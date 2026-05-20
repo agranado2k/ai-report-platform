@@ -1,0 +1,71 @@
+# infra/terraform/.tfvars.local.example
+#
+# Copy to `.tfvars.local` (gitignored) and fill in real values. The wrapper
+# `scripts/tf.sh` sources this file on every invocation.
+#
+# These are BOOTSTRAP credentials only — used by the operator locally to
+# `terraform apply` the first time. After Phase 0c, production CD reads
+# secrets from GitHub Actions Secrets (which Terraform itself populates).
+#
+# Token permission requirements per provider are noted inline.
+
+# ─── Cloudflare / R2 ──────────────────────────────────────────────────────
+# Find your account id in the Cloudflare dashboard URL:
+#   https://dash.cloudflare.com/<ACCOUNT_ID>/
+export R2_ACCOUNT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# R2 API token scoped to the `tf-state` bucket only.
+# Dashboard → R2 → Manage API tokens → Create token
+#   Permissions: Object Read & Write
+#   Bucket scope: tf-state
+export AWS_ACCESS_KEY_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export AWS_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Account-scoped Cloudflare API token (used by the Terraform `cloudflare`
+# provider to manage DNS / R2 buckets / Workers).
+# Dashboard → My Profile → API Tokens → Create Token
+#   Permissions: Zone:DNS:Edit, Account:Cloudflare R2:Edit,
+#                Account:Workers Scripts:Edit, Account:Workers KV Storage:Edit
+export TF_VAR_cloudflare_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── Neon (also the host for the Postgres advisory lock) ──────────────────
+# Connection string for the bootstrap Neon project's `main` branch. The
+# advisory lock used by tf.sh runs against THIS connection. Terraform itself
+# manages Neon resources via TF_VAR_neon_api_key.
+#
+# For Phase 0a, create a minimal Neon project manually and paste its URI here.
+# Phase 0b's `modules/neon-project/` will replace it; the lock semantics
+# survive the migration because the key hashes a string, not a row id.
+export PG_LOCK_URL="postgresql://USER:PASS@HOST.neon.tech/neondb?sslmode=require"
+
+# Neon API key (full-access). Settings → API Keys.
+export TF_VAR_neon_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── Vercel ───────────────────────────────────────────────────────────────
+# Personal access token. Account → Settings → Tokens.
+export TF_VAR_vercel_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export TF_VAR_vercel_team_id="team_xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── Upstash ──────────────────────────────────────────────────────────────
+# Management API key. console.upstash.com → Account → Management API.
+export TF_VAR_upstash_email="you@example.com"
+export TF_VAR_upstash_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── Clerk ────────────────────────────────────────────────────────────────
+# Backend API key per environment. clerk.com → API Keys.
+export TF_VAR_clerk_secret_key_prod="sk_live_xxxxxxxxxxxxxxxxxxxx"
+export TF_VAR_clerk_secret_key_staging="sk_test_xxxxxxxxxxxxxxxxxxxx"
+
+# ─── Resend ───────────────────────────────────────────────────────────────
+# Send-only domain key. resend.com → API Keys.
+export TF_VAR_resend_api_key="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── GitHub ───────────────────────────────────────────────────────────────
+# Fine-grained PAT for the agrando2k account, scoped to this repo.
+# Permissions: Administration (R/W), Contents (R/W), Pull requests (R/W),
+#              Webhooks (R/W), Secrets (R/W), Actions (R/W).
+export TF_VAR_github_token="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ─── Domain & operator ────────────────────────────────────────────────────
+export TF_VAR_apex_domain="example.com"          # CHANGE ME
+export TF_VAR_operator_email="you@example.com"

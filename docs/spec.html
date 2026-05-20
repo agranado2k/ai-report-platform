@@ -1,0 +1,2555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>HTML Report Hosting Platform — Technical Specification</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1b1f26;
+    --border: #262b34;
+    --text: #e8ecf1;
+    --muted: #9aa3af;
+    --accent: #7c9eff;
+    --accent-2: #6ee7b7;
+    --product: #c4b5fd;
+    --engineering: #7dd3fc;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --code-bg: #0f1216;
+    --code-border: #232831;
+    --radius: 10px;
+    --maxw: 1040px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafbfc;
+      --panel: #ffffff;
+      --panel-2: #f3f5f8;
+      --border: #e3e7ee;
+      --text: #1a1f2a;
+      --muted: #5c6571;
+      --accent: #2a55d1;
+      --accent-2: #047857;
+      --product: #6d28d9;
+      --engineering: #0369a1;
+      --warn: #92400e;
+      --danger: #b91c1c;
+      --code-bg: #f5f7fa;
+      --code-border: #e0e4ec;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--sans);
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+  header.hero {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 28px;
+    margin-bottom: 36px;
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 0 0 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 17px;
+    margin: 0;
+    max-width: 800px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .meta span { display: inline-flex; align-items: center; }
+  .meta span + span::before { content: "·"; margin-right: 14px; color: var(--border); }
+
+  .part-banner {
+    margin: 60px 0 28px;
+    padding: 28px 24px;
+    border-radius: var(--radius);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--product);
+  }
+  .part-banner.engineering { border-left-color: var(--engineering); }
+  .part-banner .part-label {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 12px;
+    color: var(--product);
+    font-weight: 700;
+    margin: 0 0 6px;
+  }
+  .part-banner.engineering .part-label { color: var(--engineering); }
+  .part-banner h2 {
+    margin: 0 0 8px;
+    font-size: 26px;
+    border: 0;
+    padding: 0;
+  }
+  .part-banner p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 760px;
+  }
+
+  h2 {
+    font-size: 22px;
+    margin: 48px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: -0.005em;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  h3 { font-size: 17px; margin: 28px 0 10px; color: var(--text); }
+  h4 {
+    font-size: 14px;
+    margin: 18px 0 6px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  strong { color: var(--text); }
+  code {
+    font-family: var(--mono);
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 0.92em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 0 0 16px;
+  }
+  pre code { background: transparent; border: 0; padding: 0; font-size: inherit; }
+
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin: 0 0 28px;
+  }
+  .toc h4 { margin-top: 0; }
+  .toc .toc-section { margin-top: 12px; }
+  .toc .toc-section:first-of-type { margin-top: 0; }
+  .toc .toc-section-label {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--product);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .toc .toc-section-label.engineering { color: var(--engineering); }
+  .toc ol {
+    columns: 2;
+    column-gap: 24px;
+    padding-left: 20px;
+    margin-bottom: 0;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+  .toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+  @media (max-width: 640px) {
+    .toc ol { columns: 1; }
+    h1 { font-size: 28px; }
+    .wrap { padding: 36px 18px 64px; }
+  }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--panel-2);
+    padding: 14px 18px;
+    border-radius: 4px;
+    margin: 16px 0 20px;
+  }
+  .callout.problem { border-left-color: var(--warn); }
+  .callout.goal { border-left-color: var(--accent-2); }
+  .callout.danger { border-left-color: var(--danger); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 22px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--panel-2);
+  }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  table.threats td:first-child {
+    width: 38px;
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  table.threats td:nth-child(2) { white-space: normal; font-weight: 600; }
+  table.threats tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+  @media (prefers-color-scheme: light) {
+    table.threats tr:nth-child(even) td { background: rgba(0,0,0,0.018); }
+  }
+
+  .adr {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin: 18px 0;
+  }
+  .adr h3 {
+    margin-top: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .adr-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    background: rgba(124,158,255,0.12);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .adr .field { margin: 8px 0; }
+  .adr .field b {
+    color: var(--muted);
+    display: inline-block;
+    min-width: 100px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+  .status {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(110,231,183,0.12);
+    color: var(--accent-2);
+    font-weight: 600;
+    margin-left: 4px;
+  }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .pill.p0 { background: rgba(248,113,113,0.14); color: var(--danger); }
+  .pill.new { background: rgba(124,158,255,0.14); color: var(--accent); }
+  .pill.updated { background: rgba(251,191,36,0.14); color: var(--warn); }
+  .pill.product { background: rgba(196,181,253,0.14); color: var(--product); }
+  .pill.engineering { background: rgba(125,211,252,0.14); color: var(--engineering); }
+
+  .status-pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .status-pill.not-started { background: rgba(154,163,175,0.14); color: var(--muted); border: 1px solid var(--border); }
+  .status-pill.in-progress { background: rgba(124,158,255,0.16); color: var(--accent); }
+  .status-pill.blocked     { background: rgba(251,191,36,0.16); color: var(--warn); }
+  .status-pill.done        { background: rgba(110,231,183,0.16); color: var(--accent-2); }
+
+  table.tracker td:nth-child(3) { width: 130px; }
+  table.tracker td:first-child { font-family: var(--mono); font-size: 13px; }
+  table.tracker td:nth-child(2) { white-space: normal; font-weight: normal; }
+
+  table.ci-jobs td:first-child { font-family: var(--mono); }
+  table.ci-jobs tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+  @media (prefers-color-scheme: light) {
+    table.ci-jobs tr:nth-child(even) td { background: rgba(0,0,0,0.018); }
+  }
+
+  .phase {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 12px 0;
+  }
+  .phase.security { border-left-color: var(--danger); }
+  .phase h3 { margin: 0 0 6px; font-size: 15px; }
+  .phase .week { color: var(--muted); font-size: 12px; font-weight: 500; margin-left: 6px; }
+  .phase ul { margin: 8px 0 0; }
+
+  .out-of-scope { color: var(--muted); font-style: italic; }
+
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius);
+    padding: 18px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.4;
+    white-space: pre;
+    color: var(--text);
+    margin: 0 0 16px;
+  }
+  .diagram.tight { font-size: 11.5px; }
+
+  .step-list { counter-reset: step; padding-left: 0; list-style: none; }
+  .step-list > li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 36px;
+    margin-bottom: 10px;
+  }
+  .step-list > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 1px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+  }
+
+  .layer-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 720px) {
+    .layer-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .layer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px 14px 18px;
+    position: relative;
+  }
+  .layer::before {
+    content: attr(data-layer);
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    background: var(--bg);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 0 8px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .layer h4 {
+    margin: 6px 0 8px;
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .layer p { font-size: 14px; margin-bottom: 0; color: var(--muted); }
+  .layer p strong { color: var(--text); }
+
+  .journey {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin: 14px 0 22px;
+  }
+  .journey h3 {
+    margin: 0 0 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .journey .who {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .journey .who b { color: var(--text); }
+  .journey .outcome {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .journey .outcome strong { color: var(--accent-2); }
+
+  .pattern {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin: 10px 0;
+  }
+  .pattern h4 {
+    margin: 0 0 6px;
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .pattern p { font-size: 14px; margin-bottom: 0; }
+  .pattern code { font-size: 12.5px; }
+
+  .table-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 10px 0;
+  }
+  .table-card h4 {
+    margin: 0 0 6px;
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: var(--mono);
+  }
+  .table-card p { font-size: 14px; margin-bottom: 6px; }
+  .table-card .meta-tags {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .table-card .meta-tags span {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .ref-list {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 22px;
+    margin: 12px 0 16px;
+  }
+  .ref-list ul { margin: 4px 0 0; padding-left: 20px; }
+  .ref-list li { font-size: 14px; }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Technical Specification · v1 (rev 7)</p>
+    <h1>HTML Report Hosting Platform</h1>
+    <p class="subtitle">A SaaS platform where LLMs (or any client) push HTML reports to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version without breaking links. Specification is split into <strong>Part I — Product</strong> (what we're building and why) and <strong>Part II — Engineering</strong> (how we're building it, with strict practices and a tracked delivery pipeline).</p>
+    <div class="meta">
+      <span>Author: Senior Product Engineer</span>
+      <span>Date: 2026-05-20</span>
+      <span>Status: Approved</span>
+      <span>Target: v1 (MVP)</span>
+      <span>Framework: Remix v2</span>
+      <span>Repo: github.com/agrando2k</span>
+      <span>CI/CD: GitHub Actions</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Table of contents">
+    <h4>Contents</h4>
+    <div class="toc-section">
+      <div class="toc-section-label">Part I — Product</div>
+      <ol>
+        <li><a href="#context">Context</a></li>
+        <li><a href="#summary">User-facing summary</a></li>
+        <li><a href="#journeys"><strong>User journeys &amp; flow diagrams</strong></a></li>
+        <li><a href="#security-commitments">Security commitments</a></li>
+        <li><a href="#out-of-scope">Out of scope</a></li>
+      </ol>
+    </div>
+    <div class="toc-section">
+      <div class="toc-section-label engineering">Part II — Engineering</div>
+      <ol>
+        <li><a href="#hex-arch"><strong>Architecture overview (hexagonal)</strong></a></li>
+        <li><a href="#domain-model">Domain model &amp; bounded contexts</a></li>
+        <li><a href="#eda"><strong>Event-driven architecture</strong></a></li>
+        <li><a href="#patterns">Design patterns (DTO, Use Case, Service)</a></li>
+        <li><a href="#practices"><strong>Engineering practices (TDD, BDD, FP, worktrees, docs, API)</strong></a></li>
+        <li><a href="#development"><strong>Development &amp; delivery (CI/CD, AI review, tracker)</strong></a></li>
+        <li><a href="#db-design"><strong>Database design</strong></a></li>
+        <li><a href="#stack">Stack</a></li>
+        <li><a href="#components">System components</a></li>
+        <li><a href="#flows">Upload &amp; viewer flows</a></li>
+        <li><a href="#mcp">MCP server / Skill</a></li>
+        <li><a href="#security">Security &amp; abuse model</a></li>
+        <li><a href="#adrs">ADRs (30 records)</a></li>
+        <li><a href="#phases">Implementation phases</a></li>
+        <li><a href="#verification">Verification (24 tests)</a></li>
+        <li><a href="#files">Critical files</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <!-- ─────────────────────────────────────────── -->
+  <!-- PART I — PRODUCT                            -->
+  <!-- ─────────────────────────────────────────── -->
+
+  <section class="part-banner">
+    <p class="part-label">Part I</p>
+    <h2>Product</h2>
+    <p>What we're building, who it's for, and the end-to-end journeys customers will experience. Read this part if you care about <em>what</em> the platform does and how it feels to use.</p>
+  </section>
+
+  <section id="context">
+    <h2>Context</h2>
+    <p>LLMs increasingly generate HTML reports as their final artifact: data analyses, dashboards, write-ups. Today the workflow is:</p>
+    <ol>
+      <li>LLM produces an HTML file locally.</li>
+      <li>User opens it in a browser to read it.</li>
+      <li>User shares it &mdash; emails the file, generates a PDF, or pastes into a Google Doc.</li>
+      <li>Report changes &mdash; user must re-distribute the new version and chase down everyone who has the old one.</li>
+    </ol>
+    <div class="callout problem">
+      <p><strong>The problem is distribution and updates, not generation.</strong> Existing competitors (Linkyhost, HTMLSave, generic file hosts) all miss the LLM-native workflow: no programmatic upload from agents, no stable URLs that auto-update when the report is re-uploaded, no team/org model, no folder organization, no flexible sharing controls.</p>
+    </div>
+    <div class="callout goal">
+      <p><strong>Goal.</strong> A SaaS platform where an LLM (or any client) can push an HTML report to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version at that URL without breaking links. Built B2B-ready (orgs from day 1), starts free, designed for a Stripe-based paid tier later, <strong>security-first</strong> from line one.</p>
+    </div>
+  </section>
+
+  <section id="summary">
+    <h2>User-facing summary</h2>
+    <ul>
+      <li><strong>Login &amp; orgs.</strong> Sign in via Clerk. Every user has a personal org by default and can create/join more.</li>
+      <li><strong>Upload.</strong> From the web (drag-and-drop) or programmatically (HTTP API with an API key, MCP server, or Claude Code Skill).</li>
+      <li><strong>Stable URLs.</strong> Each report has a permanent slug. Re-uploading creates a new version but the public URL doesn't change.</li>
+      <li><strong>Folders.</strong> Organize reports in a folder tree inside the org.</li>
+      <li><strong>Sharing modes (per report).</strong> public link &middot; password-protected link &middot; org-members-only &middot; email allowlist (magic link).</li>
+      <li><strong>Collaboration (per folder).</strong> Grant write access to anyone by email &mdash; including users outside your org. Grants inherit. Collaborators upload via their own agent.</li>
+    </ul>
+  </section>
+
+  <section id="journeys">
+    <h2>User journeys &amp; flow diagrams <span class="pill product">product</span></h2>
+    <p>Six end-to-end journeys cover the entire v1 product surface. Each shows actor &rarr; system messages over time (top to bottom).</p>
+
+    <div class="journey">
+      <h3>Journey 1 &mdash; First-time user uploads a report from the web</h3>
+      <p class="who"><b>Actor:</b> Solo professional · <b>Goal:</b> share an HTML report with a colleague · <b>Entry:</b> marketing site</p>
+<div class="diagram">User                Dashboard (app.&lt;domain&gt;)      Scanner          Viewer (view.&lt;domain&gt;)
+ │                          │                       │                       │
+ │  Click "Sign up"         │                       │                       │
+ ├─────────────────────────▶│                       │                       │
+ │                          │                       │                       │
+ │  Verify email (Clerk)    │                       │                       │
+ │◀────────────────────────▶│                       │                       │
+ │                          │                       │                       │
+ │  Personal org created    │                       │                       │
+ │  (auto)                  │                       │                       │
+ │◀─────────────────────────┤                       │                       │
+ │                          │                       │                       │
+ │  Drag report.html        │                       │                       │
+ ├─────────────────────────▶│  Sync pre-checks      │                       │
+ │                          │  (size, MIME, slip)   │                       │
+ │                          │                       │                       │
+ │  201 + scan_status=pend  │  ReportUploaded event │                       │
+ │◀─────────────────────────┤──────────────────────▶│  ClamAV + heuristics  │
+ │                          │                       │                       │
+ │  Live URL appears        │                       │  ScanCompleted=clean  │
+ │  (with "scanning..."     │◀──────────────────────┤                       │
+ │   badge ~3-5s)           │  live_version_id      │                       │
+ │                          │  promoted             │                       │
+ │  Open viewer URL         │                       │                       │
+ ├──────────────────────────┼───────────────────────┼──────────────────────▶│
+ │                          │                       │                       │
+ │  Renders correctly       │                       │  Strict CSP, no auth  │
+ │◀─────────────────────────┼───────────────────────┼───────────────────────┤
+ │                          │                       │                       │
+ │  Copy URL → email to     │                       │                       │
+ │  colleague               │                       │                       │</div>
+      <p class="outcome"><strong>Outcome:</strong> User has a permanent shareable URL within ~30 seconds of signing up. Re-uploads will not change the URL.</p>
+    </div>
+
+    <div class="journey">
+      <h3>Journey 2 &mdash; LLM uploads a report via MCP <span class="pill new">core flow</span></h3>
+      <p class="who"><b>Actor:</b> Claude (or any MCP-aware agent) acting for a logged-in user · <b>Goal:</b> turn an analysis into a shareable URL · <b>Entry:</b> chat / agent</p>
+<div class="diagram">User (chat)        Claude (LLM)         MCP server          API (app.&lt;domain&gt;)    Scanner
+   │                  │                     │                       │                  │
+   │  "Analyze this   │                     │                       │                  │
+   │   CSV and share  │                     │                       │                  │
+   │   the result"    │                     │                       │                  │
+   ├─────────────────▶│                     │                       │                  │
+   │                  │  Generate           │                       │                  │
+   │                  │  report.html        │                       │                  │
+   │                  │                     │                       │                  │
+   │                  │  upload_report({html})                      │                  │
+   │                  ├────────────────────▶│  POST /api/v1/reports │                  │
+   │                  │                     ├──────────────────────▶│                  │
+   │                  │                     │  Bearer rk_live_...   │                  │
+   │                  │                     │                       │  scope check     │
+   │                  │                     │                       │  pre-checks      │
+   │                  │                     │                       │  ReportUploaded  │
+   │                  │                     │                       ├─────────────────▶│
+   │                  │                     │  201 { view_url,      │                  │
+   │                  │                     │       slug, version,  │  ClamAV +        │
+   │                  │                     │       scan_status }   │  heuristics      │
+   │                  │                     │◀──────────────────────┤                  │
+   │                  │  { view_url }       │                       │  ScanCompleted   │
+   │                  │◀────────────────────┤                       │◀─────────────────┤
+   │                  │                     │                       │                  │
+   │ "Here's your     │                     │                       │  live_version    │
+   │  report: &lt;url&gt;"  │                     │                       │  promoted        │
+   │◀─────────────────┤                     │                       │                  │</div>
+      <p class="outcome"><strong>Outcome:</strong> The LLM produces a live URL in the same turn. The user never opens our dashboard for this happy path &mdash; the agent handles everything via the API key in its environment.</p>
+    </div>
+
+    <div class="journey">
+      <h3>Journey 3 &mdash; Re-upload keeps the URL stable <span class="pill p0">the core value prop</span></h3>
+      <p class="who"><b>Actor:</b> Same user / agent · <b>Goal:</b> publish an updated version without re-distributing the link · <b>Entry:</b> existing report</p>
+<div class="diagram">Owner / Agent       API                    Scanner            Existing viewers
+   │                  │                      │                     │
+   │  Original URL:   │                      │                     │
+   │  view/&lt;slug&gt;     │                      │                     │  (browser holds
+   │  v1 LIVE         │                      │                     │   the URL, will
+   │                  │                      │                     │   revisit later)
+   │                  │                      │                     │
+   │  update_report({slug, html})            │                     │
+   ├─────────────────▶│  Verify ownership    │                     │
+   │                  │  Insert v2 row       │                     │
+   │                  │  (scan_status=pend)  │                     │
+   │                  │  ReportUploaded(v2)  │                     │
+   │                  ├─────────────────────▶│                     │
+   │                  │                      │  scan v2            │
+   │                  │  ScanCompleted=clean │                     │
+   │                  │◀─────────────────────┤                     │
+   │                  │  Promote v2 →        │                     │
+   │                  │  live_version_id     │                     │
+   │  201 { v=2,      │                      │                     │
+   │       same url } │                      │                     │
+   │◀─────────────────┤                      │                     │
+   │                  │                      │                     │
+   │                  │                      │                     │  Revisit URL
+   │                  │                      │                     │  (within max-age=60)
+   │                  │                      │                     │
+   │                  │  GET /&lt;slug&gt;        │                     │
+   │                  │◀─────────────────────┼─────────────────────┤
+   │                  │  serves v2           │                     │
+   │                  ├──────────────────────┼────────────────────▶│
+   │                  │                      │                     │
+   │                  │  (v1 still at        │                     │
+   │                  │   /&lt;slug&gt;?v=1)      │                     │</div>
+      <p class="outcome"><strong>Outcome:</strong> The share URL never changes. Old recipients see the new content; nobody has to re-share. Prior versions remain accessible via <code>?v=N</code> for audit.</p>
+    </div>
+
+    <div class="journey">
+      <h3>Journey 4 &mdash; Cross-org collaboration <span class="pill product">teams</span></h3>
+      <p class="who"><b>Actors:</b> Acme (owner) and Alice (external collaborator, no account yet) · <b>Goal:</b> Alice's agent can update reports in Acme's folder</p>
+<div class="diagram">Owner (Acme)        Dashboard           Email             Alice              Alice's agent
+   │                  │                  │                  │                       │
+   │  Open folder     │                  │                  │                       │
+   │  /Reports/       │                  │                  │                       │
+   │                  │                  │                  │                       │
+   │  Grant editor    │  Insert          │                  │                       │
+   │  to alice@…      │  folder_collab   │                  │                       │
+   ├─────────────────▶│  (pending,       │                  │                       │
+   │                  │   user_id=NULL)  │                  │                       │
+   │                  │  CollaboratorGranted event          │                       │
+   │                  ├─────────────────▶│  Email Alice     │                       │
+   │                  │                  ├─────────────────▶│                       │
+   │                  │                  │                  │                       │
+   │                  │                  │                  │  Click link, sign up  │
+   │                  │  Resolve pending │                  │  via Clerk            │
+   │                  │  grant on        │                  ├──────────────────────▶│
+   │                  │  first sign-in   │                  │                       │
+   │                  │  (email→user_id) │                  │                       │
+   │                  │                  │                  │  "Shared with me"     │
+   │                  │                  │                  │  shows Acme/Reports   │
+   │                  │                  │                  │                       │
+   │                  │                  │                  │  Issue own API key    │
+   │                  │                  │                  │  in personal org      │
+   │                  │                  │                  │                       │
+   │                  │                  │                  │  Agent: update_report │
+   │                  │                  │                  │  (slug=acme-report)   │
+   │                  │                  │                  │                       │
+   │                  │  canWrite(Alice, /Reports/) walks   │                       │
+   │                  │  ancestry → grant match → allow     │                       │
+   │                  │  audit_log(actor=Alice, org=Acme)   │                       │
+   │                  │                  │                  │  201, view_url same   │
+   │                  │                  │                  │◀──────────────────────┤</div>
+      <p class="outcome"><strong>Outcome:</strong> Alice's agent can update Acme's reports using Alice's own API key, without joining Acme's org. Audit log captures actor + report org for every action. Revocation is one click for the owner.</p>
+    </div>
+
+    <div class="journey">
+      <h3>Journey 5 &mdash; Sharing modes (single-page summary)</h3>
+      <p class="who"><b>Actor:</b> Visitor (any) · <b>Goal:</b> view a report · <b>Mode determined per-report by owner</b></p>
+<div class="diagram">Mode              Visitor experience                                     Backend gate
+─────────────────────────────────────────────────────────────────────────────────────────────────
+public            Open URL → renders                                      None (rate-limit only)
+password          Open URL → prompt → enter password → renders            Argon2id verify cookie
+org               Open URL → Clerk sign-in → must be org member           Clerk session + org check
+allowlist         Click magic link in email → renders                     Token: 15-min TTL, IP/UA</div>
+      <p class="outcome"><strong>Outcome:</strong> The owner picks the mode at upload or later from the dashboard. Switching modes is a single ACL UPDATE; existing share links keep working under the new policy.</p>
+    </div>
+
+    <div class="journey">
+      <h3>Journey 6 &mdash; Abuse report &amp; takedown</h3>
+      <p class="who"><b>Actors:</b> Visitor flagging a page, our admin team · <b>Goal:</b> remove harmful content quickly</p>
+<div class="diagram">Visitor           Viewer page          API                Admin queue        Org owner
+   │                  │                    │                     │                  │
+   │  Sees suspicious │                    │                     │                  │
+   │  login form on   │                    │                     │                  │
+   │  view/&lt;slug&gt;     │                    │                     │                  │
+   │                  │                    │                     │                  │
+   │  Click "Report"  │                    │                     │                  │
+   ├─────────────────▶│  POST /abuse/&lt;slug&gt;│                     │                  │
+   │                  ├───────────────────▶│  insert             │                  │
+   │                  │                    │  abuse_reports row  │                  │
+   │                  │                    │  AbuseReported event│                  │
+   │                  │                    ├────────────────────▶│                  │
+   │                  │                    │                     │                  │
+   │  Thank-you page  │                    │                     │  Admin reviews   │
+   │◀─────────────────┤                    │                     │  triage queue    │
+   │                  │                    │                     │                  │
+   │                  │                    │                     │  Takedown        │
+   │                  │                    │  Set deleted_at     │                  │
+   │                  │                    │  Purge R2 keys      │                  │
+   │                  │                    │  ReportTakenDown    │                  │
+   │                  │                    │                     ├─────────────────▶│
+   │                  │                    │                     │  Email + appeal  │
+   │                  │                    │                     │  link (24h)      │
+   │                  │  GET /&lt;slug&gt;        │                     │                  │
+   │                  │◀────────────────────                      │                  │
+   │                  │  404                │                     │                  │</div>
+      <p class="outcome"><strong>Outcome:</strong> Abuse is reported anonymously (IP-hashed); admin can take down within minutes; owner gets notified with a 24h appeal window (skipped for confirmed CSAM/active phishing). Service workers blocked at the edge mean abusive content can't persist in victims' browsers after takedown.</p>
+    </div>
+  </section>
+
+  <section id="security-commitments">
+    <h2>Security commitments <span class="pill product">user-visible</span></h2>
+    <p>These are the public-facing promises we make to users and that should appear in the marketing site, signup flow, and docs:</p>
+    <ul>
+      <li><strong>MFA required for org admins.</strong> Two-factor auth is enforced through Clerk for any user with admin privileges.</li>
+      <li><strong>Every upload is scanned before it goes live.</strong> Malware (ClamAV) + phishing heuristics + cryptominer detection. Flagged uploads show a 451 interstitial; the URL never serves harmful content.</li>
+      <li><strong>Default CSP blocks uploaded JS from calling external servers.</strong> If a report tries to phone home to an attacker's site, the browser blocks it. Power users on paid plans can opt-in per report.</li>
+      <li><strong>One-click API key revocation</strong> with <code>last_used_at</code>, geo, and rate visible in your dashboard. We alert you on anomalies (new country, rate spikes, repeated failures).</li>
+      <li><strong>Per-page "Report abuse" link</strong> with a documented takedown SLA. Anonymous reporting; IP-hashed; appeals workflow.</li>
+    </ul>
+    <p class="out-of-scope">Detailed threat model, architecture-level mitigations, and ADRs live in Part II.</p>
+  </section>
+
+  <section id="out-of-scope">
+    <h2>Out of scope for v1</h2>
+    <p class="out-of-scope">PDF export &middot; custom domains &middot; viewer analytics &middot; comments/annotations &middot; embed widgets &middot; webhooks &middot; billing UI (Stripe). All on the v1.1+ roadmap.</p>
+  </section>
+
+  <!-- ─────────────────────────────────────────── -->
+  <!-- PART II — ENGINEERING                        -->
+  <!-- ─────────────────────────────────────────── -->
+
+  <section class="part-banner engineering">
+    <p class="part-label">Part II</p>
+    <h2>Engineering</h2>
+    <p>How we're building it: hexagonal architecture, event-driven where it pays off, well-known patterns (DTOs, Use Cases, Domain Services, Repositories), a relational schema designed for tenancy and auditability, and a defense-in-depth security stack. Read this part if you're going to write the code, review the code, or operate the system.</p>
+  </section>
+
+  <section id="hex-arch">
+    <h2>Architecture overview &mdash; hexagonal <span class="pill engineering">pattern</span></h2>
+    <p>We adopt <strong>hexagonal architecture</strong> (Cockburn's "ports and adapters"): a pure domain core surrounded by ports (interfaces) and adapters (concrete implementations). The domain knows nothing about Remix, Drizzle, Clerk, or R2 &mdash; only about <em>Reports</em>, <em>Versions</em>, <em>Folders</em>, and the rules governing them. Every infrastructure choice is replaceable behind a port.</p>
+
+<div class="diagram tight">┌─────────────────────────────────────────────────────────────────────────────┐
+│  DRIVING ADAPTERS  (inbound — call the application)                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Remix HTTP   │  │ MCP server   │  │ Admin UI     │  │ Cron / event │     │
+│  │ /api/v1/*    │  │ (npm pkg)    │  │ /_admin/*    │  │ workers      │     │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
+│         │                 │                 │                 │             │
+│         └─────────────────┴────────┬────────┴─────────────────┘             │
+│                                    │                                        │
+│                       ┌────────────▼──────────────┐                         │
+│                       │   INBOUND PORTS           │                         │
+│                       │   (use-case interfaces)   │                         │
+│                       │   UploadReport            │                         │
+│                       │   UpdateReport            │                         │
+│                       │   SetAcl                  │                         │
+│                       │   GrantFolderAccess       │                         │
+│                       │   TakedownReport          │                         │
+│                       │   ResolveScanResult       │                         │
+│                       │   …                       │                         │
+│                       └────────────┬──────────────┘                         │
+│                                    │                                        │
+│                       ┌────────────▼──────────────┐                         │
+│                       │      DOMAIN CORE          │                         │
+│                       │  ────────────────────────  │                         │
+│                       │  Entities:                │                         │
+│                       │   Report, Version,        │                         │
+│                       │   Folder, User, Org,      │                         │
+│                       │   ApiKey, Acl,            │                         │
+│                       │   Collaborator,           │                         │
+│                       │   AbuseReport             │                         │
+│                       │  Value objects:           │                         │
+│                       │   Slug, FilePath, Email,  │                         │
+│                       │   ScopeSet, Permission    │                         │
+│                       │  Domain services:         │                         │
+│                       │   PermissionResolver      │                         │
+│                       │   ScanPipeline            │                         │
+│                       │   AnomalyDetector         │                         │
+│                       │  Events (domain):         │                         │
+│                       │   ReportUploaded          │                         │
+│                       │   ScanCompleted           │                         │
+│                       │   ReportPublished         │                         │
+│                       │   ReportTakenDown         │                         │
+│                       │   CollaboratorGranted     │                         │
+│                       │   AbuseReported           │                         │
+│                       │   ApiKeyAnomalyDetected   │                         │
+│                       └────────────┬──────────────┘                         │
+│                                    │                                        │
+│                       ┌────────────▼──────────────┐                         │
+│                       │   OUTBOUND PORTS          │                         │
+│                       │   (repository / gateway)  │                         │
+│                       │   ReportRepository        │                         │
+│                       │   VersionRepository       │                         │
+│                       │   BlobStorage             │                         │
+│                       │   EventBus (outbox)       │                         │
+│                       │   IdentityProvider        │                         │
+│                       │   RateLimiter             │                         │
+│                       │   ScanQueue               │                         │
+│                       │   Notifier (email)        │                         │
+│                       └────────────┬──────────────┘                         │
+│                                    │                                        │
+│   ┌─────────┬─────────┬────────────┼────────────┬─────────┬──────────┐     │
+│   ▼         ▼         ▼            ▼            ▼         ▼          ▼     │
+│ ┌───────┐ ┌─────┐ ┌────────┐ ┌──────────┐ ┌────────┐ ┌───────┐ ┌─────────┐ │
+│ │Drizzle│ │ R2  │ │Postgres│ │  Clerk   │ │Upstash │ │ClamAV │ │ Resend  │ │
+│ │  PG   │ │ S3  │ │ outbox │ │          │ │ Redis  │ │worker │ │ email   │ │
+│ └───────┘ └─────┘ └────────┘ └──────────┘ └────────┘ └───────┘ └─────────┘ │
+│  DRIVEN ADAPTERS (outbound — application calls them)                        │
+└─────────────────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>Layer responsibilities</h3>
+    <div class="layer-grid">
+      <div class="layer" data-layer="Inner">
+        <h4>Domain core (pure)</h4>
+        <p>Plain TypeScript. <strong>Zero infrastructure imports.</strong> Entities, value objects, domain services, domain events. Pure functions; deterministic; trivially unit-testable. Lives in <code>packages/domain/</code>.</p>
+      </div>
+      <div class="layer" data-layer="Inbound">
+        <h4>Use Cases (interactors)</h4>
+        <p>One class per intent (<code>UploadReportUseCase</code>, <code>SetAclUseCase</code>, …). Takes a DTO, orchestrates domain logic + outbound ports, returns a DTO. Single public method (<code>execute()</code>). Lives in <code>packages/application/</code>.</p>
+      </div>
+      <div class="layer" data-layer="Outbound">
+        <h4>Ports (interfaces)</h4>
+        <p>TypeScript <code>interface</code>s the domain depends on. Repositories, gateways, event bus, blob storage. <strong>No concrete code.</strong> Lives next to the domain code that uses them.</p>
+      </div>
+      <div class="layer" data-layer="Adapters">
+        <h4>Adapters (concrete)</h4>
+        <p>Drizzle implementations of repositories, R2 client wrapper, Clerk gateway, Upstash limiter, ClamAV queue client, Resend notifier. Each adapter is a thin translation layer. Lives in <code>packages/adapters/</code>.</p>
+      </div>
+    </div>
+
+    <h3>What this buys us</h3>
+    <ul>
+      <li><strong>Testability.</strong> Use cases tested with in-memory fakes for every port. Domain code tested with zero mocks.</li>
+      <li><strong>Replaceable infrastructure.</strong> Swap Neon for Supabase, R2 for S3, Clerk for WorkOS &mdash; touch only the adapter, never the domain.</li>
+      <li><strong>Security audit clarity.</strong> All side-effecting code lives in adapters; all rules live in the domain. Reviewing the rules doesn't require reading SQL.</li>
+      <li><strong>Forced separation of concerns.</strong> Hexagonal stops "let me just add this Drizzle call inside the React component" before it gets started.</li>
+    </ul>
+  </section>
+
+  <section id="domain-model">
+    <h2>Domain model &amp; bounded contexts</h2>
+    <p>We identify <strong>three loosely-coupled bounded contexts</strong>. They share a database but communicate via domain events, not direct repository calls.</p>
+
+    <table>
+      <thead><tr><th>Context</th><th>Owns</th><th>Primary entities</th><th>Listens to</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Publishing</strong></td><td>Upload, version, publish, serve, takedown</td><td>Report, Version, Folder, Acl</td><td><code>ScanCompleted</code>, <code>AbuseConfirmed</code></td></tr>
+        <tr><td><strong>Identity &amp; Access</strong></td><td>Users, orgs, keys, scopes, collaborators, permission resolution</td><td>User, Org, ApiKey, Collaborator</td><td><code>ReportUploaded</code> (for audit)</td></tr>
+        <tr><td><strong>Trust &amp; Safety</strong></td><td>Scanning, abuse reports, takedowns, anomaly detection</td><td>ScanJob, AbuseReport, Anomaly</td><td><code>ReportUploaded</code>, <code>ApiKeyUsed</code></td></tr>
+      </tbody>
+    </table>
+
+    <p>Boundaries are enforced by directory structure, not by separate services. v1 ships as a modular monolith; if any context grows past the team's bandwidth, it can be extracted into its own deployment without rewriting the domain.</p>
+  </section>
+
+  <section id="eda">
+    <h2>Event-driven architecture <span class="pill engineering">where it pays off</span></h2>
+    <p>We use events for cross-context communication and for everything that should happen <em>after</em> a write commits. We deliberately <strong>don't</strong> use events when a synchronous call is simpler and the call site is in the same context.</p>
+
+    <h3>Domain events</h3>
+    <table>
+      <thead><tr><th>Event</th><th>Emitted by</th><th>Handled by (subscribers)</th></tr></thead>
+      <tbody>
+        <tr><td><code>ReportUploaded</code></td><td><code>UploadReportUseCase</code></td><td>ScanQueue (enqueue job) &middot; AuditLogger</td></tr>
+        <tr><td><code>ScanCompleted</code></td><td>Scanner worker</td><td>PromoteVersionUseCase (on clean) &middot; FlagVersionUseCase (on flagged) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportPublished</code></td><td><code>PromoteVersionUseCase</code></td><td>CacheInvalidator (CDN/edge KV) &middot; Notifier (first-publish welcome) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportTakenDown</code></td><td><code>TakedownReportUseCase</code></td><td>BlobPurger (R2) &middot; Notifier (owner with 24h appeal) &middot; AuditLogger</td></tr>
+        <tr><td><code>CollaboratorGranted</code></td><td><code>GrantFolderAccessUseCase</code></td><td>Notifier (email + magic link) &middot; AuditLogger</td></tr>
+        <tr><td><code>AbuseReported</code></td><td><code>ReportAbuseUseCase</code></td><td>TriageQueueWriter &middot; AuditLogger (admin-scoped)</td></tr>
+        <tr><td><code>ApiKeyUsed</code></td><td>API auth middleware</td><td>AnomalyDetector (geo/rate/failure) &middot; AuditLogger</td></tr>
+        <tr><td><code>ApiKeyAnomalyDetected</code></td><td>AnomalyDetector</td><td>Notifier (admin email + dashboard banner)</td></tr>
+        <tr><td><code>CspViolationReported</code></td><td><code>/csp-report</code> ingest</td><td>CspReportRepository &middot; (weekly review aggregation)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Transactional outbox pattern</h3>
+    <p>We use the <strong>Postgres transactional outbox</strong> to publish events atomically with state changes. No extra queue dependency for the critical path; at-least-once delivery; ordered per aggregate.</p>
+
+<div class="diagram tight">┌──────────────────────────────────────────────────────────────────────────┐
+│  Use case (e.g. UploadReportUseCase)                                     │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ BEGIN TX                                                           │  │
+│  │   INSERT into report_versions(...);                                │  │
+│  │   INSERT into outbox(event_type, aggregate_id, payload_json, ...);│  │
+│  │ COMMIT                                                             │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│         │                                                                │
+│         ▼  ↑  (same DB, no distributed transaction)                      │
+│  ┌────────────────────────────┐                                          │
+│  │  outbox table              │                                          │
+│  │  id · event_type ·         │                                          │
+│  │  aggregate_id · payload ·  │                                          │
+│  │  status · attempts ·       │                                          │
+│  │  available_at · created_at │                                          │
+│  └────────────┬───────────────┘                                          │
+│               │ (polled every ~1s by worker)                             │
+│               ▼                                                          │
+│  ┌────────────────────────────┐                                          │
+│  │  Outbox dispatcher worker  │  Fetches pending rows in batches,        │
+│  │  (Vercel cron or QStash)   │  invokes handlers, marks delivered.      │
+│  │                            │  Exponential backoff on failure.          │
+│  └────────────┬───────────────┘                                          │
+│               │                                                          │
+│   ┌───────────┴────────────┬────────────────┬──────────────┐             │
+│   ▼                        ▼                ▼              ▼             │
+│ Scan queue          Cache invalidator   Notifier       Audit logger      │
+│ (ClamAV)            (edge KV / CDN)     (Resend email) (Postgres)        │
+└──────────────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>Design rules for events</h3>
+    <ul>
+      <li><strong>Events are facts</strong>, named in past tense: <code>ReportUploaded</code>, not <code>UploadReport</code>.</li>
+      <li><strong>Payloads carry just enough</strong> for handlers to act &mdash; usually aggregate id and the new state. Handlers re-fetch if they need more.</li>
+      <li><strong>Idempotent handlers.</strong> Every handler tolerates being invoked twice for the same event (we get at-least-once).</li>
+      <li><strong>One commit, one event.</strong> Don't emit two events from one transaction if they should be ordered &mdash; emit one and let handlers fan out.</li>
+      <li><strong>No event-driven cycles.</strong> A handler can produce a new event but not one already on the call chain. We compile-time-check this with a static analyzer in CI.</li>
+    </ul>
+  </section>
+
+  <section id="patterns">
+    <h2>Design patterns</h2>
+
+    <div class="pattern">
+      <h4>DTO (Data Transfer Object)</h4>
+      <p>Every boundary between adapters and use cases passes plain TypeScript objects validated by <strong>Zod schemas</strong>. DTOs are inputs and outputs; <em>never</em> domain entities. Naming: <code>UploadReportInput</code>, <code>UploadReportOutput</code>, <code>ReportSummaryDto</code>. The same Zod schema is used to validate the HTTP body, the MCP tool input, and the unit test fixture &mdash; one source of truth.</p>
+    </div>
+
+    <div class="pattern">
+      <h4>Use Case (interactor)</h4>
+      <p>One class per intent, single public <code>execute(input: InputDto): Promise&lt;OutputDto&gt;</code> method. Receives outbound ports via constructor (DI). Contains <em>no</em> framework imports, <em>no</em> HTTP details, <em>no</em> SQL. Easy to test with fake ports.</p>
+<pre><code>// packages/application/src/upload-report.use-case.ts
+export class UploadReportUseCase {
+  constructor(
+    private readonly reports: ReportRepository,
+    private readonly versions: VersionRepository,
+    private readonly blobs: BlobStorage,
+    private readonly events: EventBus,
+    private readonly permissions: PermissionResolver,
+    private readonly limits: PlanLimiter,
+  ) {}
+
+  async execute(input: UploadReportInput): Promise&lt;UploadReportOutput&gt; {
+    await this.permissions.assertCanWrite(input.actorUserId, input.folderId);
+    await this.limits.assertWithinPlan(input.orgId, 'reports.write');
+    // ... extract zip, store blobs, create version row, emit event ...
+    return { slug, viewUrl, version, scanStatus: 'pending' };
+  }
+}</code></pre>
+    </div>
+
+    <div class="pattern">
+      <h4>Domain Service</h4>
+      <p>Domain logic that doesn't belong to a single entity. <code>PermissionResolver</code> walks the folder ancestry and checks <code>folder_collaborators</code>. <code>ScanPipeline</code> coordinates the sequence of scanners. <code>AnomalyDetector</code> evaluates an <code>ApiKeyUsed</code> event against historical baselines. Pure functions where possible.</p>
+    </div>
+
+    <div class="pattern">
+      <h4>Repository</h4>
+      <p>Interface lives in the domain (<code>ReportRepository</code>). Drizzle implementation lives in the adapter layer (<code>DrizzleReportRepository</code>). Repositories return <em>entities</em>, not Drizzle rows. The translation happens inside the adapter via a mapper function.</p>
+    </div>
+
+    <div class="pattern">
+      <h4>Gateway (anti-corruption layer)</h4>
+      <p>External services are wrapped: <code>ClerkIdentityGateway</code>, <code>R2BlobStorage</code>, <code>UpstashRateLimiter</code>, <code>ResendNotifier</code>. The wrapper translates external types into our types. We never leak Clerk's <code>OrganizationMembership</code> shape into a use case.</p>
+    </div>
+
+    <div class="pattern">
+      <h4>Result type (functional error handling)</h4>
+      <p>Use cases return <code>Result&lt;T, AppError&gt;</code> for expected failure (e.g. <code>NotAllowed</code>, <code>PlanLimitExceeded</code>, <code>ScanFlagged</code>) instead of throwing. Unexpected failures still throw and become 500s. The HTTP adapter maps <code>AppError</code> kinds to status codes in one place.</p>
+    </div>
+
+    <div class="pattern">
+      <h4>Specification (for permission rules)</h4>
+      <p><code>canWrite(user, folder)</code> is a Specification that composes simpler checks: <code>IsOrgMember(folder.orgId) OR HasFolderGrantOnAncestor(folder, user)</code>. New rules compose without rewriting callers.</p>
+    </div>
+  </section>
+
+  <section id="practices">
+    <h2>Engineering practices <span class="pill engineering">how we work</span></h2>
+    <p>Six concrete commitments that govern <em>how</em> code arrives in this repository. Each ships in Phase 0 with skills, hooks, and CI gates so the practice is enforced, not aspirational. The practices are designed for a team that mixes humans and LLM-driven agents &mdash; everything below applies equally to either.</p>
+
+    <h3>1. Strict Test-Driven Development <span class="pill new">/tdd skill</span></h3>
+    <p>All implementation follows <strong>Red &rarr; Green &rarr; Refactor</strong>. Pattern mirrors the proven setup at <code>zora-pantheon</code>: a user-invocable skill (<code>/tdd &lt;task&gt;</code>) walks the cycle, and a Stop hook blocks completion if any affected package has failing tests. There is no path to "done" with red tests.</p>
+
+    <h4>Workflow</h4>
+    <ul>
+      <li><strong>Bug fix path (Prove-It).</strong> Write a failing test that reproduces the bug &rarr; fix &rarr; harden with edge-case tests. The reproduction test is the first commit.</li>
+      <li><strong>New feature path.</strong> Phase 0 <em>Understand</em> &rarr; Phase 1 <em>Red</em> (write failing tests covering happy + edge + error) &rarr; Phase 2 <em>Green</em> (minimal implementation, no test edits) &rarr; Phase 3 <em>Refactor</em> (improve, keep tests green).</li>
+    </ul>
+
+    <h4>Enforcement (Phase 0 deliverables)</h4>
+<pre><code>.claude/
+├── skills/
+│   └── tdd/
+│       └── SKILL.md              # /tdd &lt;task&gt;, user-invocable, walks R-G-R
+├── hooks/
+│   ├── tdd-stop-guard.sh         # Stop hook: blocks completion if tests fail
+│   ├── tdd-protect-tests.sh      # PreToolUse: warns on editing test files
+│   ├── tdd-post-edit-tests.sh    # PostToolUse: runs affected package tests
+│   └── tdd-utils.sh              # shared helpers (detect_package, run_tests)
+└── rules/
+    ├── tdd-test-files.md         # rules for *.spec.ts / __tests__/
+    └── tdd-source-files.md       # rules for production code</code></pre>
+
+    <h4>Conventions</h4>
+    <ul>
+      <li><strong>Vitest</strong> as runner. <strong>Test files</strong>: <code>*.spec.ts</code> co-located in <code>__tests__/</code> directories.</li>
+      <li><strong>Coverage targets</strong>: 100% line + branch on <code>packages/domain</code> and <code>packages/application</code>; pragmatic coverage on adapters.</li>
+      <li><strong>No <code>.skip()</code></strong>, <strong>no <code>.only()</code></strong>, <strong>no <code>TODO</code></strong> in committed test files (CI grep gate).</li>
+      <li><strong>Test-edit warnings</strong>: if a test file is modified after Green, the hook prompts "fix the implementation, not the test."</li>
+    </ul>
+
+    <h3>2. Behavior-Driven Development for use-case e2e tests <span class="pill new">Gherkin</span></h3>
+    <p>Every <strong>use case has a corresponding <code>.feature</code> file</strong> describing observable behavior in business language. Features are executable e2e tests that exercise the system top-to-bottom through HTTP, MCP, or the dashboard &mdash; whichever the use case's actor uses. Acts as living documentation, kept in source.</p>
+
+    <h4>Stack</h4>
+    <ul>
+      <li><strong>Playwright</strong> for browser e2e (dashboard journeys, viewer rendering, CSP checks).</li>
+      <li><strong><code>playwright-bdd</code></strong> for Gherkin support (compiles <code>.feature</code> files into Playwright test specs).</li>
+      <li><strong>Real Postgres branch</strong> per CI run (Neon branch); ephemeral R2 bucket via signed test creds.</li>
+    </ul>
+
+    <h4>Layout</h4>
+<pre><code>tests/e2e/
+├── features/
+│   ├── upload-report.feature              # ↔ UploadReportUseCase
+│   ├── update-report-stable-url.feature   # ↔ UpdateReportUseCase
+│   ├── set-acl.feature                    # ↔ SetAclUseCase
+│   ├── grant-folder-access.feature        # ↔ GrantFolderAccessUseCase
+│   ├── takedown-report.feature            # ↔ TakedownReportUseCase
+│   ├── report-abuse.feature               # ↔ ReportAbuseUseCase
+│   └── rotate-api-key.feature             # ↔ RotateApiKeyUseCase
+├── steps/                                 # step definitions (shared, reused across features)
+└── fixtures/                              # seeded data, test users, test API keys</code></pre>
+
+    <h4>Example feature</h4>
+<pre><code>Feature: Upload a report and get a stable URL
+  As an agent acting for a logged-in user
+  I want to push an HTML report and receive a permanent share URL
+  So that re-uploads update the live page without breaking the link
+
+  Scenario: First upload of a single-file HTML report
+    Given the user "Alice" has an API key with scope "reports:write"
+    When the agent POSTs report.html to /api/v1/reports
+    Then the response status is 201
+    And the response includes a slug matching /^[a-zA-Z0-9_-]{10}$/
+    And the response includes a scan_status of "pending"
+    And after the scanner completes
+    And the scan_status is "clean"
+    Then visiting the view_url returns 200 with content-type text/html
+
+  Scenario: Re-uploading keeps the URL stable
+    Given a published report with slug "abc1234567"
+    When the agent calls update_report with the same slug and new HTML
+    Then the response includes version 2
+    And the view URL is unchanged
+    And /view/abc1234567?v=1 still serves the original HTML</code></pre>
+
+    <p>One <code>.feature</code> per use case keeps the <strong>business intent versioned in source</strong>. PRs that touch a use case must update its feature; CI fails if the feature file is missing or skipped.</p>
+
+    <h3>3. Functional programming (vanilla TypeScript) <span class="pill new">no new libs</span></h3>
+    <p>Domain and application layers are written in a functional style using only TypeScript and the standard library &mdash; <strong>no fp-ts, Effect, Remeda, Ramda, or Immer</strong>. The discipline is small enough to keep in the team's head and avoids tying the codebase to a heavy abstraction tax.</p>
+
+    <h4>The four rules</h4>
+    <div class="layer-grid">
+      <div class="layer" data-layer="Rule 1">
+        <h4>Pure functions in the domain</h4>
+        <p>Domain functions take inputs, return outputs, no side effects, no globals, no <code>Date.now()</code>, no <code>Math.random()</code>. Clock and randomness injected via outbound ports.</p>
+      </div>
+      <div class="layer" data-layer="Rule 2">
+        <h4>Immutability</h4>
+        <p><code>readonly</code> on every type. <code>ReadonlyArray</code> instead of <code>T[]</code>. <code>as const</code> on literals. Never mutate inputs &mdash; always return a new value. CI lints for <code>.push</code>/<code>.splice</code>/assignment on domain types.</p>
+      </div>
+      <div class="layer" data-layer="Rule 3">
+        <h4>Composition over inheritance</h4>
+        <p>No abstract classes in the domain. Functions compose via <code>pipe()</code> (a 12-line utility, no library). Discriminated unions instead of class hierarchies. Use cases compose pure functions with effectful ports.</p>
+      </div>
+      <div class="layer" data-layer="Rule 4">
+        <h4>Side effects at the edge</h4>
+        <p>All I/O lives in adapters. The domain returns "what should happen" (a <code>DomainResult</code> with events to publish); the use case interprets that and calls ports. Easy to test; easy to audit.</p>
+      </div>
+    </div>
+
+    <h4>What this looks like in code</h4>
+<pre><code>// packages/domain/src/services/permission-resolver.ts
+type Folder = { readonly id: string; readonly orgId: string; readonly parentId: string | null };
+type Grant  = { readonly folderId: string; readonly granteeUserId: string;
+                readonly permission: 'editor' | 'admin' };
+
+export const findAncestorGrant = (
+  folder: Folder,
+  ancestors: ReadonlyArray&lt;Folder&gt;,
+  grants:    ReadonlyArray&lt;Grant&gt;,
+  userId:    string,
+): Grant | null =&gt;
+  [folder, ...ancestors]
+    .flatMap(f =&gt; grants.filter(g =&gt; g.folderId === f.id))
+    .find(g =&gt; g.granteeUserId === userId) ?? null;
+
+// Pure. No mocks needed to test. No new libraries.</code></pre>
+    <ul>
+      <li>Classes are still used for <strong>use cases</strong> (they hold injected dependencies) and <strong>adapters</strong> (they wrap stateful infrastructure). The class is a thin shell; the logic inside is pipelines of pure functions.</li>
+      <li><strong>Result&lt;T, E&gt;</strong> type is hand-rolled (~15 lines), used uniformly across use cases.</li>
+      <li><strong>Branding</strong> for value-object types (<code>type Slug = string &amp; { readonly _: 'Slug' }</code>) prevents accidental string mixing without a runtime cost.</li>
+    </ul>
+
+    <h3>4. Git worktree workflow for agent-driven work <span class="pill new">parallel safety</span></h3>
+    <p>Any time an agent (or human) starts a new feature, bug fix, refactor, or experiment, the work happens in a <strong>dedicated git worktree</strong>, not by switching branches in the main checkout. This lets multiple in-flight changes coexist without stash drama, lets agents work in parallel without stepping on each other, and keeps the main working tree clean for review and ad-hoc debugging.</p>
+
+    <h4>Convention</h4>
+<pre><code># Start a feature
+git worktree add ../&lt;feature-slug&gt; -b feat/&lt;feature-slug&gt;
+cd ../&lt;feature-slug&gt;
+pnpm install
+# ... do work, commit, push, open PR ...
+
+# When merged, clean up
+git worktree remove ../&lt;feature-slug&gt;
+git branch -D feat/&lt;feature-slug&gt;</code></pre>
+
+    <h4>Encoded in CLAUDE.md (agent instructions)</h4>
+    <ul>
+      <li><strong>Before starting any feature, bug fix, or experiment</strong>, the agent runs <code>git worktree add ../&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code>. Never edits files in the root checkout for in-progress work.</li>
+      <li><strong>One worktree per task.</strong> Don't reuse a worktree for unrelated work.</li>
+      <li><strong>Worktrees live under <code>../</code></strong> (sibling to the main checkout), not inside it &mdash; keeps <code>find</code>, <code>rg</code>, and tooling sane.</li>
+      <li>A <strong><code>/worktree-cleanup</code> skill</strong> lists stale worktrees (merged or abandoned for &gt;14 days) and removes them after confirmation.</li>
+    </ul>
+
+    <h3>5. Documentation-as-contract pre-push hook <span class="pill new">enforced</span></h3>
+    <p>A pre-push git hook (and a Claude Code <code>PreToolUse</code> hook for the <code>Bash</code> tool when the command is <code>git push</code>) verifies that <strong>code changes carry the corresponding doc changes</strong>. The aim is to prevent the project's documentation from rotting one PR at a time. A separate <strong><code>/docs-check</code> skill</strong> walks the agent through identifying which docs are now stale.</p>
+
+    <h4>Trigger matrix</h4>
+    <table>
+      <thead><tr><th>If the diff touches…</th><th>…then one of these must also change</th></tr></thead>
+      <tbody>
+        <tr><td><code>packages/db/migrations/**</code> or schema files</td><td><code>docs/db-design.md</code> + a new ADR if the change is non-trivial</td></tr>
+        <tr><td><code>apps/app/app/routes/api.v1.**</code></td><td><code>docs/api/openapi.yaml</code> + Bruno collection regenerated</td></tr>
+        <tr><td><code>packages/application/src/*.use-case.ts</code> (new)</td><td>Corresponding <code>tests/e2e/features/*.feature</code> + entry in <code>README.md</code></td></tr>
+        <tr><td><code>packages/domain/src/events/**</code> (new event)</td><td><code>docs/events.md</code> updated with emitter/subscribers</td></tr>
+        <tr><td>A new <code>docs/adr/ADR-NNN-*.md</code></td><td>Linked from <code>docs/adr/INDEX.md</code></td></tr>
+        <tr><td><code>.claude/skills/**</code> or <code>.claude/hooks/**</code></td><td><code>CLAUDE.md</code> agent-instructions section updated</td></tr>
+        <tr><td>Anything in <code>infra/terraform/**</code></td><td><code>docs/infra.md</code> + ops runbook entry</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Implementation</h4>
+<pre><code>.claude/
+├── skills/
+│   └── docs-check/
+│       └── SKILL.md         # /docs-check — walks the agent through trigger matrix
+└── hooks/
+    └── docs-prepush-guard.sh # PreToolUse on Bash when command starts with "git push"
+                              # — runs the matrix check; exit 2 blocks the push
+                              # — provides a clear diff of what's missing
+                              # — emergency bypass: PUSH_WITHOUT_DOCS=1 (logged + flagged in PR)</code></pre>
+
+    <h3>6. API documentation — OpenAPI + Bruno <span class="pill new">git-native</span></h3>
+    <p>The HTTP API is the source of truth for the platform (ADR-003). Its specification must be machine-readable, human-readable, agent-readable, and <strong>versioned in git alongside the code that implements it</strong>. We use <strong>OpenAPI 3.1</strong> as the canonical spec and <strong>Bruno</strong> as the desktop client / collection format.</p>
+
+    <h4>Tool evaluation (May 2026)</h4>
+    <table>
+      <thead><tr><th>Tool</th><th>OSS</th><th>Git-friendly collections</th><th>CLI</th><th>Cloud lock-in</th><th>Fit</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Bruno</strong></td><td>Yes (MIT)</td><td><strong>Yes</strong> &mdash; <code>.bru</code> plain-text files commit cleanly</td><td>Yes (<code>bru run</code>)</td><td>None</td><td><strong>Pick.</strong> Local-first, no account, diff-friendly, CI runnable.</td></tr>
+        <tr><td>Hoppscotch</td><td>Yes</td><td>Partial &mdash; collections export as JSON</td><td>Yes</td><td>Optional cloud sync</td><td>Good alternative; PR-review experience weaker than Bruno.</td></tr>
+        <tr><td>Postman</td><td>No</td><td>Poor &mdash; cloud-first; JSON exports drift</td><td>Newman</td><td>Heavy (paid for team)</td><td>Skip. Vendor lock-in, weak git story.</td></tr>
+        <tr><td>Insomnia</td><td>Partial</td><td>Weak &mdash; recent versions require Kong cloud login</td><td>Inso CLI</td><td>Increasing</td><td>Skip. Direction-of-travel is wrong.</td></tr>
+        <tr><td>Thunder Client</td><td>Source-available</td><td>OK in VS Code</td><td>Limited</td><td>Paid team plan</td><td>Niche; tied to VS Code.</td></tr>
+        <tr><td>OpenAPI + Scalar UI</td><td>Yes</td><td>YAML is git-native</td><td>Yes</td><td>None</td><td><strong>Use alongside Bruno for hosted docs.</strong></td></tr>
+      </tbody>
+    </table>
+
+    <h4>Our setup</h4>
+<pre><code>docs/api/
+├── openapi.yaml              # source of truth (OpenAPI 3.1)
+├── bruno/                    # generated from openapi.yaml; committed
+│   ├── bruno.json
+│   ├── environments/{local,staging,production}.bru
+│   └── collections/
+│       ├── reports/
+│       │   ├── Upload report.bru
+│       │   ├── Update report.bru
+│       │   └── Get report metadata.bru
+│       ├── folders/ ...
+│       ├── api-keys/ ...
+│       └── abuse/ ...
+└── scripts/
+    └── gen-bruno-from-openapi.ts   # run on every openapi.yaml change</code></pre>
+    <ul>
+      <li><strong>Rendered docs</strong>: <strong>Scalar</strong> UI mounted at <code>app.&lt;domain&gt;/docs</code> reads the OpenAPI directly. Open-source, no lock-in, beautiful default.</li>
+      <li><strong>Agent-friendly</strong>: the MCP server reads <code>openapi.yaml</code> at startup to validate tool schemas against the live API.</li>
+      <li><strong>CI</strong>: a contract-test step runs <code>bru run docs/api/bruno/collections</code> against a staging deploy on every PR &mdash; catches breaking changes before merge.</li>
+      <li><strong>Drift detection</strong>: the doc-update pre-push hook regenerates Bruno from OpenAPI; if regenerated files don't match committed files, push is blocked.</li>
+    </ul>
+
+    <h3>Agentic instructions consolidated</h3>
+    <p>The repo's <strong><code>CLAUDE.md</code></strong> codifies the practices above as binding instructions for any agent working in the codebase:</p>
+    <ul>
+      <li>Before starting any task, <code>git worktree add ../&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code> in a fresh worktree.</li>
+      <li>Use <code>/tdd &lt;task&gt;</code> to begin implementation &mdash; never write production code before its test.</li>
+      <li>Every new use case requires a <code>.feature</code> file in <code>tests/e2e/features/</code>.</li>
+      <li>Domain code is pure-functional with <code>readonly</code> everything; lint flags mutation on domain types.</li>
+      <li>Before <code>git push</code>, run <code>/docs-check</code> &mdash; or let the pre-push hook block and tell you what's missing.</li>
+      <li>OpenAPI is the contract; any route change re-runs <code>gen-bruno-from-openapi.ts</code>.</li>
+    </ul>
+  </section>
+
+  <section id="development">
+    <h2>Development &amp; delivery <span class="pill engineering">pipeline</span></h2>
+    <p>How code moves from a feature branch in a worktree to a production deploy. The pipeline is opinionated: <strong>PR-only delivery into a protected main</strong>, <strong>CI runs the full quality bar on every PR</strong>, <strong>CD continuously deploys on merge</strong>, and <strong>two AI reviewers (Claude + Gemini) post automated PR feedback</strong> alongside the required human review.</p>
+
+    <h3>Development progress tracker <span class="pill new">v1 status</span></h3>
+    <p>Live status of the v1 build. Update on every PR merge that completes an item. Format borrowed from a lightweight kanban &mdash; the rows below are the unit of delivery for the platform.</p>
+
+    <h4>Infrastructure &amp; account setup</h4>
+    <table class="tracker">
+      <thead><tr><th>Milestone</th><th>Description</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>repo-bootstrap</td><td>Create <code>github.com/agrando2k/&lt;repo&gt;</code> public; configure branch protection on <code>main</code></td><td><span class="status-pill not-started">Not started</span></td><td>Blocks everything below</td></tr>
+        <tr><td>codeowners</td><td>Add <code>.github/CODEOWNERS</code> with <code>* @agrando2k</code> and sensitive-path overrides</td><td><span class="status-pill not-started">Not started</span></td><td>Required for branch-protection review rule</td></tr>
+        <tr><td>ci-workflows</td><td>Add <code>ci.yml</code>, <code>cd.yml</code>, <code>claude-review.yml</code>, <code>gemini-review.yml</code></td><td><span class="status-pill not-started">Not started</span></td><td>Required status checks wired</td></tr>
+        <tr><td>vercel-projects</td><td>Provision two Vercel projects (<code>app</code>, <code>view</code>); link to GitHub repo; preview deploys on every PR</td><td><span class="status-pill not-started">Not started</span></td><td>Preview URLs commented on PRs</td></tr>
+        <tr><td>neon-db</td><td>Provision Neon project; create <code>main</code> + per-PR branch automation</td><td><span class="status-pill not-started">Not started</span></td><td>Ephemeral DB per CI run</td></tr>
+        <tr><td>r2-buckets</td><td>Cloudflare R2: <code>reports-prod</code>, <code>reports-staging</code>, <code>reports-ci</code> (versioning on)</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env access keys in GitHub secrets</td></tr>
+        <tr><td>upstash-redis</td><td>Upstash Redis instances for prod/staging</td><td><span class="status-pill not-started">Not started</span></td><td>Rate-limit namespaces seeded</td></tr>
+        <tr><td>cloudflare-zone</td><td>Cloudflare zone for <code>&lt;domain&gt;</code>; Terraform-managed records</td><td><span class="status-pill not-started">Not started</span></td><td>DNS-as-code from day 1</td></tr>
+        <tr><td>clerk-tenant</td><td>Clerk app w/ Organizations enabled; MFA enforcement for admins; <code>__Host-</code> cookie config</td><td><span class="status-pill not-started">Not started</span></td><td>Three envs: prod/staging/test</td></tr>
+        <tr><td>psl-submission</td><td>Open PR against publicsuffix/list to add <code>view.&lt;domain&gt;</code></td><td><span class="status-pill not-started">Not started</span></td><td>2-6 wk merge SLA; ship without waiting</td></tr>
+        <tr><td>hsts-preload</td><td>Submit <code>&lt;domain&gt;</code> to hstspreload.org once stable</td><td><span class="status-pill not-started">Not started</span></td><td>Blocked on launch; irreversible</td></tr>
+        <tr><td>github-secrets</td><td>Populate <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, Vercel/Neon/Cloudflare/R2/Upstash/Clerk tokens</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env scoped where possible</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Feature phases</h4>
+    <table class="tracker">
+      <thead><tr><th>Phase</th><th>Scope</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Phase 0a</td><td>Accounts + Terraform state bootstrap (R2 <code>tf-state</code> bucket, <code>tf.sh</code> PG-lock wrapper)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 1-2 · gates all of Phase 0</td></tr>
+        <tr><td>Phase 0b</td><td>Terraform modules + applies (Vercel, Neon, R2, Cloudflare, Upstash, Clerk, GitHub, Resend)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 3-5 · applies <code>shared → staging → prod</code></td></tr>
+        <tr><td>Phase 0c</td><td>Skeleton apps + CI/CD (Remix /health routes, full headers, edge MW stubs, GHA workflows, AI review)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 6-7</td></tr>
+        <tr><td>Phase 0d</td><td>E2E harness — 13 infrastructure features green; use-case features written as <code>@pending</code></td><td><span class="status-pill not-started">Not started</span></td><td>Day 8-9 · gates Phase 1</td></tr>
+        <tr><td>Phase 0e</td><td>Engineering practices wired (TDD hooks, BDD, FP lint, worktree skill, docs-check, Bruno generator)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 10 · also gates Phase 1</td></tr>
+        <tr><td>Phase 1</td><td>Core upload + viewer (HTTP API, key issuance, edge MW, R2 stream, public ACL)</td><td><span class="status-pill not-started">Not started</span></td><td>Week 2 · depends on Phase 0</td></tr>
+        <tr><td>Phase 1.5</td><td>Scanning + abuse pipeline (ClamAV worker, 451 interstitial, triage queue, takedown)</td><td><span class="status-pill not-started">Not started</span></td><td>Week 2-3 · parallel with Phase 2</td></tr>
+        <tr><td>Phase 2</td><td>Sharing modes + folders (password/org/allowlist modes, folder CRUD, magic links)</td><td><span class="status-pill not-started">Not started</span></td><td>Week 3</td></tr>
+        <tr><td>Phase 2.5</td><td>Collaboration (folder_collaborators, pending-grant resolution, "Shared with me")</td><td><span class="status-pill not-started">Not started</span></td><td>Week 3-4</td></tr>
+        <tr><td>Phase 3</td><td>Clients (MCP server npm pkg, Claude Code Skill, Scalar docs site)</td><td><span class="status-pill not-started">Not started</span></td><td>Week 4</td></tr>
+        <tr><td>Phase 4</td><td>Polish + plan scaffolding (version history UI, <code>assertWithinPlan()</code>, audit log surfacing)</td><td><span class="status-pill not-started">Not started</span></td><td>Week 5</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Legend:</strong> <span class="status-pill not-started">Not started</span> &nbsp; <span class="status-pill in-progress">In progress</span> &nbsp; <span class="status-pill blocked">Blocked</span> &nbsp; <span class="status-pill done">Done</span></p>
+
+    <h3>Source control &amp; branching</h3>
+    <ul>
+      <li><strong>Repository:</strong> <code>github.com/agrando2k/&lt;repo&gt;</code> (public).</li>
+      <li><strong>Default branch:</strong> <code>main</code>. Protected. No direct pushes. Linear history.</li>
+      <li><strong>Branch naming</strong> (enforced by CI regex check):
+        <ul>
+          <li><code>feat/&lt;slug&gt;</code> &mdash; new behavior</li>
+          <li><code>fix/&lt;slug&gt;</code> &mdash; bug fix</li>
+          <li><code>refactor/&lt;slug&gt;</code> &mdash; no behavior change</li>
+          <li><code>chore/&lt;slug&gt;</code> &mdash; deps, tooling, CI config</li>
+          <li><code>docs/&lt;slug&gt;</code> &mdash; docs-only changes</li>
+        </ul>
+      </li>
+      <li><strong>Commit messages:</strong> Conventional Commits encouraged (<code>feat:</code>, <code>fix:</code>, <code>chore:</code>, <code>docs:</code>); commitlint configured but not blocking in v1.</li>
+      <li><strong>Worktree-first</strong>: every branch starts as a worktree (ADR-025). The main checkout is read-only for in-progress work.</li>
+    </ul>
+
+    <h3>Branch protection on <code>main</code></h3>
+    <p>Configured under <em>Settings &rarr; Branches &rarr; Branch protection rules</em>. The intent is "<strong>nothing reaches main without a PR, a human review by the repo owner, and a green pipeline</strong>."</p>
+    <ul>
+      <li><strong>Require a pull request</strong> before merging.</li>
+      <li><strong>Require approvals: 1</strong>, from <code>CODEOWNERS</code> (the user). PR authors cannot approve their own PR.</li>
+      <li><strong>Dismiss stale approvals</strong> when new commits are pushed (re-review every change).</li>
+      <li><strong>Require status checks to pass</strong> before merging (see CI table below). Branches must be up to date with <code>main</code> before merging.</li>
+      <li><strong>Require linear history</strong> (squash-only merges &mdash; one commit per PR on main).</li>
+      <li><strong>Restrict who can push to matching branches</strong>: nobody (force everything through PRs, including the owner).</li>
+      <li><strong>Disallow force pushes</strong> and <strong>disallow deletions</strong>.</li>
+      <li><strong>Include administrators</strong> in the rules (so the owner can't accidentally bypass).</li>
+      <li><strong>Require signed commits</strong> on <code>main</code> (GPG/SSH-signed).</li>
+    </ul>
+
+    <h3>CI pipeline (PR &rarr; quality gate)</h3>
+    <p>Workflow: <code>.github/workflows/ci.yml</code> · Triggers: <code>pull_request</code> (opened, synchronize, reopened) · Concurrency: <code>ci-${{ github.ref }}</code> with <code>cancel-in-progress: true</code> (latest push wins).</p>
+
+    <table class="ci-jobs">
+      <thead><tr><th>Job</th><th>Runs</th><th>Required check?</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>biome</td><td><code>biome ci .</code> &mdash; lint + format check across the monorepo</td><td>Yes</td><td>Fails on any unfixed style or lint issue</td></tr>
+        <tr><td>typecheck</td><td><code>turbo check:types</code> &mdash; <code>tsc --noEmit</code> per package</td><td>Yes</td><td>Domain/app packages first; failures fail-fast</td></tr>
+        <tr><td>unit-tests</td><td>Vitest, matrix per package; coverage uploaded to Codecov</td><td>Yes</td><td>100% domain + application coverage gate</td></tr>
+        <tr><td>migration-check</td><td>Provision a Neon branch; apply migrations forward; rollback; re-apply</td><td>Yes</td><td>Catches non-reversible migrations early</td></tr>
+        <tr><td>e2e-tests</td><td>Playwright + <code>playwright-bdd</code> against a per-PR Vercel preview deploy + ephemeral Neon branch + <code>reports-ci</code> R2 bucket</td><td>Yes</td><td>Sharded; ~3-5 min wall time</td></tr>
+        <tr><td>security-headers</td><td>curl against the PR's viewer preview; asserts the full header stack (ADR-013)</td><td>Yes</td><td>Catches CSP / sandbox / COOP drift</td></tr>
+        <tr><td>bruno-contract</td><td><code>bru run docs/api/bruno/collections</code> against the PR's app preview</td><td>Yes</td><td>API contract test (ADR-027)</td></tr>
+        <tr><td>docs-trigger-matrix</td><td>Runs the doc-update matrix (ADR-026) against the diff</td><td>Yes</td><td>Same logic as the local pre-push hook</td></tr>
+        <tr><td>branch-name</td><td>Asserts <code>feat/&middot; fix/&middot; refactor/&middot; chore/&middot; docs/</code> prefix</td><td>Yes</td><td>Soft regex check; quick fail</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Job graph:</strong> <code>biome + typecheck + branch-name</code> in parallel (fast fail); then <code>unit-tests + migration-check</code> in parallel; then <code>e2e-tests + security-headers + bruno-contract</code> after the Vercel preview deploys; <code>docs-trigger-matrix</code> runs alongside biome.</p>
+
+    <h3>CD pipeline (merge to main &rarr; production)</h3>
+    <p>Workflow: <code>.github/workflows/cd.yml</code> · Triggers: <code>push</code> to <code>main</code> (only reachable via merged PR per branch protection) · Concurrency: <code>cd-main</code>, <strong>no cancel</strong> (we never want to skip a deploy).</p>
+    <ul>
+      <li><strong>deploy-app</strong> &mdash; Vercel production deploy for <code>apps/app</code>. Pinned to the merged commit SHA.</li>
+      <li><strong>deploy-view</strong> &mdash; Vercel production deploy for <code>apps/view</code>.</li>
+      <li><strong>deploy-scanner</strong> &mdash; Build + push the ClamAV sidecar image to GHCR; trigger a rolling restart of the scanner service.</li>
+      <li><strong>terraform-apply</strong> &mdash; Run <code>terraform apply</code> against <code>infra/terraform/</code> with the Cloudflare token; produces a plan diff in the workflow log.</li>
+      <li><strong>migrate-db</strong> &mdash; Apply Drizzle migrations against the prod Neon branch. Migrations must be forward-only (backward-compatible) per the migration-check gate.</li>
+      <li><strong>smoke-tests</strong> &mdash; Hit health endpoints + a synthetic upload-view-and-takedown round-trip against production.</li>
+      <li><strong>notify</strong> &mdash; Post a Slack/email summary on success; on failure, page the owner and roll back via Vercel's instant rollback.</li>
+    </ul>
+    <p><strong>Preview deploys</strong> are produced on every PR and commented on the PR with the URL. Preview environments use the <code>reports-ci</code> R2 bucket and Neon branch &mdash; production data is never touched by a PR.</p>
+
+    <h3>Automated PR review &mdash; Claude + Gemini <span class="pill new">dual AI</span></h3>
+    <p>Two independent AI reviewers post inline comments and a summary on every PR. <strong>Their reviews are advisory, not blocking</strong> &mdash; the required approval still comes from the repo owner (CODEOWNERS). Two reviewers because they catch different things: Claude is consistently strong on architecture and security reasoning; Gemini is strong on style and idiomatic suggestions. The disagreement between them is often where the real bug lives.</p>
+
+    <h4>Workflow: <code>.github/workflows/claude-review.yml</code></h4>
+<pre><code>name: Claude PR review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-opus-4-7
+          review_focus: |
+            - Security headers, ACL logic, CSP / sandbox / COOP changes
+            - Schema migration safety (forward-only, backward-compatible)
+            - TDD compliance (every code change has a corresponding test change)
+            - FP discipline (no mutation on domain types; pure where possible)
+            - ADR alignment (point out any decision that needs a new ADR)
+          inline_comments: true
+          summary_comment: true</code></pre>
+
+    <h4>Workflow: <code>.github/workflows/gemini-review.yml</code></h4>
+<pre><code>name: Gemini PR review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: google-github-actions/gemini-cli@v1
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          model: gemini-2.5-pro
+          task: pr-review
+          focus: code quality, idiomatic TypeScript, performance, readability
+          inline_comments: true</code></pre>
+
+    <ul>
+      <li>Both bots post as their own bot users; their reviews appear in the PR's <em>Conversation</em> tab.</li>
+      <li>They <strong>cannot satisfy the CODEOWNERS approval requirement</strong> &mdash; only the human owner can.</li>
+      <li>They <strong>can</strong> request changes; if either does, the PR shows a "Changes requested" status until the author addresses or dismisses the review.</li>
+      <li><strong>Cost guardrail:</strong> the action is gated to skip if the diff exceeds 4,000 lines (rare; flagged as a "needs split" review).</li>
+    </ul>
+
+    <h3><code>CODEOWNERS</code></h3>
+<pre><code># .github/CODEOWNERS
+
+# Default: everything owned by the repo owner
+*                                @agrando2k
+
+# Sensitive areas get an extra reviewer requirement in v1.1 (security advisor)
+/packages/domain/                @agrando2k
+/packages/application/           @agrando2k
+/apps/view/                      @agrando2k
+/infra/terraform/                @agrando2k
+/.github/workflows/              @agrando2k
+/docs/adr/                       @agrando2k</code></pre>
+
+    <h3>Required GitHub secrets</h3>
+    <ul>
+      <li><code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code> &mdash; AI review</li>
+      <li><code>VERCEL_TOKEN</code>, <code>VERCEL_ORG_ID</code>, <code>VERCEL_PROJECT_ID_APP</code>, <code>VERCEL_PROJECT_ID_VIEW</code> &mdash; deploys</li>
+      <li><code>NEON_API_KEY</code> &mdash; ephemeral branch provisioning for CI</li>
+      <li><code>CLOUDFLARE_API_TOKEN</code> &mdash; Terraform DNS apply</li>
+      <li><code>R2_ACCESS_KEY_ID</code>, <code>R2_SECRET_ACCESS_KEY</code> (test bucket scoped)</li>
+      <li><code>UPSTASH_REDIS_REST_URL</code>, <code>UPSTASH_REDIS_REST_TOKEN</code> (per env)</li>
+      <li><code>CLERK_SECRET_KEY</code> (test instance for e2e)</li>
+      <li><code>GHCR_PAT</code> &mdash; ClamAV sidecar image push</li>
+    </ul>
+    <p><strong>Secret hygiene:</strong> all secrets scoped per-environment in Vercel; least-privilege tokens (e.g. R2 keys scoped to the bucket); rotation playbook in <code>docs/ops.md</code>. CI step <code>gitleaks</code> blocks any secret-shaped string in source.</p>
+
+    <h3>Local pre-push parity</h3>
+    <p>What CI checks, the local pre-push hook also runs (in lighter form): <code>biome</code>, <code>typecheck</code>, affected-package unit tests, the doc-update matrix. This eliminates the "push, wait 5 minutes, fail" loop. CI remains authoritative.</p>
+  </section>
+
+  <section id="db-design">
+    <h2>Database design <span class="pill engineering">schema + ER</span></h2>
+    <p>Single PostgreSQL database on Neon, accessed via Drizzle. Schema designed for <strong>multi-tenant isolation</strong> (every owned row carries <code>org_id</code>), <strong>audit-by-default</strong> (immutable <code>audit_log</code> and <code>outbox</code>), and <strong>soft-delete with hard retention</strong> (<code>deleted_at</code> flag plus a scheduled hard-purge job after the appeal window).</p>
+
+    <h3>Entity-relationship diagram</h3>
+<div class="diagram tight">                ┌─────────────┐                ┌─────────────┐
+                │    orgs     │                │    users    │
+                │─────────────│                │─────────────│
+                │ id PK       │                │ id PK       │
+                │ clerk_org_id│                │ clerk_user_id│
+                │ name        │                │ email       │
+                │ plan        │                │ created_at  │
+                │ plan_limits │                └──────┬──────┘
+                │ created_at  │                       │
+                └──────┬──────┘                       │
+                       │ 1                         1  │
+                       │                              │
+              ┌────────┼──────────────┐               │
+              │ N      │ N            │ N             │ N
+              ▼        ▼              ▼               ▼
+        ┌─────────┐ ┌─────────┐  ┌─────────────┐ ┌─────────────────┐
+        │ folders │ │ reports │  │folder_collab│ │   api_keys      │
+        │─────────│ │─────────│  │─────────────│ │─────────────────│
+        │ id PK   │ │ id PK   │  │ id PK       │ │ id PK           │
+        │ org_id  │ │ org_id  │  │ folder_id   │ │ acting_user_id  │──┐
+        │ parent_ │ │folder_id│  │ grantee_user│ │ issued_in_org_id│  │
+        │ id self │ │ slug 10c│  │ grantee_em  │ │ name, scopes    │  │
+        │ name    │ │ title   │  │ permission  │ │ key_prefix      │  │
+        │ slug    │ │ live_ver│  │ added_by    │ │ key_hash        │  │
+        │created  │ │ deleted │  │ added_at    │ │ last_used_at    │  │
+        └────┬────┘ └────┬────┘  └─────────────┘ │ revoked_at      │  │
+             │ 1         │ 1                     └─────────────────┘  │
+             │ self      │                                            │
+             └─────┐     │ N                                          │
+                   ▼     ▼                                            │
+            ┌──────────────────┐                                      │
+            │ report_versions  │                                      │
+            │──────────────────│                                      │
+            │ id PK            │◀──── reports.live_version_id         │
+            │ report_id FK     │                                      │
+            │ version_no       │                                      │
+            │ manifest_json    │                                      │
+            │ size_bytes       │                                      │
+            │ content_hash     │                                      │
+            │ uploaded_by_user │──────────────────────────────────────┘
+            │ scan_status      │   ('pending','clean','flagged','blocked')
+            │ scan_findings    │
+            │ scanned_at       │
+            │ uploaded_at      │
+            └──────────────────┘
+                   ▲ 1
+                   │
+                   │ 1
+            ┌──────┴───────┐
+            │     acls     │     (1 row per report)
+            │──────────────│
+            │ report_id PK │──── reports.id
+            │ mode         │   ('public','password','org','allowlist')
+            │ password_hash│
+            │ allowed_email│
+            │ csp_extras   │   (paid-plan opt-in)
+            │ updated_at   │
+            └──────────────┘
+
+    ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+    │  abuse_reports   │    │   csp_reports    │    │     outbox       │
+    │──────────────────│    │──────────────────│    │──────────────────│
+    │ id PK            │    │ id PK            │    │ id PK            │
+    │ report_id FK     │    │ report_slug      │    │ event_type       │
+    │ reporter_ip_hash │    │ document_uri     │    │ aggregate_id     │
+    │ reason · notes   │    │ violated_dir     │    │ payload JSONB    │
+    │ status           │    │ blocked_uri      │    │ status           │
+    │ created_at       │    │ source_file/line │    │ attempts         │
+    │ actioned_by/at   │    │ raw JSONB        │    │ available_at     │
+    └──────────────────┘    │ received_at      │    │ created_at       │
+                            └──────────────────┘    │ delivered_at     │
+                                                    └──────────────────┘
+
+    ┌──────────────────────────────────────────────────┐
+    │  audit_log  (append-only)                        │
+    │──────────────────────────────────────────────────│
+    │ id PK · org_id · actor_user_id · action ·        │
+    │ target_type · target_id · meta_json · at         │
+    │  partitioned monthly; 1-year retention; export   │
+    │  to cold storage at month-roll                   │
+    └──────────────────────────────────────────────────┘</div>
+
+    <h3>Table catalog</h3>
+
+    <div class="table-card">
+      <h4>orgs</h4>
+      <p>The tenant boundary. Every owned row in the system carries <code>org_id</code> directly or transitively. Mirrors Clerk's organization records (Clerk is source of truth for membership; we mirror for FK integrity and joins).</p>
+      <div class="meta-tags"><span>tenant root</span><span>idx: clerk_org_id (unique)</span><span>idx: plan</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>users</h4>
+      <p>Mirror of Clerk users. <code>acting_user_id</code> on API keys and audit rows points here. Email is denormalized for invitation/grant resolution before a user signs up.</p>
+      <div class="meta-tags"><span>mirror of clerk</span><span>idx: clerk_user_id (unique)</span><span>idx: email</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>api_keys</h4>
+      <p>Bearer credentials. Stored as <code>key_prefix</code> (12 chars, plaintext, shown in UI) + <code>key_hash</code> (argon2id). <strong>User-scoped</strong> (<code>acting_user_id</code>) so cross-org collaboration works. <code>scopes</code> JSONB carries OAuth-style permissions (<code>reports:write</code>, …). Soft-delete via <code>revoked_at</code>.</p>
+      <div class="meta-tags"><span>argon2id-hashed</span><span>idx: key_prefix</span><span>idx: acting_user_id</span><span>idx: last_used_at</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>folders</h4>
+      <p>Tree, <code>parent_id</code> self-reference, max depth 8. <code>(org_id, parent_id, slug)</code> unique. Permission resolver walks ancestors to find <code>folder_collaborators</code> grants.</p>
+      <div class="meta-tags"><span>tree (parent_id)</span><span>idx: org_id</span><span>idx: (org_id, parent_id, slug) unique</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>folder_collaborators</h4>
+      <p>Grants of <code>editor</code>/<code>admin</code> on a folder to a user, by email. Inherited by descendants. <code>grantee_user_id</code> NULL until the invitee signs up; resolved to a user id on first sign-in (job listening to <code>UserCreated</code>).</p>
+      <div class="meta-tags"><span>idx: folder_id</span><span>idx: grantee_email</span><span>idx: (folder_id, grantee_email) unique</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>reports</h4>
+      <p>The aggregate root for hosted content. <code>slug</code> is an immutable 10-char nanoid &mdash; the public URL forever. <code>live_version_id</code> points at the served version; flips on scan-clean. Soft-deleted via <code>deleted_at</code>; hard-purged after the appeal window.</p>
+      <div class="meta-tags"><span>aggregate root</span><span>idx: slug (unique)</span><span>idx: (org_id, folder_id)</span><span>idx: deleted_at (partial)</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>report_versions</h4>
+      <p>One row per upload. <code>manifest_json</code> lists files (paths + R2 keys + content-types). <code>scan_status</code> gates publishing: only <code>'clean'</code> versions can become <code>live_version_id</code>. <code>content_hash</code> dedupes accidental duplicate uploads.</p>
+      <div class="meta-tags"><span>idx: report_id</span><span>idx: (report_id, version_no) unique</span><span>idx: scan_status</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>acls</h4>
+      <p>One row per report. <code>mode</code> determines viewer gate; <code>password_hash</code> (argon2id) for password mode, <code>allowed_emails</code> JSONB for allowlist mode. <code>csp_extras</code> holds the paid-plan per-report CSP opt-in (e.g. extra <code>connect-src</code> domains).</p>
+      <div class="meta-tags"><span>1:1 with reports</span><span>pk: report_id</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>abuse_reports</h4>
+      <p>User-submitted abuse flags. <code>reporter_ip_hash</code> stores SHA-256 of the IP + daily salt to allow per-IP rate-limit reasoning without storing raw IPs. <code>status</code> drives the admin triage queue.</p>
+      <div class="meta-tags"><span>idx: report_id</span><span>idx: status</span><span>idx: created_at</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>csp_reports</h4>
+      <p>Inbound browser CSP-violation reports posted to <code>/csp-report</code> on the app. 90-day retention. Aggregated weekly to find drift opportunities (e.g. a directive that could be tightened).</p>
+      <div class="meta-tags"><span>idx: violated_directive</span><span>idx: received_at</span><span>retention: 90d</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>outbox</h4>
+      <p>Transactional outbox for domain events. Written inside the same transaction as the state change; drained by the dispatcher worker (~1s poll). <code>available_at</code> supports delayed dispatch (e.g. R2 purge at takedown + 24h).</p>
+      <div class="meta-tags"><span>idx: (status, available_at)</span><span>idx: aggregate_id</span><span>partitioned monthly</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>audit_log</h4>
+      <p>Append-only. Every state change, every API-key usage, every grant/revoke, every takedown. <code>actor_user_id</code> + IP-hash + geo + scope. Org-readable via dashboard. Monthly partitions; cold-storage export at month-roll; 1-year hot retention.</p>
+      <div class="meta-tags"><span>append-only</span><span>idx: (org_id, at)</span><span>idx: actor_user_id</span><span>partitioned monthly</span></div>
+    </div>
+
+    <h3>Cross-cutting schema policies</h3>
+    <ul>
+      <li><strong>UUIDv7 for ids</strong> (time-ordered, index-friendly). Slugs are separate from ids and are URL-facing.</li>
+      <li><strong>Soft delete</strong> (<code>deleted_at TIMESTAMPTZ NULL</code>) on all user-visible resources. Hard purge runs as a scheduled job after the appeal window.</li>
+      <li><strong>Tenant isolation</strong> enforced in repositories: every query filters by <code>org_id</code>. A linter (custom ESLint rule) flags raw <code>db.select().from(reports)</code> without an <code>org_id</code> filter.</li>
+      <li><strong>JSONB usage</strong> only for shapes we never query individually (<code>manifest_json</code>, <code>scan_findings</code>, <code>meta_json</code>, <code>plan_limits_json</code>). Anything we want to filter/aggregate gets a real column.</li>
+      <li><strong>Foreign-key cascades</strong>: <code>ON DELETE RESTRICT</code> by default; <code>ON DELETE CASCADE</code> only on <code>report_versions → reports</code> and <code>acls → reports</code>. The app does soft-deletes; cascades are a defense for accidental hard-deletes via migrations.</li>
+      <li><strong>Partitioning</strong>: <code>audit_log</code> and <code>outbox</code> partitioned monthly. Old partitions detached and cold-exported.</li>
+      <li><strong>Migrations</strong>: Drizzle migrations; every PR includes the up + down. CI runs migrations against a temporary Neon branch and rolls back.</li>
+    </ul>
+  </section>
+
+  <section id="stack">
+    <h2>Stack</h2>
+    <table>
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Frontend + API</td><td><strong>Remix v2</strong> on <strong>Vercel</strong></td><td>Loaders/actions fit upload + viewer ACL flow. Web Fetch native. RR v7 migration is a rename.</td></tr>
+        <tr><td>Edge gate</td><td><strong>Vercel Edge Middleware</strong></td><td>Framework-agnostic. Rate limit, SW-block, scan-status check before Remix runs.</td></tr>
+        <tr><td>Auth</td><td><strong>Clerk</strong> + Organizations</td><td>MFA for org admins; <code>__Host-</code> cookies; magic links.</td></tr>
+        <tr><td>Database</td><td><strong>Neon Postgres</strong></td><td>Serverless, branching. Drizzle parameterized queries.</td></tr>
+        <tr><td>ORM</td><td><strong>Drizzle</strong></td><td>TS-native; thin; serverless-friendly.</td></tr>
+        <tr><td>Blob storage</td><td><strong>Cloudflare R2</strong></td><td>No egress fees. S3-compatible. Versioning on.</td></tr>
+        <tr><td>Rate limit</td><td><strong>Upstash Redis</strong></td><td>Per-key/IP/org sliding-window.</td></tr>
+        <tr><td>Event bus</td><td><strong>Postgres outbox</strong> + Vercel Cron / Upstash QStash</td><td>Transactional with state changes; no extra infra dependency.</td></tr>
+        <tr><td>Malware scan</td><td><strong>ClamAV</strong> sidecar</td><td>OSS; daily signatures. VirusTotal as v1.1 second-stage.</td></tr>
+        <tr><td>DNS</td><td><strong>Cloudflare</strong> + Terraform</td><td>IaC; weekly drift detection.</td></tr>
+        <tr><td>Email</td><td><strong>Resend</strong></td><td>Magic links, owner notifications, admin alerts.</td></tr>
+        <tr><td>Viewer origin</td><td><code>view.&lt;domain&gt;</code> + PSL submission</td><td>Origin isolation; PSL for sibling-subdomain isolation.</td></tr>
+        <tr><td>MCP server</td><td>Standalone npm package</td><td>Thin HTTP wrapper; distributed via <code>npx</code>.</td></tr>
+        <tr><td>Payments</td><td>Stripe (deferred to v1.1)</td><td><code>plan</code> enum on org from day 1.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="components">
+    <h2>System components</h2>
+<div class="diagram">┌──────────────────────────┐          ┌──────────────────────────┐
+│  app.&lt;domain&gt;            │          │  view.&lt;domain&gt; (PSL)     │
+│  (Remix dashboard + API) │          │  (Remix viewer)          │
+│  - Clerk + MFA           │          │  - Vercel Edge MW:       │
+│  - __Host- cookies       │          │    rate-limit            │
+│  - Trusted Types         │          │    Service-Worker:→ 403  │
+│  - Folder/report UI      │          │    scan-status precheck  │
+│  - API key + scopes      │          │  - Remix loader:         │
+│  - HTTP API: /api/v1/*   │          │    ACL gate              │
+│  - /csp-report ingest    │          │    R2 stream + headers   │
+│  - Abuse / takedown UI   │          │    abuse-report link     │
+└──────────┬───────────────┘          └──────────┬───────────────┘
+           │                                     │
+           ▼                                     ▼
+   ┌──────────────────────────────────────────────────┐
+   │  Neon Postgres                                   │
+   │  orgs · users · api_keys · folders · reports ·   │
+   │  report_versions · acls · audit_log · outbox ·   │
+   │  abuse_reports · csp_reports · collaborators     │
+   └──────────────────────────────────────────────────┘
+           ▲                                     ▲
+           │                                     │
+           ▼                                     ▼
+   ┌──────────────────────────────────────────────────┐
+   │  Cloudflare R2 (versioning on)                   │
+   │  reports/&lt;reportId&gt;/v&lt;n&gt;/&lt;path&gt;                  │
+   └──────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────┐
+   │  Outbox dispatcher (Vercel Cron / QStash)        │
+   │    → ScanQueue → ClamAV sidecar                  │
+   │    → Notifier  → Resend email                    │
+   │    → CacheInvalidator                            │
+   │    → BlobPurger (R2 delayed)                     │
+   └──────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────┐
+   │  Upstash Redis   →  rate-limits + edge KV cache  │
+   │  Cloudflare WAF  →  DDoS + bot protection        │
+   │  Terraform       →  DNS-as-code, drift detect    │
+   └──────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────┐
+   │  MCP server (npm)    ──HTTP──▶  app.&lt;domain&gt;/api │
+   │  Skill (Claude Code) ──HTTP──▶  same             │
+   └──────────────────────────────────────────────────┘</div>
+  </section>
+
+  <section id="flows">
+    <h2>Upload &amp; viewer flows</h2>
+
+    <h3>Upload flow (HTTP API &mdash; source of truth)</h3>
+<pre><code>POST /api/v1/reports
+  Auth: Bearer &lt;api_key&gt;
+  Body (multipart/form-data):
+    file: &lt;single .html OR .zip bundle&gt;
+    title?: string
+    folder_path?: string
+    update_slug?: string
+    acl?: { mode, password?, allowed_emails? }
+    csp_extras?: { connect_src?: [...] }   # paid-plan only
+  Response 201:
+    { slug, view_url, version, scan_status, dashboard_url }</code></pre>
+    <ol class="step-list">
+      <li>Authenticate API key &rarr; resolve <code>acting_user_id</code> + scopes. <code>requireScope("reports:write")</code>.</li>
+      <li>Resolve target folder.</li>
+      <li><code>canWrite(user, folder)</code>: org member OR ancestor has folder grant &rarr; allowed; else 403.</li>
+      <li>If <code>update_slug</code>: load report, verify folder check covers it.</li>
+      <li>Sync pre-checks: size, file count, MIME content-sniff, zip-slip, decompression-ratio, SVG rejection.</li>
+      <li>Extract + upload to R2 at <code>reports/&lt;reportId&gt;/v&lt;n&gt;/&lt;path&gt;</code>.</li>
+      <li>Insert <code>report_versions</code> with <code>scan_status='pending'</code>; insert <code>outbox</code> row for <code>ReportUploaded</code>. Single transaction.</li>
+      <li>Do <strong>not</strong> bump <code>live_version_id</code> &mdash; scanner promotes on <code>clean</code>.</li>
+      <li>Upsert <code>acls</code>. Return slug + viewer URL + scan_status.</li>
+    </ol>
+
+    <h3>Viewer flow (<code>view.&lt;domain&gt;</code>)</h3>
+    <ol class="step-list">
+      <li>Request <code>view.&lt;domain&gt;/&lt;slug&gt;</code> (optionally <code>?v=N</code>, <code>?token=&hellip;</code>).</li>
+      <li>Vercel Edge Middleware: per-IP rate limit; reject unknown slug; <strong>return 403 on <code>Service-Worker: script</code></strong>; scan-status pre-fetch &mdash; if <code>flagged</code>, render 451 without loader.</li>
+      <li>Remix loader on <code>routes/$slug.$.tsx</code>: ACL gate (public / password / org / allowlist).</li>
+      <li>Resolve <code>live_version_id</code> (or <code>?v=N</code>); fetch from R2; stream via <code>Response</code> with correct content-type.</li>
+      <li>Apply full security-header stack (ADR-013). Inject abuse-report link.</li>
+    </ol>
+  </section>
+
+  <section id="mcp">
+    <h2>MCP server / Skill</h2>
+    <ul>
+      <li>npm package, <code>npx @&lt;org&gt;/mcp</code>. Reads <code>&lt;ORG&gt;_API_KEY</code> + <code>&lt;ORG&gt;_API_BASE</code>.</li>
+      <li>Tools: <code>upload_report</code> · <code>update_report</code> · <code>list_reports</code> · <code>set_acl</code> · <code>grant_folder_access</code> · <code>list_my_collaborations</code>.</li>
+      <li>Claude Code Skill is a slim shell over the same API.</li>
+    </ul>
+  </section>
+
+  <section id="security">
+    <h2>Security &amp; abuse model <span class="pill p0">P0</span></h2>
+    <p>Defense-in-depth designed for hosting untrusted third-party HTML/JS. Full threat model, layered defenses, and detailed mitigations.</p>
+
+    <h3>Threat model (21 ranked risks)</h3>
+    <table class="threats">
+      <thead><tr><th>#</th><th>Threat</th><th>Primary mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Hosted page used for phishing</td><td>Upload-time phishing heuristics; per-page abuse-report link; takedown workflow</td></tr>
+        <tr><td>2</td><td>Hosted page distributes malware</td><td>ClamAV scan on every upload; MIME content-sniff; zip-bomb rejection; MIME allowlist</td></tr>
+        <tr><td>3</td><td>Hosted JS used as exfil / C2</td><td>Strict default CSP (<code>connect-src 'self'</code>); per-report opt-in (paid + abuse-reviewed)</td></tr>
+        <tr><td>4</td><td>XSS / cookie theft against dashboard</td><td>Viewer on separate origin (ADR-002); HSTS; <code>frame-ancestors 'none'</code>; <code>__Host-</code> cookies</td></tr>
+        <tr><td>5</td><td>Leaked API key abuse</td><td>User-scoped keys; scopes (ADR-016); one-click revoke; anomaly detection</td></tr>
+        <tr><td>6</td><td>Cross-tenant write via stolen/granted access</td><td>Permission check on every write; tree-walk audit logged</td></tr>
+        <tr><td>7</td><td>SQL injection / mass-assignment</td><td>Drizzle parameterized only; explicit DTOs</td></tr>
+        <tr><td>8</td><td>SSRF / outbound abuse from backend</td><td>Backend <strong>never</strong> fetches user-provided URLs in v1</td></tr>
+        <tr><td>9</td><td>Zip-slip / path traversal</td><td>Reject any extracted path with <code>..</code>, absolute, or symlinks</td></tr>
+        <tr><td>10</td><td>DDoS / cost amplification</td><td>Cloudflare in front of R2; Upstash rate limits</td></tr>
+        <tr><td>11</td><td>Account / sign-up abuse</td><td>Email verification, disposable blocklist, Cloudflare Turnstile</td></tr>
+        <tr><td>12</td><td>Magic-link replay / theft</td><td>15-min TTL, single-use, IP/UA bound</td></tr>
+        <tr><td>13</td><td>Supply-chain compromise (npm)</td><td>Lockfile pinned, Renovate + Snyk + gitleaks in CI</td></tr>
+        <tr><td>14</td><td>Secret leakage in logs</td><td>Structured logger with allowlist; <code>Authorization</code> redacted</td></tr>
+        <tr><td>15</td><td>Subdomain takeover / dangling DNS</td><td>Terraform-managed DNS; weekly drift cron</td></tr>
+        <tr><td>16</td><td>Sibling-subdomain cookie pollution</td><td>PSL submission; <code>__Host-</code> cookie prefix</td></tr>
+        <tr><td>17</td><td>Service worker persistence after takedown</td><td>Edge MW returns 403 on <code>Service-Worker: script</code></td></tr>
+        <tr><td>18</td><td>SVG-borne XSS</td><td>Reject <code>.svg</code> at pre-check; sanitize in v1.1</td></tr>
+        <tr><td>19</td><td>Spectre-class side-channel reads</td><td><code>Origin-Agent-Cluster: ?1</code>; COOP+CORP</td></tr>
+        <tr><td>20</td><td>DOM-XSS in our dashboard</td><td>Trusted Types enforced on <code>app.&lt;domain&gt;</code></td></tr>
+        <tr><td>21</td><td>CSP gap discovered post-launch</td><td><code>CSP-Report-Only</code> shadow policy + <code>/csp-report</code> ingest</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Untrusted-content rendering &mdash; six layers</h3>
+    <div class="layer-grid">
+      <div class="layer" data-layer="Layer 1">
+        <h4>Origin isolation</h4>
+        <p>Viewer at <code>view.&lt;domain&gt;</code>, app at <code>app.&lt;domain&gt;</code>. Viewer never receives app auth cookies. ADR-002.</p>
+      </div>
+      <div class="layer" data-layer="Layer 2">
+        <h4>Public Suffix List submission</h4>
+        <p><code>view.&lt;domain&gt;</code> submitted to the PSL so browsers treat sibling subdomains as separate sites. PR opens Phase 0.</p>
+      </div>
+      <div class="layer" data-layer="Layer 3">
+        <h4>Cookie hardening</h4>
+        <p>All app auth cookies use <code>__Host-</code> prefix &mdash; browser-enforced no <code>Domain</code> attribute. Structurally impossible to leak to viewer.</p>
+      </div>
+      <div class="layer" data-layer="Layer 4">
+        <h4>Strict CSP + sandbox header</h4>
+        <p>Two CSPs: enforcing (<code>connect-src 'self'</code>, <code>frame-ancestors 'none'</code>) + a second header with the <code>sandbox</code> directive.</p>
+      </div>
+      <div class="layer" data-layer="Layer 5">
+        <h4>Process &amp; side-channel isolation</h4>
+        <p><code>Origin-Agent-Cluster: ?1</code> + COOP <code>same-origin</code> + CORP <code>same-site</code>. We don't enable full COEP (would break cross-origin images).</p>
+      </div>
+      <div class="layer" data-layer="Layer 6">
+        <h4>Active-content controls</h4>
+        <p>Service workers blocked at edge. Short <code>Cache-Control</code>. SVG rejected. Trusted Types on dashboard. CSP report-only shadow policy.</p>
+      </div>
+    </div>
+
+    <h3>Reference reading</h3>
+    <div class="ref-list">
+    <ul>
+      <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html">OWASP HTML5 Security Cheat Sheet</a></li>
+      <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/Subdomain_Takeover_Prevention_Cheat_Sheet.html">OWASP Subdomain Takeover Prevention</a></li>
+      <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox">MDN: CSP <code>sandbox</code> directive</a></li>
+      <li><a href="https://web.dev/articles/why-coop-coep">web.dev: Cross-origin isolation</a></li>
+      <li><a href="https://publicsuffix.org/learn/">Public Suffix List</a></li>
+      <li><a href="https://chromium.googlesource.com/chromium/src/+/main/docs/security/service-worker-security-faq.md">Chromium Service Worker Security FAQ</a></li>
+      <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/require-trusted-types-for">MDN: Trusted Types</a></li>
+      <li><a href="https://blog.codepen.io/2023/01/18/397-user-generated-content-saftey/">CodePen: User-Generated Content Safety</a></li>
+      <li><a href="https://microservices.io/patterns/data/transactional-outbox.html">microservices.io: Transactional Outbox</a></li>
+      <li><a href="https://alistair.cockburn.us/hexagonal-architecture/">Cockburn: Hexagonal Architecture</a></li>
+    </ul>
+    </div>
+  </section>
+
+  <section id="adrs">
+    <h2>ADRs (18 records)</h2>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-001</span> Stable slug + versioned content <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Each report has an immutable short slug (<code>nanoid(10)</code>). Content in <code>report_versions</code> rows pointing at R2. <code>live_version_id</code> flips on re-upload after scan passes.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-002</span> Viewer on separate origin + PSL + <code>__Host-</code> cookies <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Viewer at <code>view.&lt;domain&gt;</code>, submitted to PSL. All app auth cookies use <code>__Host-</code> prefix. <code>frame-ancestors 'none'</code> on app; HSTS preload submitted.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-003</span> HTTP API as source of truth, MCP as wrapper <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Versioned REST API (<code>/api/v1</code>); MCP and Skill are thin clients. Any client can integrate via curl/CI.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-004</span> Cloudflare R2 over Vercel Blob / S3 <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> R2 for all uploaded files. No egress fees. S3-compatible. Versioning on.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-005</span> Clerk Organizations from day 1 <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Every user belongs to &ge;1 Clerk org. Resource ownership keyed on <code>org_id</code>. MFA enforced for org admins.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-006</span> Billing-ready, billing-deferred <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> <code>plan ENUM</code> + <code>plan_limits_json</code> on <code>orgs</code> from day 1. <code>assertWithinPlan()</code> on every write path.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-007</span> Zip bundle upload format <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Single <code>.html</code> &rarr; <code>index.html</code>. Multi-file &rarr; <code>.zip</code> with <code>index.html</code> at root. Validated, expanded, manifested.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-008</span> Hashed, prefixed, user-scoped API keys <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> <code>rk_live_*</code> keys; argon2id-hashed; <code>key_prefix</code> for UI; bound to <code>acting_user_id</code>; one-time view at creation.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-009</span> Folder-inherited write grants <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> <code>folder_collaborators</code> grants inherit by tree-walk. Cross-org collaboration via user-scoped keys.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-010</span> Remix v2 over Next.js <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Remix v2 on Vercel via Vercel adapter. Edge Middleware for framework-agnostic edge gate. Two Remix apps: <code>apps/app</code>, <code>apps/view</code>.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-011</span> Defense-in-depth security baseline <span class="status">Accepted</span> <span class="pill p0">P0</span></h3>
+      <p class="field"><b>Decision</b> Edge (Cloudflare + Upstash rate limits) + transport (HSTS, TLS 1.3) + app (security headers, CSRF, MFA) + data (parameterized queries, DTOs) + logging + build (Renovate + Snyk + gitleaks) + secrets + backups (Neon PITR, R2 versioning).</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-012</span> Upload content scanning <span class="status">Accepted</span> <span class="pill p0">P0</span></h3>
+      <p class="field"><b>Decision</b> Three-stage pipeline: sync pre-checks → async scan (ClamAV + phishing heuristics + miners) → clean/flagged/blocked. Per-page abuse-report link.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-013</span> Viewer security header stack <span class="status">Accepted</span> <span class="pill p0">P0</span></h3>
+      <p class="field"><b>Decision</b> Full stack: enforcing CSP + sandbox-header CSP + report-only CSP + COOP + CORP + <code>Origin-Agent-Cluster</code> + Permissions-Policy + Cache-Control + Report-To. Single <code>secureHeaders()</code> helper.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-014</span> Block service-worker registration at edge <span class="status">Accepted</span> <span class="pill p0">P0</span></h3>
+      <p class="field"><b>Decision</b> Edge MW returns 403 on requests carrying <code>Service-Worker: script</code>. Combined with <code>worker-src 'self'</code> + short cache TTL.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-015</span> Reject SVG at upload <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> v1 rejects <code>image/svg+xml</code> by content-sniff. v1.1 will sanitize with DOMPurify SVG profile.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-016</span> API key scopes + anomaly detection <span class="status">Accepted</span></h3>
+      <p class="field"><b>Decision</b> Scopes: <code>reports:write</code>, <code>reports:read</code>, <code>folders:write</code>, <code>acl:write</code>. <code>requireScope()</code> on every endpoint. Geo/rate/failed-auth anomaly detection with admin alerts.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-017</span> Terraform for all long-lived infrastructure <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">infra</span></h3>
+      <p class="field"><b>Context</b> The platform spans several long-lived dependencies (Vercel, Neon, Cloudflare/R2, Upstash, Clerk, Resend, GitHub repo settings). Click-ops causes drift, makes recovery hard, makes per-env reproducibility impossible, and creates single-person knowledge dependencies. Phase 0 explicitly delivers reproducible infrastructure <em>before</em> feature code so the rest of v1 builds on a stable, audited foundation.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>Every long-lived resource is provisioned via Terraform under <code>infra/terraform/</code>.</li>
+          <li>Per-provider modules: <code>vercel-app</code>, <code>neon-project</code>, <code>r2</code>, <code>cloudflare-zone</code>, <code>upstash-redis</code>, <code>clerk-app</code>, <code>github-repo</code> (branch protection, secrets, CODEOWNERS), <code>resend-domain</code>.</li>
+          <li>Envs (<code>prod</code> / <code>staging</code> / <code>shared</code>) compose modules. <code>shared/</code> holds single-instance resources.</li>
+          <li>After bootstrap, <strong>all infra changes go through a PR</strong>: CI runs <code>terraform plan</code>; CD runs <code>terraform apply</code> on merge &mdash; identical workflow to application code, identical review by CODEOWNERS + Claude + Gemini.</li>
+          <li>Click-ops remains only for (1) per-provider PAT generation and (2) the bootstrap R2 bucket for Terraform state (chicken-and-egg).</li>
+          <li><strong>Ephemeral per-PR Neon branches</strong> use the Neon API directly from CI &mdash; Terraform is too slow for ephemeral state. Prefix isolation handles R2 (<code>pr-&lt;N&gt;/</code>) and Upstash (<code>pr-&lt;N&gt;:</code>).</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Pulumi (TypeScript IaC) → declined; user requested Terraform; ecosystem maturity favors Terraform for Cloudflare/Vercel/Neon providers.</li>
+          <li>Click-ops + runbook → declined; survives no team handoff or incident drill.</li>
+          <li>Crossplane / k8s-native IaC → declined as drastically over-scoped for our footprint.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> One-time bootstrap pain (~1-2 days). After bootstrap, every change is reviewed, planned, and applied via PR. Disaster recovery from "I deleted the wrong thing" is a <code>terraform apply</code>. Onboarding a second engineer is <code>clone + read docs/infra.md + tf.sh plan</code>. Infrastructure code is itself versioned, blamed, and AI-reviewed.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-018</span> Terraform state on Cloudflare R2 with Postgres advisory locking <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">infra</span></h3>
+      <p class="field"><b>Context</b> ADR-004 already commits us to R2 for blob storage; concentrating in Cloudflare reduces account sprawl. Terraform's <code>s3</code> backend supports R2 natively (S3-compatible API). The remaining question is locking: R2 lacks DynamoDB-equivalent conditional writes, so the standard <code>dynamodb_table</code> lock isn't available. Without locking, parallel <code>terraform apply</code> calls (e.g. from two agents in parallel worktrees) corrupt state.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>State files in a dedicated R2 bucket <code>tf-state</code> (versioning on, separate keys per env: <code>prod.tfstate</code>, <code>staging.tfstate</code>, <code>shared.tfstate</code>).</li>
+          <li>Server-side encryption at rest is R2's default; access via R2 API token scoped to this bucket only.</li>
+          <li>A wrapper script <code>infra/terraform/scripts/tf.sh</code> acquires a <strong>Postgres advisory lock</strong> on Neon (<code>pg_advisory_lock(hashtext('tf-' || $env))</code>) before invoking <code>terraform plan|apply</code>, releases after.</li>
+          <li>We already pay for Neon; the lock adds zero new dependencies.</li>
+          <li><strong>Bootstrap order</strong>: (1) operator creates the <code>tf-state</code> R2 bucket via Cloudflare dashboard; (2) operator runs <code>tf.sh init</code> configuring the backend; (3) all subsequent infra (including application R2 buckets) is Terraform-applied.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>HCP Terraform Cloud → rejected; adds a third-party hosted dependency; conflicts with the "stay in Cloudflare" preference.</li>
+          <li>No locking, solo-trust → rejected; parallel agent worktrees will collide.</li>
+          <li>Cloudflare D1 lock table → considered; equivalent quality; chose Postgres because we already use it and the lock semantics are battle-tested.</li>
+          <li>Local state + git-crypt → rejected; not concurrency-safe; loses history.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> A ~30-line shell wrapper to maintain. Recovery from a stuck lock is one <code>psql</code> query (<code>SELECT pg_advisory_unlock(...)</code>). State history via R2 versioning makes "I rolled back the wrong thing" recoverable. All TF secrets stay in GitHub Actions Secrets and a gitignored <code>.tfvars.local</code> for the bootstrap operator.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-019</span> Infrastructure-first delivery &mdash; skeleton + E2E harness before feature code <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">delivery</span></h3>
+      <p class="field"><b>Context</b> Starting feature code before infrastructure and the test harness exist creates the perennial "is it my code or is it the environment?" debugging cycle &mdash; it eats more time than infra-first work costs. We want to invert: every environment real, every CI/CD pipeline exercised, and a green E2E harness validating foundations before line one of feature code.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>Phase 0 splits into <strong>5 sub-phases (0a-0e)</strong>: accounts + TF state bootstrap (0a), Terraform modules + apply (0b), skeleton apps + CI/CD (0c), E2E harness with <strong>13 infrastructure tests passing green</strong> (0d), engineering practices wired (0e).</li>
+          <li><strong>Skeleton apps</strong> include <code>/health</code> routes that exercise Neon + R2 + Upstash so infrastructure tests have something concrete to assert against. Full <code>secureHeaders()</code> stack applied. Edge MW skeletons in place (rate-limit stub, <code>Service-Worker:</code> → 403 stub).</li>
+          <li><strong>Use-case Gherkin features</strong> for Phase 1+ are written in Phase 0 and tagged <code>@pending</code>. Playwright skips them until their use case is implemented. The contract is the spec; BDD enforces it.</li>
+          <li>By end of Phase 0: 13 infrastructure tests green; CI/CD has run end-to-end against real infrastructure; feature code starts in Phase 1 with confidence that any failing test is the code, not the environment.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Start coding features in Phase 1, provision infra on demand → rejected; "is it my code or env" debugging eats more time than infra-first costs.</li>
+          <li>Mock all infrastructure in tests → rejected; integration bugs only surface against real services; we'd need this harness for v1.1 anyway.</li>
+          <li>Skip pre-feature E2E entirely → rejected; the team explicitly asked for "e2e before code."</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Phase 0 grows from ~1 week to ~1.5-2 weeks of foundational work. After that, every Phase 1+ PR runs in a real environment with fast feedback. The infrastructure tests double as a prod smoke suite (cron-scheduled post-launch).</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-020</span> Hexagonal architecture (ports &amp; adapters) <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">arch</span></h3>
+      <p class="field"><b>Context</b> The platform spans multiple infrastructure dependencies (Postgres, R2, Clerk, Upstash, ClamAV, Resend). Without an architectural boundary, business rules and SQL/framework code will tangle quickly, making testing slow and security review hard.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li><strong>Domain core</strong> (<code>packages/domain</code>): entities, value objects, domain services, domain events. Zero infra imports.</li>
+          <li><strong>Application layer</strong> (<code>packages/application</code>): use cases (interactors). One class per intent. Receives outbound ports via constructor DI.</li>
+          <li><strong>Adapters</strong> (<code>packages/adapters</code>): concrete implementations of ports &mdash; Drizzle repositories, R2 storage, Clerk gateway, Upstash limiter, ClamAV queue, Resend notifier.</li>
+          <li><strong>Driving adapters</strong> (in the Remix apps): HTTP routes, MCP server, admin UI &mdash; each calls use cases through their input DTO.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives considered</b>
+        <ul>
+          <li>Classic MVC with services everywhere &rarr; rejected; the domain rules get pulled into the framework layer over time.</li>
+          <li>Full DDD with aggregates as classes + event sourcing &rarr; rejected as overkill for v1.</li>
+          <li>No deliberate architecture &rarr; rejected; security and test discipline degrade quickly.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b>
+        <ul>
+          <li>Use cases are testable with in-memory fakes; no DB needed for application-layer tests.</li>
+          <li>Swapping any infrastructure (Neon→Supabase, Clerk→WorkOS) touches one adapter.</li>
+          <li>Slight upfront ceremony cost &mdash; mitigated by code generation for repository boilerplate.</li>
+          <li>Security review is faster: rules are concentrated in the domain; SQL doesn't hide invariants.</li>
+        </ul>
+      </p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-021</span> Event-driven via Postgres transactional outbox <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">arch</span></h3>
+      <p class="field"><b>Context</b> Several flows are inherently asynchronous (scan, notify, takedown grace period, audit). We need atomic emission of events with state changes, plus at-least-once delivery, without adding a new infrastructure dependency in v1.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>Use cases write event rows to a Postgres <code>outbox</code> table <strong>inside the same transaction</strong> as the state change.</li>
+          <li>A dispatcher worker (Vercel Cron tick + QStash for scheduled/delayed) polls <code>outbox</code> every ~1s, dispatches to in-process handlers, marks delivered.</li>
+          <li>All handlers must be idempotent (we get at-least-once).</li>
+          <li>Events are facts in past tense; minimal payloads; no event-driven cycles (CI-enforced).</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives considered</b>
+        <ul>
+          <li>External queue (SQS, RabbitMQ) &rarr; rejected for v1; extra dependency, no transactional guarantee.</li>
+          <li>Direct synchronous calls everywhere &rarr; rejected; ties unrelated contexts together and slows responses.</li>
+          <li>Postgres LISTEN/NOTIFY &rarr; rejected as primary mechanism; doesn't survive worker restarts, no replay.</li>
+          <li>Full event sourcing &rarr; rejected as scope creep.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b>
+        <ul>
+          <li>Zero new infra in v1; the outbox is a single Postgres table.</li>
+          <li>Monthly partitioning of the outbox keeps the hot set small.</li>
+          <li>Scaling beyond a single worker is straightforward (claim rows with <code>FOR UPDATE SKIP LOCKED</code>).</li>
+          <li>If we ever need stricter ordering, we already have it &mdash; outbox rows are inserted in transaction order per aggregate.</li>
+        </ul>
+      </p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-022</span> Strict TDD with hook-enforced gates <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> A platform that hosts third-party HTML and gates security at every layer cannot survive an "I'll add tests later" culture. Test discipline must be structural, not aspirational, and equally applicable to LLM-driven contributions.</p>
+      <p class="field"><b>Decision</b> Strict Red-Green-Refactor TDD, enforced by Claude Code hooks mirrored from <code>zora-pantheon</code>:
+        <ul>
+          <li><code>/tdd &lt;task&gt;</code> skill walks the cycle (with a separate "Prove-It" path for bug fixes).</li>
+          <li><strong>Stop hook</strong> (<code>tdd-stop-guard.sh</code>) blocks turn completion if any affected package has failing tests.</li>
+          <li><strong>PreToolUse hook</strong> (<code>tdd-protect-tests.sh</code>) warns when editing test files &mdash; nudges toward fixing implementation.</li>
+          <li><strong>PostToolUse hook</strong> (<code>tdd-post-edit-tests.sh</code>) runs affected-package tests after every source edit.</li>
+          <li>Rules files (<code>tdd-test-files.md</code>, <code>tdd-source-files.md</code>) attached to test/source paths.</li>
+          <li>CI greps for <code>.skip()</code>, <code>.only()</code>, <code>TODO</code> in test files; fails on any.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b> "Tests-after" (rejected, no enforcement). External CI-only gate (rejected, too late in the loop). Property-based testing as primary (deferred to v1.1 for domain functions).</p>
+      <p class="field"><b>Consequences</b> Bigger upfront discipline cost; pays back in confidence at refactor time. Hooks add ~5s to each agent turn but prevent regressions. Domain + application layers reach 100% line/branch coverage naturally; adapters covered pragmatically.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-023</span> BDD with Gherkin for use-case e2e tests <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> Use cases are the unit of value &mdash; the surface where product intent meets technical implementation. We need executable specifications in business language that survive refactors and are reviewable by non-engineers.</p>
+      <p class="field"><b>Decision</b> One <code>.feature</code> file per use case in <code>tests/e2e/features/</code>, executed with <strong>Playwright + <code>playwright-bdd</code></strong>. Features cover happy paths, the main alternative flows, and security-relevant negative paths. PRs that add or change a use case must also add or update its feature. CI fails if a use case lacks a feature.</p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Just integration tests in Vitest &rarr; rejected; loses the business-language layer.</li>
+          <li>Cypress + Cucumber &rarr; rejected; Playwright is stronger for our cross-origin tests (viewer vs app).</li>
+          <li>No e2e, rely on unit + manual &rarr; rejected; can't catch ACL / origin-isolation regressions.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Slower CI (each feature spins a real browser). Mitigated by parallelization (Playwright shards) and Neon-branch databases. Worth it for the regression catch on cross-origin / ACL / CSP behavior &mdash; the things hardest to spot in unit tests.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-024</span> Functional programming style, no new libraries <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> Hexagonal architecture wants pure domain logic. We want immutability, composability, and testability without paying the cognitive cost of adopting fp-ts, Effect, or similar full-fat FP libraries &mdash; those are powerful but raise the bar for every new contributor (human or agent).</p>
+      <p class="field"><b>Decision</b> Pure functions in domain + application layers; <code>readonly</code> everywhere; composition over inheritance; side effects pushed to adapters. Zero new dependencies &mdash; only TypeScript and the standard library. A 12-line <code>pipe()</code> and a 15-line <code>Result&lt;T, E&gt;</code> live in <code>packages/domain/src/fp/</code>. Branded types for value objects (zero runtime cost).</p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>fp-ts / Effect &rarr; rejected for v1; large surface area, opinionated, raises the agent learning curve.</li>
+          <li>Remeda / Ramda &rarr; rejected; adds a dependency for what stdlib mostly already does well in TypeScript.</li>
+          <li>Pure OOP with rich domain objects &rarr; rejected; harder to test, encourages hidden state.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Onboarding stays low-friction. CI lints flag mutation on domain types (<code>no-param-reassign</code>, custom rule against <code>.push</code> on readonly arrays). If we ever need richer FP machinery, the shape of our code makes migrating to Effect straightforward (it's still pipelines).</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-025</span> Git worktrees for all in-progress agent work <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> Agents do multiple things in parallel. Branch-switching in a single checkout causes <code>node_modules</code> churn, build-cache invalidation, and tooling confusion. It also makes it easy for an agent to accidentally cross-contaminate two in-flight changes.</p>
+      <p class="field"><b>Decision</b> Every new feature, bug fix, refactor, or experiment is performed in a dedicated worktree under <code>../&lt;feature-slug&gt;</code>, on a branch named <code>&lt;type&gt;/&lt;slug&gt;</code>. The convention is codified in <code>CLAUDE.md</code> and a <code>/worktree-cleanup</code> skill prunes stale worktrees. Main checkout is reserved for review and ad-hoc inspection.</p>
+      <p class="field"><b>Alternatives</b> Single-checkout + branch switching (rejected; causes cache churn and cross-contamination). Per-task containers (rejected as v1 overkill).</p>
+      <p class="field"><b>Consequences</b> Disk usage grows with active tasks (a worktree shares <code>.git</code> but not <code>node_modules</code>). Mitigated by pnpm's content-addressed store. Massive isolation win when an agent is running multi-step work in the background while another task is on the main checkout.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-026</span> Documentation-as-contract pre-push hook <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> The single most common failure mode in fast-moving SaaS projects is doc rot: schema changes ship without updating <code>db-design.md</code>; ADRs stop being added; READMEs go stale. Once docs lag, every future contributor (human or agent) is working from incorrect assumptions.</p>
+      <p class="field"><b>Decision</b> A pre-push gate (both a git hook and a Claude Code <code>PreToolUse</code> hook for <code>git push</code> commands) inspects the diff against a <strong>trigger matrix</strong> (schema → db-design.md; new use case → feature file + README; new ADR file → INDEX.md link; etc.) and blocks the push if the matched docs aren't part of the change. A <code>/docs-check</code> skill walks the agent through the matrix.</p>
+      <p class="field"><b>Alternatives</b> Trust the team / agent (rejected; doesn't survive month two). Mandatory PR checklist (rejected; easy to ignore). Linter-as-warning-only (rejected; warnings are noise).</p>
+      <p class="field"><b>Consequences</b> Friction on first encounter, then it becomes muscle memory. Emergency bypass exists (<code>PUSH_WITHOUT_DOCS=1</code>) but is logged and flagged in the PR &mdash; cheap to use, visible cost. Docs stay accurate by construction.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-027</span> OpenAPI 3.1 source of truth + Bruno collections <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">practice</span></h3>
+      <p class="field"><b>Context</b> Per ADR-003, the HTTP API is the source of truth and the MCP server is a thin client. The contract must be machine-readable (for the MCP server's runtime validation), human-readable (for our docs site), agent-friendly (for LLMs reading it), and git-versioned (no cloud-only artifacts).</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li><strong>OpenAPI 3.1</strong> at <code>docs/api/openapi.yaml</code> is the canonical spec. Routes are validated against it at boot in dev/CI.</li>
+          <li><strong>Bruno</strong> for desktop client collections. Generated from OpenAPI via <code>gen-bruno-from-openapi.ts</code>; committed under <code>docs/api/bruno/</code>; environments per stage.</li>
+          <li><strong>Scalar</strong> mounted at <code>app.&lt;domain&gt;/docs</code> renders the OpenAPI for human browsers.</li>
+          <li><strong>CI contract tests</strong>: <code>bru run docs/api/bruno/collections</code> against a staging deploy on every PR.</li>
+          <li><strong>Drift detection</strong>: pre-push hook re-runs the Bruno generator and blocks if committed Bruno files don't match.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Postman &rarr; rejected; cloud lock-in, weak git story, paid for team features.</li>
+          <li>Insomnia &rarr; rejected; recent versions require Kong cloud account.</li>
+          <li>Hoppscotch &rarr; viable alternative; chose Bruno for stronger plain-text-file format and PR diffability.</li>
+          <li>OpenAPI-only without a desktop client &rarr; rejected; engineers want a click-and-send tool for exploration.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> One generator script to maintain. All API artifacts diffable, reviewable, and bisectable. Agents can read the same OpenAPI we use, eliminating the most common LLM API-mismatch failure mode (out-of-date schema in the agent's head).</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-028</span> GitHub Flow with protected main, PR-only delivery <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">delivery</span></h3>
+      <p class="field"><b>Context</b> Solo (for now) build with heavy LLM-assisted contributions. Without structural enforcement, "I'll just push that small fix" becomes the norm; main becomes unreviewable; rollbacks get harder. We want a workflow that protects the integrity of <code>main</code> even from the owner.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>Public repository at <code>github.com/agrando2k/&lt;repo&gt;</code>.</li>
+          <li><code>main</code> is protected: no direct pushes, no force pushes, no deletions, linear history (squash-only), signed commits required.</li>
+          <li>Every change goes through a PR from a typed feature branch (<code>feat/&middot; fix/&middot; refactor/&middot; chore/&middot; docs/</code>).</li>
+          <li>Required: 1 approval from <code>CODEOWNERS</code>; stale approvals dismissed on new commits; up-to-date with <code>main</code> before merging.</li>
+          <li>"Include administrators" is on &mdash; the owner cannot bypass the rules. Emergency bypass only via explicit "Disable protection" with audit trail.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Trunk-based with direct push for the owner &rarr; rejected; defeats the audit trail and AI-review loop.</li>
+          <li>GitFlow (release branches) &rarr; rejected as overkill for a SaaS that continuously deploys.</li>
+          <li>Allow self-approval for the owner &rarr; rejected; the AI reviews + CI gate are the floor, but at least one human review keeps the spec aligned.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Marginal friction for trivial changes; large friction for big ones (which is correct). The protected-main rule applies to <em>everyone</em>, which means even hotfixes go through a PR &mdash; mitigated by fast CI and the local pre-push parity.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-029</span> GitHub Actions for CI on PR + CD on merge <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">delivery</span></h3>
+      <p class="field"><b>Context</b> We already use GitHub for source control. Putting CI/CD on GitHub Actions keeps the toolchain coherent (one place for secrets, one place to read logs, one set of permissions to reason about), avoids a vendor like CircleCI/Buildkite, and gets us preview deploys for free via Vercel's GitHub integration.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li><strong>CI</strong> (<code>ci.yml</code>) on <code>pull_request</code>: biome, typecheck, branch-name, unit tests, migration check (Neon branch), e2e (Playwright + BDD against per-PR Vercel preview), security-headers curl, Bruno contract tests, docs-trigger-matrix. All are <strong>required status checks</strong> on <code>main</code>.</li>
+          <li><strong>CD</strong> (<code>cd.yml</code>) on <code>push</code> to <code>main</code>: deploy app + view to Vercel prod (commit-pinned), push scanner image to GHCR, <code>terraform apply</code>, run migrations, smoke tests, notify.</li>
+          <li><strong>Preview deploys</strong> are produced by Vercel's GitHub integration on every PR; they use the ephemeral Neon branch + the CI R2 bucket.</li>
+          <li>Concurrency: CI cancels in-progress runs per PR (latest push wins); CD never cancels (we want every commit on main to deploy).</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>CircleCI / Buildkite &rarr; rejected; extra surface, no advantage for our workload.</li>
+          <li>Vercel-only pipelines &rarr; rejected; insufficient for non-Vercel jobs (Terraform, GHCR, e2e orchestration).</li>
+          <li>Deploy on tag instead of merge &rarr; rejected; we want continuous deploy, not staged release.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Strong single-vendor coupling (acceptable; if we ever leave GitHub, Actions YAML translates to most competitors). Cost is low at v1 scale. Required-checks list is long &mdash; mitigated by parallel job graph and aggressive concurrency.</p>
+    </div>
+
+    <div class="adr">
+      <h3><span class="adr-id">ADR-030</span> Dual AI PR review (Claude + Gemini) as advisory checks <span class="status">Accepted</span> <span class="pill new">new</span> <span class="pill engineering">delivery</span></h3>
+      <p class="field"><b>Context</b> A solo + LLM-assisted project has no second pair of human eyes by default. AI review provides a credible "second reviewer" voice on every PR without blocking velocity, catches a different class of issue than CI (architectural drift, security reasoning, idiomatic suggestions), and importantly produces written feedback that becomes a learning artifact for both the owner and future agents.</p>
+      <p class="field"><b>Decision</b>
+        <ul>
+          <li>Two independent reviewers via GitHub Actions: <strong>Claude</strong> (<code>anthropics/claude-code-action@v1</code>, model <code>claude-opus-4-7</code>) and <strong>Gemini</strong> (<code>google-github-actions/gemini-cli@v1</code>, model <code>gemini-2.5-pro</code>).</li>
+          <li>Both post inline comments and a summary. <strong>Reviews are advisory</strong> &mdash; they do not satisfy the CODEOWNERS approval requirement.</li>
+          <li><strong>Specialized focus</strong>: Claude is tasked with security headers, ACL logic, CSP changes, schema-migration safety, TDD compliance, FP discipline, ADR alignment. Gemini is tasked with code quality, idiomatic TypeScript, performance, readability.</li>
+          <li>Either reviewer can post "Request changes"; that adds a visible "Changes requested" status until the author addresses or dismisses (does not block merge once CODEOWNERS approves).</li>
+          <li>Cost guardrail: skip on diffs &gt;4,000 lines (split-the-PR signal).</li>
+        </ul>
+      </p>
+      <p class="field"><b>Alternatives</b>
+        <ul>
+          <li>Single AI reviewer &rarr; rejected; two models disagreeing is the most useful signal.</li>
+          <li>Make AI approval blocking &rarr; rejected; AI false positives shouldn't gate merge.</li>
+          <li>GitHub App-based reviewers (no Actions) &rarr; viable; we chose Actions for unified secret management and per-PR cost visibility.</li>
+        </ul>
+      </p>
+      <p class="field"><b>Consequences</b> Marginal API spend per PR. Two bots posting comments creates noise on small PRs &mdash; mitigated by tuning the focus prompts and skipping on trivial-diff heuristics. The owner still owns the merge decision; AI reviews are a force multiplier, not a replacement.</p>
+    </div>
+  </section>
+
+  <section id="phases">
+    <h2>Implementation phases</h2>
+
+    <div class="phase security">
+      <h3>Phase 0 &mdash; Infrastructure-first delivery <span class="week">~1.5 weeks · gates everything after (ADR-019)</span></h3>
+      <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;"><strong>Goal:</strong> every environment is reproducible from <code>terraform apply</code>, the CI/CD pipeline runs end-to-end against real infrastructure, and a green E2E harness proves the foundations work &mdash; <em>before any feature code is written</em>.</p>
+
+      <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0a &mdash; Accounts + Terraform state bootstrap (1-2 days)</h4>
+      <ul>
+        <li>Owner creates accounts: GitHub (<code>agrando2k</code>), Cloudflare (with R2), Vercel, Neon, Upstash, Clerk, Resend.</li>
+        <li>Owner generates per-provider API tokens with least-privilege scopes (Cloudflare R2+DNS+Workers, Vercel team, Neon project-create, Upstash org, Clerk per-env secret, Resend send-only, GitHub PAT for bootstrap).</li>
+        <li><strong>Bootstrap R2 bucket</strong> <code>tf-state</code> created via Cloudflare dashboard (chicken-and-egg).</li>
+        <li><code>infra/terraform/scripts/tf.sh</code> &mdash; PG advisory-lock wrapper (~30-line bash); acquires <code>pg_advisory_lock(hashtext('tf-' || $env))</code> on Neon before <code>plan|apply</code> (ADR-018).</li>
+        <li><code>infra/terraform/backend.tf</code> configured for S3-on-R2 backend. <code>.tfvars.local.example</code> committed; <code>.tfvars.local</code> gitignored.</li>
+      </ul>
+
+      <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0b &mdash; Terraform modules + apply (2-3 days)</h4>
+      <ul>
+        <li>Modules in <code>infra/terraform/modules/</code>: <code>vercel-app</code>, <code>neon-project</code>, <code>r2</code>, <code>cloudflare-zone</code>, <code>upstash-redis</code>, <code>clerk-app</code>, <code>github-repo</code>, <code>resend-domain</code>.</li>
+        <li>Envs in <code>infra/terraform/envs/</code>: <code>prod/</code>, <code>staging/</code>, <code>shared/</code> (single-instance: GitHub repo, Cloudflare zone, Resend domain).</li>
+        <li>Apply order: <code>shared → staging → verify → prod</code>.</li>
+        <li>All long-lived infrastructure provisioned: DNS, TLS, R2 application buckets, Neon project + branches, Upstash, Clerk app, GitHub branch protection (ADR-017).</li>
+      </ul>
+
+      <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0c &mdash; Skeleton apps + CI/CD wired (1-2 days)</h4>
+      <ul>
+        <li>Two minimal Remix apps deployed via Terraform-provisioned Vercel projects.</li>
+        <li><code>apps/app</code>: <code>/health</code> route returning Neon + Upstash + R2 status; Clerk signup/login; CSRF helper; Trusted Types enforced.</li>
+        <li><code>apps/view</code>: <code>/health</code> + placeholder slug handler returning the full ADR-023 header stack.</li>
+        <li>Shared <code>secureHeaders()</code> in <code>packages/headers/</code> emits the full stack on every response.</li>
+        <li>Edge MW skeletons: viewer's <code>Service-Worker:</code> → 403 (ADR-014); app's signup/login rate-limit + Turnstile.</li>
+        <li><strong>CI workflow live</strong> (<code>.github/workflows/ci.yml</code>): biome, typecheck, branch-name, unit, migration-check, e2e, security-headers, Bruno contract, docs-trigger-matrix.</li>
+        <li><strong>CD workflow live</strong> (<code>.github/workflows/cd.yml</code>): Vercel prod deploys, GHCR scanner push, <code>terraform apply</code> for any infra diff, Drizzle migrations, smoke tests.</li>
+        <li><strong>AI review workflows live</strong>: <code>claude-review.yml</code> (security/ACL/TDD/FP focus), <code>gemini-review.yml</code> (style/idiom/perf focus). Advisory only.</li>
+        <li><strong>Branch protection on <code>main</code></strong> applied <em>via Terraform</em> &mdash; the rules themselves are reviewed via PR.</li>
+      </ul>
+
+      <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0d &mdash; E2E harness + 13 infrastructure tests (1-2 days)</h4>
+      <ul>
+        <li>Playwright + <code>playwright-bdd</code> configured. CI "feature-or-fail" step added.</li>
+        <li><strong>Infrastructure E2E features</strong> in <code>tests/e2e/infrastructure/</code> &mdash; all <strong>passing green</strong> before Phase 1 starts:
+          <ol style="margin-top: 4px;">
+            <li><code>dns-and-tls.feature</code></li>
+            <li><code>vercel-up.feature</code></li>
+            <li><code>edge-middleware.feature</code></li>
+            <li><code>neon-reachable.feature</code></li>
+            <li><code>r2-roundtrip.feature</code></li>
+            <li><code>upstash-reachable.feature</code></li>
+            <li><code>clerk-signup.feature</code></li>
+            <li><code>csp-stack.feature</code></li>
+            <li><code>service-worker-blocked.feature</code></li>
+            <li><code>branch-protection.feature</code></li>
+            <li><code>ci-required-checks.feature</code></li>
+            <li><code>cd-deploys.feature</code></li>
+            <li><code>ai-review-bots.feature</code></li>
+          </ol>
+        </li>
+        <li><strong>Use-case Gherkin features</strong> in <code>tests/e2e/features/</code> written but tagged <code>@pending</code> &mdash; Playwright skips them until their use case is implemented in Phase 1+.</li>
+      </ul>
+
+      <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0e &mdash; Engineering practices wired (1-2 days)</h4>
+      <ul>
+        <li><code>.claude/skills/tdd/SKILL.md</code> + four TDD hooks + two rules files (mirrored from <code>zora-pantheon</code>).</li>
+        <li><code>.claude/skills/docs-check/SKILL.md</code> + <code>docs-prepush-guard.sh</code> (trigger-matrix enforced).</li>
+        <li><code>.claude/skills/worktree-cleanup/SKILL.md</code> + <code>scripts/worktree-init.sh</code>.</li>
+        <li><code>packages/domain/src/fp/{pipe,result,branded}.ts</code> &mdash; 12-line <code>pipe()</code>, 15-line <code>Result&lt;T,E&gt;</code>, branded types.</li>
+        <li>ESLint rule pack disallowing mutation on domain types.</li>
+        <li><code>docs/api/openapi.yaml</code> seeded; Bruno generator script; Scalar UI route at <code>app.&lt;domain&gt;/docs</code>.</li>
+        <li><code>CLAUDE.md</code> codifies: worktree-first, TDD-first, docs-on-push, OpenAPI as the API contract.</li>
+        <li><strong>PSL pull request opened</strong> for <code>view.&lt;domain&gt;</code> (proceeds in parallel; 2-6 week merge SLA; ship without waiting).</li>
+      </ul>
+
+      <p style="margin: 12px 0 0; color: var(--accent-2); font-size: 14px;"><strong>End-of-phase exit criteria:</strong> 13 infrastructure tests green; CI/CD has run end-to-end against real infrastructure; every use-case Gherkin feature exists as <code>@pending</code>; <code>terraform apply</code> against any env is idempotent.</p>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 1 &mdash; Core upload + viewer <span class="week">week 2</span></h3>
+      <ul>
+        <li><code>UploadReportUseCase</code> + Remix action at <code>routes/api.v1.reports.tsx</code>.</li>
+        <li>API key scopes; <code>requireScope()</code> on every endpoint.</li>
+        <li>Sync pre-checks (incl. SVG rejection).</li>
+        <li>Dashboard: key issuance with scope checkboxes.</li>
+        <li>Viewer: Edge MW (rate limit, SW-block, scan-status precheck) + Remix loader.</li>
+        <li>Public-mode ACL only. Rate limits live.</li>
+        <li><code>ReportUploaded</code> + <code>ReportPublished</code> events flowing through outbox.</li>
+      </ul>
+    </div>
+
+    <div class="phase security">
+      <h3>Phase 1.5 &mdash; Scanning + abuse pipeline <span class="week">week 2-3</span></h3>
+      <ul>
+        <li>ClamAV worker (sidecar) with daily signature refresh.</li>
+        <li>Async scan queue subscribed to <code>ReportUploaded</code>.</li>
+        <li><code>ScanCompleted</code> &rarr; <code>PromoteVersionUseCase</code> / <code>FlagVersionUseCase</code>.</li>
+        <li>451 interstitial for flagged; blocked never served.</li>
+        <li>Abuse-report link on viewer; admin triage queue.</li>
+        <li>Takedown action with delayed R2 purge (outbox <code>available_at</code> + 24h).</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 2 &mdash; Sharing modes + folders <span class="week">week 3</span></h3>
+      <ul>
+        <li>Folder tree CRUD.</li>
+        <li>Password and org ACL modes.</li>
+        <li>Email allowlist with magic-link tokens.</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 2.5 &mdash; Collaboration <span class="week">week 3-4</span></h3>
+      <ul>
+        <li><code>folder_collaborators</code> + grant/revoke UI.</li>
+        <li>Pending-grant resolution on first sign-in.</li>
+        <li><code>canWrite()</code> tree-walk used everywhere.</li>
+        <li>"Shared with me" view.</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 3 &mdash; Clients <span class="week">week 4</span></h3>
+      <ul>
+        <li>MCP server npm package.</li>
+        <li>Claude Code Skill.</li>
+        <li>OpenAPI spec + docs.</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 4 &mdash; Polish + plan scaffolding <span class="week">week 5</span></h3>
+      <ul>
+        <li>Version history UI.</li>
+        <li><code>assertWithinPlan()</code> enforced.</li>
+        <li>Audit log surfacing in dashboard.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="verification">
+    <h2>Verification &mdash; Phase 0 infrastructure tests + feature tests <span class="pill new">13 + 31</span></h2>
+
+    <h3>Phase 0 &mdash; Infrastructure E2E tests (must all be green before Phase 1)</h3>
+    <p>These run as Playwright + Gherkin features in <code>tests/e2e/infrastructure/</code>, executed on every PR against the PR's preview environment. They double as a production smoke suite (cron-scheduled post-launch).</p>
+    <ol class="step-list">
+      <li><strong>DNS + TLS + HSTS.</strong> <code>view.&lt;domain&gt;</code> and <code>app.&lt;domain&gt;</code> resolve over TLS 1.3; <code>Strict-Transport-Security: max-age=63072000; includeSubDomains; preload</code> returned.</li>
+      <li><strong>Vercel placeholder up.</strong> Both apps' <code>/health</code> routes return 200.</li>
+      <li><strong>Edge MW reaches the request.</strong> Viewer response carries the marker header injected by <code>apps/view/middleware.ts</code>.</li>
+      <li><strong>Neon reachable from app.</strong> <code>/health</code> reports <code>db: "ok"</code>; round-trips a <code>SELECT 1</code>.</li>
+      <li><strong>R2 round-trip.</strong> Test PUT via app, GET via view, DELETE; confirms versioning is recording.</li>
+      <li><strong>Upstash reachable.</strong> <code>INCR</code> a counter via the rate-limit code path; read it back.</li>
+      <li><strong>Clerk signup + <code>__Host-</code> cookies.</strong> Sign up test user; org auto-created; all auth cookies begin with <code>__Host-</code>; viewer origin has zero app cookies.</li>
+      <li><strong>Full security-header stack.</strong> Every header from ADR-013 present on viewer responses; CI fails if any missing.</li>
+      <li><strong>Service-worker block.</strong> Request with <code>Service-Worker: script</code> → 403; same path via <code>&lt;script src&gt;</code> works.</li>
+      <li><strong>Branch protection blocks direct push.</strong> <code>git push origin main</code> rejected by GitHub; self-approval on a PR rejected.</li>
+      <li><strong>CI required checks.</strong> Open a no-op PR; all expected required status checks appear and run; merge disabled until green.</li>
+      <li><strong>CD deploys on merge.</strong> Squash-merge a no-op PR; CD fires within ~10s; prod Vercel URL serves the new commit; <code>terraform apply</code> runs if any infra changed.</li>
+      <li><strong>AI review bots fire.</strong> Open a PR; Claude + Gemini both post review summaries within ~5 min; neither can satisfy CODEOWNERS approval.</li>
+    </ol>
+
+    <h3>Feature phase tests (Phase 1+, ~31 tests)</h3>
+    <ol class="step-list">
+      <li><strong>Auth &amp; orgs.</strong> Sign up, switch orgs, verify org-scoped data.</li>
+      <li><strong>Upload via web.</strong> <code>.html</code> and <code>.zip</code> bundles both work.</li>
+      <li><strong>Upload via API.</strong> <code>curl</code> upload; <code>update_slug</code> &rarr; same URL, v2; <code>?v=1</code> still serves v1.</li>
+      <li><strong>Upload via MCP.</strong> Claude Desktop upload lands in correct org/folder.</li>
+      <li><strong>Sharing modes.</strong> Public/password/org/allowlist gate correctly.</li>
+      <li><strong>Origin isolation.</strong> Report's <code>fetch</code> to app API &mdash; CORS blocked.</li>
+      <li><strong>Plan limits.</strong> Free-tier cap triggers clean rejection.</li>
+      <li><strong>Audit log.</strong> Every action writes a row.</li>
+      <li><strong>Cross-org collaboration.</strong> Alice updates Acme's report via her own key; revoke &rarr; 403.</li>
+      <li><strong>Security headers + CSP.</strong> curl checks; CSP violation logged.</li>
+      <li><strong>Upload pre-checks.</strong> Zip-slip, zip-bomb, MIME-mismatch all rejected.</li>
+      <li><strong>Malware scan.</strong> EICAR &rarr; blocked &lt; 5s.</li>
+      <li><strong>Rate limits.</strong> Per-key, per-IP, per-email all enforce.</li>
+      <li><strong>Abuse + takedown.</strong> Report flow + admin takedown + R2 purge.</li>
+      <li><strong>Secret hygiene.</strong> Logs redacted; gitleaks in CI.</li>
+      <li><strong>MFA enforcement.</strong> Admin without MFA forced to enroll.</li>
+      <li><strong>Origin &amp; cookie isolation.</strong> All cookies <code>__Host-</code> prefixed; viewer has no app cookies.</li>
+      <li><strong>Service worker block.</strong> <code>Service-Worker: script</code> &rarr; 403.</li>
+      <li><strong>SVG rejection.</strong> Both extension and MIME-sniff paths rejected.</li>
+      <li><strong>Full security-header stack.</strong> CI asserts every required header.</li>
+      <li><strong>Trusted Types on dashboard.</strong> <code>innerHTML</code> assignments throw.</li>
+      <li><strong>API key scopes.</strong> Scope-mismatched requests &rarr; 403.</li>
+      <li><strong>Anomaly detection.</strong> Geo / rate / failed-auth alerts fire.</li>
+      <li><strong>Subdomain-takeover monitoring.</strong> NXDOMAIN record &rarr; flagged within one cron run.</li>
+      <li><strong>TDD enforcement.</strong> Intentionally break a domain test and try to complete a turn &mdash; <code>tdd-stop-guard.sh</code> blocks with the failing-package list and excerpt. Restore &mdash; turn completes.</li>
+      <li><strong>BDD feature presence.</strong> Add a new use-case class without its <code>.feature</code> &rarr; CI "feature-or-fail" step blocks merge. Add the feature &rarr; merge unblocks.</li>
+      <li><strong>FP lint rules.</strong> Insert <code>.push()</code> against a <code>readonly</code> domain array &rarr; ESLint fails with a pointer to the immutability rule.</li>
+      <li><strong>Worktree convention.</strong> Run <code>/worktree-cleanup</code> &mdash; lists merged + abandoned (&gt;14d) worktrees; confirms before removing each.</li>
+      <li><strong>Docs pre-push gate.</strong> Modify <code>packages/db/migrations/&hellip;</code> without touching <code>docs/db-design.md</code> &rarr; <code>git push</code> blocked with a clean error pointing at the missing doc. Update the doc &rarr; push succeeds. Use <code>PUSH_WITHOUT_DOCS=1</code> &rarr; succeeds but the audit log records it and the PR gets a "docs bypassed" flag.</li>
+      <li><strong>API contract drift.</strong> Modify a route signature without regenerating Bruno &rarr; pre-push hook regenerates, finds diff vs committed files, blocks the push with the patch it would apply.</li>
+      <li><strong>Bruno CI run.</strong> Push a branch; staging deploys; <code>bru run docs/api/bruno/collections</code> against staging &rarr; assertion failures block PR merge.</li>
+      <li><strong>Branch protection &mdash; direct push.</strong> As the owner, attempt <code>git push origin main</code> from a clean checkout &rarr; rejected by GitHub with "Required status checks have not passed" / "Direct push not permitted." Force-push attempt &rarr; also rejected.</li>
+      <li><strong>Branch protection &mdash; self-approval.</strong> Open a PR; attempt to approve your own PR &rarr; GitHub blocks self-approval. Merge button stays disabled until a separate CODEOWNERS approval lands.</li>
+      <li><strong>CI required checks.</strong> Open a PR with a deliberate biome violation &rarr; merge button is disabled and the failing check is listed. Fix the violation &rarr; merge unblocks once all checks go green.</li>
+      <li><strong>CD on merge.</strong> Squash-merge a PR to main &rarr; <code>cd.yml</code> fires within ~10s; Vercel prod URL serves the new commit; smoke tests pass; Slack/email notification posted. Force a failure in <code>migrate-db</code> &rarr; CD halts, owner paged, Vercel rolled back to prior deploy.</li>
+      <li><strong>Vercel preview per PR.</strong> Open a PR; within ~2 min the Vercel bot posts the preview URL for both <code>app</code> and <code>view</code>. The e2e job hits these preview URLs (not production).</li>
+      <li><strong>AI reviewers fire.</strong> Open a PR; within ~3 min both Claude and Gemini post review summaries + inline comments. Confirm: neither reviewer's approval can satisfy the CODEOWNERS requirement.</li>
+      <li><strong>AI reviewer cost guardrail.</strong> Open a PR with a 5,000-line diff &rarr; both review actions skip with a "split this PR" comment.</li>
+    </ol>
+  </section>
+
+  <section id="files">
+    <h2>Critical files</h2>
+    <h4>packages/domain/ &mdash; pure</h4>
+    <ul>
+      <li><code>entities/{report,version,folder,user,org,api-key,acl,collaborator,abuse-report}.ts</code></li>
+      <li><code>value-objects/{slug,file-path,email,scope-set,permission}.ts</code></li>
+      <li><code>services/{permission-resolver,scan-pipeline,anomaly-detector}.ts</code></li>
+      <li><code>events/{report-uploaded,scan-completed,report-published,report-taken-down,…}.ts</code></li>
+      <li><code>ports/{report-repository,blob-storage,event-bus,identity-provider,rate-limiter,scan-queue,notifier}.ts</code></li>
+    </ul>
+    <h4>packages/application/ &mdash; use cases</h4>
+    <ul>
+      <li><code>upload-report.use-case.ts</code> · <code>update-report.use-case.ts</code> · <code>set-acl.use-case.ts</code></li>
+      <li><code>grant-folder-access.use-case.ts</code> · <code>takedown-report.use-case.ts</code></li>
+      <li><code>promote-version.use-case.ts</code> · <code>flag-version.use-case.ts</code></li>
+      <li><code>report-abuse.use-case.ts</code> · <code>rotate-api-key.use-case.ts</code></li>
+      <li><code>dtos/</code> &mdash; Zod-validated inputs/outputs, shared by HTTP and MCP</li>
+    </ul>
+    <h4>packages/adapters/ &mdash; concrete</h4>
+    <ul>
+      <li><code>drizzle/{report,version,folder,user,api-key,collaborator,abuse,csp,outbox}.repository.ts</code></li>
+      <li><code>r2/blob-storage.ts</code> &middot; <code>clerk/identity-provider.ts</code></li>
+      <li><code>upstash/rate-limiter.ts</code> &middot; <code>clamav/scan-queue.ts</code> &middot; <code>resend/notifier.ts</code></li>
+      <li><code>outbox/dispatcher.ts</code> &mdash; polls + fans out to handlers</li>
+    </ul>
+    <h4>apps/app/ &mdash; Remix dashboard + API (driving adapter)</h4>
+    <ul>
+      <li><code>app/routes/api.v1.reports.tsx</code> &mdash; upload action calls <code>UploadReportUseCase</code></li>
+      <li><code>app/routes/api.v1.reports.$slug.tsx</code></li>
+      <li><code>app/routes/api.v1.reports.$slug.acl.tsx</code></li>
+      <li><code>app/routes/api.v1.folders.$id.collaborators.tsx</code></li>
+      <li><code>app/routes/_dashboard.*.tsx</code> &middot; <code>_dashboard.shared-with-me.tsx</code></li>
+      <li><code>app/routes/_admin.abuse.tsx</code> &middot; <code>_admin.csp-reports.tsx</code></li>
+      <li><code>app/routes/csp-report.tsx</code> &mdash; ingest endpoint</li>
+      <li><code>app/lib/{auth,permissions,scopes,anomaly,plan,csrf,logger}.server.ts</code></li>
+      <li><code>app/lib/trusted-types.client.ts</code></li>
+      <li><code>app/middleware.ts</code> &mdash; signup/login rate limit, Turnstile</li>
+    </ul>
+    <h4>apps/view/ &mdash; Remix viewer (driving adapter)</h4>
+    <ul>
+      <li><code>middleware.ts</code> &mdash; rate limit + SW-block + scan-status precheck</li>
+      <li><code>app/routes/$slug.$.tsx</code> &mdash; ACL gate, R2 stream, header stack</li>
+      <li><code>app/routes/abuse.$slug.tsx</code></li>
+    </ul>
+    <h4>services/scanner/ &mdash; sidecar</h4>
+    <ul>
+      <li><code>Dockerfile</code> &middot; <code>worker.ts</code> &middot; <code>heuristics/</code></li>
+    </ul>
+    <h4>shared</h4>
+    <ul>
+      <li><code>packages/db/</code> &mdash; Drizzle schema + migrations</li>
+      <li><code>packages/mcp/</code> &mdash; MCP server npm package (driving adapter)</li>
+      <li><code>packages/headers/</code> &mdash; shared <code>secureHeaders()</code></li>
+      <li><code>packages/domain/src/fp/</code> &mdash; <code>pipe.ts</code>, <code>result.ts</code>, <code>branded.ts</code> (no external deps)</li>
+      <li><code>infra/terraform/</code> &mdash; <strong>all long-lived infrastructure as code</strong> (ADR-017, 018)
+        <ul>
+          <li><code>backend.tf</code> &mdash; S3-on-R2 backend (state bucket <code>tf-state</code>)</li>
+          <li><code>scripts/tf.sh</code> &mdash; PG advisory-lock wrapper around <code>plan|apply</code></li>
+          <li><code>.tfvars.local.example</code> &mdash; committed; <code>.tfvars.local</code> gitignored</li>
+          <li><code>modules/vercel-app/</code> · <code>modules/neon-project/</code> · <code>modules/r2/</code></li>
+          <li><code>modules/cloudflare-zone/</code> · <code>modules/upstash-redis/</code> · <code>modules/clerk-app/</code></li>
+          <li><code>modules/github-repo/</code> · <code>modules/resend-domain/</code></li>
+          <li><code>envs/prod/main.tf</code> · <code>envs/staging/main.tf</code> · <code>envs/shared/main.tf</code></li>
+        </ul>
+      </li>
+      <li><code>tests/e2e/infrastructure/</code> &mdash; 13 Gherkin features gating Phase 1 (ADR-019)</li>
+      <li><code>docs/infra.md</code> &mdash; bootstrap runbook</li>
+      <li><code>docs/ops.md</code> &mdash; secrets rotation, stuck-lock recovery, state rollback</li>
+      <li><code>infra/</code> &mdash; residual non-Terraform notes (abuse-mailbox routing, PSL PR template, HSTS-preload checklist)</li>
+    </ul>
+    <h4>engineering practices (Phase 0)</h4>
+    <ul>
+      <li><code>.claude/skills/tdd/SKILL.md</code> &mdash; user-invocable <code>/tdd &lt;task&gt;</code></li>
+      <li><code>.claude/skills/docs-check/SKILL.md</code> &mdash; <code>/docs-check</code> walks the trigger matrix</li>
+      <li><code>.claude/skills/worktree-cleanup/SKILL.md</code> &mdash; prunes stale worktrees</li>
+      <li><code>.claude/hooks/tdd-stop-guard.sh</code> &middot; <code>tdd-protect-tests.sh</code> &middot; <code>tdd-post-edit-tests.sh</code> &middot; <code>tdd-utils.sh</code></li>
+      <li><code>.claude/hooks/docs-prepush-guard.sh</code> &mdash; PreToolUse on <code>git push</code></li>
+      <li><code>.claude/rules/tdd-test-files.md</code> &middot; <code>tdd-source-files.md</code></li>
+      <li><code>CLAUDE.md</code> &mdash; agent instructions: worktree-first, TDD-first, docs-on-push</li>
+      <li><code>tests/e2e/features/*.feature</code> &mdash; one Gherkin file per use case</li>
+      <li><code>tests/e2e/steps/</code> &middot; <code>tests/e2e/fixtures/</code> &mdash; shared step defs + seeded data</li>
+      <li><code>docs/api/openapi.yaml</code> &mdash; canonical API spec</li>
+      <li><code>docs/api/bruno/</code> &mdash; generated Bruno collections + environments (committed)</li>
+      <li><code>docs/api/scripts/gen-bruno-from-openapi.ts</code></li>
+      <li><code>docs/adr/</code> &mdash; ADR-NNN-*.md files + <code>INDEX.md</code></li>
+      <li><code>docs/db-design.md</code> &middot; <code>docs/events.md</code> &middot; <code>docs/infra.md</code> &mdash; maintained docs gated by the pre-push hook</li>
+      <li><code>scripts/worktree-init.sh</code> &mdash; bootstrap a new worktree (clone, install, link env)</li>
+      <li><code>.husky/pre-push</code> &mdash; invokes <code>docs-prepush-guard.sh</code></li>
+    </ul>
+    <h4>delivery pipeline (Phase 0)</h4>
+    <ul>
+      <li><code>.github/CODEOWNERS</code> &mdash; ownership map, <code>* @agrando2k</code></li>
+      <li><code>.github/workflows/ci.yml</code> &mdash; PR quality gate (biome, typecheck, unit, e2e, headers, Bruno, docs)</li>
+      <li><code>.github/workflows/cd.yml</code> &mdash; on-merge deploy (Vercel app + view, scanner GHCR, Terraform, migrations, smoke)</li>
+      <li><code>.github/workflows/claude-review.yml</code> &mdash; <code>anthropics/claude-code-action</code> (security/ACL/TDD/FP focus)</li>
+      <li><code>.github/workflows/gemini-review.yml</code> &mdash; <code>google-github-actions/gemini-cli</code> (style/idiom/perf focus)</li>
+      <li><code>.github/pull_request_template.md</code> &mdash; checklist mirroring the docs-trigger-matrix</li>
+      <li><code>.github/dependabot.yml</code> &mdash; deps + GitHub Actions version bumps</li>
+      <li><code>infra/terraform/github/</code> &mdash; repo settings + branch protection as Terraform (so the rules themselves are reviewed via PR)</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>Source plan file: <code>~/.claude/plans/you-re-senior-product-engineer-cozy-stonebraker.md</code></p>
+    <p>Generated 2026-05-20 (rev 7) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agrando2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
+  </footer>
+
+</div>
+</body>
+</html>

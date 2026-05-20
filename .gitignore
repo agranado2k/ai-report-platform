@@ -1,0 +1,54 @@
+# ─── Terraform ───────────────────────────────────────────────────────────
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/**/.terraform/
+infra/terraform/**/.terraform.lock.hcl
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/.tfvars.local
+infra/terraform/**/.tfvars.local
+infra/terraform/*.tfvars.local
+infra/terraform/crash.log
+infra/terraform/crash.*.log
+infra/terraform/terraform.tfplan
+infra/terraform/**/terraform.tfplan
+
+# ─── Dependencies ───────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ─── Local env / secrets ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env.local
+
+# ─── Build outputs ──────────────────────────────────────────────────────
+.next/
+.vercel/
+.remix/
+build/
+dist/
+.turbo/
+
+# ─── Test artifacts ─────────────────────────────────────────────────────
+playwright-report/
+test-results/
+coverage/
+
+# ─── OS / editor ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ─── Logs ───────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
