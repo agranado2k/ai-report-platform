@@ -8,21 +8,22 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | 0a complete · 0b next (Terraform modules + first `apply`)                      |
-| **Repo path**          | `~/PetProjects/ai-report-platform/`                                            |
-| **Branch**             | `main`                                                                         |
-| **Last commit**        | `e60ee59` — `chore: Phase 0a — Terraform state bootstrap`                       |
-| **Remote**             | not yet pushed; target is `github.com/agranado2k/<repo>` (public, owner picks final name) |
-| **Live infrastructure**| nothing provisioned yet (operator still needs the bootstrap R2 bucket + Neon project per `docs/infra.md`) |
-| **Active worktrees**   | none                                                                           |
+| **Phase**              | 0b modules complete and validated; **awaiting operator bootstrap** before first `apply`. Phase 0c next (skeleton apps + CI/CD). |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/phase-0b-tf-modules/` (active worktree) |
+| **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
+| **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
+| **Remote**             | not yet pushed; target is `github.com/agrando2k/<repo>` (public, owner picks final name) |
+| **Live infrastructure**| **nothing provisioned yet.** Modules + envs are written & validated, but `terraform apply` is blocked on the operator finishing Phase 0a manual bootstrap (R2 `tf-state` bucket, bootstrap Neon project, `.tfvars.local`). |
+| **Active worktrees**   | `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/` |
 | **Spec status**        | rev 7 · 30 ADRs · 13 infra + 31 feature verification tests · `docs/spec.html`   |
 
 ### Open questions / unresolved decisions
 
 - License — `README.md` says TBD. Pick before the repo goes public.
 - Final project name — `ai-report-platform` is the working title; user may rename before push.
-- Apex domain — `TF_VAR_apex_domain` is unset; required before Phase 0b's Cloudflare zone apply.
+- Apex domain — `TF_VAR_apex_domain` is unset; required before Phase 0b's first `apply`.
 - PSL submission timing — open the PR against `publicsuffix/list` once the apex domain is finalized.
+- R2 bucket versioning — currently a `TODO` in `modules/r2/main.tf`. The cloudflare/cloudflare v4 provider doesn't yet expose versioning as a resource argument. Either wait for v5 or wrap with a `null_resource` + `curl` against the R2 API. Track for Phase 0c follow-up.
 
 ### Memory pointers for future-me
 
@@ -167,3 +168,39 @@ Working-style preference saved to the global memory system (`feedback_autonomous
 This entry written directly on `main`. Worktree convention skipped for a diary-only docs change — the convention's payoff is parallel feature work and stash-free in-flight changes; neither applies here. Next substantive change will use a worktree.
 
 No code or infrastructure changed today. Spec unchanged (still rev 7).
+
+### 2026-05-21 — Phase 0b: Terraform modules written & validated
+
+First substantive worktree-driven work. Branch `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/`. **24 Terraform files** across 8 modules and 3 env compositions; all validate cleanly with no warnings.
+
+**Modules** (`infra/terraform/modules/`):
+- `vercel-app/` — one Vercel project per Remix app; GitHub integration for preview deploys; env vars + custom domain.
+- `neon-project/` — one Neon project, prod + staging branches, role + database + endpoint per branch.
+- `r2/` — application R2 buckets (per-env). Note: versioning is a TODO — cloudflare/cloudflare v4 doesn't yet expose it as an argument; will need a `null_resource` workaround or wait for v5.
+- `cloudflare-zone/` — DNS records + zone settings (HSTS preload, min TLS 1.2, strict SSL, security header). Uses `cloudflare_zone` data source (assumes zone is pre-created).
+- `upstash-redis/` — Redis instance per env; outputs rest URL/token/readonly token.
+- `clerk-app/` — documentation-only module (Clerk has no usable TF provider yet); key-prefix validation catches "wrong env's key" mistakes at plan time.
+- `github-repo/` — repo + branch protection on `main` (v4 GraphQL resource, not v3 REST) + CODEOWNERS as a tracked file + Actions secrets + variables.
+- `resend-domain/` — documentation-only module; sanity-checks the DNS records the operator pasted from Resend's dashboard, outputs them shaped for the cloudflare-zone module to materialize.
+
+**Env compositions** (`infra/terraform/envs/`):
+- `shared/` — single-instance resources (Neon project, Cloudflare zone, GitHub repo, Resend domain). Outputs consumed by prod + staging via `terraform_remote_state`.
+- `staging/` — staging-tier slice: Vercel app + view, R2 staging + CI buckets, Upstash single-zone, Clerk test instance.
+- `prod/` — production slice: same shape, multi-zone Upstash, Clerk live keys, single prod R2 bucket.
+
+**Issues caught & fixed during validation** (worth remembering for future module work):
+1. `neon_project` `default_endpoint_settings` is a *block*, not an *argument* in this provider version. Dropped it entirely; explicit `neon_endpoint` resources cover the staging compute config.
+2. `for_each` over a sensitive map fails because keys would leak in resource addresses. Fix: don't mark the variable sensitive at the map level; use `nonsensitive(var.x)` in the `for_each`. Applied to both `vercel-app/main.tf` and `github-repo/main.tf`.
+3. `neon_branch` doesn't expose `connection_uri` — we build it ourselves from `role.name` + `role.password` + `endpoint.host` + `database.name`.
+4. Upstash `multizone` argument is deprecated (auto-enabled on paid plans). Kept the variable as a no-op for callers; removed from the resource.
+5. `github_branch_protection_v3` (REST) doesn't support `allows_deletions`. Switched to `github_branch_protection` (v4, GraphQL) — the modern resource. Required moving from `repository = name` to `repository_id = node_id` and from `branch = "main"` to `pattern = "main"`.
+6. `vulnerability_alerts` on `github_repository` is deprecated. Extracted to a separate `github_repository_vulnerability_alerts` resource.
+
+All three envs end at "Success! The configuration is valid." with no warnings.
+
+**What's NOT done** (i.e. what Phase 0b would still need before exit):
+- `terraform apply` against any env. **Blocked** on the operator finishing the Phase 0a manual bootstrap (R2 `tf-state` bucket, bootstrap Neon project, `.tfvars.local` populated, apex domain on Cloudflare).
+- R2 bucket versioning workaround (`null_resource` + curl).
+- A `pg_advisory_unlock` smoke test to confirm `tf.sh` lock semantics.
+
+**Active worktree:** `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/`. Will become a PR once the project has a GitHub remote (still pending).
