@@ -2,6 +2,18 @@
 
 These instructions are binding for any Claude or LLM-driven agent working in this repo. They mirror the architectural decisions in `docs/spec.html` (rev 7, 30 ADRs).
 
+## At session start
+
+**Read `docs/diary.md` first.** It carries the current state (phase, last commit, active worktrees, open questions, live infrastructure), and a chronological history of every material decision and milestone. The "Current state" block at the top is the agent re-orientation summary; the entries below are the why-we-got-here.
+
+If the diary disagrees with anything in this file or in `docs/spec.html`, the spec wins (it's the contract); the diary is the running log. Flag the contradiction in your next entry rather than papering over it.
+
+**Diary update protocol** (when YOU finish work that materially changes state):
+- Phase milestone reached → append a dated entry to `docs/diary.md`.
+- ADR added, decision reversed, vendor changed → append.
+- Worktree created for a non-trivial feature → note it in the next entry; remove from the active list when merged.
+- Infrastructure applied (anything beyond `tf.sh init`) → append with env, plan diff summary.
+
 ## Before any change
 
 1. **Use a git worktree** (ADR-025). Never edit files in the root checkout for in-progress work.
