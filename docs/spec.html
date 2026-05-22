@@ -546,7 +546,7 @@
       <span>Status: Approved</span>
       <span>Target: v1 (MVP)</span>
       <span>Framework: Remix v2</span>
-      <span>Repo: github.com/agrando2k</span>
+      <span>Repo: github.com/agranado2k</span>
       <span>CI/CD: GitHub Actions</span>
     </div>
   </header>
@@ -1328,8 +1328,8 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
     <table class="tracker">
       <thead><tr><th>Milestone</th><th>Description</th><th>Status</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>repo-bootstrap</td><td>Create <code>github.com/agrando2k/&lt;repo&gt;</code> public; configure branch protection on <code>main</code></td><td><span class="status-pill not-started">Not started</span></td><td>Blocks everything below</td></tr>
-        <tr><td>codeowners</td><td>Add <code>.github/CODEOWNERS</code> with <code>* @agrando2k</code> and sensitive-path overrides</td><td><span class="status-pill not-started">Not started</span></td><td>Required for branch-protection review rule</td></tr>
+        <tr><td>repo-bootstrap</td><td>Create <code>github.com/agranado2k/&lt;repo&gt;</code> public; configure branch protection on <code>main</code></td><td><span class="status-pill not-started">Not started</span></td><td>Blocks everything below</td></tr>
+        <tr><td>codeowners</td><td>Add <code>.github/CODEOWNERS</code> with <code>* @agranado2k</code> and sensitive-path overrides</td><td><span class="status-pill not-started">Not started</span></td><td>Required for branch-protection review rule</td></tr>
         <tr><td>ci-workflows</td><td>Add <code>ci.yml</code>, <code>cd.yml</code>, <code>claude-review.yml</code>, <code>gemini-review.yml</code></td><td><span class="status-pill not-started">Not started</span></td><td>Required status checks wired</td></tr>
         <tr><td>vercel-projects</td><td>Provision two Vercel projects (<code>app</code>, <code>view</code>); link to GitHub repo; preview deploys on every PR</td><td><span class="status-pill not-started">Not started</span></td><td>Preview URLs commented on PRs</td></tr>
         <tr><td>neon-db</td><td>Provision Neon project; create <code>main</code> + per-PR branch automation</td><td><span class="status-pill not-started">Not started</span></td><td>Ephemeral DB per CI run</td></tr>
@@ -1364,7 +1364,7 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
 
     <h3>Source control &amp; branching</h3>
     <ul>
-      <li><strong>Repository:</strong> <code>github.com/agrando2k/&lt;repo&gt;</code> (public).</li>
+      <li><strong>Repository:</strong> <code>github.com/agranado2k/&lt;repo&gt;</code> (public).</li>
       <li><strong>Default branch:</strong> <code>main</code>. Protected. No direct pushes. Linear history.</li>
       <li><strong>Branch naming</strong> (enforced by CI regex check):
         <ul>
@@ -1488,15 +1488,15 @@ jobs:
 <pre><code># .github/CODEOWNERS
 
 # Default: everything owned by the repo owner
-*                                @agrando2k
+*                                @agranado2k
 
 # Sensitive areas get an extra reviewer requirement in v1.1 (security advisor)
-/packages/domain/                @agrando2k
-/packages/application/           @agrando2k
-/apps/view/                      @agrando2k
-/infra/terraform/                @agrando2k
-/.github/workflows/              @agrando2k
-/docs/adr/                       @agrando2k</code></pre>
+/packages/domain/                @agranado2k
+/packages/application/           @agranado2k
+/apps/view/                      @agranado2k
+/infra/terraform/                @agranado2k
+/.github/workflows/              @agranado2k
+/docs/adr/                       @agranado2k</code></pre>
 
     <h3>Required GitHub secrets</h3>
     <ul>
@@ -2180,7 +2180,7 @@ jobs:
       <p class="field"><b>Context</b> Solo (for now) build with heavy LLM-assisted contributions. Without structural enforcement, "I'll just push that small fix" becomes the norm; main becomes unreviewable; rollbacks get harder. We want a workflow that protects the integrity of <code>main</code> even from the owner.</p>
       <p class="field"><b>Decision</b>
         <ul>
-          <li>Public repository at <code>github.com/agrando2k/&lt;repo&gt;</code>.</li>
+          <li>Public repository at <code>github.com/agranado2k/&lt;repo&gt;</code>.</li>
           <li><code>main</code> is protected: no direct pushes, no force pushes, no deletions, linear history (squash-only), signed commits required.</li>
           <li>Every change goes through a PR from a typed feature branch (<code>feat/&middot; fix/&middot; refactor/&middot; chore/&middot; docs/</code>).</li>
           <li>Required: 1 approval from <code>CODEOWNERS</code>; stale approvals dismissed on new commits; up-to-date with <code>main</code> before merging.</li>
@@ -2250,7 +2250,7 @@ jobs:
 
       <h4 style="font-size: 13px; margin: 14px 0 6px; color: var(--accent);">Phase 0a &mdash; Accounts + Terraform state bootstrap (1-2 days)</h4>
       <ul>
-        <li>Owner creates accounts: GitHub (<code>agrando2k</code>), Cloudflare (with R2), Vercel, Neon, Upstash, Clerk, Resend.</li>
+        <li>Owner creates accounts: GitHub (<code>agranado2k</code>), Cloudflare (with R2), Vercel, Neon, Upstash, Clerk, Resend.</li>
         <li>Owner generates per-provider API tokens with least-privilege scopes (Cloudflare R2+DNS+Workers, Vercel team, Neon project-create, Upstash org, Clerk per-env secret, Resend send-only, GitHub PAT for bootstrap).</li>
         <li><strong>Bootstrap R2 bucket</strong> <code>tf-state</code> created via Cloudflare dashboard (chicken-and-egg).</li>
         <li><code>infra/terraform/scripts/tf.sh</code> &mdash; PG advisory-lock wrapper (~30-line bash); acquires <code>pg_advisory_lock(hashtext('tf-' || $env))</code> on Neon before <code>plan|apply</code> (ADR-018).</li>
@@ -2534,7 +2534,7 @@ jobs:
     </ul>
     <h4>delivery pipeline (Phase 0)</h4>
     <ul>
-      <li><code>.github/CODEOWNERS</code> &mdash; ownership map, <code>* @agrando2k</code></li>
+      <li><code>.github/CODEOWNERS</code> &mdash; ownership map, <code>* @agranado2k</code></li>
       <li><code>.github/workflows/ci.yml</code> &mdash; PR quality gate (biome, typecheck, unit, e2e, headers, Bruno, docs)</li>
       <li><code>.github/workflows/cd.yml</code> &mdash; on-merge deploy (Vercel app + view, scanner GHCR, Terraform, migrations, smoke)</li>
       <li><code>.github/workflows/claude-review.yml</code> &mdash; <code>anthropics/claude-code-action</code> (security/ACL/TDD/FP focus)</li>
@@ -2547,7 +2547,7 @@ jobs:
 
   <footer>
     <p>Source plan file: <code>~/.claude/plans/you-re-senior-product-engineer-cozy-stonebraker.md</code></p>
-    <p>Generated 2026-05-20 (rev 7) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agrando2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
+    <p>Generated 2026-05-20 (rev 7) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agranado2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
   </footer>
 
 </div>

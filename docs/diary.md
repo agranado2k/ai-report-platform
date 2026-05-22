@@ -12,7 +12,7 @@
 | **Repo path**          | `~/PetProjects/ai-report-platform/`                                            |
 | **Branch**             | `main`                                                                         |
 | **Last commit**        | `e60ee59` — `chore: Phase 0a — Terraform state bootstrap`                       |
-| **Remote**             | not yet pushed; target is `github.com/agrando2k/<repo>` (public, owner picks final name) |
+| **Remote**             | not yet pushed; target is `github.com/agranado2k/<repo>` (public, owner picks final name) |
 | **Live infrastructure**| nothing provisioned yet (operator still needs the bootstrap R2 bucket + Neon project per `docs/infra.md`) |
 | **Active worktrees**   | none                                                                           |
 | **Spec status**        | rev 7 · 30 ADRs · 13 infra + 31 feature verification tests · `docs/spec.html`   |
@@ -118,7 +118,7 @@ Added a "Development & delivery" section with a **progress tracker** (two tables
 - **ADR-026 (→ 029)** GitHub Actions for CI (on PR) and CD (on merge to main). 9 CI jobs; CD deploys app + view to Vercel prod, applies Terraform, runs migrations, smoke tests.
 - **ADR-027 (→ 030)** Dual AI PR review (Claude + Gemini) — advisory only; CODEOWNERS approval still required. Cost guardrail: skip on diffs > 4,000 lines.
 
-Repo target confirmed as `github.com/agrando2k/<repo>` (public).
+Repo target confirmed as `github.com/agranado2k/<repo>` (public).
 
 ### 2026-05-20 — Infrastructure-first restructure + Phase 0a ships (rev 7)
 

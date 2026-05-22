@@ -10,7 +10,7 @@ Phases 0a-0e of `docs/spec.html` are the contract; this file is the executable r
 
 Create accounts under your operator identity. The order matters only loosely — Cloudflare first because everything else points at the domain there.
 
-- [ ] **GitHub**: `agrando2k` (org for the repo). 2FA enabled.
+- [ ] **GitHub**: `agranado2k` (org for the repo). 2FA enabled.
 - [ ] **Cloudflare**: account with R2 enabled. Register or transfer the apex domain here.
 - [ ] **Vercel**: team plan (free is fine for v1).
 - [ ] **Neon**: project for the platform.

@@ -50,7 +50,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local pre-push hook runs a subset.
 
-3. PRs receive **automated review from Claude and Gemini** (ADR-030), plus a **required human review from CODEOWNERS** (`@agrando2k`). Bot reviews are advisory; they cannot satisfy the approval requirement.
+3. PRs receive **automated review from Claude and Gemini** (ADR-030), plus a **required human review from CODEOWNERS** (`@agranado2k`). Bot reviews are advisory; they cannot satisfy the approval requirement.
 
 ## Infrastructure
 
