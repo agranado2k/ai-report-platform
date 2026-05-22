@@ -21,7 +21,7 @@ variable "framework" {
 
 variable "github_repo" {
   type        = string
-  description = "Owner/repo for the GitHub integration (e.g. 'agrando2k/ai-report-platform')."
+  description = "Owner/repo for the GitHub integration (e.g. 'agranado2k/ai-report-platform')."
 }
 
 variable "root_directory" {

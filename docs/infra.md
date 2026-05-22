@@ -104,7 +104,7 @@ infra/terraform/scripts/tf.sh prod apply
 
 ### Required GitHub Actions configuration
 
-Once the repo lives at `github.com/agrando2k/<repo>`, populate these under **Settings → Secrets and variables → Actions**. The `terraform-shared/github-repo` module also writes the secrets back from Terraform — but the first apply needs them set manually (chicken-and-egg).
+Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Settings → Secrets and variables → Actions**. The `terraform-shared/github-repo` module also writes the secrets back from Terraform — but the first apply needs them set manually (chicken-and-egg).
 
 **Repository secrets** (`Settings → Secrets`):
 

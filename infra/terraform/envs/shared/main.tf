@@ -44,16 +44,16 @@ module "github_repo" {
 
   codeowners_content = <<-EOF
     # Terraform-managed CODEOWNERS — edits go through infra/terraform/modules/github-repo
-    *                                @agrando2k
+    *                                @agranado2k
 
     # Sensitive areas (kept for clarity; we'll add a security advisor in v1.1)
-    /packages/domain/                @agrando2k
-    /packages/application/           @agrando2k
-    /apps/view/                      @agrando2k
-    /infra/terraform/                @agrando2k
-    /.github/workflows/              @agrando2k
-    /docs/adr/                       @agrando2k
-    /docs/diary.md                   @agrando2k
+    /packages/domain/                @agranado2k
+    /packages/application/           @agranado2k
+    /apps/view/                      @agranado2k
+    /infra/terraform/                @agranado2k
+    /.github/workflows/              @agranado2k
+    /docs/adr/                       @agranado2k
+    /docs/diary.md                   @agranado2k
   EOF
 
   bot_email = var.operator_email

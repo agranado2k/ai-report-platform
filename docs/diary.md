@@ -12,7 +12,7 @@
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/phase-0b-tf-modules/` (active worktree) |
 | **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
 | **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
-| **Remote**             | not yet pushed; target is `github.com/agrando2k/<repo>` (public, owner picks final name) |
+| **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` pushed; `feat/phase-0b-tf-modules` pushed; ready for first PR. |
 | **Live infrastructure**| **nothing provisioned yet.** Modules + envs are written & validated, but `terraform apply` is blocked on the operator finishing Phase 0a manual bootstrap (R2 `tf-state` bucket, bootstrap Neon project, `.tfvars.local`). |
 | **Active worktrees**   | `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/` |
 | **Spec status**        | rev 7 · 30 ADRs · 13 infra + 31 feature verification tests · `docs/spec.html`   |
@@ -232,3 +232,22 @@ Workflow at `.github/workflows/terraform.yml` (~190 lines):
 **Branch state**: commit on `feat/phase-0b-tf-modules`; the branch now has two commits (the modules + this workflow). All three envs still `terraform validate` cleanly.
 
 **Still NOT done** (unchanged from yesterday): no `terraform apply` has run; needs operator bootstrap. R2 versioning workaround still pending. PG advisory-lock smoke test still pending.
+
+### 2026-05-22 — Repo pushed to GitHub; username typo fixed
+
+User created the GitHub repo and pushed. Two events worth logging:
+
+**Repo URL settled** — `git@github.com:agranado2k/ai-report-platform.git` (public). The user initially configured `origin` to `ai-html-report`, then asked to re-point to `ai-report-platform` (matches the internal working name; one identity across local + remote + Terraform resources). Old `ai-html-report` repo on GitHub is now orphaned; user can delete via UI when convenient.
+
+**Username typo fix** — I'd been writing `agrando2k` across docs since rev 1 of the spec. The actual GitHub username is `agranado2k` (matches `/Users/agranado/` + `2k`). Caught when the user pushed and the SSH URL revealed the right spelling. Swept across:
+
+- Main branch (commit `9264a27`): `CLAUDE.md` · `docs/diary.md` · `docs/infra.md` · `docs/spec.html`
+- Feat/phase-0b branch (this commit): the same docs *plus* the Terraform-only files (`envs/shared/main.tf` CODEOWNERS template + `provider "github" { owner = ... }`; `modules/github-repo/outputs.tf` description; `modules/vercel-app/variables.tf` description; `envs/shared/variables.tf` description).
+- All three Terraform envs still validate cleanly after the sed sweep.
+
+**Push state**:
+- `main` → pushed first to `ai-html-report` (commit `4f4452f`), then re-pushed to `ai-report-platform` after the URL swap. Now at `9264a27` with the typo fix.
+- `feat/phase-0b-tf-modules` → pushed with this commit (typo fix + diary).
+- Both visible on GitHub. Branch protection isn't on yet (Terraform-applied in the future Phase 0c work + the first `apply`). PR-from-feat-into-main is ready to open via the GitHub UI.
+
+**Lesson for future-me**: when establishing a project's identity early (username, repo name, package prefix), pull from authoritative sources (`whoami`, the actual GitHub profile URL) rather than inferring from existing project paths. The `agrando2k` typo would have been caught at first read of any of `/Users/agranado/` if I'd looked.

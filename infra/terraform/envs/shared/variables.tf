@@ -19,7 +19,7 @@ variable "cloudflare_api_token" {
 
 variable "github_token" {
   type        = string
-  description = "GitHub fine-grained PAT scoped to the agrando2k account with repo Admin + Contents + Actions + Secrets."
+  description = "GitHub fine-grained PAT scoped to the agranado2k account with repo Admin + Contents + Actions + Secrets."
   sensitive   = true
 }
 
