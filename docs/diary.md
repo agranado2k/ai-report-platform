@@ -8,7 +8,7 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | 0b modules complete and validated; **awaiting operator bootstrap** before first `apply`. Phase 0c next (skeleton apps + CI/CD). |
+| **Phase**              | 0b complete: modules + `terraform.yml` GHA workflow written and validated. **Awaiting operator bootstrap + first push to GitHub** for any actual `apply`. Phase 0c next (skeleton apps + remaining CI/CD workflows). |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/phase-0b-tf-modules/` (active worktree) |
 | **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
 | **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
@@ -204,3 +204,31 @@ All three envs end at "Success! The configuration is valid." with no warnings.
 - A `pg_advisory_unlock` smoke test to confirm `tf.sh` lock semantics.
 
 **Active worktree:** `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/`. Will become a PR once the project has a GitHub remote (still pending).
+
+### 2026-05-22 — Phase 0b: dedicated Terraform GitHub Actions pipeline
+
+Decision moment: the spec's `cd.yml` originally bundled `terraform apply` with the app deploys. Today we separated infra delivery from app delivery into its own workflow. Triggered: user requested "a different pipeline for Terraform commands when anything related to infrastructure changes." Decisions confirmed in chat:
+
+- **Land in the same Phase 0b worktree** — modules + their CI ship as one cohesive PR.
+- **Auto-apply on merge to main** (no Environments-gated approval) — PR review + the plan-on-PR diff is the gate; roll back via R2 state versioning + revert PR if needed.
+- **PR-comment plan diff** via `dflook/terraform-plan@v2`.
+
+Workflow at `.github/workflows/terraform.yml` (~190 lines):
+
+- **Triggers**: `pull_request` and `push` to `main`, filtered by path (`infra/terraform/**`, `.github/workflows/terraform.yml`).
+- **Permissions**: `contents: read`, `pull-requests: write` (for plan comments).
+- **PR jobs** (parallel): `plan-shared`, `plan-staging`, `plan-prod`, `fmt-and-validate`. Each plan uses `dflook/terraform-plan@v2` with an inline `backend_config` (key + endpoints injected from secrets); diff is posted as a sticky PR comment per env. fmt-and-validate runs `terraform fmt -check -recursive` and `terraform validate` on each env with `-backend=false` (offline).
+- **Main jobs** (sequential): `apply-shared` → `apply-staging` → `apply-prod`. Each calls `infra/terraform/scripts/tf.sh <env> apply -auto-approve`, which acquires the Postgres advisory lock per ADR-018. `concurrency: cancel-in-progress: false` so a running apply is never killed mid-flight. `apt-get install postgresql-client` step adds `psql` for the lock.
+- **Secrets passed via job env**: R2 state creds, PG_LOCK_URL, per-provider tokens, env-specific Clerk keys.
+
+**`tf.sh` fix shipped alongside**: made `.tfvars.local` sourcing optional (`if [[ -f ... ]]; then source; fi`) so the wrapper works in CI where there's no `.tfvars.local`. Required-env-var checks still fail loudly with `PG_LOCK_URL not set` if neither file nor env provides credentials — verified by running `env -i bash tf.sh staging plan` and seeing the expected error.
+
+**`docs/infra.md` updated** with:
+- A note that CI handles apply once the repo is pushed; the local `tf.sh` commands are the operator escape hatch.
+- A table of 15 required GitHub Actions secrets + 6 required variables, with sources and the jobs that consume each.
+
+**What this means architecturally**: the spec's `cd.yml` is now smaller — just Vercel deploys + migrations + smoke tests. Infrastructure delivery is fully decoupled from application delivery, which is the cleaner separation we wanted anyway. The spec's "delivery" ADRs (028 / 029 / 030) still describe the high-level pipeline correctly; a future spec rev should refine ADR-029 to acknowledge the workflow split.
+
+**Branch state**: commit on `feat/phase-0b-tf-modules`; the branch now has two commits (the modules + this workflow). All three envs still `terraform validate` cleanly.
+
+**Still NOT done** (unchanged from yesterday): no `terraform apply` has run; needs operator bootstrap. R2 versioning workaround still pending. PG advisory-lock smoke test still pending.
