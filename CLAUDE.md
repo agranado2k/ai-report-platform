@@ -19,12 +19,12 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 1. **Use a git worktree** (ADR-025). Never edit files in the root checkout for in-progress work.
 
    ```bash
-   git worktree add ../<slug> -b <type>/<slug>
-   cd ../<slug>
+   # From the project root (~/PetProjects/ai-report-platform/)
+   git worktree add worktree/<slug> -b <type>/<slug>
+   cd worktree/<slug>
    ```
 
-   `<type>` is one of `feat`, `fix`, `refactor`, `chore`, `docs`. Examples:
-   `feat/phase-0b-tf-modules`, `fix/r2-roundtrip-test`, `docs/adr-031-foo`.
+   Worktrees live under `worktree/` inside the project (gitignored). `<type>` is one of `feat`, `fix`, `refactor`, `chore`, `docs`. Examples: `feat/phase-0b-tf-modules`, `fix/r2-roundtrip-test`, `docs/adr-031-foo`.
 
 2. **Start with `/tdd`** for any code change (Phase 0e). Write the failing test first, then implementation, then refactor. See `.claude/skills/tdd/SKILL.md`.
 
@@ -71,7 +71,7 @@ This repo IS NOT:
 | If you need to…                          | Skill / hook / doc                              |
 | ---------------------------------------- | ----------------------------------------------- |
 | Write code                               | `/tdd <task>` (ADR-022)                         |
-| Open a PR                                | `git worktree add ../<slug> -b feat/<slug>`     |
+| Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
 | Check docs are in sync                   | `/docs-check`                                   |
 | Update API surface                       | Edit `docs/api/openapi.yaml`; Bruno auto-regens |
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |

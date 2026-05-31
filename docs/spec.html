@@ -1220,21 +1220,21 @@ export const findAncestorGrant = (
     <p>Any time an agent (or human) starts a new feature, bug fix, refactor, or experiment, the work happens in a <strong>dedicated git worktree</strong>, not by switching branches in the main checkout. This lets multiple in-flight changes coexist without stash drama, lets agents work in parallel without stepping on each other, and keeps the main working tree clean for review and ad-hoc debugging.</p>
 
     <h4>Convention</h4>
-<pre><code># Start a feature
-git worktree add ../&lt;feature-slug&gt; -b feat/&lt;feature-slug&gt;
-cd ../&lt;feature-slug&gt;
+<pre><code># Start a feature (from the project root)
+git worktree add worktree/&lt;feature-slug&gt; -b feat/&lt;feature-slug&gt;
+cd worktree/&lt;feature-slug&gt;
 pnpm install
 # ... do work, commit, push, open PR ...
 
 # When merged, clean up
-git worktree remove ../&lt;feature-slug&gt;
+git worktree remove worktree/&lt;feature-slug&gt;
 git branch -D feat/&lt;feature-slug&gt;</code></pre>
 
     <h4>Encoded in CLAUDE.md (agent instructions)</h4>
     <ul>
-      <li><strong>Before starting any feature, bug fix, or experiment</strong>, the agent runs <code>git worktree add ../&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code>. Never edits files in the root checkout for in-progress work.</li>
+      <li><strong>Before starting any feature, bug fix, or experiment</strong>, the agent runs <code>git worktree add worktree/&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code> from the project root. Never edits files in the root checkout for in-progress work.</li>
       <li><strong>One worktree per task.</strong> Don't reuse a worktree for unrelated work.</li>
-      <li><strong>Worktrees live under <code>../</code></strong> (sibling to the main checkout), not inside it &mdash; keeps <code>find</code>, <code>rg</code>, and tooling sane.</li>
+      <li><strong>Worktrees live under <code>worktree/</code></strong> inside the project (gitignored) &mdash; keeps everything for one project grouped under one tree, and <code>ls ~/Projects</code> stays clean.</li>
       <li>A <strong><code>/worktree-cleanup</code> skill</strong> lists stale worktrees (merged or abandoned for &gt;14 days) and removes them after confirmation.</li>
     </ul>
 
@@ -1308,7 +1308,7 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
     <h3>Agentic instructions consolidated</h3>
     <p>The repo's <strong><code>CLAUDE.md</code></strong> codifies the practices above as binding instructions for any agent working in the codebase:</p>
     <ul>
-      <li>Before starting any task, <code>git worktree add ../&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code> in a fresh worktree.</li>
+      <li>Before starting any task, <code>git worktree add worktree/&lt;slug&gt; -b &lt;type&gt;/&lt;slug&gt;</code> in a fresh worktree (from the project root).</li>
       <li>Use <code>/tdd &lt;task&gt;</code> to begin implementation &mdash; never write production code before its test.</li>
       <li>Every new use case requires a <code>.feature</code> file in <code>tests/e2e/features/</code>.</li>
       <li>Domain code is pure-functional with <code>readonly</code> everything; lint flags mutation on domain types.</li>

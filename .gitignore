@@ -15,6 +15,11 @@ infra/terraform/crash.*.log
 infra/terraform/terraform.tfplan
 infra/terraform/**/terraform.tfplan
 
+# ─── Git worktrees ──────────────────────────────────────────────────────
+# Feature-branch worktrees live under worktree/<slug>/ per ADR-025.
+# Each one has its own .git pointer; main's git index doesn't track them.
+worktree/
+
 # ─── Dependencies ───────────────────────────────────────────────────────
 node_modules/
 .pnpm-store/

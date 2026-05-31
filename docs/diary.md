@@ -9,12 +9,12 @@
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | 0b complete: modules + `terraform.yml` GHA workflow written and validated. **Awaiting operator bootstrap + first push to GitHub** for any actual `apply`. Phase 0c next (skeleton apps + remaining CI/CD workflows). |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/phase-0b-tf-modules/` (active worktree) |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` (active worktree, per the new convention) |
 | **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
 | **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` pushed; `feat/phase-0b-tf-modules` pushed; ready for first PR. |
 | **Live infrastructure**| **nothing provisioned yet.** Modules + envs are written & validated, but `terraform apply` is blocked on the operator finishing Phase 0a manual bootstrap (R2 `tf-state` bucket, bootstrap Neon project, `.tfvars.local`). |
-| **Active worktrees**   | `feat/phase-0b-tf-modules` at `~/PetProjects/phase-0b-tf-modules/` |
+| **Active worktrees**   | `feat/phase-0b-tf-modules` at `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` |
 | **Spec status**        | rev 7 · 30 ADRs · 13 infra + 31 feature verification tests · `docs/spec.html`   |
 
 ### Open questions / unresolved decisions
@@ -29,7 +29,7 @@
 
 - **The diary is the orientation document.** Read this `Current state` block at session start.
 - **The spec wins** in disputes. When the diary and `docs/spec.html` disagree, the spec is the contract; the diary is the log.
-- **All work in worktrees** per ADR-025: `git worktree add ../<slug> -b <type>/<slug>`. Branch types: `feat` `fix` `refactor` `chore` `docs`.
+- **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
 - **TDD scaffolding will land in Phase 0e** — until then, write tests alongside code by convention rather than by hook enforcement.
 
@@ -251,3 +251,17 @@ User created the GitHub repo and pushed. Two events worth logging:
 - Both visible on GitHub. Branch protection isn't on yet (Terraform-applied in the future Phase 0c work + the first `apply`). PR-from-feat-into-main is ready to open via the GitHub UI.
 
 **Lesson for future-me**: when establishing a project's identity early (username, repo name, package prefix), pull from authoritative sources (`whoami`, the actual GitHub profile URL) rather than inferring from existing project paths. The `agrando2k` typo would have been caught at first read of any of `/Users/agranado/` if I'd looked.
+
+### 2026-05-25 — Worktree convention change + Neon pooler lock issue
+
+Two small but real things landed today, on top of the user's first attempt at `tf.sh staging apply`.
+
+**Worktree layout moved from sibling to child-of-project.** Old convention was `git worktree add ../<slug>` putting the worktree at `~/PetProjects/<slug>/`. The user's preference: keep everything for one project under the project tree. New convention: `git worktree add worktree/<slug>` from the project root, putting worktrees at `~/PetProjects/ai-report-platform/worktree/<slug>/`. `worktree/` added to `.gitignore` on both branches. ADR-025 text in `docs/spec.html`, `CLAUDE.md`, and the diary's memory pointer all updated to match. Moved the active feat worktree with `git worktree move` — no commits lost, no checkouts broken.
+
+**Neon pooler vs session-level advisory locks.** The user tried `tf.sh staging apply` and hit "Lock 'tf-staging' is held by another tf.sh invocation" → 60s timeout → "Failed to acquire lock." Diagnosis: `PG_LOCK_URL` was pointing at Neon's PgBouncer pooler endpoint (transaction-pooling mode). Session-level advisory locks acquired by one psql invocation persist on the warm pooled backend even after the client disconnects, so the next invocation gets `f` from `pg_try_advisory_lock`. Standard PgBouncer-meets-session-state issue. Resolution: switch `PG_LOCK_URL` to Neon's direct (non-pooled) endpoint and release the stale lock via `SELECT pg_advisory_unlock(hashtext('tf-staging'))`.
+
+Also surfaced — and this one I should have caught when I wrote `tf.sh` originally — the script's locking design is broken in a deeper way: the lock is acquired in one psql invocation and the connection closes IMMEDIATELY, so even on a direct endpoint the lock doesn't actually serialize `terraform apply` runs. Two concurrent applies would both succeed. The fix is a backgrounded long-lived psql session that holds the lock across the apply, signaled to release on exit. Filed as a follow-up; doesn't block the user today as long as they're the only one applying.
+
+**Bootstrap walkthrough also delivered** in chat — the explicit `tf.sh shared init → shared import → shared apply → staging → prod` sequence with the GitHub-repo import step (`module.github_repo.github_repository.this`) before `shared apply`, since the repo already exists from yesterday's push.
+
+**Net effect on the branch**: this commit. No infrastructure changes; layout + convention + diary only.
