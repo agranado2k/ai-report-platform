@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/.server/**/*.ts",
+    "**/.server/**/*.tsx",
+    "**/.client/**/*.ts",
+    "**/.client/**/*.tsx"
+  ],
+  "compilerOptions": {
+    "types": ["@remix-run/node", "vite/client"],
+    "noEmit": true,
+    "paths": {
+      "~/*": ["./app/*"]
+    }
+  }
+}

@@ -54,10 +54,17 @@ resource "github_branch_protection" "main" {
     contexts = var.required_status_checks
   }
 
+  # Solo-developer mode (ADR-032): the PR mechanism is kept (no direct
+  # pushes to main; signed commits + linear history still apply), but
+  # human-approval-on-PR is dropped to 0 and the CODEOWNERS gate is off.
+  # Rationale: with one developer, requiring an approving review makes
+  # main unmergeable (GitHub won't let you approve your own PR). AI
+  # review (ADR-030) + CI status checks are the gates that remain.
+  # When a second developer joins, flip these back to `1` / `true`.
   required_pull_request_reviews {
-    required_approving_review_count = 1
+    required_approving_review_count = 0
     dismiss_stale_reviews           = true
-    require_code_owner_reviews      = true
+    require_code_owner_reviews      = false
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)

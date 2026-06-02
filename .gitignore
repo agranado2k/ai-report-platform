@@ -45,6 +45,8 @@ node_modules/
 build/
 dist/
 .turbo/
+.vite/
+**/.cache/
 
 # ─── Test artifacts ─────────────────────────────────────────────────────
 playwright-report/
