@@ -1,86 +1,118 @@
 # infra/terraform/.tfvars.local.example
 #
 # Copy to `.tfvars.local` (gitignored) and fill in real values. The wrapper
-# `scripts/tf.sh` sources this file on every invocation.
+# `scripts/tf.sh` sources this file on every invocation so all the exports
+# below become env vars Terraform picks up as `TF_VAR_*`.
 #
-# These are BOOTSTRAP credentials only — used by the operator locally to
-# `terraform apply` the first time. After Phase 0c, production CD reads
-# secrets from GitHub Actions Secrets (which Terraform itself populates).
+# Two-file pattern:
 #
-# Token permission requirements per provider are noted inline.
+#   1) THIS FILE (`.tfvars.local`): bash exports for state-backend bootstrap
+#      creds + provider tokens that DON'T vary per environment.
+#
+#   2) `envs/<env>/secrets.auto.tfvars` (HCL): env-specific values (Clerk
+#      keys per env, the resend DNS-records list). Auto-loaded by Terraform
+#      from the working directory. Also gitignored. Templates at the bottom
+#      of this file.
+#
+# Why split? Bash quoting around complex types (lists/objects, DKIM keys
+# with `+`/`/`/`=`) is fragile. HCL is friendlier. And per-env secrets
+# don't fit in one shared bash file anyway.
 
-# ─── Cloudflare / R2 ──────────────────────────────────────────────────────
-# Find your account id in the Cloudflare dashboard URL:
+# ═══════════════════════════════════════════════════════════════════════════
+# Bootstrap — Terraform state backend (R2) + Postgres advisory lock (Neon)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Cloudflare account id. Found in the dashboard URL:
 #   https://dash.cloudflare.com/<ACCOUNT_ID>/
+# Also exported as TF_VAR_cloudflare_account_id so staging/prod modules
+# can reach R2 from the same value.
 export R2_ACCOUNT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export TF_VAR_cloudflare_account_id="$R2_ACCOUNT_ID"
 
 # R2 API token scoped to the `tf-state` bucket only.
-# Dashboard → R2 → Manage API tokens → Create token
-#   Permissions: Object Read & Write
+# Dashboard → R2 → Manage R2 API Tokens → Create
+#   Permission: Object Read & Write
 #   Bucket scope: tf-state
+# (NOT the general "API Tokens" page — that's a different credential type.)
 export AWS_ACCESS_KEY_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 export AWS_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# Account-scoped Cloudflare API token (used by the Terraform `cloudflare`
-# provider to manage DNS / R2 buckets / Workers).
-# Dashboard → My Profile → API Tokens → Create Token
-#   Permissions: Zone:DNS:Edit, Account:Cloudflare R2:Edit,
-#                Account:Workers Scripts:Edit, Account:Workers KV Storage:Edit
-export TF_VAR_cloudflare_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-# ─── Neon (also the host for the Postgres advisory lock) ──────────────────
-# Connection string for the bootstrap Neon project's `main` branch. The
-# advisory lock used by tf.sh runs against THIS connection. Terraform itself
-# manages Neon resources via TF_VAR_neon_api_key.
-#
-# For Phase 0a, create a minimal Neon project manually and paste its URI here.
-# Phase 0b's `modules/neon-project/` will replace it; the lock semantics
-# survive the migration because the key hashes a string, not a row id.
+# Connection string for the bootstrap Neon project's `main` branch — the
+# Postgres advisory lock that tf.sh uses lives here.
+# IMPORTANT: must be the DIRECT (non-pooler) endpoint. The pooler URL
+# (contains "-pooler" in the hostname) breaks session-level advisory locks.
 export PG_LOCK_URL="postgresql://USER:PASS@HOST.neon.tech/neondb?sslmode=require"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Provider tokens — shared across envs
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Cloudflare API token (bearer; for the cloudflare/cloudflare Terraform
+# provider — different from the R2 access keys above).
+# Dashboard → My Profile → API Tokens → Create Token (custom template)
+#   Zone → Zone → Read
+#   Zone → DNS → Edit
+#   Zone → Zone Settings → Edit
+#   Account → Workers R2 Storage → Edit
+#   Resource scope: zone = your apex; account = your account.
+export TF_VAR_cloudflare_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Neon API key (full-access). Settings → API Keys.
 export TF_VAR_neon_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# ─── Vercel ───────────────────────────────────────────────────────────────
-# Personal access token. Account → Settings → Tokens.
+# Vercel — Account → Settings → Tokens.
 export TF_VAR_vercel_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 export TF_VAR_vercel_team_id="team_xxxxxxxxxxxxxxxxxxxxxxxx"
 
-# ─── Upstash ──────────────────────────────────────────────────────────────
-# Management API key. console.upstash.com → Account → Management API.
+# Upstash — console.upstash.com → Account → Management API.
 export TF_VAR_upstash_email="you@example.com"
 export TF_VAR_upstash_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# ─── Clerk ────────────────────────────────────────────────────────────────
-# Backend API key per environment. clerk.com → API Keys.
-export TF_VAR_clerk_secret_key_prod="sk_live_xxxxxxxxxxxxxxxxxxxx"
-export TF_VAR_clerk_secret_key_staging="sk_test_xxxxxxxxxxxxxxxxxxxx"
-
-# ─── Resend ───────────────────────────────────────────────────────────────
-# Send-only domain key. resend.com → API Keys.
+# Resend — send-only API key. resend.com → API Keys.
 export TF_VAR_resend_api_key="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# NOTE: `TF_VAR_resend_dns_records` is NOT set here. It's a list-of-objects,
-# and bash quoting around the DKIM public key (which contains `+`, `/`, `=`)
-# is error-prone. Put it in a separate HCL file instead — gitignored:
+# ═══════════════════════════════════════════════════════════════════════════
+# Shared-env single-instance values
+# (only `envs/shared` reads these)
+# ═══════════════════════════════════════════════════════════════════════════
+
+export TF_VAR_apex_domain="example.com"          # CHANGE ME
+export TF_VAR_operator_email="you@example.com"
+
+# Fine-grained GitHub PAT for the agranado2k account, scoped to THIS repo.
+# Permissions (Repository, all Read & write unless noted):
+#   Administration, Contents, Secrets, Variables; Metadata (read-only,
+#   auto-granted). Nothing else needed.
+export TF_VAR_github_token="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# AI PR-review keys (passed through to GitHub Actions secrets by the
+# github_repo module, then consumed by the claude-review.yml / gemini-review.yml
+# workflows).
+export TF_VAR_anthropic_api_key="sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export TF_VAR_gemini_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHAT DOES NOT BELONG IN THIS FILE — go in per-env `secrets.auto.tfvars`
+# ═══════════════════════════════════════════════════════════════════════════
 #
-#   infra/terraform/envs/shared/secrets.auto.tfvars
-#   ────────────────────────────────────────────────────
+# Create these three files (each gitignored by .gitignore's
+# `**/secrets.auto.tfvars` rule). Terraform auto-loads them from the env's
+# working dir, no -var-file flag needed.
+#
+# ─── infra/terraform/envs/shared/secrets.auto.tfvars ──────────────────────
+#
 #   resend_dns_records = [
 #     { name = "send",              type = "TXT", value = "v=spf1 include:amazonses.com ~all" },
 #     { name = "resend._domainkey", type = "TXT", value = "p=MIGfMA0GCSqGSIb3DQEBAQUA…" },
 #     { name = "_dmarc",            type = "TXT", value = "v=DMARC1; p=none;" },
 #   ]
 #
-# Terraform auto-loads any `*.auto.tfvars` in the working directory — no
-# `-var-file` flag needed.
-
-# ─── GitHub ───────────────────────────────────────────────────────────────
-# Fine-grained PAT for the agrando2k account, scoped to this repo.
-# Permissions: Administration (R/W), Contents (R/W), Pull requests (R/W),
-#              Webhooks (R/W), Secrets (R/W), Actions (R/W).
-export TF_VAR_github_token="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-# ─── Domain & operator ────────────────────────────────────────────────────
-export TF_VAR_apex_domain="example.com"          # CHANGE ME
-export TF_VAR_operator_email="you@example.com"
+# ─── infra/terraform/envs/staging/secrets.auto.tfvars ─────────────────────
+#
+#   clerk_publishable_key = "pk_test_xxxxxxxxxxxxxxxxxxxx"
+#   clerk_secret_key      = "sk_test_xxxxxxxxxxxxxxxxxxxx"
+#
+# ─── infra/terraform/envs/prod/secrets.auto.tfvars ────────────────────────
+#
+#   clerk_publishable_key = "pk_live_xxxxxxxxxxxxxxxxxxxx"
+#   clerk_secret_key      = "sk_live_xxxxxxxxxxxxxxxxxxxx"
