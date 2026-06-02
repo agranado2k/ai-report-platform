@@ -85,10 +85,13 @@ resource "github_repository_file" "codeowners" {
 resource "github_actions_secret" "this" {
   # Keys (secret names) are not sensitive — only values are. See the same
   # nonsensitive() pattern in modules/vercel-app/main.tf.
-  for_each        = nonsensitive(var.actions_secrets)
-  repository      = github_repository.this.name
-  secret_name     = each.key
-  plaintext_value = each.value
+  for_each    = nonsensitive(var.actions_secrets)
+  repository  = github_repository.this.name
+  secret_name = each.key
+  # `value` replaces the deprecated `plaintext_value` in github provider v6+.
+  # Behavior is the same — the value is encrypted client-side before
+  # transmission and stored encrypted at GitHub.
+  value = each.value
 }
 
 # GitHub Actions variables — non-sensitive config consumed by workflows.

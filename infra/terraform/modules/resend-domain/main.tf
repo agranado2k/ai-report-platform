@@ -30,7 +30,10 @@ check "records_well_formed" {
     error_message = "Resend DNS records must be CNAME, TXT, or MX."
   }
   assert {
-    condition     = length(var.dns_records) >= 4 # 1 MX + 1 SPF + at least 1 DKIM + 1 DMARC, usually more
-    error_message = "Expected at least 4 DNS records from Resend (MX + SPF + DKIM + DMARC). Got ${length(var.dns_records)}. Re-check the Resend dashboard."
+    # Minimum for a verifiable send-only setup is SPF + DKIM + DMARC = 3.
+    # An MX record is only required if you want bounces routed through Resend
+    # (rare for transactional email). Don't gate on it.
+    condition     = length(var.dns_records) >= 3
+    error_message = "Expected at least 3 DNS records from Resend (SPF + DKIM + DMARC). Got ${length(var.dns_records)}. Re-check the Resend dashboard."
   }
 }
