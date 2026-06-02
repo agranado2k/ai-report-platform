@@ -8,13 +8,13 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | Phase 0b merged (PR #1 → `main`). Phase 0c.1 in progress: monorepo scaffold + skeleton Remix apps to unblock Vercel auto-detection. Phase 0c is split into five sub-PRs: 0c.1 skeleton apps, 0c.2 shared headers + edge MW stubs, 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection with proven required-status-checks list. |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-skeleton-apps/` (active worktree). The old `worktree/phase-0b-tf-modules/` is stale — clean up next session. |
-| **Branch**             | `feat/phase-0c-skeleton-apps` open against `main` (local, not pushed yet) |
-| **Last commit on main**        | `51b6186` — `Phase 0b: Terraform infrastructure + CD pipeline + ADR-031 (#1)` (squash-merged PR #1) |
-| **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` reflects the squash merge. |
-| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod`, `arp-view-prod`), GitHub repo with branch protection + 8 secrets + 2 variables. Vercel deploys currently fail (no app code yet) — Phase 0c.1 lands the first deployable shape. |
-| **Active worktrees**   | `feat/phase-0c-skeleton-apps` at `~/PetProjects/ai-report-platform/worktree/phase-0c-skeleton-apps/` (this PR). `feat/phase-0b-tf-modules` at `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` — merged, awaiting `git worktree remove`. |
+| **Phase**              | Phase 0c.1 merged at `2fa0d22` (PR #2 — green Vercel + ADR-032 solo-dev branch protection). Phase 0c.2 in progress: `packages/headers` shared security-headers package + Edge MW stubs (Service-Worker block + edge marker). Sub-PRs remaining: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection + Terraform-codify the Vercel Corepack env var. |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` (active worktree). Old 0b + 0c.1 worktrees cleaned up. |
+| **Branch**             | `feat/phase-0c-shared-headers` open against `main` (local, not pushed yet) |
+| **Last commit on main**        | `2fa0d22` — `Phase 0c.1: monorepo scaffold + skeleton Remix apps (#2)` |
+| **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
+| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PR #2), GitHub repo with ADR-032 branch protection (0 required approvals). Vercel projects also have `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for `feat/phase-0c-skeleton-apps` preview — codification deferred to 0c.5. |
+| **Active worktrees**   | `feat/phase-0c-shared-headers` at `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` |
 | **Spec status**        | rev 7 · 32 ADRs (ADR-031 + ADR-032 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
 
 ### Open questions / unresolved decisions
@@ -364,3 +364,40 @@ The first three commits past the initial scaffold all hit Vercel build failures 
 **Carry-over for Phase 0c.5** (Terraform re-tighten + codification pass): add `ENABLE_EXPERIMENTAL_COREPACK = "1"` to `modules/vercel-app/main.tf` as a `vercel_project_environment_variable` resource so future preview branches don't need manual CLI setup. Right now the env var is scoped to the `feat/phase-0c-skeleton-apps` branch only.
 
 **Memory pointer (future-me)**: the wrong fix on a "build is broken on Vercel" symptom is to chase package manager versions. The right fix is usually a Vercel-project-level setting (env var, Node version, Root Directory). Read the actual Vercel docs and community thread before bumping versions speculatively.
+
+### 2026-06-02 — Phase 0c.2: shared `arp-headers` package + Edge Middleware stubs
+
+Phase 0c.1 merged at `2fa0d22`; both Phase 0b and 0c.1 worktrees cleaned up. Phase 0c.2 starts in `worktree/phase-0c-shared-headers/` on `feat/phase-0c-shared-headers`.
+
+The goal of this slice: stand up the **single source of truth for security headers** (`packages/headers/`) so every route in both apps reaches it through the same function, and land the Edge Middleware skeletons so Phase 0d's infra tests have something concrete to assert against.
+
+**`packages/headers/` — exposes two functions:**
+
+| Function | Origin | Distinguishing pieces |
+|---|---|---|
+| `viewHeaders()` | `view.<domain>` | Full ADR-013 stack — two CSP headers (enforcing + `sandbox`), report-only shadow policy, COOP=`same-origin`, CORP=`same-site`, `Origin-Agent-Cluster`, `Referrer-Policy: no-referrer`, `Cache-Control: private, max-age=60, must-revalidate`. |
+| `appHeaders()` | `app.<domain>` | Same baseline tightened where we control the content — no `'unsafe-inline'` in `script-src`, CORP=`same-origin` (tighter), `Referrer-Policy: strict-origin-when-cross-origin`, **Trusted Types** enforced (`Require-Trusted-Types-For: 'script'` + `Trusted-Types` allowlist), no default Cache-Control (loaders set their own). |
+
+Both functions return a fresh `Headers` instance so callers can override per-response (e.g. `/health` overrides Cache-Control to `no-store`). Shared utilities (`PERMISSIONS_POLICY` denying ~13 sensors/APIs, `HSTS` with preload, `Report-To` builder) live in `src/permissions-policy.ts`. The `Report-To` endpoint resolves to `${APP_ORIGIN}/csp-report` at request time so prod / preview / local each get the right URL.
+
+Package is `name: "arp-headers"` (unscoped, matches `arp-app` / `arp-view`), `private: true`, `type: "module"`, exports `./` `./view` `./app` directly from `src/*.ts` (no build step — both apps are Vite, which handles TS workspace deps natively).
+
+**Edge Middleware stubs:**
+
+- `apps/view/middleware.ts` — **ADR-014 lands here**: any GET carrying `Service-Worker: script` returns 403 with `x-edge-marker: view-mw-sw-blocked`. Other requests pass through `next()` with `x-edge-marker: view-mw` so Phase 0d's `edge-middleware.feature` test can assert the edge ran. Per-IP rate-limit + `scan_status` precheck are tagged `TODO Phase 1`.
+- `apps/app/middleware.ts` — placeholder `next()` with `x-edge-marker: app-mw`. Signup/login rate-limit + Turnstile + CSRF tagged `TODO Phase 1`.
+
+Both use `@vercel/edge`'s `next()` helper (added to each app's dependencies along with `arp-headers: workspace:*`).
+
+**`/health` routes rewired:**
+
+Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stringify(...), { headers })` where `headers` comes from the shared package. They override `content-type` + `cache-control: no-store` on top of the baseline stack so the `/health` JSON is always fresh but every other ADR-013 header still ships. This is the canonical pattern future routes will follow.
+
+**What's deliberately NOT in this commit:**
+
+- No CSP nonces yet — `'unsafe-inline'` in viewer `script-src` is permitted (ADR-013) because users author the scripts. We add nonces to the dashboard when there's actual inline script to nonce in Phase 1+.
+- No `/csp-report` endpoint — that's an `app.<domain>` route, lands in Phase 1 alongside the report ingestion table.
+- No Upstash wiring in the middlewares — Phase 1's rate-limit slice.
+- No unit tests yet — TDD scaffolding (`.claude/skills/tdd/SKILL.md` + hooks) is Phase 0e per ADR-022.
+
+**Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
