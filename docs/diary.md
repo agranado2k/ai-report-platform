@@ -469,3 +469,28 @@ Revised decision: **rebase-merge only**. Every PR commit is replayed onto `main`
 The decision lives under ADR-033 rather than a new ADR because it's the same problem (how does a commit reach `main` and what does it look like there) — the squash/rebase choice is internal to that decision, not an architectural pivot on its own.
 
 **Carry-over to 0c.5 (updated)**: register `Release` + `Commit messages (Conventional Commits)` as required status checks. `pr-title.yml` removed from the list since it no longer exists.
+
+### 2026-06-02 — Claude bot wiring (partial ADR-030 — Phase 0c.4a)
+
+User ran `/install-github-app` from Claude Code, which opens PR #5 with two workflows from the official `anthropics/claude-code-action@v1`. Rather than merge PR #5 separately, we folded its files into PR #4 with project-specific customization baked in:
+
+| File | What it does | Trigger |
+|---|---|---|
+| `.github/workflows/claude.yml` | `@claude` mention bot — responds in issue / PR / review-comment / review threads | `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `issues` (open/assign) — guarded by a job-level `if` that matches `@claude` in the relevant body |
+| `.github/workflows/claude-code-review.yml` | Auto-reviewer on every PR — uses the `code-review@claude-code-plugins` skill from Anthropic's plugin marketplace, posts inline review comments on the diff | `pull_request` opened / synchronize / ready_for_review / reopened |
+
+Customizations vs PR #5's defaults (all derived from the Claude Code Action [usage docs](https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md)):
+
+- **`use_commit_signing: true`** on `claude.yml` — our branch protection requires signed commits (ADR-025). The action signs via the GitHub API when this flag is on; no SSH key secret needed.
+- **`contents: write` + `pull-requests: write`** on `claude.yml` — the bot needs to commit fixes back and reply on review threads. PR #5 had only read permissions.
+- **`--max-turns 20`** on `claude.yml`, **`--max-turns 25`** on `claude-code-review.yml` — cost control.
+- **Project-policy `--system-prompt`** on `claude.yml` — tells Claude: every commit must be Conventional Commits (ADR-033), merges are rebase-only, ADR-024 forbids fp-ts / Effect / Remeda, never bypass the husky hook with `--no-verify`. Without this preamble, Claude would happily write non-conforming commits that fail the `commitlint` check and block the PR.
+- **Per-ADR prompt augmentation** on `claude-code-review.yml` — the plugin's default prompt is generic; we append project-specific flags (call out violations of ADR-013 / ADR-014 / ADR-024 / ADR-033 specifically). The reviewer learns our policies without manual context-paste.
+
+**Auth**: both workflows use `secrets.CLAUDE_CODE_OAUTH_TOKEN`, which the GitHub App install flow populated. Already in the repo's Actions secrets — no manual setup.
+
+**Scope vs ADR-030**: this is the Claude half. Gemini half (`gemini-review.yml`) is still pending for Phase 0c.4b — either as a separate official action or a custom workflow calling the Gemini API. Either way it's additive — review bots aren't gating (advisory only, per ADR-032).
+
+**Folding PR #5 into PR #4**: PR #5 will be closed after this PR merges. The bot workflows belong with the rest of the ADR-033 + ADR-030-related plumbing (commit-format enforcement + release pipeline + bot review wiring) so it all ships and applies together.
+
+**Carry-over to 0c.5**: do NOT add the Claude Code Review check to `required_status_checks` — bot reviews are advisory per ADR-032. The `Release` workflow and the `commitlint` workflow are the only release-pipeline checks worth gating on.

@@ -1,0 +1,63 @@
+name: Claude Code
+
+# Triggered when `@claude` appears in:
+#   - a top-level issue comment
+#   - a PR review comment (inline)
+#   - a PR review body
+#   - an issue body or title (on open / assign)
+#
+# Authentication uses `CLAUDE_CODE_OAUTH_TOKEN` (created by the GitHub App
+# install flow). Branch protection requires signed commits, so we set
+# `use_commit_signing: true` — the action signs via the GitHub API, no SSH
+# key secret needed.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # write needed: Claude may commit fixes back via use_commit_signing
+      pull-requests: write  # write needed: Claude may comment / reply on review threads
+      issues: write
+      id-token: write
+      actions: read         # read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Branch protection (ADR-025) requires signed commits. The action
+          # signs via the GitHub API when this flag is on.
+          use_commit_signing: true
+
+          additional_permissions: |
+            actions: read
+
+          # Project-policy preamble. Keeps Claude in line with ADR-024
+          # (no fp-ts/Effect/Remeda), ADR-033 (Conventional Commits +
+          # rebase-merge), and ADR-032 (solo-dev branch protection).
+          # --max-turns caps cost.
+          claude_args: |
+            --max-turns 20
+            --system-prompt "Project: ai-report-platform. Read CLAUDE.md and docs/diary.md first for ADRs and project state. Hard rules: (1) Every commit message MUST be Conventional Commits — feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert with optional (scope), subject <=100 chars. (2) Merges to main are rebase-only (ADR-033); do not propose merge commits. (3) ADR-024 forbids fp-ts/Effect/Remeda — use vanilla TS with the in-repo pipe() / Result helpers. (4) Domain types are readonly. (5) When pushing fixes, commit one logical change per commit so semantic-release picks them up cleanly. (6) Never bypass the husky commit-msg hook with --no-verify."

@@ -52,7 +52,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local pre-push hook runs a subset.
 
-3. PRs receive **automated review from Claude and Gemini** (ADR-030). Per ADR-032 (solo-developer mode), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
+3. PRs receive **automated review from Claude** (ADR-030 — Claude half live via `.github/workflows/claude-code-review.yml`; Gemini half pending). The `@claude` mention bot (`.github/workflows/claude.yml`) responds in PR / issue / review-comment threads — both authenticated by `CLAUDE_CODE_OAUTH_TOKEN` repo secret, with `use_commit_signing: true` so any commits Claude pushes satisfy branch protection. Per ADR-032 (solo-developer mode), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
 
 ## Infrastructure
 

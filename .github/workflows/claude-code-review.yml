@@ -1,0 +1,49 @@
+name: Claude Code Review
+
+# Automated code review on every PR (Phase 0c.4 / ADR-030 — the Claude
+# half of the dual AI-review setup; Gemini half lands separately).
+#
+# Uses the official `code-review@claude-code-plugins` skill from
+# Anthropic's plugin marketplace. The skill posts inline review comments
+# on the diff; it does NOT commit or push.
+#
+# Read-only permissions — this workflow only posts comments. No
+# branch-protection interaction needed.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # write needed: posts the review comments
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: |
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Apply project context: this repo follows the ADRs in CLAUDE.md
+            and docs/diary.md. Specifically flag any code that violates
+            ADR-024 (no fp-ts/Effect/Remeda; vanilla TS only in domain /
+            application layers), ADR-013 (the security header stack must
+            ship on every viewer response), ADR-014 (service workers
+            blocked at the edge), or ADR-033 (Conventional Commits).
+          claude_args: |
+            --max-turns 25
