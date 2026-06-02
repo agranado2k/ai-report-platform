@@ -87,21 +87,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Write backend config
+        # dflook/terraform-plan's `backend_config` input only accepts file
+        # paths or strict `key=value` pairs — it can't parse HCL like
+        # `bucket = "tf-state"`. And the `endpoints` value is a nested map
+        # which has no clean key=value form. So we materialize the config
+        # as a real HCL file and pass the path.
+        run: |
+          cat > /tmp/backend-shared.hcl <<EOF
+          bucket                      = "tf-state"
+          key                         = "shared.tfstate"
+          region                      = "auto"
+          endpoints                   = { s3 = "https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com" }
+          skip_credentials_validation = true
+          skip_metadata_api_check     = true
+          skip_region_validation      = true
+          skip_requesting_account_id  = true
+          use_path_style              = true
+          EOF
+
       - uses: dflook/terraform-plan@v2
         with:
           path: infra/terraform/envs/shared
           label: "tf-plan: shared"
           add_github_comment: changes-only
-          backend_config: |
-            bucket = "tf-state"
-            key = "shared.tfstate"
-            region = "auto"
-            endpoints = { s3 = "https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com" }
-            skip_credentials_validation = true
-            skip_metadata_api_check = true
-            skip_region_validation = true
-            skip_requesting_account_id = true
-            use_path_style = true
+          backend_config: /tmp/backend-shared.hcl
 
   # plan-staging removed: ADR-031 dropped persistent staging. Per-PR previews
   # via Vercel + ephemeral Neon branches cover what staging used to.
@@ -118,21 +128,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Write backend config
+        run: |
+          cat > /tmp/backend-prod.hcl <<EOF
+          bucket                      = "tf-state"
+          key                         = "prod.tfstate"
+          region                      = "auto"
+          endpoints                   = { s3 = "https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com" }
+          skip_credentials_validation = true
+          skip_metadata_api_check     = true
+          skip_region_validation      = true
+          skip_requesting_account_id  = true
+          use_path_style              = true
+          EOF
+
       - uses: dflook/terraform-plan@v2
         with:
           path: infra/terraform/envs/prod
           label: "tf-plan: prod"
           add_github_comment: changes-only
-          backend_config: |
-            bucket = "tf-state"
-            key = "prod.tfstate"
-            region = "auto"
-            endpoints = { s3 = "https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com" }
-            skip_credentials_validation = true
-            skip_metadata_api_check = true
-            skip_region_validation = true
-            skip_requesting_account_id = true
-            use_path_style = true
+          backend_config: /tmp/backend-prod.hcl
 
   # ═══════════════════════════════════════════════════════════════════════════
   # MAIN FLOW — terraform apply, shared → staging → prod, sequential
