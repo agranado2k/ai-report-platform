@@ -22,29 +22,14 @@ variable "visibility" {
 
 variable "required_status_checks" {
   type        = list(string)
-  description = "CI job names required to pass before a PR can merge. Must match the job names in .github/workflows/ci.yml exactly."
-  default = [
-    "ci / biome",
-    "ci / typecheck",
-    "ci / branch-name",
-    "ci / unit-tests",
-    "ci / migration-check",
-    "ci / e2e-tests",
-    "ci / security-headers",
-    "ci / bruno-contract",
-    "ci / docs-trigger-matrix",
-  ]
-}
-
-variable "codeowners_content" {
-  type        = string
-  description = "Raw text content of .github/CODEOWNERS."
-}
-
-variable "bot_email" {
-  type        = string
-  description = "Commit author email used when Terraform writes files into the repo (CODEOWNERS, etc.)."
-  default     = "terraform@noreply.local"
+  description = <<-EOT
+    CI job names required to pass before a PR can merge. Each name must
+    match an existing workflow job name EXACTLY, otherwise the branch
+    becomes unmergeable (the rule waits for checks that never arrive).
+    Default is an empty list — Phase 0c will populate it as ci.yml /
+    cd.yml workflows come online and prove they actually run.
+  EOT
+  default     = []
 }
 
 variable "actions_secrets" {

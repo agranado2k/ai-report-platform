@@ -28,7 +28,9 @@ resource "cloudflare_record" "this" {
   zone_id = data.cloudflare_zone.this.id
   name    = each.value.name
   type    = each.value.type
-  value   = each.value.value
+  # `content` replaces the deprecated `value` argument in cloudflare provider
+  # v4.40+. Same wire-level behavior; just the argument name changed.
+  content = each.value.value
   ttl     = lookup(each.value, "ttl", 1) # 1 = automatic
   proxied = lookup(each.value, "proxied", false)
   comment = lookup(each.value, "comment", null)

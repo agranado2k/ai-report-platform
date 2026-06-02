@@ -68,18 +68,12 @@ resource "github_branch_protection" "main" {
   allows_deletions                = false
 }
 
-# CODEOWNERS file — committed as part of the repo, so review-required logic
-# can attribute reviews correctly.
-resource "github_repository_file" "codeowners" {
-  repository          = github_repository.this.name
-  file                = ".github/CODEOWNERS"
-  branch              = "main"
-  content             = var.codeowners_content
-  commit_message      = "chore: terraform-managed CODEOWNERS"
-  commit_author       = "tf-bot"
-  commit_email        = var.bot_email
-  overwrite_on_create = true
-}
+# NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
+# NOT managed by Terraform. The earlier `github_repository_file` approach
+# tried to PUT the file via the API, which branch protection (with
+# enforce_admins = true) rejects: signed commits + PR required. Keeping
+# CODEOWNERS in source means edits go through PRs like any other file
+# change — no chicken-and-egg with the protection rule.
 
 # GitHub Actions secrets — sensitive values consumed by CI/CD workflows.
 resource "github_actions_secret" "this" {

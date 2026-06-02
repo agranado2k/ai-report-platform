@@ -1,0 +1,16 @@
+# CODEOWNERS — auto-applied review requirement.
+# Lines later in the file take precedence over earlier ones.
+# See https://docs.github.com/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+*                                @agranado2k
+
+# Sensitive areas — kept explicit so a security reviewer can easily
+# be added in v1.1 without touching every other line.
+/packages/domain/                @agranado2k
+/packages/application/           @agranado2k
+/apps/view/                      @agranado2k
+/infra/terraform/                @agranado2k
+/.github/                        @agranado2k
+/docs/adr/                       @agranado2k
+/docs/diary.md                   @agranado2k

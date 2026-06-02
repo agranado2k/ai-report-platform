@@ -38,25 +38,11 @@ module "neon_project" {
 }
 
 # 4) GitHub repo — the source-of-truth for the platform.
+# CODEOWNERS is NOT managed here — see the comment in modules/github-repo/main.tf.
+# The file lives at `.github/CODEOWNERS` in the repo root, edited via normal PRs.
 module "github_repo" {
   source    = "../../modules/github-repo"
   repo_name = "ai-report-platform"
-
-  codeowners_content = <<-EOF
-    # Terraform-managed CODEOWNERS — edits go through infra/terraform/modules/github-repo
-    *                                @agranado2k
-
-    # Sensitive areas (kept for clarity; we'll add a security advisor in v1.1)
-    /packages/domain/                @agranado2k
-    /packages/application/           @agranado2k
-    /apps/view/                      @agranado2k
-    /infra/terraform/                @agranado2k
-    /.github/workflows/              @agranado2k
-    /docs/adr/                       @agranado2k
-    /docs/diary.md                   @agranado2k
-  EOF
-
-  bot_email = var.operator_email
 
   actions_secrets = {
     # AI review (ADR-030)
