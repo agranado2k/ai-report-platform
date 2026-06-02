@@ -1,0 +1,47 @@
+name: Commit messages (Conventional Commits)
+
+# Lints every commit added by the PR. With rebase-merge enabled
+# (ADR-033 revised), each commit on the PR ends up on `main` verbatim
+# — so each one must individually follow Conventional Commits and is
+# what semantic-release will parse on the next release run.
+#
+# Belt-and-braces to the local husky commit-msg hook: catches commits
+# made with `--no-verify`, commits from outside this checkout, or
+# branches pushed before the hook was installed.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commitlint:
+    name: Lint PR commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the merge-base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install root devDependencies
+        run: pnpm install --no-frozen-lockfile --ignore-scripts --filter='!./apps/*' --filter='!./packages/*'
+
+      - name: Lint every commit in the PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose

@@ -365,7 +365,6 @@ The first three commits past the initial scaffold all hit Vercel build failures 
 
 **Memory pointer (future-me)**: the wrong fix on a "build is broken on Vercel" symptom is to chase package manager versions. The right fix is usually a Vercel-project-level setting (env var, Node version, Root Directory). Read the actual Vercel docs and community thread before bumping versions speculatively.
 
-<<<<<<< HEAD
 ### 2026-06-02 — Phase 0c.2: shared `arp-headers` package + Edge Middleware stubs
 
 Phase 0c.1 merged at `2fa0d22`; both Phase 0b and 0c.1 worktrees cleaned up. Phase 0c.2 starts in `worktree/phase-0c-shared-headers/` on `feat/phase-0c-shared-headers`.
@@ -402,7 +401,7 @@ Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stri
 - No unit tests yet — TDD scaffolding (`.claude/skills/tdd/SKILL.md` + hooks) is Phase 0e per ADR-022.
 
 **Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
-=======
+
 ### 2026-06-02 — ADR-033: Conventional Commits + semantic-release
 
 Two things needed for a clean release pipeline that's auditable across the team and across time:
@@ -445,7 +444,28 @@ Two things needed for a clean release pipeline that's auditable across the team 
 - `.github/workflows/pr-title.yml` — lints PR titles with the same type allowlist
 - `CLAUDE.md` — added rule #4 under "Before any change" with the commit-format rule + examples
 
-**Carry-over to 0c.5**: `release.yml` and `pr-title.yml` should be added to `required_status_checks` in the `github_branch_protection` module so a Conventional-Commits-failing PR can't merge.
+**Carry-over to 0c.5**: `release.yml` and `commitlint.yml` should be added to `required_status_checks` in the `github_branch_protection` module so a Conventional-Commits-failing PR can't merge.
 
 **Memory pointer**: zora-pantheon was the reference point for "find a release setup we've used before." Turned out it uses Changesets, not semantic-release; we adopted semantic-release anyway after weighing both. Don't conflate the two next time future-me hears "like the zora-pantheon setup."
->>>>>>> b5d44f6 (feat(release): Conventional Commits + semantic-release (ADR-033))
+
+#### ADR-033 revision (same day) — rebase-merge only, every commit preserved
+
+Initial 0c.x convention was squash-merge: branch protection's `allow_squash_merge = true` + `allow_rebase_merge = false`, with the PR title becoming the single squash commit on `main`. A `pr-title.yml` workflow linted that title.
+
+User pushed back: squash-merge throws away every commit on the PR and collapses useful history (the debug-and-fix sequence for the Vercel Corepack hunt is a vivid example — four commits chasing the wrong fix before landing the right one; squash erases the trail). It also feeds `semantic-release` only one commit per PR, so a single PR can only contribute one release-notes bullet even if it did multiple `feat:` + `fix:` things.
+
+Revised decision: **rebase-merge only**. Every PR commit is replayed onto `main` in order, preserving full history while staying linear (branch protection's `required_linear_history = true` is happy — rebase produces a linear sequence). `semantic-release` on the next run sees every typed commit and aggregates them properly into the release notes.
+
+**Implications + the workflow churn:**
+
+- The PR title is no longer the merge commit, so `pr-title.yml` is obsolete. Deleted.
+- **Every individual commit** now matters. The local `.husky/commit-msg` hook stays. Added `.github/workflows/commitlint.yml` that lints every commit in the PR range (`pnpm exec commitlint --from $BASE_SHA --to $HEAD_SHA --verbose`) as belt-and-braces against commits made with `--no-verify` or pushed from outside this checkout.
+- **PR authors must curate before opening**: if a PR has a "fix typo" or "address review feedback" commit, squash it locally with `git rebase -i` first. The on-main history is the historical record; nobody wants a typo-fix line in v1.4.2's release notes. CLAUDE.md rule #4 updated accordingly.
+
+**Terraform diff:**
+
+- `modules/github-repo/main.tf` — `allow_squash_merge = true → false`; `allow_rebase_merge = false → true`. Comment block explaining the rationale + the trade-off.
+
+The decision lives under ADR-033 rather than a new ADR because it's the same problem (how does a commit reach `main` and what does it look like there) — the squash/rebase choice is internal to that decision, not an architectural pivot on its own.
+
+**Carry-over to 0c.5 (updated)**: register `Release` + `Commit messages (Conventional Commits)` as required status checks. `pr-title.yml` removed from the list since it no longer exists.
