@@ -80,10 +80,15 @@ jobs:
       TF_VAR_apex_domain: ${{ vars.APEX_DOMAIN }}
       TF_VAR_operator_email: ${{ vars.OPERATOR_EMAIL }}
       TF_VAR_github_token: ${{ secrets.GH_REPO_ADMIN_TOKEN }}
+      TF_VAR_neon_org_id: ${{ secrets.NEON_ORG_ID }}
       TF_VAR_resend_dns_records: ${{ secrets.RESEND_DNS_RECORDS_JSON }}
       TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
       TF_VAR_gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
       TF_VAR_resend_api_key: ${{ secrets.RESEND_API_KEY }}
+      # dflook's docker container needs an explicit GITHUB_TOKEN to post the
+      # plan diff as a PR comment; secrets.GITHUB_TOKEN is the auto-provided
+      # ephemeral token, sufficient for pulls + writing PR comments.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +130,8 @@ jobs:
     env:
       TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_PROD }}
       TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY_PROD }}
+      # Required so dflook's container can post the plan as a PR comment.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -164,6 +171,7 @@ jobs:
       TF_VAR_apex_domain: ${{ vars.APEX_DOMAIN }}
       TF_VAR_operator_email: ${{ vars.OPERATOR_EMAIL }}
       TF_VAR_github_token: ${{ secrets.GH_REPO_ADMIN_TOKEN }}
+      TF_VAR_neon_org_id: ${{ secrets.NEON_ORG_ID }}
       TF_VAR_resend_dns_records: ${{ secrets.RESEND_DNS_RECORDS_JSON }}
       TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
       TF_VAR_gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
