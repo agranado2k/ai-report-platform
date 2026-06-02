@@ -1,8 +1,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { appHeaders } from "arp-headers/app";
 
 export async function loader(_args: LoaderFunctionArgs) {
-  return Response.json(
-    {
+  const headers = appHeaders();
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
+
+  return new Response(
+    JSON.stringify({
       status: "ok",
       service: "app",
       phase: "0c",
@@ -13,12 +18,7 @@ export async function loader(_args: LoaderFunctionArgs) {
         r2: "not-wired",
       },
       timestamp: new Date().toISOString(),
-    },
-    {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "application/json; charset=utf-8",
-      },
-    },
+    }),
+    { headers },
   );
 }
