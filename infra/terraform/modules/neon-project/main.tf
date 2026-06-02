@@ -49,23 +49,24 @@ resource "neon_role" "main" {
 }
 
 # Staging branch (forks from main; copy-on-write storage).
+#
+# Neon copies the parent branch's role + database into the new branch
+# automatically when a branch is forked. Creating a separate `neon_role` or
+# `neon_database` on this branch would conflict with the inherited copy
+# ("role already exists"), which is exactly what caused our first apply to
+# leave 2 of 7 Neon resources missing.
+#
+# So we DON'T create staging-specific role/database resources. We reuse the
+# inherited ones — same role name ("app") and database name ("ai_report_platform")
+# as on `main`, just resolved through this branch's compute endpoint.
+#
+# Trade-off for v1: rotating the main role's password would log out staging
+# until the staging branch is re-forked. Acceptable now; revisit in v1.1 if
+# we ever need credential isolation per env.
 resource "neon_branch" "staging" {
   project_id = neon_project.this.id
   parent_id  = neon_project.this.default_branch_id
   name       = "staging"
-}
-
-resource "neon_database" "staging" {
-  project_id = neon_project.this.id
-  branch_id  = neon_branch.staging.id
-  name       = var.database_name
-  owner_name = neon_role.staging.name
-}
-
-resource "neon_role" "staging" {
-  project_id = neon_project.this.id
-  branch_id  = neon_branch.staging.id
-  name       = var.role_name
 }
 
 resource "neon_endpoint" "staging" {
