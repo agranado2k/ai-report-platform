@@ -17,10 +17,16 @@ terraform {
 
 resource "upstash_redis_database" "this" {
   database_name = var.name
-  region        = var.region
-  tls           = true
-  # Note: `multizone` was removed (deprecated by Upstash; auto-enabled on
-  # paid plans). The `multizone` variable is kept as a no-op for callers
-  # so the env compositions don't break; we may reuse it for a future
-  # "tier" abstraction.
+  # Upstash deprecated regional databases. All new Redis instances are
+  # "global" — backed by a primary region and 0+ read replicas. We pin the
+  # primary to the var.region value (callers pass e.g. "us-east-1"); read
+  # replicas are configurable via var.read_regions but default to empty
+  # (single-region global, which behaves like the old regional setup for
+  # cost + latency).
+  primary_region = var.region
+  read_regions   = var.read_regions
+  tls            = true
+  # `multizone` and the old `region` are gone from the resource; the
+  # corresponding variables are kept as no-ops below so existing env
+  # compositions don't break.
 }
