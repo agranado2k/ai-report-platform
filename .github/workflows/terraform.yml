@@ -88,13 +88,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Write backend config
-        # dflook/terraform-plan's `backend_config` input only accepts file
-        # paths or strict `key=value` pairs — it can't parse HCL like
-        # `bucket = "tf-state"`. And the `endpoints` value is a nested map
-        # which has no clean key=value form. So we materialize the config
-        # as a real HCL file and pass the path.
+        # dflook/terraform-plan runs in a docker container that mounts
+        # $GITHUB_WORKSPACE — /tmp on the runner host isn't visible inside
+        # the container. The file has to live in the workspace, ideally
+        # inside the env dir so the action's `backend_config` resolves it
+        # relative to its `path`.
         run: |
-          cat > /tmp/backend-shared.hcl <<EOF
+          cat > infra/terraform/envs/shared/backend.hcl <<EOF
           bucket                      = "tf-state"
           key                         = "shared.tfstate"
           region                      = "auto"
@@ -111,7 +111,7 @@ jobs:
           path: infra/terraform/envs/shared
           label: "tf-plan: shared"
           add_github_comment: changes-only
-          backend_config: /tmp/backend-shared.hcl
+          backend_config: backend.hcl
 
   # plan-staging removed: ADR-031 dropped persistent staging. Per-PR previews
   # via Vercel + ephemeral Neon branches cover what staging used to.
@@ -130,7 +130,7 @@ jobs:
 
       - name: Write backend config
         run: |
-          cat > /tmp/backend-prod.hcl <<EOF
+          cat > infra/terraform/envs/prod/backend.hcl <<EOF
           bucket                      = "tf-state"
           key                         = "prod.tfstate"
           region                      = "auto"
@@ -147,7 +147,7 @@ jobs:
           path: infra/terraform/envs/prod
           label: "tf-plan: prod"
           add_github_comment: changes-only
-          backend_config: /tmp/backend-prod.hcl
+          backend_config: backend.hcl
 
   # ═══════════════════════════════════════════════════════════════════════════
   # MAIN FLOW — terraform apply, shared → staging → prod, sequential
