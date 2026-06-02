@@ -516,3 +516,45 @@ Adds the Gemini half of the dual AI review. With this, ADR-030's "Claude + Gemin
 **Open question**: Gemini's review prompt currently asks it to read `CLAUDE.md` and `docs/diary.md`. CLAUDE.md is the Claude-aimed name, but the *content* is project policy applicable to any reviewer. Renaming to `AGENTS.md` or `CONTRIBUTING.md` would be more inclusive — flagged but not urgent. Tracking for the next housekeeping pass.
 
 **Carry-over to 0c.5**: same as the Claude review — do NOT add `Gemini Code Review` to `required_status_checks`. Advisory only.
+
+### 2026-06-02 — `/pr-iterate` skill: closed-loop PR drive-to-green (Phase 0c.4c)
+
+The dual AI review (ADR-030) is now wired, but the operator still has to manually read the bot comments + failing checks and decide what to do. That's the gap this slice closes — gives Claude Code (the local IDE/CLI tool) a procedure to drive an open PR to green on its own, advisory comments and all.
+
+**File**: `.claude/skills/pr-iterate/SKILL.md`
+
+**Invocation**:
+
+| Mode | Command | When to use |
+|---|---|---|
+| Single iteration | `/pr-iterate <PR#>` | After a manual push, to clean up any new bot feedback before walking away |
+| Continuous loop | `/loop /pr-iterate <PR#>` | "Set it and forget it" — the loop runner re-fires the skill every wake-up until the stop condition is reached |
+
+Each iteration runs the same five-step procedure: snapshot via `gh` → triage against project ADRs → apply / reply / escalate → commit + push as Conventional Commits → report status. The skill **never merges**, **never `--force-push`s**, and **never `--no-verify`s** the husky hook. It escalates when a bot suggestion contradicts an ADR or when it genuinely can't diagnose a failing check from the logs.
+
+**Why a skill rather than a hook**:
+
+- Hooks fire on events Claude Code knows about (`Stop`, `UserPromptSubmit`, etc.). A `Stop` hook that auto-fires `/pr-iterate` on session end was tempting, but the noise is high — every session would trigger a poll, even sessions that didn't touch a PR.
+- A skill is **opt-in by invocation**, which is the right blast radius. Operator decides when to start the loop; operator decides when to stop (`Ctrl-C` the loop or close the session).
+- A skill **composes with `/loop`** for free, which gives the auto-iteration behavior without writing custom scheduling logic.
+
+**Triage policy** (codified in the skill):
+
+| Suggestion class | Skill action |
+|---|---|
+| Improves security / correctness / readability, no ADR conflict | Apply, commit, optionally reply on thread |
+| Contradicts an ADR (e.g. "use fp-ts" violates ADR-024, "squash to one commit" violates ADR-033) | Reply on thread with the ADR number cited; don't apply |
+| Ambiguous — touches an open question or needs a design call | Escalate to operator with a one-line summary; stop the iteration |
+| Test failure I can't diagnose from logs | Escalate (don't guess at fixes) |
+
+**What it deliberately doesn't do**:
+
+- **No PR merging** — that's GitHub's gate, not Claude's.
+- **No branch-protection modification** — even via Terraform from inside the iteration. ADR-032 changes go through their own PR.
+- **No sleep-polling inside one iteration** when invoked via `/loop` — the loop runner schedules the next wake; the iteration just runs once and returns.
+- **No Stop-hook auto-trigger** for v1 — opt-in invocation is the right blast radius. Revisit if the manual cadence is genuinely annoying.
+
+**Cross-references the skill cites by ADR number in replies** (so future-greps work):
+- ADR-013 (security headers) · ADR-014 (SW block) · ADR-024 (no fp-ts) · ADR-025 (PR + signed commits + linear) · ADR-030 (dual AI review) · ADR-032 (0 approvals) · ADR-033 (Conventional Commits + rebase-merge)
+
+**Carry-over to a future polish pass**: when the skill encounters its first real "I can't apply this — needs a human" case, capture the pattern in the diary so the triage table grows over time. The current table covers the obvious cases; edge cases will emerge from use.

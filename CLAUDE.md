@@ -74,6 +74,7 @@ This repo IS NOT:
 | ---------------------------------------- | ----------------------------------------------- |
 | Write code                               | `/tdd <task>` (ADR-022)                         |
 | Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
+| Iterate on bot review + CI on an open PR | `/pr-iterate <PR#>` (one pass) · `/loop /pr-iterate <PR#>` (continuous) |
 | Check docs are in sync                   | `/docs-check`                                   |
 | Update API surface                       | Edit `docs/api/openapi.yaml`; Bruno auto-regens |
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |
