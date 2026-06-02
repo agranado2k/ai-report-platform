@@ -10,6 +10,16 @@ variable "bucket_names" {
 
 variable "location" {
   type        = string
-  description = "Location hint. 'auto', 'wnam' (Western North America), 'enam' (Eastern North America), 'weur', 'eeur', 'apac'."
+  description = <<-EOT
+    R2 location hint. Case-insensitive (the module upper-cases it before
+    sending to the provider):
+      WNAM   Western North America
+      ENAM   Eastern North America
+      WEUR   Western Europe
+      EEUR   Eastern Europe
+      APAC   Asia-Pacific
+      OC     Oceania
+      auto   Cloudflare picks
+  EOT
   default     = "auto"
 }

@@ -20,7 +20,10 @@ resource "cloudflare_r2_bucket" "this" {
   for_each   = toset(var.bucket_names)
   account_id = var.account_id
   name       = each.value
-  location   = var.location
+  # The provider requires uppercase ("ENAM", "WEUR", …). Normalizing here
+  # so callers can pass either case — Cloudflare's own docs are inconsistent
+  # about which to use.
+  location = upper(var.location)
 
   # R2 versioning isn't yet a first-class TF resource in cloudflare/cloudflare
   # v4. Enable it via the dashboard or via the API in a null_resource hook.
