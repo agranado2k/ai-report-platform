@@ -494,3 +494,25 @@ Customizations vs PR #5's defaults (all derived from the Claude Code Action [usa
 **Folding PR #5 into PR #4**: PR #5 will be closed after this PR merges. The bot workflows belong with the rest of the ADR-033 + ADR-030-related plumbing (commit-format enforcement + release pipeline + bot review wiring) so it all ships and applies together.
 
 **Carry-over to 0c.5**: do NOT add the Claude Code Review check to `required_status_checks` — bot reviews are advisory per ADR-032. The `Release` workflow and the `commitlint` workflow are the only release-pipeline checks worth gating on.
+
+### 2026-06-02 — Gemini bot wiring (closes ADR-030 — Phase 0c.4b)
+
+Adds the Gemini half of the dual AI review. With this, ADR-030's "Claude + Gemini auto-review on every PR" is fully wired — both bots run on every PR open / sync / ready / reopen, both post inline review comments, and neither gates the merge (advisory per ADR-032).
+
+**`.github/workflows/gemini-review.yml`** uses the official `google-github-actions/run-gemini-cli@v0` action with the `code-review` extension from `gemini-cli-extensions`. Adapted from the [upstream `pr-review` example](https://github.com/google-github-actions/run-gemini-cli/blob/main/examples/workflows/pr-review/gemini-review.yml), with the following deliberate simplifications:
+
+1. **Self-contained, not a `workflow_call`** — upstream is a reusable workflow that needs a separate dispatcher. We trigger directly on `pull_request` events to avoid the dispatcher layer for a solo-dev setup.
+2. **API-key auth, not Workload Identity Federation** — WIF is Google's recommended production path but needs a GCP project to federate against. Our `GEMINI_API_KEY` repo secret (already populated by Phase 0b's Terraform via `actions_secrets`) is sufficient for now. When a GCP project lands, swap the auth inputs — the action supports both modes simultaneously.
+3. **Project-policy prompt** — same pattern as `claude-code-review.yml`: the upstream's `/pr-code-review` slash command runs as-is, but we append flags directing Gemini to specifically call out violations of ADR-013 (security headers), ADR-014 (service workers blocked at edge), ADR-024 (no fp-ts/Effect/Remeda; readonly domain), ADR-033 (Conventional Commits + rebase-merge), and ADR-025/032 (solo-dev branch protection — so it doesn't flag the 0-approval setup as a finding).
+4. **GitHub MCP server** scoped to the three tools the reviewer actually needs (`add_comment_to_pending_review`, `pull_request_read`, `pull_request_review_write`) rather than the upstream's broader set. Smaller blast radius if the action is ever compromised.
+
+**A note on the consumer Gemini Code Assist GitHub App**: per Google's docs, the consumer-tier "Gemini Code Assist on GitHub" app is scheduled to shut down **2026-07-17**. We deliberately did NOT install that app — `run-gemini-cli` is the supported path forward. If we ever onboarded the App for one-click setup, we'd need to migrate before that shutdown anyway. Skipped the round-trip.
+
+**No mention bot for Gemini** (yet): the upstream provides a `gemini-invoke` workflow that responds to `@gemini-cli` mentions, mirroring our `claude.yml`. Skipped because:
+- The Claude mention bot is enough for "let an LLM help me on a PR" use cases.
+- The Gemini auto-reviewer is where ADR-030's value lives (second opinion on every PR).
+- Adding it later is a single file — no architectural lock-in.
+
+**Open question**: Gemini's review prompt currently asks it to read `CLAUDE.md` and `docs/diary.md`. CLAUDE.md is the Claude-aimed name, but the *content* is project policy applicable to any reviewer. Renaming to `AGENTS.md` or `CONTRIBUTING.md` would be more inclusive — flagged but not urgent. Tracking for the next housekeeping pass.
+
+**Carry-over to 0c.5**: same as the Claude review — do NOT add `Gemini Code Review` to `required_status_checks`. Advisory only.
