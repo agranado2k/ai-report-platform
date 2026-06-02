@@ -9,8 +9,9 @@ module "resend_domain" {
   dns_records = var.resend_dns_records
 }
 
-# 2) Cloudflare zone — DNS + zone settings. Merges Resend's verification records
-#    with our own app/view records for both prod and staging.
+# 2) Cloudflare zone — DNS + zone settings. Merges Resend's verification
+#    records with our own production app/view records. Per-PR previews use
+#    Vercel-generated preview domains (`*.vercel.app`), no DNS needed.
 locals {
   apex          = var.apex_domain
   vercel_target = "cname.vercel-dns.com" # constant — every Vercel custom domain CNAMEs here
@@ -18,8 +19,6 @@ locals {
   app_view_records = [
     { name = "app", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production dashboard" },
     { name = "view", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production viewer" },
-    { name = "staging.app", type = "CNAME", value = local.vercel_target, proxied = false, comment = "staging dashboard" },
-    { name = "staging.view", type = "CNAME", value = local.vercel_target, proxied = false, comment = "staging viewer" },
   ]
 
   all_records = concat(local.app_view_records, module.resend_domain.dns_records)

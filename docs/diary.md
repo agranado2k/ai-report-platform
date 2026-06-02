@@ -8,7 +8,7 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | 0b complete: modules + `terraform.yml` GHA workflow written and validated. **Awaiting operator bootstrap + first push to GitHub** for any actual `apply`. Phase 0c next (skeleton apps + remaining CI/CD workflows). |
+| **Phase**              | 0b near-complete: shared applied, staging destroyed (ADR-031), prod awaiting final apply (Upstash slot just freed). Phase 0c next (skeleton apps + remaining CI/CD workflows). |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` (active worktree, per the new convention) |
 | **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
 | **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
@@ -265,3 +265,32 @@ Also surfaced — and this one I should have caught when I wrote `tf.sh` origina
 **Bootstrap walkthrough also delivered** in chat — the explicit `tf.sh shared init → shared import → shared apply → staging → prod` sequence with the GitHub-repo import step (`module.github_repo.github_repository.this`) before `shared apply`, since the repo already exists from yesterday's push.
 
 **Net effect on the branch**: this commit. No infrastructure changes; layout + convention + diary only.
+
+### 2026-06-02 — ADR-031: continuous deployment to prod; persistent staging dropped
+
+After applying shared, running staging through ~half a dozen real provider-quirk fixes (Neon org_id, Neon retention cap, Neon branch role inheritance, R2 location case, Upstash regional→global, Upstash free-tier limit, GitHub Variables permission), the user called the architectural question: **is persistent staging actually carrying its weight?**
+
+Decision: **no.** Staging is removed. The platform deploys continuously to prod.
+
+What we keep, what we drop:
+
+- **Kept**: per-PR Vercel preview deploys (every PR gets `<sha>.vercel.app` URLs for app + view automatically), per-PR ephemeral Neon branches (CI provisions them via the Neon API; deleted on PR close), prefix-isolated R2 and Upstash for CI's test data (`pr-<N>/` keys + `pr-<N>:` namespaces).
+- **Dropped**: persistent staging Vercel projects (`arp-app-staging`, `arp-view-staging`), staging R2 buckets (`arp-reports-staging`, `arp-reports-ci`), staging Upstash database (`arp-staging`), staging Clerk test instance (still exists in Clerk dashboard; Terraform just stops referencing it), the persistent `staging` branch on the Neon project (main = prod), staging DNS records (`staging.app.agranado.com` / `staging.view.agranado.com`), `envs/staging/` Terraform directory, `plan-staging` + `apply-staging` GHA jobs.
+
+The architectural rationale: at solo + LLM-assisted scale, **the safety net staging used to provide is now provided by other layers** — Vercel previews surface UX/visual issues per-PR; ephemeral Neon branches catch migration breakage per-PR; AI review (Claude + Gemini) + human review catch code defects per-PR; and the production blast radius is bounded by the size of any single change. Persistent staging was costing real Upstash/Vercel quota and forcing a manual "promote to prod" decision that, in practice, was always going to be "yes" after CI green + Vercel preview looked right.
+
+This is a deliberate revision of the spec's **ADR-019** (infrastructure-first delivery had shared → staging → prod) and **ADR-026/029** (CD pipeline ran apply-staging before apply-prod). The infrastructure-first principle stands — every PR still runs against real infrastructure, just not a persistent staging slice. The CD pipeline stays "PR → CI green → human + AI review → merge → auto-apply" but the apply chain shortens to `shared → prod`.
+
+**Code changes landed in this commit:**
+- Deleted `infra/terraform/envs/staging/` (composition + secrets template; the gitignored secrets.auto.tfvars went with it)
+- Simplified `modules/neon-project/main.tf` — removed `neon_branch.staging` and `neon_endpoint.staging`; the project is now single-branch (main). Per-PR ephemeral branches still happen via the Neon API from CI.
+- Trimmed `modules/neon-project/outputs.tf` — removed `staging_connection_uri`
+- Trimmed `envs/shared/outputs.tf` — removed `neon_staging_connection_uri`
+- Trimmed `envs/shared/main.tf` — removed the two staging DNS records from `local.app_view_records`
+- Trimmed `.github/workflows/terraform.yml` — removed `plan-staging` and `apply-staging` jobs; updated header comments and the fmt-and-validate loop from `for env in shared staging prod` to `for env in shared prod`. Five jobs total now: plan-shared, plan-prod, apply-shared, apply-prod, fmt-and-validate.
+
+**What this leaves for next apply (operator-side):**
+- `tf.sh shared apply` will diff: destroy `neon_branch.staging`, `neon_endpoint.staging`, and the 2 staging DNS records — clean reconciliation between state and the new code. Probably "0 to add, 0 to change, 4 to destroy."
+- `tf.sh prod apply` will then succeed for Upstash (slot freed by the staging destroy step + the now-removed staging Neon branch).
+
+Spec/HTML carry the old shared→staging→prod model and will need a follow-up sync (Phase 0c-ish). The diary is the authoritative log for this decision until that sync happens.

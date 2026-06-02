@@ -1,4 +1,5 @@
-# Outputs consumed by envs/prod and envs/staging via terraform_remote_state.
+# Outputs consumed by envs/prod via terraform_remote_state.
+# (envs/staging was removed in ADR-031 — continuous deployment to prod.)
 
 output "apex_domain" {
   value = var.apex_domain
@@ -13,15 +14,11 @@ output "github_repo_full_name" {
 }
 
 output "neon_project_id" {
-  value = module.neon_project.project_id
+  value       = module.neon_project.project_id
+  description = "Per-PR ephemeral branches are created from this project id by CI via the Neon API."
 }
 
 output "neon_prod_connection_uri" {
   value     = module.neon_project.prod_connection_uri
-  sensitive = true
-}
-
-output "neon_staging_connection_uri" {
-  value     = module.neon_project.staging_connection_uri
   sensitive = true
 }

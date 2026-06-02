@@ -6,9 +6,9 @@
 #   - Different concurrency (we NEVER want to cancel a running apply)
 #   - Clearer failure attribution
 #
-# On PR: `terraform plan` for shared/staging/prod, in parallel, posts each plan
+# On PR: `terraform plan` for shared/prod, in parallel, posts each plan
 #        as a sticky comment on the PR via dflook/terraform-plan@v2.
-# On push to main: `terraform apply` for shared → staging → prod, sequentially,
+# On push to main: `terraform apply` for shared → prod, sequentially,
 #                  via infra/terraform/scripts/tf.sh (ADR-018: Postgres advisory lock).
 #
 # References: ADR-017 (Terraform for all infra), ADR-018 (R2 state + PG lock),
@@ -103,33 +103,8 @@ jobs:
             skip_requesting_account_id = true
             use_path_style = true
 
-  plan-staging:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: tf-plan-${{ github.event.pull_request.number }}-staging
-      cancel-in-progress: true
-    env:
-      TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
-      TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dflook/terraform-plan@v2
-        with:
-          path: infra/terraform/envs/staging
-          label: "tf-plan: staging"
-          add_github_comment: changes-only
-          backend_config: |
-            bucket = "tf-state"
-            key = "staging.tfstate"
-            region = "auto"
-            endpoints = { s3 = "https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com" }
-            skip_credentials_validation = true
-            skip_metadata_api_check = true
-            skip_region_validation = true
-            skip_requesting_account_id = true
-            use_path_style = true
+  # plan-staging removed: ADR-031 dropped persistent staging. Per-PR previews
+  # via Vercel + ephemeral Neon branches cover what staging used to.
 
   plan-prod:
     if: github.event_name == 'pull_request'
@@ -195,35 +170,10 @@ jobs:
       - name: Apply
         run: infra/terraform/scripts/tf.sh shared apply -auto-approve
 
-  apply-staging:
-    needs: apply-shared
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: tf-apply-staging
-      cancel-in-progress: false
-    env:
-      TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
-      TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Install psql
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client
-
-      - name: Init
-        run: infra/terraform/scripts/tf.sh staging init
-
-      - name: Apply
-        run: infra/terraform/scripts/tf.sh staging apply -auto-approve
+  # apply-staging removed: see ADR-031. CD chain is now shared → prod direct.
 
   apply-prod:
-    needs: apply-staging
+    needs: apply-shared
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
@@ -270,7 +220,7 @@ jobs:
       - name: terraform validate (all envs)
         run: |
           set -e
-          for env in shared staging prod; do
+          for env in shared prod; do
             echo "=== validate $env ==="
             (cd infra/terraform/envs/$env && terraform init -backend=false -input=false && terraform validate)
           done

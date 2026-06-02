@@ -48,31 +48,9 @@ resource "neon_role" "main" {
   name       = var.role_name
 }
 
-# Staging branch (forks from main; copy-on-write storage).
-#
-# Neon copies the parent branch's role + database into the new branch
-# automatically when a branch is forked. Creating a separate `neon_role` or
-# `neon_database` on this branch would conflict with the inherited copy
-# ("role already exists"), which is exactly what caused our first apply to
-# leave 2 of 7 Neon resources missing.
-#
-# So we DON'T create staging-specific role/database resources. We reuse the
-# inherited ones — same role name ("app") and database name ("ai_report_platform")
-# as on `main`, just resolved through this branch's compute endpoint.
-#
-# Trade-off for v1: rotating the main role's password would log out staging
-# until the staging branch is re-forked. Acceptable now; revisit in v1.1 if
-# we ever need credential isolation per env.
-resource "neon_branch" "staging" {
-  project_id = neon_project.this.id
-  parent_id  = neon_project.this.default_branch_id
-  name       = "staging"
-}
-
-resource "neon_endpoint" "staging" {
-  project_id               = neon_project.this.id
-  branch_id                = neon_branch.staging.id
-  type                     = "read_write"
-  autoscaling_limit_min_cu = 0.25
-  autoscaling_limit_max_cu = var.max_compute_units
-}
+# Note: there's no persistent `staging` branch here. The platform deploys
+# continuously to prod (ADR-031); the `main` branch is production and
+# per-PR ephemeral branches are created by CI on-demand via the Neon API,
+# not Terraform. If a long-lived staging branch becomes useful later
+# (e.g. for shared QA), add `neon_branch.staging` + `neon_endpoint.staging`
+# back; the inherited-role pattern documented earlier still applies.
