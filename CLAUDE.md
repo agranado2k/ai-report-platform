@@ -30,6 +30,8 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 3. **Read the relevant ADR** before changing infrastructure or security code. ADRs live in `docs/adr/`. Currently 30 records; the full spec is in `docs/spec.html`.
 
+4. **Use Conventional Commits** (ADR-033). Every commit message and every PR title must start with one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`, optionally followed by `(scope)`, then `:`, then a subject ≤100 chars. Examples: `feat(headers): add Trusted Types policy`, `fix(viewer): block service worker registration`, `chore(deps): bump turbo to 2.5.4`. `feat` drives a minor bump on merge, `fix`/`perf` drive patch, `BREAKING CHANGE:` in the body drives major; everything else ships under the next release without bumping. The local husky `commit-msg` hook lints commits at write time; a CI workflow lints the PR title (which becomes the squash-merge commit on `main`).
+
 ## Style
 
 - **Functional, immutable** for `packages/domain/` and `packages/application/` (ADR-024). No new FP libraries — vanilla TS + 12-line `pipe()` + 15-line `Result<T, E>`.

@@ -8,14 +8,14 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | Phase 0c.1 merged at `2fa0d22` (PR #2 — green Vercel + ADR-032 solo-dev branch protection). Phase 0c.2 in progress: `packages/headers` shared security-headers package + Edge MW stubs (Service-Worker block + edge marker). Sub-PRs remaining: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection + Terraform-codify the Vercel Corepack env var. |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` (active worktree). Old 0b + 0c.1 worktrees cleaned up. |
-| **Branch**             | `feat/phase-0c-shared-headers` open against `main` (local, not pushed yet) |
-| **Last commit on main**        | `2fa0d22` — `Phase 0c.1: monorepo scaffold + skeleton Remix apps (#2)` |
+| **Phase**              | Phase 0c.2 merged at `c04de5c` (PR #3 — shared `arp-headers` package + Edge MW stubs). PR #4 in flight on `feat/phase-0c-commit-conventions`: Conventional Commits enforcement + semantic-release pipeline + rebase-merge revision (ADR-033) + Vercel Corepack env-var Terraform codification. Sub-PRs remaining after #4: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection. |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` (active worktree). Old 0b / 0c.1 / 0c.2 worktrees cleaned up. |
+| **Branch**             | `feat/phase-0c-commit-conventions` open against `main` (PR #4 — rebased on `c04de5c`) |
+| **Last commit on main**        | `c04de5c` — `Phase 0c.2: shared arp-headers + Edge MW stubs (#3)` |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
-| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PR #2), GitHub repo with ADR-032 branch protection (0 required approvals). Vercel projects also have `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for `feat/phase-0c-skeleton-apps` preview — codification deferred to 0c.5. |
-| **Active worktrees**   | `feat/phase-0c-shared-headers` at `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` |
-| **Spec status**        | rev 7 · 32 ADRs (ADR-031 + ADR-032 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
+| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PRs #2 and #3), GitHub repo with ADR-032 branch protection (0 required approvals, still squash-merge until PR #4 applies). `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for both PR #2 and PR #3 preview branches; PR #4 codifies it in `envs/prod/main.tf` so every future branch inherits it. |
+| **Active worktrees**   | `feat/phase-0c-commit-conventions` at `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` |
+| **Spec status**        | rev 7 · 33 ADRs (ADR-031 + ADR-032 + ADR-033 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
 
 ### Open questions / unresolved decisions
 
@@ -365,6 +365,7 @@ The first three commits past the initial scaffold all hit Vercel build failures 
 
 **Memory pointer (future-me)**: the wrong fix on a "build is broken on Vercel" symptom is to chase package manager versions. The right fix is usually a Vercel-project-level setting (env var, Node version, Root Directory). Read the actual Vercel docs and community thread before bumping versions speculatively.
 
+<<<<<<< HEAD
 ### 2026-06-02 — Phase 0c.2: shared `arp-headers` package + Edge Middleware stubs
 
 Phase 0c.1 merged at `2fa0d22`; both Phase 0b and 0c.1 worktrees cleaned up. Phase 0c.2 starts in `worktree/phase-0c-shared-headers/` on `feat/phase-0c-shared-headers`.
@@ -401,3 +402,50 @@ Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stri
 - No unit tests yet — TDD scaffolding (`.claude/skills/tdd/SKILL.md` + hooks) is Phase 0e per ADR-022.
 
 **Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
+=======
+### 2026-06-02 — ADR-033: Conventional Commits + semantic-release
+
+Two things needed for a clean release pipeline that's auditable across the team and across time:
+
+1. **Commit-message format the team can parse** — humans and tools both. The Conventional Commits standard (`<type>(<scope>): <subject>`) is the de-facto choice, has tooling everywhere, and maps cleanly onto SemVer (`feat` → minor, `fix`/`perf` → patch, `BREAKING CHANGE:` → major).
+2. **An automatic version + tag + release pipeline** so we never debate "what's in prod right now" — the answer is `v1.4.2` and the GitHub Release has the bullet list of what changed.
+
+**Decision**: Adopt Conventional Commits across all commits and PR titles; use the `semantic-release` npm package on merge-to-`main` to compute the next version, write the git tag, and publish a GitHub Release with auto-generated notes. No npm publish (this isn't a distributed library); no in-repo `CHANGELOG.md` (GitHub Releases is the source of truth — see "branch-protection interaction" below).
+
+**Why semantic-release and not Changesets** (the obvious alternative): we evaluated. Changesets is the better fit for libraries published to npm where per-package versioning matters. Our shape is a SaaS — single application, multiple internal packages — and the team's stated preference is commit-driven (one less file to remember when opening a PR). Diary entry stands as the comparison record so this isn't relitigated.
+
+**Why no in-repo `CHANGELOG.md` + `@semantic-release/git` plugin**: those would push back to `main`, which under ADR-025 + ADR-032 still requires signed commits + linear history + no force-push. The GitHub Actions bot can't sign commits without extra secret machinery, and we're not adding that just to keep a markdown file. GitHub Releases gives the same audit trail without the push-to-protected-branch dance.
+
+**Allowed commit types** (`@commitlint/config-conventional` defaults, mirrored in `commitlint.config.js`): `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Bump mapping in `.releaserc.json`:
+
+| Type | Bump | Shows in release notes? |
+|---|---|---|
+| `feat` | minor | ✅ "Features" |
+| `fix` | patch | ✅ "Bug Fixes" |
+| `perf` | patch | ✅ "Performance" |
+| `refactor` | none | ✅ "Refactoring" |
+| `docs` | none | ✅ "Documentation" |
+| `chore` / `test` / `ci` / `build` / `style` | none | hidden by default |
+| `BREAKING CHANGE:` in body or `!` after type | major | ✅ "BREAKING CHANGES" |
+
+**Enforcement (two layers)**:
+
+1. **Local — `.husky/commit-msg`** runs `commitlint` on every commit. Bad message → rejected. Bypass with `--no-verify` exists for emergencies but is logged.
+2. **CI — `.github/workflows/pr-title.yml`** lints the PR title via `amannn/action-semantic-pull-request@v5`. Because branch protection only allows squash-merge, the PR title becomes the commit on `main` — the title is what `semantic-release` actually parses. Linting it stops a Conventional-Commits-violating merge from breaking the release pipeline.
+
+**Release workflow — `.github/workflows/release.yml`**: triggers on push to `main`, full git history checkout, Corepack-prepares pnpm 10.5.0, runs `pnpm exec semantic-release`. The Vercel-style `ENABLE_EXPERIMENTAL_COREPACK` dance isn't needed here — this is GitHub-hosted, not Vercel-hosted. `permissions.contents: write` lets the workflow create tags + releases without a PAT.
+
+**Files landed in this commit:**
+
+- `package.json` — added `prepare`, `commitlint`, `release`, `release:dry` scripts; 8 new devDependencies (commitlint, husky, semantic-release + 3 plugins, conventionalcommits preset)
+- `commitlint.config.js` — extends `@commitlint/config-conventional`, relaxes `body-max-line-length` (we paste log excerpts in commit bodies regularly)
+- `.husky/commit-msg` — runs `pnpm exec commitlint --edit "$1"`, executable bit set
+- `.releaserc.json` — branches `main`, `tagFormat: v${version}`, the three-plugin pipeline (commit-analyzer → release-notes-generator → github) with the bump table above
+- `.github/workflows/release.yml` — push-to-main trigger, concurrency-guarded, semantic-release run
+- `.github/workflows/pr-title.yml` — lints PR titles with the same type allowlist
+- `CLAUDE.md` — added rule #4 under "Before any change" with the commit-format rule + examples
+
+**Carry-over to 0c.5**: `release.yml` and `pr-title.yml` should be added to `required_status_checks` in the `github_branch_protection` module so a Conventional-Commits-failing PR can't merge.
+
+**Memory pointer**: zora-pantheon was the reference point for "find a release setup we've used before." Turned out it uses Changesets, not semantic-release; we adopted semantic-release anyway after weighing both. Don't conflate the two next time future-me hears "like the zora-pantheon setup."
+>>>>>>> b5d44f6 (feat(release): Conventional Commits + semantic-release (ADR-033))

@@ -1,0 +1,48 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "conventionalcommits",
+        "releaseRules": [
+          { "type": "feat", "release": "minor" },
+          { "type": "fix", "release": "patch" },
+          { "type": "perf", "release": "patch" },
+          { "type": "refactor", "release": false },
+          { "type": "docs", "release": false },
+          { "type": "style", "release": false },
+          { "type": "test", "release": false },
+          { "type": "build", "release": false },
+          { "type": "ci", "release": false },
+          { "type": "chore", "release": false }
+        ],
+        "parserOpts": {
+          "noteKeywords": ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
+        }
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {
+          "types": [
+            { "type": "feat", "section": "Features" },
+            { "type": "fix", "section": "Bug Fixes" },
+            { "type": "perf", "section": "Performance" },
+            { "type": "refactor", "section": "Refactoring", "hidden": false },
+            { "type": "docs", "section": "Documentation", "hidden": false },
+            { "type": "chore", "section": "Chore", "hidden": true },
+            { "type": "test", "section": "Tests", "hidden": true },
+            { "type": "ci", "section": "CI", "hidden": true },
+            { "type": "build", "section": "Build", "hidden": true },
+            { "type": "style", "section": "Style", "hidden": true }
+          ]
+        }
+      }
+    ],
+    "@semantic-release/github"
+  ]
+}

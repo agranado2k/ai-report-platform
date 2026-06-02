@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Required for semantic-release to create tags and GitHub releases.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+# Avoid concurrent releases stomping on each other if two PRs merge
+# back-to-back.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+    # Skip the auto-commits semantic-release itself may push (not currently
+    # configured, but cheap insurance against loops if @semantic-release/git
+    # is added later).
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # semantic-release needs the full git history to determine the
+          # bump from commits since the last tag.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install root devDependencies only
+        run: pnpm install --no-frozen-lockfile --ignore-scripts --filter='!./apps/*' --filter='!./packages/*'
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release
