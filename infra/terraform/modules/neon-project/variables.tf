@@ -45,6 +45,13 @@ variable "max_compute_units" {
 
 variable "history_retention_seconds" {
   type        = number
-  description = "Point-in-time-recovery window in seconds. Free tier: 24h (86400). Paid: up to 30d."
-  default     = 86400
+  description = <<-EOT
+    Point-in-time-recovery window in seconds.
+    Neon Free plan max:  21,600  (6h)
+    Neon Launch plan:    604,800 (7d)
+    Neon Scale/Business: 2,592,000 (30d)
+    Default is 6h so a fresh free-tier account doesn't hit the cap.
+    Override with TF_VAR_neon_history_retention_seconds after upgrading.
+  EOT
+  default     = 21600
 }
