@@ -10,6 +10,11 @@ infra/terraform/**/*.tfstate.*
 infra/terraform/.tfvars.local
 infra/terraform/**/.tfvars.local
 infra/terraform/*.tfvars.local
+# `*.auto.tfvars` files are auto-loaded by Terraform from the working dir;
+# we use them for complex-typed variables (lists/objects) where bash exports
+# get fragile — e.g. envs/shared/secrets.auto.tfvars for resend_dns_records.
+infra/terraform/**/secrets.auto.tfvars
+infra/terraform/**/*.auto.tfvars
 infra/terraform/crash.log
 infra/terraform/crash.*.log
 infra/terraform/terraform.tfplan

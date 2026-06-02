@@ -60,6 +60,21 @@ export TF_VAR_clerk_secret_key_staging="sk_test_xxxxxxxxxxxxxxxxxxxx"
 # Send-only domain key. resend.com → API Keys.
 export TF_VAR_resend_api_key="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
+# NOTE: `TF_VAR_resend_dns_records` is NOT set here. It's a list-of-objects,
+# and bash quoting around the DKIM public key (which contains `+`, `/`, `=`)
+# is error-prone. Put it in a separate HCL file instead — gitignored:
+#
+#   infra/terraform/envs/shared/secrets.auto.tfvars
+#   ────────────────────────────────────────────────────
+#   resend_dns_records = [
+#     { name = "send",              type = "TXT", value = "v=spf1 include:amazonses.com ~all" },
+#     { name = "resend._domainkey", type = "TXT", value = "p=MIGfMA0GCSqGSIb3DQEBAQUA…" },
+#     { name = "_dmarc",            type = "TXT", value = "v=DMARC1; p=none;" },
+#   ]
+#
+# Terraform auto-loads any `*.auto.tfvars` in the working directory — no
+# `-var-file` flag needed.
+
 # ─── GitHub ───────────────────────────────────────────────────────────────
 # Fine-grained PAT for the agrando2k account, scoped to this repo.
 # Permissions: Administration (R/W), Contents (R/W), Pull requests (R/W),
