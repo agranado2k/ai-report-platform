@@ -63,16 +63,16 @@ if [[ ! -d "$ENV_DIR" ]]; then
 fi
 
 # ─── Load credentials ─────────────────────────────────────────────────────
+# `.tfvars.local` is optional: source it if present (local operator flow),
+# otherwise rely on env vars already being set (CI flow — GitHub Actions
+# injects secrets directly into the environment). The required-var checks
+# below catch the "missing config" case in both modes.
 TFVARS_LOCAL="$TF_DIR/.tfvars.local"
 if [[ -f "$TFVARS_LOCAL" ]]; then
   # shellcheck source=/dev/null
   set -a
   source "$TFVARS_LOCAL"
   set +a
-else
-  echo "Missing $TFVARS_LOCAL" >&2
-  echo "Copy .tfvars.local.example, fill it in, and re-run." >&2
-  exit 2
 fi
 
 : "${PG_LOCK_URL:?PG_LOCK_URL not set (Neon connection string for advisory lock)}"

@@ -86,7 +86,7 @@ Each invocation initializes the S3-on-R2 backend with the env-specific state key
 
 ## 5. Apply in order (~30 min total)
 
-> This section becomes live in Phase 0b. Skip for now if you're only doing the Phase 0a bootstrap.
+> Once the repo is pushed and GitHub Actions are wired up, **CI handles this for you**. On every PR that touches `infra/terraform/**`, `.github/workflows/terraform.yml` runs `terraform plan` for shared/staging/prod (in parallel) and posts each diff as a sticky PR comment. On merge to `main`, the workflow runs `terraform apply` for **shared → staging → prod sequentially** (a failure in `shared` halts the chain). The commands below are the local-operator escape hatch — first apply on a fresh repo, or recovery situations where you can't go through a PR.
 
 ```bash
 # Shared resources (single-instance: GitHub repo, Cloudflare zone, Resend)
@@ -101,6 +101,41 @@ infra/terraform/scripts/tf.sh staging apply
 infra/terraform/scripts/tf.sh prod plan
 infra/terraform/scripts/tf.sh prod apply
 ```
+
+### Required GitHub Actions configuration
+
+Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Settings → Secrets and variables → Actions**. The `terraform-shared/github-repo` module also writes the secrets back from Terraform — but the first apply needs them set manually (chicken-and-egg).
+
+**Repository secrets** (`Settings → Secrets`):
+
+| Secret | Source | Used by |
+| --- | --- | --- |
+| `R2_TF_STATE_ACCESS_KEY_ID` | R2 token scoped to `tf-state` bucket | every job (backend auth) |
+| `R2_TF_STATE_SECRET_ACCESS_KEY` | same R2 token | every job (backend auth) |
+| `CLOUDFLARE_ACCOUNT_ID` | dashboard URL | every job |
+| `CLOUDFLARE_API_TOKEN` | account-scoped Cloudflare token | every env |
+| `PG_LOCK_URL` | Neon connection string for the advisory lock | apply jobs |
+| `NEON_API_KEY` | Neon API key (full-access) | shared |
+| `VERCEL_API_TOKEN` | Vercel PAT | staging, prod, shared (pass-through) |
+| `UPSTASH_API_KEY` | Upstash management key | staging, prod |
+| `GH_REPO_ADMIN_TOKEN` | GitHub PAT (admin scope for the github_repo module) | shared |
+| `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | staging |
+| `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod |
+| `RESEND_API_KEY` | Resend send-only domain key | shared (pass-through) |
+| `RESEND_DNS_RECORDS_JSON` | JSON-encoded list from Resend dashboard | shared |
+| `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |
+| `GEMINI_API_KEY` | for the Gemini PR-review workflow | shared (pass-through) |
+
+**Repository variables** (`Settings → Variables`):
+
+| Variable | Example | Used by |
+| --- | --- | --- |
+| `APEX_DOMAIN` | `example.com` | shared |
+| `OPERATOR_EMAIL` | `you@example.com` | shared |
+| `VERCEL_TEAM_ID` | `team_xxxx…` | staging, prod |
+| `UPSTASH_EMAIL` | `you@example.com` | staging, prod |
+| `CLERK_PUBLISHABLE_KEY_STAGING` | `pk_test_…` | staging |
+| `CLERK_PUBLISHABLE_KEY_PROD` | `pk_live_…` | prod |
 
 ---
 

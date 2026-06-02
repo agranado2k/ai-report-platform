@@ -10,10 +10,23 @@ infra/terraform/**/*.tfstate.*
 infra/terraform/.tfvars.local
 infra/terraform/**/.tfvars.local
 infra/terraform/*.tfvars.local
+# `*.auto.tfvars` files are auto-loaded by Terraform from the working dir;
+# we use them for complex-typed variables (lists/objects) where bash exports
+# get fragile — e.g. envs/shared/secrets.auto.tfvars for resend_dns_records.
+infra/terraform/**/secrets.auto.tfvars
+infra/terraform/**/*.auto.tfvars
+# CI-generated backend config (written by terraform.yml workflow into the
+# env dir because the action's container can't see /tmp on the runner host).
+infra/terraform/**/backend.hcl
 infra/terraform/crash.log
 infra/terraform/crash.*.log
 infra/terraform/terraform.tfplan
 infra/terraform/**/terraform.tfplan
+
+# ─── Git worktrees ──────────────────────────────────────────────────────
+# Feature-branch worktrees live under worktree/<slug>/ per ADR-025.
+# Each one has its own .git pointer; main's git index doesn't track them.
+worktree/
 
 # ─── Dependencies ───────────────────────────────────────────────────────
 node_modules/
