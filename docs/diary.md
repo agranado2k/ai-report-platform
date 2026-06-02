@@ -4,18 +4,18 @@
 
 ---
 
-## Current state — 2026-05-21
+## Current state — 2026-06-02
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | 0b near-complete: shared applied, staging destroyed (ADR-031), prod awaiting final apply (Upstash slot just freed). Phase 0c next (skeleton apps + remaining CI/CD workflows). |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` (active worktree, per the new convention) |
-| **Branch**             | `feat/phase-0b-tf-modules` open against `main` (no remote yet, no PR yet) |
-| **Last commit on main**        | `4f4452f` — `docs: establish development diary + autonomous-execution mode` |
-| **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` pushed; `feat/phase-0b-tf-modules` pushed; ready for first PR. |
-| **Live infrastructure**| **nothing provisioned yet.** Modules + envs are written & validated, but `terraform apply` is blocked on the operator finishing Phase 0a manual bootstrap (R2 `tf-state` bucket, bootstrap Neon project, `.tfvars.local`). |
-| **Active worktrees**   | `feat/phase-0b-tf-modules` at `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` |
-| **Spec status**        | rev 7 · 30 ADRs · 13 infra + 31 feature verification tests · `docs/spec.html`   |
+| **Phase**              | Phase 0b merged (PR #1 → `main`). Phase 0c.1 in progress: monorepo scaffold + skeleton Remix apps to unblock Vercel auto-detection. Phase 0c is split into five sub-PRs: 0c.1 skeleton apps, 0c.2 shared headers + edge MW stubs, 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection with proven required-status-checks list. |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-skeleton-apps/` (active worktree). The old `worktree/phase-0b-tf-modules/` is stale — clean up next session. |
+| **Branch**             | `feat/phase-0c-skeleton-apps` open against `main` (local, not pushed yet) |
+| **Last commit on main**        | `51b6186` — `Phase 0b: Terraform infrastructure + CD pipeline + ADR-031 (#1)` (squash-merged PR #1) |
+| **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` reflects the squash merge. |
+| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod`, `arp-view-prod`), GitHub repo with branch protection + 8 secrets + 2 variables. Vercel deploys currently fail (no app code yet) — Phase 0c.1 lands the first deployable shape. |
+| **Active worktrees**   | `feat/phase-0c-skeleton-apps` at `~/PetProjects/ai-report-platform/worktree/phase-0c-skeleton-apps/` (this PR). `feat/phase-0b-tf-modules` at `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` — merged, awaiting `git worktree remove`. |
+| **Spec status**        | rev 7 · 31 ADRs (ADR-031 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
 
 ### Open questions / unresolved decisions
 
@@ -294,3 +294,40 @@ This is a deliberate revision of the spec's **ADR-019** (infrastructure-first de
 - `tf.sh prod apply` will then succeed for Upstash (slot freed by the staging destroy step + the now-removed staging Neon branch).
 
 Spec/HTML carry the old shared→staging→prod model and will need a follow-up sync (Phase 0c-ish). The diary is the authoritative log for this decision until that sync happens.
+
+### 2026-06-02 — Phase 0b merged · Phase 0c.1 starts: monorepo scaffold + skeleton Remix apps
+
+**Phase 0b merged.** PR #1 (`feat/phase-0b-tf-modules` → `main`) squash-merged at `51b6186`. The merge surfaced a small divergence: local `main` had an unpushed `chore: worktrees live under worktree/` commit (`8e24da7`) whose contents were already inside the squash. Resolved by `git reset --hard origin/main` on both local `main` and the new feat branch. No work lost — the worktree-convention chore is reflected in the squash and in the diary's ADR-025 entries.
+
+**Phase 0c plan (five sub-PRs, kept small to stay merge-ready):**
+
+| # | What | Why this unit |
+|---|---|---|
+| 0c.1 (this) | Monorepo scaffold (`pnpm-workspace.yaml`, `turbo.json`, root tsconfig) + skeleton `apps/app` + skeleton `apps/view` with `/` and `/health` routes. Both apps are Remix v2 + Vite + `@vercel/remix` Vercel preset. | Unblocks the three Vercel deploy checks that have been failing on every Phase 0b push because Vercel had no `package.json` to detect. |
+| 0c.2 | `packages/headers/` shared `secureHeaders()` emitting the full ADR-013 stack + Edge Middleware stubs (rate-limit, `Service-Worker: script` → 403, scan-status precheck). | Lands the security baseline as a single source of truth before any route uses it. |
+| 0c.3 | `.github/workflows/ci.yml` (biome + typecheck + vitest + Playwright + Bruno) and `cd.yml` (post-merge prod deploy + smoke). | The required-status-checks list in 0c.5 needs these jobs to exist first. |
+| 0c.4 | `claude-review.yml` + `gemini-review.yml` AI PR-review bots (ADR-030). | Independent of 0c.3 once `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` are in repo secrets (both already populated by Terraform). |
+| 0c.5 | Re-tighten branch protection: re-enable "Include administrators" and populate `required_status_checks` with the actually-running job names from 0c.3 + 0c.4. Terraform change in `modules/github-repo/`. | Closes the loop: branch protection is now PR-only AND status-checked. |
+
+Each PR is intended to be small enough to review in one sitting and to deploy on its own — no "0c.1 only works once 0c.3 lands" coupling.
+
+**What landed in this commit (0c.1):**
+
+- Root `package.json` (workspaces, scripts via Turbo, pnpm 9, Node ≥20)
+- `pnpm-workspace.yaml` (covers `apps/*` and `packages/*`)
+- `turbo.json` (build, dev, typecheck, clean tasks; build outputs include `.vercel/output/**`)
+- Root `tsconfig.json` — strict, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, ES2022/ESNext modules
+- `apps/app/` — Remix v2 + Vite + Vercel preset; `app/root.tsx`, `app/routes/_index.tsx`, `app/routes/health.tsx` (returns service + checks + timestamp JSON, `cache-control: no-store`)
+- `apps/view/` — same shape as `apps/app` on port 3001; placeholder `_index.tsx` calls out viewer-origin role, `health.tsx` same payload shape
+- `.gitignore` — added `.vite/` + `**/.cache/` (rest of the Node/Turbo/Vercel patterns were already there from Phase 0b)
+
+**What's deliberately NOT in this commit:**
+
+- No `entry.client.tsx` / `entry.server.tsx` — the Remix Vite plugin auto-generates both. Less code to maintain unless we need to customize.
+- No `$slug.$.tsx` viewer route yet — Phase 1 wires the real slug→version→R2 flow; for 0c.1 the `_index.tsx` is enough to prove Vercel deploys.
+- No `vercel.json` per app — the existing `modules/vercel-app/` Terraform configured Root Directory per project; trusting that. If Vercel detection fails on this push, we add `vercel.json` in 0c.5 alongside the branch-protection re-tighten.
+- No `packages/headers/` — that's 0c.2's whole point.
+- No CI workflows — those are 0c.3.
+- No Clerk / Neon / R2 / Upstash wiring inside `/health` — the route reports `"not-wired"` for each so it returns 200 and lets the Phase 0d infrastructure tests assert against a known shape. Phase 0c.2/0c.3 wires real checks.
+
+**Open issue carried into next session**: clean up `worktree/phase-0b-tf-modules` (its branch is merged). Command: `git worktree remove worktree/phase-0b-tf-modules && git branch -D feat/phase-0b-tf-modules` from the project root.
