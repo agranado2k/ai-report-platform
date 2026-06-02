@@ -57,8 +57,15 @@ export PG_LOCK_URL="postgresql://USER:PASS@HOST.neon.tech/neondb?sslmode=require
 #   Resource scope: zone = your apex; account = your account.
 export TF_VAR_cloudflare_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# Neon API key (full-access). Settings → API Keys.
+# Neon — "Personal API key" (account-scoped, can create projects).
+# Neon console → top-right account menu → Account settings → API keys.
+# NOT a project-scoped key — those can't create new projects.
 export TF_VAR_neon_api_key="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Neon organization id — required since 2024 (new accounts always belong
+# to an org). Find it: Neon console → Organization → Settings → Organization ID.
+# Looks like `org-shimmering-pond-12345678`.
+export TF_VAR_neon_org_id="org-xxxxxxxxxxxxxxxx"
 
 # Vercel — Account → Settings → Tokens.
 export TF_VAR_vercel_api_token="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"

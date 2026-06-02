@@ -35,6 +35,7 @@ module "cloudflare_zone" {
 module "neon_project" {
   source       = "../../modules/neon-project"
   project_name = "ai-report-platform"
+  org_id       = var.neon_org_id
 }
 
 # 4) GitHub repo — the source-of-truth for the platform.

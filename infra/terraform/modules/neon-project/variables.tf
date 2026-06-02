@@ -1,3 +1,13 @@
+variable "org_id" {
+  type        = string
+  description = <<-EOT
+    Neon organization id (required when the API key is associated with an
+    organization, which is the default for new accounts as of 2024). Find
+    it: Neon console → Organization → Settings → Organization ID. Looks
+    like `org-xxxxxxxxxxxxx`.
+  EOT
+}
+
 variable "project_name" {
   type        = string
   description = "Neon project name (visible in Neon console)."

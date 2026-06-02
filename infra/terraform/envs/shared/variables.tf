@@ -29,6 +29,11 @@ variable "neon_api_key" {
   sensitive   = true
 }
 
+variable "neon_org_id" {
+  type        = string
+  description = "Neon organization id. Required when creating projects under an org-scoped API key. Find it: Neon console → Organization → Settings → Organization ID."
+}
+
 variable "resend_dns_records" {
   type = list(object({
     name  = string

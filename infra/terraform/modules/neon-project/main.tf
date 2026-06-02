@@ -18,6 +18,11 @@ terraform {
 }
 
 resource "neon_project" "this" {
+  # `org_id` is required when the API key belongs to an organization (true for
+  # all new Neon accounts since 2024). Find it: Neon console → Organization →
+  # Settings → Organization ID. Pass via TF_VAR_neon_org_id.
+  org_id = var.org_id
+
   name                      = var.project_name
   region_id                 = var.region
   pg_version                = var.pg_version
