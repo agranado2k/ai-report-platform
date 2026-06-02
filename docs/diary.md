@@ -15,7 +15,7 @@
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). `main` reflects the squash merge. |
 | **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod`, `arp-view-prod`), GitHub repo with branch protection + 8 secrets + 2 variables. Vercel deploys currently fail (no app code yet) — Phase 0c.1 lands the first deployable shape. |
 | **Active worktrees**   | `feat/phase-0c-skeleton-apps` at `~/PetProjects/ai-report-platform/worktree/phase-0c-skeleton-apps/` (this PR). `feat/phase-0b-tf-modules` at `~/PetProjects/ai-report-platform/worktree/phase-0b-tf-modules/` — merged, awaiting `git worktree remove`. |
-| **Spec status**        | rev 7 · 31 ADRs (ADR-031 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
+| **Spec status**        | rev 7 · 32 ADRs (ADR-031 + ADR-032 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
 
 ### Open questions / unresolved decisions
 
@@ -331,3 +331,36 @@ Each PR is intended to be small enough to review in one sitting and to deploy on
 - No Clerk / Neon / R2 / Upstash wiring inside `/health` — the route reports `"not-wired"` for each so it returns 200 and lets the Phase 0d infrastructure tests assert against a known shape. Phase 0c.2/0c.3 wires real checks.
 
 **Open issue carried into next session**: clean up `worktree/phase-0b-tf-modules` (its branch is merged). Command: `git worktree remove worktree/phase-0b-tf-modules && git branch -D feat/phase-0b-tf-modules` from the project root.
+
+### 2026-06-02 — ADR-032: solo-developer mode (no required human PR approval) + Vercel Corepack env-var hunt
+
+Two changes appended to PR #2 after the green-build celebration.
+
+**ADR-032 — solo-developer branch-protection mode.**
+
+The Phase 0b branch protection (per the original ADR-025 ruleset) required `required_approving_review_count = 1` plus `require_code_owner_reviews = true`. With only one developer (`@agranado2k`) and CODEOWNERS pointing at the same single account, this was an unmergeable configuration — GitHub refuses to let you approve your own PR, so every merge would have been blocked. The Phase 0b PR squeaked through only because the protection rule wasn't applied to that repo state yet.
+
+Decision: drop human approval to `0` and turn `require_code_owner_reviews` off. The PR mechanism stays (no direct pushes to main; signed commits + linear history + conversation resolution still required), and CI status checks + AI review (Claude + Gemini per ADR-030) remain the gates. CODEOWNERS becomes informational — useful to GitHub's UI as an ownership map but not a merge gate.
+
+This is a deliberate revision of **ADR-025**. When a second developer joins, flip `required_approving_review_count` back to `1` and `require_code_owner_reviews` back to `true` in `infra/terraform/modules/github-repo/main.tf` — both are a single line each. Spec rev 7 still describes the multi-developer ruleset; the diary is the authoritative log for this decision until the spec sync (deferred along with the ADR-031 sync to a later Phase 0c/0d follow-up).
+
+**Code changes landed in this commit:**
+
+- `modules/github-repo/main.tf` — `required_approving_review_count = 0`, `require_code_owner_reviews = false`, comment block explaining the revert path
+- `CLAUDE.md` — rewrote the "PRs receive automated review…" line to reflect ADR-032; rewrote the runtime-deps paragraph to drop the CODEOWNERS-review wording
+- `README.md` — updated the "PR-only delivery" bullet for solo-mode
+
+`enforce_admins`, `require_signed_commits`, `required_linear_history`, `allows_force_pushes = false`, `allows_deletions = false`, `required_conversation_resolution` — all unchanged. The owner still cannot bypass the PR mechanism.
+
+**Vercel build saga (in-flight on this PR).**
+
+The first three commits past the initial scaffold all hit Vercel build failures and cost real debugging time. Worth recording because the wrong fix is more likely than the right one on a Node-version/package-manager incompatibility:
+
+1. `engines.pnpm: ">=9"` triggered `ERR_PNPM_UNSUPPORTED_ENGINE` because Vercel's image runs pnpm 6.35.1, which reads `engines.pnpm` and bails before install. Removed the field; added per-app `vercel.json` with `installCommand` running `corepack enable && corepack prepare pnpm@<version> --activate && pnpm install`.
+2. With Corepack-installed pnpm 9.12.0 + Node 24 (Vercel's default), every npm registry fetch died with `ERR_INVALID_THIS: Value of "this" must be of type URLSearchParams`. I assumed this was the known pnpm/Node 22.12+ undici bug. Bumped to pnpm 9.15.4 — no fix.
+3. Bumped to pnpm 10.5.0 — no fix.
+4. **Actual root cause** (per [Jelani Harris's blog](https://jelaniharris.com/blog/fixing-errinvalidthis-error-on-vercel-using-pnpm/) + the Vercel community thread): Vercel's Corepack support is gated by the env var `ENABLE_EXPERIMENTAL_COREPACK=1` at the *project* level. Without it, the install command runs Corepack but Vercel's wrapper bypasses the prepared pnpm binary and falls back to a built-in that hits the Node 24 URL bug. Set via `vercel env add` on `arp-app-prod` + `arp-view-prod` (Production + this branch's Preview). Empty commit triggered a fresh deploy; both projects went green.
+
+**Carry-over for Phase 0c.5** (Terraform re-tighten + codification pass): add `ENABLE_EXPERIMENTAL_COREPACK = "1"` to `modules/vercel-app/main.tf` as a `vercel_project_environment_variable` resource so future preview branches don't need manual CLI setup. Right now the env var is scoped to the `feat/phase-0c-skeleton-apps` branch only.
+
+**Memory pointer (future-me)**: the wrong fix on a "build is broken on Vercel" symptom is to chase package manager versions. The right fix is usually a Vercel-project-level setting (env var, Node version, Root Directory). Read the actual Vercel docs and community thread before bumping versions speculatively.

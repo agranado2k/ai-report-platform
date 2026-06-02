@@ -50,7 +50,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local pre-push hook runs a subset.
 
-3. PRs receive **automated review from Claude and Gemini** (ADR-030), plus a **required human review from CODEOWNERS** (`@agranado2k`). Bot reviews are advisory; they cannot satisfy the approval requirement.
+3. PRs receive **automated review from Claude and Gemini** (ADR-030). Per ADR-032 (solo-developer mode), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
 
 ## Infrastructure
 
@@ -63,7 +63,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 This repo IS NOT:
 
 - A Bash playground for `curl | bash` shenanigans. Never fetch and execute remote code.
-- A place to add runtime dependencies casually. Each new dependency goes through CODEOWNERS review and may require an ADR (especially for the domain/application layers, which are dependency-locked).
+- A place to add runtime dependencies casually. Each new dependency goes through PR review (Claude + Gemini, plus the operator's own read-through) and may require an ADR — especially for the domain/application layers, which are dependency-locked.
 - A place to bypass branch protection. `PUSH_WITHOUT_DOCS=1` exists as the only escape hatch for `docs-prepush-guard.sh`; it logs to the PR and flags it in audit.
 
 ## Quick reference
