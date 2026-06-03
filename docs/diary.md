@@ -621,3 +621,31 @@ Both should complete in <2 minutes. After that:
 **Carry-over** — if the GitHub App install ever re-sets `default_workflow_permissions` to `read` (e.g. on re-install), the symptom returns. Worth periodically auditing via `gh api ... /actions/permissions/workflow`. A Terraform resource (`github_actions_repository_permissions` or similar) to manage this declaratively would lock it down — flagged for 0c.5 alongside the Terraform-codified branch protection re-tighten.
 
 **Memory pointer** — when a GitHub App installation flow appears to "just work" but downstream workflows mysteriously stop firing, **check `gh api repos/{owner}/{repo}/actions/permissions/workflow` first**. The default-permissions field is the silent breaker.
+
+### 2026-06-03 — PR #6 merged + recovery sequence: half complete, second fix-up landing
+
+After PR #6 merged at `f610f56`, push events on `main` started firing again (the `default_workflow_permissions: write` fix worked). The first push run produced:
+
+- ✅ `Release` workflow → **`v1.0.0` tagged + GitHub Release published** (semantic-release computed major from the first-ever `feat:` commits)
+- ✅ `Terraform / apply-shared` → **branch protection flipped**: `allow_squash_merge: false`, `allow_rebase_merge: true`. The next PR after this one is the project's first rebase-merge.
+- ❌ `Terraform / apply-prod` → failed with `ENV_CONFLICT` on `ENABLE_EXPERIMENTAL_COREPACK`. The Production-target CLI entries we set manually for PRs #2 / #3 / #4 / #6 were still live and blocked Terraform's create.
+
+**Recovery sweep**:
+
+- Deleted both Production-target manual entries via `vercel env rm ENABLE_EXPERIMENTAL_COREPACK production --yes` on `arp-app-prod` + `arp-view-prod`. The four per-branch Preview entries remain (CLI rm syntax errored — but they don't conflict with Terraform's per-target=preview-with-no-branch entry; they're harmless orphans).
+- Tried `gh workflow run terraform.yml --ref main` to retry `apply-prod`. Every job **skipped** because the apply jobs gate on `github.event_name == 'push'`. The `workflow_dispatch` trigger we added in PR #6 was correct at the workflow level but the job-level conditions never accepted it.
+
+**Fix landing in this PR** (`fix/apply-jobs-dispatch`):
+
+- `terraform.yml` `apply-shared` and `apply-prod` `if` conditions widened from `github.event_name == 'push' && github.ref == 'refs/heads/main'` to `(... push + main ...) || github.event_name == 'workflow_dispatch'`.
+- `plan-shared` / `plan-prod` / `fmt-and-validate` stay PR-only — they don't need workflow_dispatch (no recovery use case).
+
+**After this PR merges** (rebase-merge — first one in the project):
+
+1. `terraform.yml` fires on push → `apply-shared` re-runs (idempotent — already in sync) and `apply-prod` re-runs (now succeeds — Production conflict gone; the all-preview Terraform entry won't collide with per-branch CLI entries).
+2. `Release` workflow fires on the same push and computes `v1.0.1` (just `fix:` commits → patch bump).
+3. The `ENABLE_EXPERIMENTAL_COREPACK` env var is finally codified on both Vercel projects for `production` + `preview` + `development` targets. Future preview branches get it automatically.
+
+**Why the per-branch Preview entries are deliberately left orphaned**: deleting them via CLI errored with "Custom Environment not found" (Vercel's `vercel env rm <name> preview <branch>` has a quirky syntax that doesn't match its `add` form). They're cosmetic at this point — the all-preview Terraform entry will satisfy build needs for every branch. A housekeeping pass can sweep them when convenient; no urgency.
+
+**Carry-over for 0c.5** (now bigger): codify `default_workflow_permissions` + `actions/permissions` settings in the `github-repo` Terraform module so the App-install drift can't recur silently. Plus the carry-over from the prior entry still stands: add `Release` + `Commit messages (Conventional Commits)` + the Terraform `Apply` jobs to `required_status_checks`.
