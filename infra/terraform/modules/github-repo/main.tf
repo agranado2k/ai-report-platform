@@ -79,66 +79,36 @@ resource "github_branch_protection" "main" {
     require_code_owner_reviews      = false
   }
 
-  enforce_admins                  = true # owner cannot bypass (ADR-025)
-  require_signed_commits          = true
+  enforce_admins = true # owner cannot bypass (ADR-025)
+  # ADR-035 reverses ADR-025's signed-commits bit. GitHub's UI rebase-merge
+  # rewrites the committer date during the server-side rebase, which
+  # invalidates the locally-signed signatures, and GitHub cannot re-sign
+  # because only the operator holds the private key. Merge Queue would
+  # work around this — except merge queue is unavailable on user-owned
+  # repos (this one is), only org-owned repos can use it.
+  #
+  # Choosing rebase-merge (ADR-033 revision) over signed-commits for the
+  # solo-dev velocity. Other branch-protection invariants (enforce_admins,
+  # linear history, no force-push, no delete, PR-only, conversation
+  # resolution) stay in force, so the surface area for tampered history
+  # remains small. When this repo moves to an org or a second developer
+  # joins, revisit by re-enabling `require_signed_commits = true` and
+  # enabling Merge Queue alongside it.
+  require_signed_commits          = false
   require_conversation_resolution = true
   required_linear_history         = true
   allows_force_pushes             = false
   allows_deletions                = false
 }
 
-# ADR-034: GitHub Merge Queue (resolves the rebase-merge + signed-commits
-# conflict — see the 2026-06-03 diary entry).
-#
-# Background. With `require_signed_commits = true` and rebase-merge as
-# the only allowed merge method, the GitHub UI's "Rebase and merge" button
-# rewrites the committer date on each PR commit, invalidating the
-# signatures. GitHub cannot re-sign on the operator's behalf (only they
-# hold the private key), so branch protection rejects the resulting
-# unsigned commits and the PR can't be merged.
-#
-# Resolution: GitHub Merge Queue. The queue rebases the PR onto current
-# `main`, runs CI against the rebased state (a synthetic
-# `gh-readonly-queue/main/pr-N-XXX` ref), and when checks pass, pushes
-# the result to `main` using GitHub's web-flow signing key — which IS
-# trusted by `require_signed_commits`. This preserves both:
-#   * ADR-025 — signed commits on `main`
-#   * ADR-033 revision — rebase-merge with every PR commit landing on
-#     `main` verbatim
-#
-# Operator flow: "Merge when ready" in the PR UI → queue → green CI on
-# rebased state → automatic push. No manual rebase, no per-key dance.
-#
-# Implemented as a Repository Ruleset (newer GitHub API) rather than
-# extending `github_branch_protection` because the older branch-protection
-# resource doesn't expose merge queue settings. The two coexist: branch
-# protection still enforces signed commits / linear history / no force
-# push; the ruleset adds the merge queue behavior on top.
-resource "github_repository_ruleset" "merge_queue" {
-  name        = "main-merge-queue"
-  repository  = github_repository.this.name
-  target      = "branch"
-  enforcement = "active"
-
-  conditions {
-    ref_name {
-      include = ["~DEFAULT_BRANCH"]
-      exclude = []
-    }
-  }
-
-  rules {
-    merge_queue {
-      check_response_timeout_minutes    = 60
-      grouping_strategy                 = "ALLGREEN"
-      merge_method                      = "REBASE"
-      min_entries_to_merge              = 1
-      max_entries_to_merge              = 5
-      max_entries_to_build              = 5
-      min_entries_to_merge_wait_minutes = 5
-    }
-  }
-}
+# ADR-034 was reverted in ADR-035 (see the 2026-06-03 diary entry). Merge
+# queue cannot be enabled on user-owned repositories — the GitHub API
+# rejects the `merge_queue` rule type with a generic 422 regardless of
+# payload shape. Empirically confirmed via direct `gh api` POST to
+# /repos/{user}/{repo}/rulesets with multiple variants; the underlying
+# constraint is documented at
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue
+# ("available in any public repository owned by an organization").
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

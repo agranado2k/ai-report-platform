@@ -690,3 +690,37 @@ The queue is `grouping_strategy = "ALLGREEN"` (require all required checks to pa
 **Bootstrap note for THIS PR**: same as PR #7 — until this PR merges, we still don't have merge queue available. The previous merge (PR #7) used the temporary squash-merge enablement via API; this PR (PR #8) needs the same temporary enablement to land. Once merge queue is live, no future bootstrap needed: every PR goes through the queue, the queue signs everything web-flow.
 
 **Carry-over to 0c.5 (updated)**: when populating `required_status_checks` with real check names, include the merge_group-triggered ones (`commitlint` job, `terraform plan` jobs). The queue uses this list to decide green-ness; an empty list means it merges immediately with no gating.
+
+### 2026-06-03 — ADR-035: merge queue unavailable on user-owned repos → drop signed-commits, keep rebase-merge
+
+PR #8's merge-queue ruleset failed to apply. Direct `gh api` debugging confirmed: GitHub returns `"Invalid rule 'merge_queue': "` with no detail regardless of payload variant. Root cause from the [official docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue):
+
+> "Pull request merge queues are available in any public repository owned by an **organization**, or in private repositories owned by organizations using GitHub Enterprise Cloud."
+
+This repo is owned by a user account (`agranado2k`). Merge queue is not available — full stop, regardless of payload, plan tier, or workaround.
+
+**Options considered after this finding**:
+
+| Option | Cost | Trade-off |
+|---|---|---|
+| A. Drop `require_signed_commits` | 5 min | Lose tamper-evidence on `main`. ADR-025's other invariants stay. |
+| B. Transfer repo to an org → enable merge queue | 30–60 min + Vercel / GitHub App / Terraform state reconciliation | Preserves both ADRs |
+| C. Custom bot-signed rebase workflow | 2–3 hours of YAML + key management + ongoing maintenance | Preserves both ADRs |
+
+**Decision (ADR-035) — chose A**. For a solo developer working alongside an LLM agent, the marginal security loss is small: branch protection still enforces `enforce_admins = true`, `required_linear_history = true`, `allows_force_pushes = false`, `allows_deletions = false`, `require_conversation_resolution = true`, PR-only — the surface area for tampered history is already small. GitHub 2FA covers impersonation at the auth layer. The cost of options B/C is real engineering time that doesn't move the product forward.
+
+**Reversal trigger**: when this repo moves to a GitHub organization (e.g., when a second developer joins, or for hosting consolidation), revisit by re-enabling `require_signed_commits = true` AND `github_repository_ruleset.merge_queue` together. Both decisions are encoded as single-line Terraform flips with clear comments.
+
+**Code changes landed in this PR** (`fix/drop-signed-commits`):
+
+- `modules/github-repo/main.tf` — `require_signed_commits = true → false` with the rationale comment above. Removed the `github_repository_ruleset.merge_queue` resource that PR #8 added but couldn't apply.
+- `.github/workflows/commitlint.yml` — removed the dead `merge_group:` trigger and the `|| github.event.merge_group.*` fallbacks; PR title / commits in the PR are the only enforcement points now.
+- `.github/workflows/terraform.yml` — removed the dead `merge_group:` trigger, reverted the plan jobs' `if` conditions to `pull_request` only, reverted concurrency-group keys.
+- `CLAUDE.md` rule 4 — back to "Merges to `main` use 'Rebase and merge'" (no merge queue mention).
+
+**Bootstrap for THIS PR**: same as PRs #6/#7/#8 — one final temp-enable of squash-merge via API. After this PR merges + Terraform applies the `require_signed_commits = false`, every future PR rebase-merges directly from the GitHub UI with no warning and no bootstrap dance.
+
+**Carry-over to 0c.5 (revised)**: the `merge_group` triggers and merge-queue-related carry-overs are deleted. What stays:
+- Populate `required_status_checks` with real check names (`Lint PR commits`, `plan-shared`, `plan-prod`, plus 0c.3 workflows once they land)
+- Codify `default_workflow_permissions = "write"` in the github-repo module so App-install drift can't recur silently
+- Sweep the 5 orphan per-branch `ENABLE_EXPERIMENTAL_COREPACK` Vercel entries
