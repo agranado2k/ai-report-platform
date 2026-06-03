@@ -169,7 +169,11 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
 
   apply-shared:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Push to main fires the normal apply chain. workflow_dispatch is
+    # the recovery hatch (added in PR #6) for when push events on main
+    # fail to fire — without it here the dispatched run skips every
+    # apply job and does nothing.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
       group: tf-apply-shared
@@ -204,7 +208,11 @@ jobs:
 
   apply-prod:
     needs: apply-shared
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Push to main fires the normal apply chain. workflow_dispatch is
+    # the recovery hatch (added in PR #6) for when push events on main
+    # fail to fire — without it here the dispatched run skips every
+    # apply job and does nothing.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
       group: tf-apply-prod
