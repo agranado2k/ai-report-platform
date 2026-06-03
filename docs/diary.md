@@ -649,3 +649,44 @@ After PR #6 merged at `f610f56`, push events on `main` started firing again (the
 **Why the per-branch Preview entries are deliberately left orphaned**: deleting them via CLI errored with "Custom Environment not found" (Vercel's `vercel env rm <name> preview <branch>` has a quirky syntax that doesn't match its `add` form). They're cosmetic at this point — the all-preview Terraform entry will satisfy build needs for every branch. A housekeeping pass can sweep them when convenient; no urgency.
 
 **Carry-over for 0c.5** (now bigger): codify `default_workflow_permissions` + `actions/permissions` settings in the `github-repo` Terraform module so the App-install drift can't recur silently. Plus the carry-over from the prior entry still stands: add `Release` + `Commit messages (Conventional Commits)` + the Terraform `Apply` jobs to `required_status_checks`.
+
+### 2026-06-03 — ADR-034: GitHub Merge Queue (rebase-merge + signed-commits, both preserved)
+
+PR #7 surfaced a documented GitHub limitation: with `require_signed_commits = true` AND rebase-merge as the only allowed merge method, the GitHub UI's **Rebase and merge** button rewrites each commit's committer date during the server-side rebase, which invalidates the existing signatures. GitHub cannot re-sign on the operator's behalf (only they hold the private key), so branch protection rejects the resulting unsigned commits and the PR never merges. Quote from the GitHub UI:
+
+> Base branch requires signed commits. Rebase merges cannot be automatically signed by GitHub.
+
+The PR commits themselves WERE verified — `gh api repos/.../commits/{sha} --jq .commit.verification` showed `{"verified": true, "reason": "valid"}` on both `a2bc910` and `ad85e09`. The verification was lost when GitHub rewrote the committer during rebase.
+
+**Three resolutions evaluated**:
+
+| Path | Trade-off |
+|---|---|
+| A. Drop `require_signed_commits` | Single Terraform change. Loses tamper-evidence on `main`. Closest to ADR-033's intent (preserve every PR commit). |
+| C-1. Custom bot-signed rebase workflow | ~150 lines of YAML + a bot SSH/GPG key in secrets. Preserves both ADRs; all on us to maintain. |
+| **C-2. GitHub Merge Queue (chosen)** | Built-in GitHub feature, free for public repos. Queue rebases + runs CI on rebased state + GitHub web-flow signs the result. Preserves ADR-025 (signed commits) AND ADR-033 revision (rebase-merge with every PR commit on main). One-line trigger addition per workflow that needs to gate merge. |
+
+**Decision (ADR-034)**: Adopt GitHub Merge Queue as the merge mechanism for `main`. Both ADR-025 (`require_signed_commits = true`) and ADR-033 revision (rebase, every commit lands verbatim) stay in force unchanged — the queue does the rebase server-side and signs the result with the web-flow key, which `require_signed_commits` accepts.
+
+**How merge queue works for us**:
+
+- Operator clicks **"Merge when ready"** on a green PR → PR enters the queue
+- Queue creates a synthetic ref `gh-readonly-queue/main/pr-N-XXX` containing the PR's commits rebased onto current `main`
+- Workflows triggered on `merge_group` event run against this synthetic ref (this PR adds `merge_group:` to `commitlint.yml` and `terraform.yml`)
+- On green: GitHub web-flow-signs the rebased commits and pushes them to `main`. Branch protection accepts the signed commits, the PR auto-closes.
+- On red: PR is removed from the queue and the operator is notified.
+
+The queue is `grouping_strategy = "ALLGREEN"` (require all required checks to pass) and `merge_method = "REBASE"` — straight-through, no batching surprises while we're solo-dev. We can tighten to batched grouping when the PR volume justifies it.
+
+**Implementation**:
+
+- `infra/terraform/modules/github-repo/main.tf` — added `github_repository_ruleset.merge_queue` alongside the existing `github_branch_protection.main`. Rulesets are the newer GitHub API; the old branch-protection resource doesn't expose merge queue settings. The two coexist: branch protection still enforces signed-commits / linear-history / no-force-push / no-delete / PR-only; the ruleset adds the merge queue behavior on top.
+- `.github/workflows/commitlint.yml` — added `merge_group:` trigger; the lint step now reads `BASE_SHA` / `HEAD_SHA` from either `pull_request` or `merge_group` event payloads via the `||` fallback.
+- `.github/workflows/terraform.yml` — added `merge_group:` trigger; `plan-shared` / `plan-prod` / `fmt-and-validate` conditions widened from `pull_request` only to `pull_request OR merge_group`; concurrency groups switched from `pull_request.number` to `pull_request.number || run_id` so queue runs don't collide with PR runs.
+- `CLAUDE.md` rule 4 — updated to describe the merge-queue workflow (click "Merge when ready", queue rebases, web-flow-signs, pushes).
+
+**Bot review workflows deliberately NOT triggered on `merge_group`**: `claude-code-review.yml` + `gemini-review.yml` already ran when the PR was opened — re-running them on the rebased state would burn API tokens for no judgment that wasn't already made. The bot reviews are advisory per ADR-032; they don't need to gate the queue.
+
+**Bootstrap note for THIS PR**: same as PR #7 — until this PR merges, we still don't have merge queue available. The previous merge (PR #7) used the temporary squash-merge enablement via API; this PR (PR #8) needs the same temporary enablement to land. Once merge queue is live, no future bootstrap needed: every PR goes through the queue, the queue signs everything web-flow.
+
+**Carry-over to 0c.5 (updated)**: when populating `required_status_checks` with real check names, include the merge_group-triggered ones (`commitlint` job, `terraform plan` jobs). The queue uses this list to decide green-ness; an empty list means it merges immediately with no gating.
