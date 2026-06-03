@@ -44,10 +44,10 @@ Reference: [Domain-Driven Design — Martin Fowler](https://martinfowler.com/bli
 ### Tactical patterns (adopt these)
 
 - **Entities** — types with identity that change over time (e.g., `Report`, `Folder`, `Org`). Equality by ID, not by attributes.
-- **Value Objects** — immutable types defined by their attributes (e.g., `Slug`, `PlanLimits`, `AclMode`, `Scopes`). Equality by value. Use branded TS types per the spec's `packages/domain/src/fp/branded.ts`.
-- **Aggregates** — invariant boundaries. Each aggregate has one root entity; external code can only reference the root. Examples: `Report` aggregate contains `ReportVersion`s and the `Acl`; `Folder` aggregate contains its `Collaborator`s. Defined explicitly per context.
+- **Value Objects** — immutable types defined by their attributes (e.g., `Slug`, `PlanLimits`, `AclMode`, `Scope`, `Grant level`, `Scan status`). Equality by value. Use branded TS types per the spec's `packages/domain/src/fp/branded.ts`.
+- **Aggregates** — invariant boundaries. Each aggregate has one root entity; external code can only reference the root. Examples: the `Report` aggregate contains `ReportVersion`s and the `Acl`; the `Folder` aggregate contains its `Collaborator`s and their `Grant level`s; the `ScanJob` aggregate (Abuse & Moderation) owns scan `findings`. Defined explicitly per context.
 - **Repositories** — already covered by ADR-020 (interfaces in `packages/application/`, Drizzle implementations in `packages/adapters/`). One repository per aggregate root.
-- **Domain Events** — emitted by aggregates on state changes (e.g., `ReportPublished`, `VersionScanned`, `AbuseReported`). Carried via the transactional outbox that the spec's event-driven decision already commits to.
+- **Domain Events** — emitted by aggregates on state changes (e.g., `ReportPublished`, `ReportVersionScanned`, `AbuseReported`). Carried via the transactional outbox that the spec's event-driven decision already commits to. The canonical event catalog is `docs/events.md`.
 
 ### Explicitly NOT adopting
 

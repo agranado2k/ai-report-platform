@@ -537,7 +537,7 @@
 <div class="wrap">
 
   <header class="hero">
-    <p class="eyebrow">Technical Specification · v1 (rev 7)</p>
+    <p class="eyebrow">Technical Specification · v1 (rev 8)</p>
     <h1>HTML Report Hosting Platform</h1>
     <p class="subtitle">A SaaS platform where LLMs (or any client) push HTML reports to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version without breaking links. Specification is split into <strong>Part I — Product</strong> (what we're building and why) and <strong>Part II — Engineering</strong> (how we're building it, with strict practices and a tracked delivery pipeline).</p>
     <div class="meta">
@@ -628,6 +628,7 @@
   <section id="journeys">
     <h2>User journeys &amp; flow diagrams <span class="pill product">product</span></h2>
     <p>Six end-to-end journeys cover the entire v1 product surface. Each shows actor &rarr; system messages over time (top to bottom).</p>
+    <p class="pill updated">Note (rev 8): the narrow sequence diagrams below use shorthand event labels. <code>ReportUploaded</code> is the canonical <code>ReportVersionUploaded</code>; <code>ScanCompleted</code> is the canonical <code>ReportVersionScanned</code>. The normative names are in the Domain-events table and <code>docs/events.md</code>.</p>
 
     <div class="journey">
       <h3>Journey 1 &mdash; First-time user uploads a report from the web</h3>
@@ -869,7 +870,7 @@ allowlist         Click magic link in email → renders                     Toke
 │                       │   SetAcl                  │                         │
 │                       │   GrantFolderAccess       │                         │
 │                       │   TakedownReport          │                         │
-│                       │   ResolveScanResult       │                         │
+│                       │   PromoteVersion          │                         │
 │                       │   …                       │                         │
 │                       └────────────┬──────────────┘                         │
 │                                    │                                        │
@@ -877,7 +878,7 @@ allowlist         Click magic link in email → renders                     Toke
 │                       │      DOMAIN CORE          │                         │
 │                       │  ────────────────────────  │                         │
 │                       │  Entities:                │                         │
-│                       │   Report, Version,        │                         │
+│                       │   Report, ReportVersion,  │                         │
 │                       │   Folder, User, Org,      │                         │
 │                       │   ApiKey, Acl,            │                         │
 │                       │   Collaborator,           │                         │
@@ -890,8 +891,8 @@ allowlist         Click magic link in email → renders                     Toke
 │                       │   ScanPipeline            │                         │
 │                       │   AnomalyDetector         │                         │
 │                       │  Events (domain):         │                         │
-│                       │   ReportUploaded          │                         │
-│                       │   ScanCompleted           │                         │
+│                       │   ReportVersionUploaded   │                         │
+│                       │   ReportVersionScanned    │                         │
 │                       │   ReportPublished         │                         │
 │                       │   ReportTakenDown         │                         │
 │                       │   CollaboratorGranted     │                         │
@@ -954,12 +955,14 @@ allowlist         Click magic link in email → renders                     Toke
     <h2>Domain model &amp; bounded contexts</h2>
     <p>We identify <strong>three loosely-coupled bounded contexts</strong>. They share a database but communicate via domain events, not direct repository calls.</p>
 
+    <p class="pill updated">Rev 8 domain-language sync (2026-06-04): per ADR-0036, the canonical source for domain <em>language</em> is now <code>docs/domain-glossary.md</code>, <code>docs/context-map.md</code>, and <code>docs/events.md</code>. This section is synced to them. Renamed contexts: <code>Publishing</code> &rarr; <code>Reports &amp; Folders</code>, <code>Trust &amp; Safety</code> &rarr; <code>Abuse &amp; Moderation</code>. Folder collaborators moved into the <code>Folder</code> aggregate (Reports &amp; Folders); API-key anomaly detection moved into Identity &amp; Access.</p>
+
     <table>
       <thead><tr><th>Context</th><th>Owns</th><th>Primary entities</th><th>Listens to</th></tr></thead>
       <tbody>
-        <tr><td><strong>Publishing</strong></td><td>Upload, version, publish, serve, takedown</td><td>Report, Version, Folder, Acl</td><td><code>ScanCompleted</code>, <code>AbuseConfirmed</code></td></tr>
-        <tr><td><strong>Identity &amp; Access</strong></td><td>Users, orgs, keys, scopes, collaborators, permission resolution</td><td>User, Org, ApiKey, Collaborator</td><td><code>ReportUploaded</code> (for audit)</td></tr>
-        <tr><td><strong>Trust &amp; Safety</strong></td><td>Scanning, abuse reports, takedowns, anomaly detection</td><td>ScanJob, AbuseReport, Anomaly</td><td><code>ReportUploaded</code>, <code>ApiKeyUsed</code></td></tr>
+        <tr><td><strong>Reports &amp; Folders</strong></td><td>Upload, version, publish, serve; folders, collaborators, ACLs; permission resolution</td><td>Report, ReportVersion, Folder, Collaborator, Acl</td><td><code>ReportVersionScanned</code>, <code>ReportTakenDown</code>, <code>UserCreated</code></td></tr>
+        <tr><td><strong>Identity &amp; Access</strong></td><td>Users, orgs, plans, keys, scopes, API-key anomaly detection</td><td>User, Org, ApiKey, Anomaly</td><td><code>ApiKeyUsed</code> (anomaly detection)</td></tr>
+        <tr><td><strong>Abuse &amp; Moderation</strong></td><td>Scanning, abuse reports, takedowns, CSP reports</td><td>ScanJob, AbuseReport</td><td><code>ReportVersionUploaded</code></td></tr>
       </tbody>
     </table>
 
@@ -974,11 +977,13 @@ allowlist         Click magic link in email → renders                     Toke
     <table>
       <thead><tr><th>Event</th><th>Emitted by</th><th>Handled by (subscribers)</th></tr></thead>
       <tbody>
-        <tr><td><code>ReportUploaded</code></td><td><code>UploadReportUseCase</code></td><td>ScanQueue (enqueue job) &middot; AuditLogger</td></tr>
-        <tr><td><code>ScanCompleted</code></td><td>Scanner worker</td><td>PromoteVersionUseCase (on clean) &middot; FlagVersionUseCase (on flagged) &middot; AuditLogger</td></tr>
-        <tr><td><code>ReportPublished</code></td><td><code>PromoteVersionUseCase</code></td><td>CacheInvalidator (CDN/edge KV) &middot; Notifier (first-publish welcome) &middot; AuditLogger</td></tr>
-        <tr><td><code>ReportTakenDown</code></td><td><code>TakedownReportUseCase</code></td><td>BlobPurger (R2) &middot; Notifier (owner with 24h appeal) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportVersionUploaded</code></td><td><code>UploadReportUseCase</code></td><td>ScanJob enqueue (Abuse &amp; Moderation) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportVersionScanned</code></td><td><code>ScanJob</code> (Abuse &amp; Moderation)</td><td>Reports &amp; Folders (set <code>scan_status</code>; auto-publish on clean) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportPublished</code></td><td><code>PromoteVersionUseCase</code></td><td>CacheInvalidator (CDN/edge KV) &middot; Notifier (welcome, first publish only) &middot; AuditLogger</td></tr>
+        <tr><td><code>AclChanged</code></td><td><code>UpdateAclUseCase</code></td><td>CacheInvalidator (viewer gate changed)</td></tr>
         <tr><td><code>CollaboratorGranted</code></td><td><code>GrantFolderAccessUseCase</code></td><td>Notifier (email + magic link) &middot; AuditLogger</td></tr>
+        <tr><td><code>UserCreated</code></td><td>Clerk webhook (Identity &amp; Access ACL)</td><td>Reports &amp; Folders (resolve pending grant <code>grantee_email</code> &rarr; <code>UserId</code>) &middot; AuditLogger</td></tr>
+        <tr><td><code>ReportTakenDown</code></td><td><code>TakedownReportUseCase</code></td><td>Reports &amp; Folders (set <code>deleted_at</code>) &middot; BlobPurger (R2, +24h) &middot; Notifier (owner, 24h appeal) &middot; AuditLogger</td></tr>
         <tr><td><code>AbuseReported</code></td><td><code>ReportAbuseUseCase</code></td><td>TriageQueueWriter &middot; AuditLogger (admin-scoped)</td></tr>
         <tr><td><code>ApiKeyUsed</code></td><td>API auth middleware</td><td>AnomalyDetector (geo/rate/failure) &middot; AuditLogger</td></tr>
         <tr><td><code>ApiKeyAnomalyDetected</code></td><td>AnomalyDetector</td><td>Notifier (admin email + dashboard banner)</td></tr>
@@ -1022,7 +1027,7 @@ allowlist         Click magic link in email → renders                     Toke
 
     <h3>Design rules for events</h3>
     <ul>
-      <li><strong>Events are facts</strong>, named in past tense: <code>ReportUploaded</code>, not <code>UploadReport</code>.</li>
+      <li><strong>Events are facts</strong>, named in past tense: <code>ReportVersionUploaded</code>, not <code>UploadReportVersion</code>.</li>
       <li><strong>Payloads carry just enough</strong> for handlers to act &mdash; usually aggregate id and the new state. Handlers re-fetch if they need more.</li>
       <li><strong>Idempotent handlers.</strong> Every handler tolerates being invoked twice for the same event (we get at-least-once).</li>
       <li><strong>One commit, one event.</strong> Don't emit two events from one transaction if they should be ordered &mdash; emit one and let handlers fan out.</li>
@@ -1642,8 +1647,14 @@ jobs:
 
     <div class="table-card">
       <h4>report_versions</h4>
-      <p>One row per upload. <code>manifest_json</code> lists files (paths + R2 keys + content-types). <code>scan_status</code> gates publishing: only <code>'clean'</code> versions can become <code>live_version_id</code>. <code>content_hash</code> dedupes accidental duplicate uploads.</p>
+      <p>One row per upload (a <code>ReportVersion</code>). <code>manifest_json</code> lists files (paths + R2 keys + content-types). <code>scan_status</code> gates publishing: only <code>'clean'</code> versions can become <code>live_version_id</code>. <code>content_hash</code> dedupes accidental duplicate uploads. <strong>Rev 8 note:</strong> <code>scan_status</code> is a denormalized <em>cache</em> of the <code>ScanJob</code> verdict (owned by Abuse &amp; Moderation), updated on <code>ReportVersionScanned</code>; the detailed <code>scan_findings</code> live on <code>scan_jobs</code>, not here.</p>
       <div class="meta-tags"><span>idx: report_id</span><span>idx: (report_id, version_no) unique</span><span>idx: scan_status</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>scan_jobs</h4>
+      <p>The <code>ScanJob</code> aggregate (Abuse &amp; Moderation). One row per <code>ReportVersion</code> scanned; tracks the lifecycle (<code>queued</code> &rarr; <code>running</code> &rarr; <code>done</code>/<code>failed</code>) and holds <code>findings</code> (ClamAV + phishing/miner heuristics). On completion emits <code>ReportVersionScanned</code>; Reports &amp; Folders caches the verdict on <code>report_versions.scan_status</code>. <strong>Added in rev 8</strong> &mdash; previously <code>scan_findings</code> sat on <code>report_versions</code>; Phase 1 migrates it here.</p>
+      <div class="meta-tags"><span>aggregate root</span><span>idx: report_version_id (unique)</span><span>idx: status</span></div>
     </div>
 
     <div class="table-card">
@@ -1783,7 +1794,7 @@ jobs:
       <li>If <code>update_slug</code>: load report, verify folder check covers it.</li>
       <li>Sync pre-checks: size, file count, MIME content-sniff, zip-slip, decompression-ratio, SVG rejection.</li>
       <li>Extract + upload to R2 at <code>reports/&lt;reportId&gt;/v&lt;n&gt;/&lt;path&gt;</code>.</li>
-      <li>Insert <code>report_versions</code> with <code>scan_status='pending'</code>; insert <code>outbox</code> row for <code>ReportUploaded</code>. Single transaction.</li>
+      <li>Insert <code>report_versions</code> with <code>scan_status='pending'</code>; insert <code>outbox</code> row for <code>ReportVersionUploaded</code>. Single transaction.</li>
       <li>Do <strong>not</strong> bump <code>live_version_id</code> &mdash; scanner promotes on <code>clean</code>.</li>
       <li>Upsert <code>acls</code>. Return slug + viewer URL + scan_status.</li>
     </ol>
@@ -1885,7 +1896,7 @@ jobs:
   </section>
 
   <section id="adrs">
-    <h2>ADRs (18 records)</h2>
+    <h2>ADRs (30 records)</h2>
 
     <div class="adr">
       <h3><span class="adr-id">ADR-001</span> Stable slug + versioned content <span class="status">Accepted</span></h3>
@@ -2325,7 +2336,7 @@ jobs:
         <li>Dashboard: key issuance with scope checkboxes.</li>
         <li>Viewer: Edge MW (rate limit, SW-block, scan-status precheck) + Remix loader.</li>
         <li>Public-mode ACL only. Rate limits live.</li>
-        <li><code>ReportUploaded</code> + <code>ReportPublished</code> events flowing through outbox.</li>
+        <li><code>ReportVersionUploaded</code> + <code>ReportPublished</code> events flowing through outbox.</li>
       </ul>
     </div>
 
@@ -2333,8 +2344,8 @@ jobs:
       <h3>Phase 1.5 &mdash; Scanning + abuse pipeline <span class="week">week 2-3</span></h3>
       <ul>
         <li>ClamAV worker (sidecar) with daily signature refresh.</li>
-        <li>Async scan queue subscribed to <code>ReportUploaded</code>.</li>
-        <li><code>ScanCompleted</code> &rarr; <code>PromoteVersionUseCase</code> / <code>FlagVersionUseCase</code>.</li>
+        <li>Async scan queue subscribed to <code>ReportVersionUploaded</code>.</li>
+        <li><code>ReportVersionScanned</code> &rarr; <code>PromoteVersionUseCase</code> / <code>FlagVersionUseCase</code>.</li>
         <li>451 interstitial for flagged; blocked never served.</li>
         <li>Abuse-report link on viewer; admin triage queue.</li>
         <li>Takedown action with delayed R2 purge (outbox <code>available_at</code> + 24h).</li>
@@ -2547,7 +2558,7 @@ jobs:
 
   <footer>
     <p>Source plan file: <code>~/.claude/plans/you-re-senior-product-engineer-cozy-stonebraker.md</code></p>
-    <p>Generated 2026-05-20 (rev 7) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agranado2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
+    <p>Generated 2026-05-20, rev 8 (domain-language sync 2026-06-04) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agranado2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
   </footer>
 
 </div>
