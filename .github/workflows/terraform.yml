@@ -27,6 +27,12 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform.yml"
+  # Re-plan the rebased state when merge queue (ADR-034) processes the
+  # PR. Same plan jobs, against the synthetic gh-readonly-queue/* ref.
+  # No paths filter on merge_group — if the rebase touches infra at
+  # all, plan; if not, the path filter on the apply jobs' inputs makes
+  # this a no-op.
+  merge_group:
   # Recovery hatch: manually trigger apply-shared / apply-prod via
   #   `gh workflow run terraform.yml --ref main`
   # for cases where push events on main fail to fire (see the
@@ -78,10 +84,12 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
 
   plan-shared:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     concurrency:
-      group: tf-plan-${{ github.event.pull_request.number }}-shared
+      # PR runs key on PR number (latest push wins); merge_group runs key
+      # on run_id (each queued state is its own run, don't cancel siblings).
+      group: tf-plan-${{ github.event.pull_request.number || github.run_id }}-shared
       cancel-in-progress: true
     env:
       TF_VAR_apex_domain: ${{ vars.APEX_DOMAIN }}
@@ -129,10 +137,10 @@ jobs:
   # via Vercel + ephemeral Neon branches cover what staging used to.
 
   plan-prod:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     concurrency:
-      group: tf-plan-${{ github.event.pull_request.number }}-prod
+      group: tf-plan-${{ github.event.pull_request.number || github.run_id }}-prod
       cancel-in-progress: true
     env:
       TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_PROD }}
@@ -242,7 +250,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
 
   fmt-and-validate:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
