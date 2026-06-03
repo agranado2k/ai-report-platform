@@ -46,7 +46,7 @@ module "clerk" {
 
 locals {
   shared_env = {
-    # ADR-033 carry-over → codified here so every preview branch gets it
+    # Codified here so every preview branch gets it
     # automatically. Without this var, Vercel's wrapper ignores the
     # Corepack-prepared pnpm and falls back to a built-in that hits the
     # Node 24 / pnpm URL bug (`ERR_INVALID_THIS: Value of "this" must be

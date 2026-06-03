@@ -14,6 +14,13 @@ terraform {
   }
 }
 
+# Resolve the merge-bot user's GraphQL node_id at apply time so the
+# branch_protection.required_pull_request_reviews.pull_request_bypassers
+# list can reference it. See ADR-0035 for context.
+data "github_user" "merge_bot" {
+  username = "agranado2k"
+}
+
 resource "github_repository" "this" {
   name        = var.repo_name
   description = var.description
@@ -23,7 +30,7 @@ resource "github_repository" "this" {
   has_projects = false
   has_wiki     = false
 
-  # ADR-033 revision: rebase-merge only.
+  # Rebase-merge only.
   #   - allow_merge_commit = false  → no merge-commits (would break the
   #     linear-history rule on branch protection anyway).
   #   - allow_squash_merge = false → squash-merge throws away every commit
@@ -66,79 +73,48 @@ resource "github_branch_protection" "main" {
     contexts = var.required_status_checks
   }
 
-  # Solo-developer mode (ADR-032): the PR mechanism is kept (no direct
-  # pushes to main; signed commits + linear history still apply), but
-  # human-approval-on-PR is dropped to 0 and the CODEOWNERS gate is off.
-  # Rationale: with one developer, requiring an approving review makes
-  # main unmergeable (GitHub won't let you approve your own PR). AI
-  # review (ADR-030) + CI status checks are the gates that remain.
-  # When a second developer joins, flip these back to `1` / `true`.
+  # Solo-developer branch-protection policy: the PR mechanism is kept
+  # (no direct pushes to main; signed commits + linear history still
+  # apply), but human-approval-on-PR is dropped to 0 and the CODEOWNERS
+  # gate is off. Rationale: with one developer, requiring an approving
+  # review makes main unmergeable (GitHub won't let you approve your
+  # own PR). AI review (ADR-030) + CI status checks are the gates that
+  # remain. When a second developer joins, flip these back to `1` / `true`.
   required_pull_request_reviews {
     required_approving_review_count = 0
     dismiss_stale_reviews           = true
     require_code_owner_reviews      = false
+
+    # ADR-0035: the `agranado2k` user identity (authenticated via the
+    # MERGE_BOT_TOKEN repo secret) bypasses the PR requirement so the
+    # `bot-merge.yml` workflow can push the rebased + web-flow-signed
+    # commits to `main`. Without this entry, the workflow's PATCH to
+    # /git/refs/heads/main is rejected by branch protection even though
+    # the API-created commits are signed.
+    #
+    # github_branch_protection (v4 / GraphQL) takes a list of GraphQL
+    # node IDs here — NOT a `bypass_pull_request_allowances { users }`
+    # sub-block (that's the v3 REST API shape). The `data "github_user"`
+    # lookup below resolves the username to its node_id at apply time.
+    pull_request_bypassers = [data.github_user.merge_bot.node_id]
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)
-  require_signed_commits          = true
+  require_signed_commits          = true # ADR-025; kept via bot-merge.yml (ADR-0035)
   require_conversation_resolution = true
   required_linear_history         = true
   allows_force_pushes             = false
   allows_deletions                = false
 }
 
-# ADR-034: GitHub Merge Queue (resolves the rebase-merge + signed-commits
-# conflict — see the 2026-06-03 diary entry).
-#
-# Background. With `require_signed_commits = true` and rebase-merge as
-# the only allowed merge method, the GitHub UI's "Rebase and merge" button
-# rewrites the committer date on each PR commit, invalidating the
-# signatures. GitHub cannot re-sign on the operator's behalf (only they
-# hold the private key), so branch protection rejects the resulting
-# unsigned commits and the PR can't be merged.
-#
-# Resolution: GitHub Merge Queue. The queue rebases the PR onto current
-# `main`, runs CI against the rebased state (a synthetic
-# `gh-readonly-queue/main/pr-N-XXX` ref), and when checks pass, pushes
-# the result to `main` using GitHub's web-flow signing key — which IS
-# trusted by `require_signed_commits`. This preserves both:
-#   * ADR-025 — signed commits on `main`
-#   * ADR-033 revision — rebase-merge with every PR commit landing on
-#     `main` verbatim
-#
-# Operator flow: "Merge when ready" in the PR UI → queue → green CI on
-# rebased state → automatic push. No manual rebase, no per-key dance.
-#
-# Implemented as a Repository Ruleset (newer GitHub API) rather than
-# extending `github_branch_protection` because the older branch-protection
-# resource doesn't expose merge queue settings. The two coexist: branch
-# protection still enforces signed commits / linear history / no force
-# push; the ruleset adds the merge queue behavior on top.
-resource "github_repository_ruleset" "merge_queue" {
-  name        = "main-merge-queue"
-  repository  = github_repository.this.name
-  target      = "branch"
-  enforcement = "active"
-
-  conditions {
-    ref_name {
-      include = ["~DEFAULT_BRANCH"]
-      exclude = []
-    }
-  }
-
-  rules {
-    merge_queue {
-      check_response_timeout_minutes    = 60
-      grouping_strategy                 = "ALLGREEN"
-      merge_method                      = "REBASE"
-      min_entries_to_merge              = 1
-      max_entries_to_merge              = 5
-      max_entries_to_build              = 5
-      min_entries_to_merge_wait_minutes = 5
-    }
-  }
-}
+# ADR-0035: keep `require_signed_commits = true` AND rebase-merge by
+# routing every merge through `.github/workflows/bot-merge.yml`. That
+# workflow uses GitHub's git/commits REST API to create web-flow-signed
+# copies of each PR commit on top of `main`, then updates
+# `refs/heads/main` via the operator's identity (`agranado2k`,
+# authenticated via the MERGE_BOT_TOKEN secret). The
+# pull_request_bypassers entry above permits the workflow's PATCH
+# despite branch protection's PR requirement.
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run Gemini PR review
-        # Bot review is advisory (ADR-032 — can't gate merge). Transient
+        # Bot review is advisory (solo-developer policy — can't gate merge). Transient
         # Gemini API outages (e.g. 503 UNAVAILABLE) shouldn't fail the
         # PR check; the review just becomes a no-op for this run.
         continue-on-error: true
@@ -112,12 +112,14 @@ jobs:
               - ADR-024: domain and application layers use vanilla TS +
                 the in-repo `pipe()` / `Result<T,E>` helpers — no fp-ts,
                 Effect, or Remeda. All domain types are readonly.
-              - ADR-033: every commit follows Conventional Commits —
+              - Conventional Commits: every commit follows
                 feat | fix | docs | style | refactor | perf | test |
                 build | ci | chore | revert, with optional (scope) and
-                subject <= 100 chars. Merges to main are rebase-only.
-              - ADR-025 / ADR-032: PR-only workflow; signed commits;
-                solo-dev mode (0 required approvals is intentional).
+                subject <= 100 chars. Merges to main are rebase-only
+                via the `/merge` comment workflow (ADR-0035) — not
+                via the GitHub UI Rebase button.
+              - ADR-025 + solo-developer policy: PR-only workflow;
+                signed commits; 0 required approvals is intentional.
 
             Provide constructive feedback in a structured format. Keep
             comments inline on specific lines where possible.

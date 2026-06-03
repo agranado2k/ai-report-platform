@@ -1,0 +1,31 @@
+# Architecture Decision Records
+
+Each ADR captures one architectural decision in [MADR format](https://adr.github.io/madr/). The record is the contract; the development chronology lives in `docs/diary.md`.
+
+## Index
+
+| # | Title | Status |
+|---|---|---|
+| 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Accepted (2026-06-03) |
+| 0036 | [Adopt Domain-Driven Design principles](0036-domain-driven-design.md) | Accepted (2026-06-04) |
+
+## Backlog (ADRs 1–30 from the spec)
+
+The 30 foundational ADRs (ADR-001 through ADR-030) live inside `docs/spec.html` (rev 7) and have not yet been extracted into individual files in this directory. Tracked as a housekeeping follow-up.
+
+## Decisions recorded in the development diary (not ADRs)
+
+Several material decisions made during Phase 0c iteration are recorded as dated entries in `docs/diary.md` — they describe what was decided and why, but did not warrant a standalone ADR file at the time. They are still binding policy. If any of them grow consequential enough to deserve formal ADR treatment, a new ADR file lands here and the diary entry gets a back-reference.
+
+- **2026-06-02** — Drop persistent staging; continuous deployment to prod.
+- **2026-06-02** — Solo-developer branch protection policy (`required_approving_review_count = 0`).
+- **2026-06-02** — Conventional Commits + semantic-release + rebase-merge convention.
+- **2026-06-03** — GitHub Merge Queue setup attempted and rejected (user-owned repositories cannot enable it).
+
+## Conventions
+
+- File name: `NNNN-short-kebab-title.md`. Zero-padded to four digits.
+- Status values: `Proposed | Accepted | Rejected | Deprecated | Superseded by NNNN`.
+- The "Decision" section is the contract. Implementation detail and historical context go in `More Information` at the bottom, kept short.
+- When a decision is reversed or revised, do NOT edit the old ADR — write a new one and set the old one's status to `Superseded by NNNN`.
+- The diary references the ADR by number; the ADR does not reference the diary.

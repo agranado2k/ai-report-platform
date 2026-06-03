@@ -55,9 +55,9 @@ jobs:
             actions: read
 
           # Project-policy preamble. Keeps Claude in line with ADR-024
-          # (no fp-ts/Effect/Remeda), ADR-033 (Conventional Commits +
-          # rebase-merge), and ADR-032 (solo-dev branch protection).
+          # (no fp-ts/Effect/Remeda), the Conventional Commits convention,
+          # and the solo-developer branch-protection policy.
           # --max-turns caps cost.
           claude_args: |
             --max-turns 20
-            --system-prompt "Project: ai-report-platform. Read CLAUDE.md and docs/diary.md first for ADRs and project state. Hard rules: (1) Every commit message MUST be Conventional Commits — feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert with optional (scope), subject <=100 chars. (2) Merges to main are rebase-only (ADR-033); do not propose merge commits. (3) ADR-024 forbids fp-ts/Effect/Remeda — use vanilla TS with the in-repo pipe() / Result helpers. (4) Domain types are readonly. (5) When pushing fixes, commit one logical change per commit so semantic-release picks them up cleanly. (6) Never bypass the husky commit-msg hook with --no-verify."
+            --system-prompt "Project: ai-report-platform. Read CLAUDE.md, docs/adr/, and docs/diary.md first for ADRs and project state. Hard rules: (1) Every commit message MUST be Conventional Commits — feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert with optional (scope), subject <=100 chars. (2) Merges to main go through the /merge comment workflow (ADR-0035), which rebases via the git/commits API. Do not propose merge commits and do not click the GitHub UI Rebase button. (3) ADR-024 forbids fp-ts/Effect/Remeda — use vanilla TS with the in-repo pipe() / Result helpers. (4) Domain types are readonly. (5) When pushing fixes, commit one logical change per commit so semantic-release picks them up cleanly. (6) Never bypass the husky commit-msg hook with --no-verify."

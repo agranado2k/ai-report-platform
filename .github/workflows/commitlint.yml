@@ -1,9 +1,9 @@
 name: Commit messages (Conventional Commits)
 
-# Lints every commit added by the PR. With rebase-merge enabled
-# (ADR-033 revised), each commit on the PR ends up on `main` verbatim
-# — so each one must individually follow Conventional Commits and is
-# what semantic-release will parse on the next release run.
+# Lints every commit added by the PR. The bot-merge workflow (ADR-0035)
+# replays each PR commit onto `main` verbatim — so each one must
+# individually follow Conventional Commits and is what semantic-release
+# parses on the next release run.
 #
 # Belt-and-braces to the local husky commit-msg hook: catches commits
 # made with `--no-verify`, commits from outside this checkout, or
@@ -12,10 +12,6 @@ name: Commit messages (Conventional Commits)
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
-  # Re-lint the rebased commits when merge queue (ADR-034) processes the
-  # PR. Same check, against the synthetic gh-readonly-queue/* ref that
-  # represents the imminent push to main.
-  merge_group:
 
 permissions:
   contents: read
@@ -44,11 +40,8 @@ jobs:
       - name: Install root devDependencies
         run: pnpm install --no-frozen-lockfile --ignore-scripts --filter='!./apps/*' --filter='!./packages/*'
 
-      - name: Lint every commit in the range
+      - name: Lint every commit in the PR
         env:
-          # pull_request events expose .pull_request.{base,head}.sha;
-          # merge_group events (ADR-034) expose .merge_group.{base,head}_sha.
-          # Use whichever is populated for this run.
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose

@@ -266,7 +266,7 @@ Also surfaced — and this one I should have caught when I wrote `tf.sh` origina
 
 **Net effect on the branch**: this commit. No infrastructure changes; layout + convention + diary only.
 
-### 2026-06-02 — ADR-031: continuous deployment to prod; persistent staging dropped
+### 2026-06-02 — Continuous deployment to prod; persistent staging dropped
 
 After applying shared, running staging through ~half a dozen real provider-quirk fixes (Neon org_id, Neon retention cap, Neon branch role inheritance, R2 location case, Upstash regional→global, Upstash free-tier limit, GitHub Variables permission), the user called the architectural question: **is persistent staging actually carrying its weight?**
 
@@ -332,7 +332,7 @@ Each PR is intended to be small enough to review in one sitting and to deploy on
 
 **Open issue carried into next session**: clean up `worktree/phase-0b-tf-modules` (its branch is merged). Command: `git worktree remove worktree/phase-0b-tf-modules && git branch -D feat/phase-0b-tf-modules` from the project root.
 
-### 2026-06-02 — ADR-032: solo-developer mode (no required human PR approval) + Vercel Corepack env-var hunt
+### 2026-06-02 — Solo-developer branch-protection mode (0 required approvals) + Vercel Corepack env-var hunt
 
 Two changes appended to PR #2 after the green-build celebration.
 
@@ -402,7 +402,7 @@ Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stri
 
 **Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
 
-### 2026-06-02 — ADR-033: Conventional Commits + semantic-release
+### 2026-06-02 — Conventional Commits + semantic-release + rebase-merge convention
 
 Two things needed for a clean release pipeline that's auditable across the team and across time:
 
@@ -650,7 +650,7 @@ After PR #6 merged at `f610f56`, push events on `main` started firing again (the
 
 **Carry-over for 0c.5** (now bigger): codify `default_workflow_permissions` + `actions/permissions` settings in the `github-repo` Terraform module so the App-install drift can't recur silently. Plus the carry-over from the prior entry still stands: add `Release` + `Commit messages (Conventional Commits)` + the Terraform `Apply` jobs to `required_status_checks`.
 
-### 2026-06-03 — ADR-034: GitHub Merge Queue (rebase-merge + signed-commits, both preserved)
+### 2026-06-03 — Attempted GitHub Merge Queue setup; rejected by API (user-owned repo limitation)
 
 PR #7 surfaced a documented GitHub limitation: with `require_signed_commits = true` AND rebase-merge as the only allowed merge method, the GitHub UI's **Rebase and merge** button rewrites each commit's committer date during the server-side rebase, which invalidates the existing signatures. GitHub cannot re-sign on the operator's behalf (only they hold the private key), so branch protection rejects the resulting unsigned commits and the PR never merges. Quote from the GitHub UI:
 
@@ -690,3 +690,85 @@ The queue is `grouping_strategy = "ALLGREEN"` (require all required checks to pa
 **Bootstrap note for THIS PR**: same as PR #7 — until this PR merges, we still don't have merge queue available. The previous merge (PR #7) used the temporary squash-merge enablement via API; this PR (PR #8) needs the same temporary enablement to land. Once merge queue is live, no future bootstrap needed: every PR goes through the queue, the queue signs everything web-flow.
 
 **Carry-over to 0c.5 (updated)**: when populating `required_status_checks` with real check names, include the merge_group-triggered ones (`commitlint` job, `terraform plan` jobs). The queue uses this list to decide green-ness; an empty list means it merges immediately with no gating.
+
+### 2026-06-03 — ADR-035 landed: bot-merge workflow (PR #9)
+
+Architectural decision is recorded at **`docs/adr/0035-bot-merge-workflow.md`** (the contract). This entry is the development chronology only.
+
+**Sequence of the day**:
+
+1. Squash-merged PR #8 expecting Merge Queue to come online via the `github_repository_ruleset.merge_queue` resource. Terraform `apply-shared` failed with a generic `Invalid rule 'merge_queue'` 422 from the GitHub API.
+2. Reproduced the failure via direct `gh api` POSTs with multiple payload variants — same error every time. Located the root cause in [GitHub's docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue): Merge Queue is not available on user-owned repositories. ADR-034 abandoned.
+3. Opened PR #9 along the "drop `require_signed_commits`" path. Operator pushed back: *"Why can't we keep that?"*
+4. Researched the GitHub UI **Rebase and merge** signature loss: confirmed it's a documented, long-standing limitation (community discussions [#11639](https://github.com/orgs/community/discussions/11639), [#39886](https://github.com/orgs/community/discussions/39886)). The committer-date rewrite during server-side rebase invalidates signatures and GitHub cannot re-sign on the operator's behalf.
+5. Found the unblocking insight while researching alternatives: GitHub's git/commits REST API automatically web-flow-signs every commit it creates. We don't need any signing infrastructure — just call the API.
+6. Pivoted PR #9 to **Option C — custom bot-merge workflow**. ADR-035 records the decision.
+
+**Files in this PR**:
+
+- `docs/adr/INDEX.md` + `docs/adr/0035-bot-merge-workflow.md` — new. The actual ADR document (this diary entry is the log, not the decision).
+- `infra/terraform/modules/github-repo/main.tf` — kept `require_signed_commits = true`; added `bypass_pull_request_allowances { users = ["agranado2k"] }` inside `required_pull_request_reviews`.
+- `.github/workflows/bot-merge.yml` — new (~140 lines). Implements ADR-035.
+- `.github/workflows/commitlint.yml` + `.github/workflows/terraform.yml` — removed dead `merge_group:` triggers and fallbacks left over from ADR-034.
+- `CLAUDE.md` rule 4 — describes the `/merge` comment flow; explicit "do NOT click the UI Rebase and merge button".
+- `.claude/skills/review-and-evaluate/SKILL.md` + `.claude/skills/review-pr/SKILL.md` — copied from zora-pantheon and wired into `/pr-iterate`. Independent concern, shipped in the same PR cycle.
+
+**Bootstrap for this PR**: same as PRs #6/#7/#8 — temp-enable squash-merge via API once more. PR #9 cannot use the new `/merge` workflow because the workflow doesn't exist on `main` until this PR merges. Squash-merge PR #9, then run the one-time operator setup (PAT issuance, secret population) described in ADR-035's "Decision outcome" section.
+
+**Memory pointer for future-me**: I had been writing "ADRs" inline in this diary file (entries dated 2026-06-02 / 2026-06-03 carry "ADR-031" through "ADR-034" labels). That conflates two distinct artifacts — the diary is a chronological development log; ADRs are decision records with a fixed structure (per [adr.github.io](https://adr.github.io)). Cleaned up today (PR #9): those decisions stay recorded in the diary as plain dated entries (not as ADRs), the four old in-diary "ADR-NNN" labels are gone, and ADRs from now on live as standalone files under `docs/adr/` (see `INDEX.md`). The diary may reference ADRs by number; the ADR file is the source of truth for any decision.
+
+**Carry-over to 0c.5 (revised)**:
+
+- Populate `required_status_checks` with real check names (`Lint PR commits`, `plan-shared`, `plan-prod`, plus 0c.3 workflows once they land)
+- Codify `default_workflow_permissions = "write"` in the github-repo module so App-install drift can't recur silently
+- Codify the `MERGE_BOT_TOKEN` PAT issuance step in `docs/ops.md` (operator runbook addition)
+- Sweep the 5 orphan per-branch `ENABLE_EXPERIMENTAL_COREPACK` Vercel entries
+- Backfill ADRs 1–30 from `docs/spec.html` into `docs/adr/*.md` files (see `INDEX.md` backlog)
+
+### 2026-06-03 — `/review-and-evaluate` skill copied from zora-pantheon + wired into `/pr-iterate`
+
+User asked to fold zora-pantheon's `/review-and-evaluate` skill into our flow. Copied two skills from `~/HouseNumbers/zora-pantheon/.claude/commands/`:
+
+- `.claude/skills/review-pr/SKILL.md` — 5-sub-agent review (Security, API/CRUD, Pattern, Simplicity, Test hygiene) producing a severity-bucketed finding list (`C-N` / `H-N` / `M-N` / `L-N`). Original was zora-MongoDB-centric; adapted Agent 1 to also call out ADR-013/014/015/016 (our security stack) and Agent 3 to call out ADR-024 (vanilla TS, no fp-ts/Effect/Remeda) + ADR-020 (hexagonal, domain has no I/O).
+- `.claude/skills/review-and-evaluate/SKILL.md` — wrapper that runs `/review-pr` and a parallel "Context Alignment Analyst" agent that reads CLAUDE.md + `docs/diary.md` + the diff, then synthesizes Apply / Skip / Discuss verdicts per finding.
+
+`/pr-iterate` got a new **Step 2 — Independent code review** that invokes `/review-and-evaluate` between Snapshot and Triage:
+
+| Verdict from `/review-and-evaluate` | What `/pr-iterate` does with it |
+|---|---|
+| Apply | Add to the Act list — fix via a Conventional Commits commit. |
+| Skip | Record in the iteration report ("not applied — reason: …") and ignore. |
+| Discuss | Add to escalation list — surface to operator at end of iteration. |
+
+The local review is **complementary** to the bot reviews from `claude-review` / `gemini-review` (ADR-030). They look at the same diff with different lenses: bot reviews are third-party AI commenting via GitHub API; `/review-and-evaluate` is a fresh local run with full file access and the live diary. **If both flag the same issue → almost certainly worth applying. If they disagree → Discuss/escalation candidate.**
+
+CLAUDE.md quick reference got a row for `/review-and-evaluate`. The iteration report format in `pr-iterate/SKILL.md` got a new line for verdict counts (Apply / Skip / Discuss).
+
+**Carry-over (none).** Standalone improvement to the agent flow — no infra touch.
+
+### 2026-06-03 — Auto-assign PR author workflow
+
+Added `.github/workflows/auto-assign-pr-author.yml`. On `pull_request: opened` or `reopened`, the workflow calls `POST /repos/{owner}/{repo}/issues/{pr}/assignees` to assign the PR author to their own PR — so the "Assignees" panel always reflects who's driving the PR to merge without anyone clicking a button.
+
+Implementation notes:
+
+- Skips bot-authored PRs (`endsWith(github.event.pull_request.user.login, '[bot]')`) — Dependabot, Renovate, `claude[bot]`, etc. don't have a person to assign.
+- Idempotent on `reopened` — checks current assignees first and skips if the author is already on the list.
+- Fails open — if the API call returns non-2xx (e.g., 422 because the author isn't a repo collaborator), the workflow logs and exits 0 so CI isn't blocked.
+
+Cost / scope: ~30 lines of YAML, no new secrets, no Terraform change. Not architectural (so no ADR file) — just a convenience.
+
+### 2026-06-04 — ADR-0036 lands: Domain-Driven Design adopted
+
+The architectural decision is in `docs/adr/0036-domain-driven-design.md` (MADR format). This entry is the chronological log only.
+
+Operator referenced [Martin Fowler's DDD bliki](https://martinfowler.com/bliki/DomainDrivenDesign.html) and asked the project to follow DDD principles. The decision complements ADR-020 (hexagonal layout) and ADR-024 (vanilla TS / functional style) — those covered *how the domain layer is built*; this one covers *how we model the domain*. Strategic patterns adopted (Ubiquitous Language, Bounded Contexts, Context Map) plus the tactical subset that aligns with our existing architecture (Entities, Value Objects, Aggregates, Repositories, Domain Events). CQRS and Event Sourcing are explicit non-goals.
+
+Files landed in this commit:
+- `docs/adr/0036-domain-driven-design.md` — the ADR
+- `docs/adr/INDEX.md` — registry row
+- `docs/domain-glossary.md` — seeded with ~15 terms covering the three contexts plus the shared kernel
+- `docs/context-map.md` — three bounded contexts with an ASCII diagram + integration patterns
+- `CLAUDE.md` Style section — new bullet referencing ADR-0036, glossary, and context map
+
+**Carry-over for Phase 1+**: as the first features land, update the glossary in the same PR that introduces each new term. Aggregates with their invariants get their own tests (allowed by ADR-024 — no I/O needed). The context map gets revised if/when a new bounded context appears (none planned for v1).
