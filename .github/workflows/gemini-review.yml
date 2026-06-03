@@ -48,6 +48,10 @@ jobs:
           fetch-depth: 1
 
       - name: Run Gemini PR review
+        # Bot review is advisory (ADR-032 — can't gate merge). Transient
+        # Gemini API outages (e.g. 503 UNAVAILABLE) shouldn't fail the
+        # PR check; the review just becomes a no-op for this run.
+        continue-on-error: true
         uses: google-github-actions/run-gemini-cli@v0
         env:
           GEMINI_CLI_TRUST_WORKSPACE: "true"

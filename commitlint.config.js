@@ -18,5 +18,11 @@ export default {
     "body-max-line-length": [0, "always"],
     "footer-max-line-length": [0, "always"],
     "subject-max-length": [2, "always", 100],
+    // Disable subject-case enforcement. The default rule rejects any
+    // subject that isn't all-lowercase, but legitimate subjects regularly
+    // contain proper nouns (Claude, Gemini, Vercel, Cloudflare), product
+    // names (Remix, Neon), and ALL-CAPS env vars / constants
+    // (`ENABLE_EXPERIMENTAL_COREPACK`). Forcing lowercase mangles them.
+    "subject-case": [0],
   },
 };
