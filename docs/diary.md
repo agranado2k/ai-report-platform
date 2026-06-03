@@ -15,7 +15,7 @@
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PRs #2 and #3), GitHub repo with ADR-032 branch protection (0 required approvals, still squash-merge until PR #4 applies). `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for both PR #2 and PR #3 preview branches; PR #4 codifies it in `envs/prod/main.tf` so every future branch inherits it. |
 | **Active worktrees**   | `feat/phase-0c-commit-conventions` at `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` |
-| **Spec status**        | rev 7 · 33 ADRs (ADR-031 + ADR-032 + ADR-033 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
+| **Spec status**        | **rev 8** (2026-06-04 domain-language sync — Domain-model + Events sections + schema cards aligned to the DDD docs) · ADRs 0035 + 0036 in `docs/adr/`, ADR-001–030 still inline in `docs/spec.html` · `docs/events.md` is now the canonical event registry · 13 infra + 31 feature verification tests · `docs/spec.html`. **⚠ This Current-state block is stale below this line** — it was frozen at 2026-06-02 (`c04de5c`) while `main` advanced to `6681a7c` (PRs #4–#10). Trust the dated entries; the block needs a full re-sync pass. |
 
 ### Open questions / unresolved decisions
 
@@ -803,3 +803,30 @@ Copied seven skills from [mattpocock/skills](https://github.com/mattpocock/skill
 **License**: MIT. Attribution + full license text at `.claude/skills/LICENSE-mattpocock-skills.md`. The three in-house skills (`pr-iterate`, `review-pr`, `review-and-evaluate`) are explicitly called out as NOT from Matt's repo.
 
 **Carry-over for Phase 0e**: bring in zora-pantheon's TDD enforcement hooks (`PostToolUse` to auto-run nearest test after every edit; `Stop` to block completion if tests fail). The Matt's `tdd/SKILL.md` and zora's hooks compose cleanly.
+
+### 2026-06-04 — Domain-language alignment (spec rev 8 sync) · worktree `docs/domain-language-alignment`
+
+Ran `/grill-with-docs` to reconcile the domain vocabulary **before** any Phase 1 feature code cements it. No domain code or schema exists yet, so this was the cheapest possible moment to fix terminology. The audit found the spec (rev 7) and the DDD docs (ADR-0036 + glossary + context-map, all dated 2026-06-04) diverging on context names and event names, and the DDD docs contradicting **themselves** in two places. Seven operator decisions resolved it.
+
+**Decisions (all operator-confirmed via the grill):**
+
+1. **Source of truth for domain *language*** = the DDD docs (glossary / context-map / ADR-0036), not the spec. Rationale: ADR-0036 postdates spec rev 7 and specifically governs modeling; CLAUDE.md's "spec wins" rule is about *architecture* contracts. The spec is synced **to** the DDD docs (this is rev 8). The spec still wins on architecture.
+2. **`Collaborator` / `folder_collaborators` is owned by Reports & Folders** (the `Folder` aggregate owns its grant chain), resolving the context-map/glossary-vs-ADR-0036 contradiction in ADR-0036's favor. `canWrite()` lives entirely in R&F; grantees are referenced by `UserId`/email via the shared kernel. R&F **subscribes to `UserCreated`** to resolve a pending email-invited grant to a `UserId` on first sign-in.
+3. **Scanning** = a first-class **`ScanJob` aggregate** in Abuse & Moderation (lifecycle `queued`→`running`→`done`/`failed`, owns `findings`); `scan_status` on `ReportVersion` is a **denormalized cache** of the verdict, owned by Reports & Folders and updated on `ReportVersionScanned`. The context-map's old `ScanResult` aggregate is dropped. **Schema consequence (Phase 1):** a new `scan_jobs` table; `scan_findings`/`scanned_at` migrate off `report_versions` onto it.
+4. **API-key anomaly detection (ADR-016)** — was silently dropped when "Trust & Safety" was renamed "Abuse & Moderation"; given a home in **Identity & Access** (`Anomaly` read-model + `AnomalyDetector`; events `ApiKeyUsed` → `ApiKeyAnomalyDetected`). Abuse & Moderation stays content-only.
+5. **Canonical event catalog (11 events)** with the `ReportVersion` rename — see the new `docs/events.md` registry. Dropped the spec's phantom `AbuseConfirmed`.
+6. **`ReportVersion`** is the canonical term (was `Version`); events became `ReportVersionUploaded` / `ReportVersionScanned`.
+7. New terms: `Plan`, `PlanLimits`, `Grant level` (`editor`|`admin`). Kept `Acl`.
+
+**Context renames:** `Publishing` → `Reports & Folders`; `Trust & Safety` → `Abuse & Moderation`; Identity & Access unchanged.
+
+**Files changed:**
+- `docs/domain-glossary.md` — rewritten; `ReportVersion`/`Scan status`/`ScanJob`/`Collaborator`/`Grant level`/`Plan`/`PlanLimits`/`Anomaly` added or corrected; per-context "emits events" list added.
+- `docs/context-map.md` — rewritten; ownership + event flows corrected; ASCII diagram updated.
+- `docs/events.md` — **new** canonical event registry (catalog + design rules + a rename-traceability table).
+- `docs/adr/0036-domain-driven-design.md` — minimal: Value-Object + Aggregate examples extended (`Grant level`, `Scan status`, `ScanJob`), one stale event name fixed (`VersionScanned` → `ReportVersionScanned`), pointer to `docs/events.md`. No decision in 0036 was reversed, so no superseding ADR was needed.
+- `docs/spec.html` — **rev 7 → rev 8**: Domain-model bounded-contexts table, Domain-events table, and schema table-cards (`report_versions` note + new `scan_jobs` card) synced; hexagonal-diagram domain-events list + entity list updated; ADR section header count corrected `(18)` → `(30)`. The narrow Product sequence diagrams keep shorthand labels with a reconciliation note (column too narrow for the longer event names).
+
+**Deliberately NOT done:** the spec's ER **ASCII diagram** still shows the pre-rev-8 schema (`scan_findings` on `report_versions`, no `scan_jobs` box) — the table-cards carry the rev-8 note; the ASCII gets redrawn when Phase 1 writes the real schema in `docs/db-design.md`. The diary **Current-state block** at the top is stale (frozen at `c04de5c`); flagged inline, full re-sync deferred.
+
+**Process:** worktree `docs/domain-language-alignment` on branch `docs/domain-language-alignment`. Lands via the normal PR flow (`/docs-check`, dual AI review, `/merge` bot-merge per ADR-0035). This was a docs-only grill/alignment pass — no code, no infrastructure.
