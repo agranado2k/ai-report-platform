@@ -1,0 +1,52 @@
+name: Auto-assign PR author
+
+# Assigns the PR author as the assignee when a PR is opened or reopened.
+# Convenience so the "Assignees" panel reflects who's responsible for
+# driving the PR to merge, without anyone clicking a button.
+#
+# Skips PRs opened by bots (Dependabot, Renovate, claude[bot], etc.)
+# since those don't represent a person who'd be "assigned" the work.
+#
+# Fails open: if the assignment API call fails (e.g., the author is
+# not a repo collaborator and can't be assigned), the workflow logs
+# the error and exits 0 so it doesn't block CI.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
+    steps:
+      - name: Assign PR author
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+
+          # Skip if already assigned (idempotent on `reopened`).
+          ALREADY=$(gh api "repos/${REPO}/issues/${PR_NUMBER}" \
+            --jq '.assignees[].login' | grep -Fx "$AUTHOR" || true)
+          if [[ -n "$ALREADY" ]]; then
+            echo "PR #${PR_NUMBER} is already assigned to ${AUTHOR} — nothing to do."
+            exit 0
+          fi
+
+          # gh api `assignees[]=<login>` form is what the REST endpoint expects.
+          if gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/assignees" \
+               -f "assignees[]=${AUTHOR}" > /dev/null; then
+            echo "✅ Assigned PR #${PR_NUMBER} to ${AUTHOR}"
+          else
+            # Most common cause: the PR author isn't a collaborator, so
+            # GitHub returns 422. We don't want this to fail CI.
+            echo "⚠️ Could not assign PR #${PR_NUMBER} to ${AUTHOR} (likely a permission / non-collaborator case). Continuing."
+          fi

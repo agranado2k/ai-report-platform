@@ -745,3 +745,15 @@ The local review is **complementary** to the bot reviews from `claude-review` / 
 CLAUDE.md quick reference got a row for `/review-and-evaluate`. The iteration report format in `pr-iterate/SKILL.md` got a new line for verdict counts (Apply / Skip / Discuss).
 
 **Carry-over (none).** Standalone improvement to the agent flow — no infra touch.
+
+### 2026-06-03 — Auto-assign PR author workflow
+
+Added `.github/workflows/auto-assign-pr-author.yml`. On `pull_request: opened` or `reopened`, the workflow calls `POST /repos/{owner}/{repo}/issues/{pr}/assignees` to assign the PR author to their own PR — so the "Assignees" panel always reflects who's driving the PR to merge without anyone clicking a button.
+
+Implementation notes:
+
+- Skips bot-authored PRs (`endsWith(github.event.pull_request.user.login, '[bot]')`) — Dependabot, Renovate, `claude[bot]`, etc. don't have a person to assign.
+- Idempotent on `reopened` — checks current assignees first and skips if the author is already on the list.
+- Fails open — if the API call returns non-2xx (e.g., 422 because the author isn't a repo collaborator), the workflow logs and exits 0 so CI isn't blocked.
+
+Cost / scope: ~30 lines of YAML, no new secrets, no Terraform change. Not architectural (so no ADR file) — just a convenience.
