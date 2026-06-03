@@ -77,24 +77,20 @@ resource "github_branch_protection" "main" {
     required_approving_review_count = 0
     dismiss_stale_reviews           = true
     require_code_owner_reviews      = false
+
+    # ADR-035: the `agranado2k` user identity (authenticated via the
+    # MERGE_BOT_TOKEN repo secret) bypasses the PR requirement so the
+    # `bot-merge.yml` workflow can push the rebased + web-flow-signed
+    # commits to `main`. Without this entry, the workflow's PATCH to
+    # /git/refs/heads/main is rejected by branch protection even though
+    # the API-created commits are signed.
+    bypass_pull_request_allowances {
+      users = ["agranado2k"]
+    }
   }
 
-  enforce_admins = true # owner cannot bypass (ADR-025)
-  # ADR-035 reverses ADR-025's signed-commits bit. GitHub's UI rebase-merge
-  # rewrites the committer date during the server-side rebase, which
-  # invalidates the locally-signed signatures, and GitHub cannot re-sign
-  # because only the operator holds the private key. Merge Queue would
-  # work around this — except merge queue is unavailable on user-owned
-  # repos (this one is), only org-owned repos can use it.
-  #
-  # Choosing rebase-merge (ADR-033 revision) over signed-commits for the
-  # solo-dev velocity. Other branch-protection invariants (enforce_admins,
-  # linear history, no force-push, no delete, PR-only, conversation
-  # resolution) stay in force, so the surface area for tampered history
-  # remains small. When this repo moves to an org or a second developer
-  # joins, revisit by re-enabling `require_signed_commits = true` and
-  # enabling Merge Queue alongside it.
-  require_signed_commits          = false
+  enforce_admins                  = true # owner cannot bypass (ADR-025)
+  require_signed_commits          = true # ADR-025 + ADR-035 (kept via bot-merge.yml)
   require_conversation_resolution = true
   required_linear_history         = true
   allows_force_pushes             = false
@@ -109,6 +105,19 @@ resource "github_branch_protection" "main" {
 # constraint is documented at
 # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue
 # ("available in any public repository owned by an organization").
+#
+# Resolution (ADR-035 Option C): keep `require_signed_commits = true`
+# AND rebase-merge via a custom workflow `.github/workflows/bot-merge.yml`.
+# The workflow uses GitHub's git/commits REST API to create web-flow-signed
+# copies of each PR commit on top of `main`, then updates `refs/heads/main`
+# via the operator's identity (`agranado2k`, authenticated via the
+# MERGE_BOT_TOKEN secret). The bypass_pull_request_allowances entry above
+# permits the workflow's PATCH despite branch protection's PR requirement.
+#
+# When this repo moves to a GitHub org, switch to Merge Queue:
+#   1. Remove `bot-merge.yml` and the bypass entry
+#   2. Re-add `github_repository_ruleset.merge_queue` with merge_method = REBASE
+#   3. The queue's web-flow signing accomplishes the same with less code
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

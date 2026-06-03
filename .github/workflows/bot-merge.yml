@@ -1,0 +1,190 @@
+name: Bot merge (rebase + web-flow sign)
+
+# ADR-035 Option C — preserves both signed-commits (ADR-025) AND
+# rebase-merge (ADR-033 revision) by sidestepping GitHub's UI rebase
+# button, which cannot sign rewritten commits.
+#
+# Flow: operator comments `/merge` on a green PR. This workflow re-creates
+# each PR commit on top of `main` via the git/commits REST API. Every
+# API-created commit is automatically web-flow-signed by GitHub, which
+# `require_signed_commits = true` accepts. The PATCH to /git/refs/heads/main
+# is permitted because `agranado2k` (the user the MERGE_BOT_TOKEN is
+# scoped to) is in `bypass_pull_request_allowances`.
+#
+# Auth: `MERGE_BOT_TOKEN` — a fine-grained PAT scoped to this repo with
+# Contents (read+write) + Pull requests (read+write) + Metadata (read).
+# One-time operator setup after this PR merges; see `docs/ops.md`.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # Serialize merges on `main` so two concurrent `/merge` comments don't
+  # race the `refs/heads/main` PATCH. `cancel-in-progress: false` because
+  # we never want to abort a half-finished merge.
+  group: bot-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    # Only fire on PR comments (not issue comments) containing `/merge`
+    # as a standalone token. Trailing/leading whitespace allowed.
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/merge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authorize commenter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          USER: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+          PERM=$(gh api "repos/${REPO}/collaborators/${USER}/permission" --jq .permission)
+          case "$PERM" in
+            admin|write|maintain) echo "authorized: $USER ($PERM)" ;;
+            *)
+              gh pr comment "${{ github.event.issue.number }}" \
+                --body "⚠️ Sorry @${USER}, you need write access to use \`/merge\`. Your permission level is \`${PERM}\`."
+              exit 1
+              ;;
+          esac
+
+      - name: Snapshot PR + validate state
+        id: snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          PR_JSON=$(gh api "repos/${REPO}/pulls/${PR}")
+          HEAD_SHA=$(echo "$PR_JSON" | jq -r .head.sha)
+          BASE_SHA=$(echo "$PR_JSON" | jq -r .base.sha)
+          STATE=$(echo "$PR_JSON" | jq -r .state)
+          MERGEABLE=$(echo "$PR_JSON" | jq -r .mergeable)
+          MERGE_STATE=$(echo "$PR_JSON" | jq -r .mergeable_state)
+
+          if [[ "$STATE" != "open" ]]; then
+            gh pr comment "$PR" --body "⚠️ PR is not open (state=\`${STATE}\`)."
+            exit 1
+          fi
+
+          # null mergeable means GitHub is still computing — be conservative.
+          if [[ "$MERGEABLE" == "false" ]]; then
+            gh pr comment "$PR" --body "⚠️ PR has merge conflicts. Rebase locally and force-push, then comment \`/merge\` again."
+            exit 1
+          fi
+
+          # Acceptable merge states for proceeding:
+          #   clean      = checks green, up to date with base, no conflicts
+          #   has_hooks  = same as clean, plus hooks (still fine)
+          # Refuse anything else (blocked, behind, dirty, unstable, unknown).
+          case "$MERGE_STATE" in
+            clean|has_hooks) ;;
+            behind)
+              gh pr comment "$PR" --body "⚠️ PR is behind \`main\`. Click **Update branch** in the GitHub UI (it web-flow-signs the result) then comment \`/merge\` again."
+              exit 1
+              ;;
+            *)
+              gh pr comment "$PR" --body "⚠️ PR is not in a mergeable state (\`${MERGE_STATE}\`). Required checks may still be running or failing."
+              exit 1
+              ;;
+          esac
+
+          # Get current main HEAD and verify base matches.
+          MAIN_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq .object.sha)
+          if [[ "$MAIN_SHA" != "$BASE_SHA" ]]; then
+            gh pr comment "$PR" --body "⚠️ \`main\` moved (now \`${MAIN_SHA:0:7}\`, PR base is \`${BASE_SHA:0:7}\`). Click **Update branch** then \`/merge\` again."
+            exit 1
+          fi
+
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$MAIN_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Rebase PR commits onto main via API (web-flow signed)
+        id: rebase
+        env:
+          # Identity that can bypass branch protection PR requirement
+          # (see github_branch_protection.required_pull_request_reviews.
+          #  bypass_pull_request_allowances in modules/github-repo/main.tf).
+          GH_TOKEN: ${{ secrets.MERGE_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          PARENT: ${{ steps.snapshot.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+
+          # Get the ordered list of commit SHAs on the PR.
+          COMMITS=$(gh api "repos/${REPO}/pulls/${PR}/commits" --paginate --jq '.[].sha')
+
+          echo "Rebasing the following commits onto main (${PARENT:0:7}):"
+          for SHA in $COMMITS; do echo "  $SHA"; done
+
+          # Walk the commits in order; for each, POST a new commit with the
+          # original tree + author + message but the new parent. The API
+          # web-flow-signs each created commit.
+          NEW_PARENT="$PARENT"
+          for SHA in $COMMITS; do
+            ORIG=$(gh api "repos/${REPO}/git/commits/${SHA}")
+
+            PAYLOAD=$(echo "$ORIG" | jq --arg parent "$NEW_PARENT" '{
+              message: .message,
+              tree:    .tree.sha,
+              parents: [$parent],
+              author:  { name: .author.name,    email: .author.email,    date: .author.date },
+              # Set committer to the original author too so semantic-release
+              # sees a single identity per commit. The web-flow signature is
+              # attached separately by GitHub and remains valid.
+              committer: { name: .author.name, email: .author.email, date: .author.date }
+            }')
+
+            NEW_SHA=$(echo "$PAYLOAD" | gh api -X POST "repos/${REPO}/git/commits" --input - --jq .sha)
+            echo "  ${SHA:0:7} → ${NEW_SHA:0:7}"
+            NEW_PARENT="$NEW_SHA"
+          done
+
+          echo "new_head=$NEW_PARENT" >> "$GITHUB_OUTPUT"
+
+      - name: Update main ref + verify signatures
+        env:
+          GH_TOKEN: ${{ secrets.MERGE_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          NEW_HEAD: ${{ steps.rebase.outputs.new_head }}
+        run: |
+          set -euo pipefail
+
+          # force=false: reject non-fast-forward updates. If main moved
+          # between snapshot and now, this fails and the operator retries.
+          gh api -X PATCH "repos/${REPO}/git/refs/heads/main" \
+            --raw-field sha="$NEW_HEAD" \
+            -F force=false > /dev/null
+
+          # Confirm the new HEAD commit verifies.
+          VERIFIED=$(gh api "repos/${REPO}/commits/${NEW_HEAD}" --jq .commit.verification.verified)
+          REASON=$(gh api "repos/${REPO}/commits/${NEW_HEAD}" --jq .commit.verification.reason)
+
+          if [[ "$VERIFIED" != "true" ]]; then
+            gh pr comment "$PR" --body "❗ Pushed to \`main\` but the new head commit is NOT verified (reason: \`${REASON}\`). Investigate."
+            exit 1
+          fi
+
+          gh pr comment "$PR" --body "✅ Merged via \`/merge\` — rebased onto \`main\` with web-flow signatures (head: \`${NEW_HEAD:0:7}\`, verified: \`${REASON}\`)."
+
+      - name: Failure notice
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.issue.number }}" \
+            --body "❌ \`/merge\` failed at the workflow level. Check the run logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
