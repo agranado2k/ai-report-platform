@@ -558,3 +558,66 @@ Each iteration runs the same five-step procedure: snapshot via `gh` → triage a
 - ADR-013 (security headers) · ADR-014 (SW block) · ADR-024 (no fp-ts) · ADR-025 (PR + signed commits + linear) · ADR-030 (dual AI review) · ADR-032 (0 approvals) · ADR-033 (Conventional Commits + rebase-merge)
 
 **Carry-over to a future polish pass**: when the skill encounters its first real "I can't apply this — needs a human" case, capture the pattern in the diary so the triage table grows over time. The current table covers the obvious cases; edge cases will emerge from use.
+
+### 2026-06-03 — Broken release pipeline + recovery: `default_workflow_permissions` was silently set to `read`
+
+After PR #4 squash-merged, no workflows fired on `main`. No `Release` run → no `v1.0.0` tag, no GitHub Release. No `Terraform` apply → no `allow_squash_merge = false` (rebase-merge still not enabled), no `ENABLE_EXPERIMENTAL_COREPACK = "1"` codified at the Vercel project level (only the manual per-branch CLI sets are live).
+
+**Symptom audit** (all confirmed via `gh api` / `gh run list`):
+
+| Merge | SHA | Push workflows that fired | Should have fired |
+|---|---|---|---|
+| Phase 0b (PR #1) | `51b6186` | `Terraform` ✓ | `Terraform` (apply-shared / apply-prod) |
+| Phase 0c.1 (PR #2) | `2fa0d22` | `Terraform` ✓ | `Terraform` (no infra changes → empty plan, harmless) |
+| Phase 0c.2 (PR #3) | `c04de5c` | **nothing** ✗ | (no infra changes, no workflows added → expected nothing) |
+| Phase 0c.4 (PR #4) | `e483671` | **nothing** ✗ | `Terraform` (apply-shared flips merge mode + adds Corepack env var) + `Release` (`v1.0.0` from the `feat:` commit) |
+
+The cutoff is between PR #2 and PR #4. What changed in between: the user ran `/install-github-app` to install the official Claude Code GitHub App (which opened PR #5 with the Claude workflows).
+
+**Root cause** — the GitHub App install silently set the repository's `default_workflow_permissions` to `read`:
+
+```
+$ gh api repos/agranado2k/ai-report-platform/actions/permissions/workflow
+{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}
+```
+
+This is the maximum `GITHUB_TOKEN` permission a workflow can be granted, and it silently caps workflows that declare `permissions.contents: write` (as both `release.yml` via `@semantic-release/github` and `terraform.yml` via the apply step do). In this repo's case the effect was stronger than docs suggest: not just capped, but the workflows never fired on `push` events at all. Could be a quirk of the GitHub App installation flow, or undocumented interaction with branch protection's `required_signatures`. Either way, the symptom is reproducible: PRs #3 and #4 both squash-merged into `main` and produced ZERO `push`-event workflow runs.
+
+**Fix** — restore `write` as the default:
+
+```
+$ gh api -X PUT repos/agranado2k/ai-report-platform/actions/permissions/workflow \
+    -f default_workflow_permissions='write' -F can_approve_pull_request_reviews=false
+```
+
+Verified after the call:
+
+```
+{"default_workflow_permissions":"write","can_approve_pull_request_reviews":false}
+```
+
+**Hardening landed in this PR** (`fix/release-pipeline-dispatch`):
+
+1. Added `workflow_dispatch:` to `release.yml` and `terraform.yml` — recovery hatch so we can re-run them manually via `gh workflow run` if push triggers ever stop firing again. Cost: nil.
+2. Diary entry (this one) documents the symptom, the root cause, and the recovery steps so future-me doesn't relearn this from scratch.
+
+**Recovery steps after this PR merges** (operator runs from main):
+
+```bash
+# Run release.yml manually to compute v1.0.0 from the missed merges
+gh workflow run release.yml --ref main
+
+# Run terraform apply manually to flip squash → rebase and add the
+# ENABLE_EXPERIMENTAL_COREPACK env var that PR #4 codified
+gh workflow run terraform.yml --ref main
+```
+
+Both should complete in <2 minutes. After that:
+
+- A `v1.0.0` git tag + GitHub Release exist
+- `allow_squash_merge = false`, `allow_rebase_merge = true` on the repo — next PR is rebase-merged
+- `ENABLE_EXPERIMENTAL_COREPACK` is codified per-project; future preview branches inherit it (no more manual `vercel env add` per branch)
+
+**Carry-over** — if the GitHub App install ever re-sets `default_workflow_permissions` to `read` (e.g. on re-install), the symptom returns. Worth periodically auditing via `gh api ... /actions/permissions/workflow`. A Terraform resource (`github_actions_repository_permissions` or similar) to manage this declaratively would lock it down — flagged for 0c.5 alongside the Terraform-codified branch protection re-tighten.
+
+**Memory pointer** — when a GitHub App installation flow appears to "just work" but downstream workflows mysteriously stop firing, **check `gh api repos/{owner}/{repo}/actions/permissions/workflow` first**. The default-permissions field is the silent breaker.

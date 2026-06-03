@@ -27,6 +27,13 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform.yml"
+  # Recovery hatch: manually trigger apply-shared / apply-prod via
+  #   `gh workflow run terraform.yml --ref main`
+  # for cases where push events on main fail to fire (see the
+  # 2026-06-03 diary entry — the GitHub App install silently set
+  # `default_workflow_permissions: read` on the repo, which blocked
+  # push-event workflows from firing on main).
+  workflow_dispatch:
 
 permissions:
   contents: read
