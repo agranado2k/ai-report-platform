@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     branches: [main]
+  # Recovery hatch: manually trigger from the Actions UI or
+  #   `gh workflow run release.yml --ref main`
+  # for cases where push events on main fail to fire (see the
+  # 2026-06-03 diary entry — the GitHub App install silently set
+  # `default_workflow_permissions: read` on the repo, which blocked
+  # push-event workflows from firing on main).
+  workflow_dispatch:
 
 # Required for semantic-release to create tags and GitHub releases.
 permissions:
