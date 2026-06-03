@@ -46,6 +46,12 @@ module "clerk" {
 
 locals {
   shared_env = {
+    # ADR-033 carry-over → codified here so every preview branch gets it
+    # automatically. Without this var, Vercel's wrapper ignores the
+    # Corepack-prepared pnpm and falls back to a built-in that hits the
+    # Node 24 / pnpm URL bug (`ERR_INVALID_THIS: Value of "this" must be
+    # of type URLSearchParams`). Apply to all build environments.
+    ENABLE_EXPERIMENTAL_COREPACK      = { value = "1", target = ["production", "preview", "development"], sensitive = false }
     NODE_ENV                          = { value = "production", target = ["production"], sensitive = false }
     DATABASE_URL                      = { value = local.neon_uri, target = ["production"] }
     CLERK_PUBLISHABLE_KEY             = { value = module.clerk.publishable_key, target = ["production"], sensitive = false }

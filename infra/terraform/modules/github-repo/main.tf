@@ -23,9 +23,21 @@ resource "github_repository" "this" {
   has_projects = false
   has_wiki     = false
 
+  # ADR-033 revision: rebase-merge only.
+  #   - allow_merge_commit = false  → no merge-commits (would break the
+  #     linear-history rule on branch protection anyway).
+  #   - allow_squash_merge = false → squash-merge throws away every commit
+  #     on the PR and writes a single one using the PR title. That collapses
+  #     useful history (e.g. a debug-and-fix sequence) and means
+  #     semantic-release only sees one commit per PR.
+  #   - allow_rebase_merge = true  → each PR commit is replayed onto main
+  #     in order, preserving full history while staying linear. Combined
+  #     with the husky commit-msg hook (every commit Conventional-Commits
+  #     formatted), semantic-release on the next push sees every typed
+  #     commit and aggregates them into the release notes.
   allow_merge_commit     = false
-  allow_squash_merge     = true # the only merge style (linear history)
-  allow_rebase_merge     = false
+  allow_squash_merge     = false
+  allow_rebase_merge     = true
   allow_auto_merge       = true
   delete_branch_on_merge = true
 

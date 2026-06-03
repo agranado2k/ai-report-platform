@@ -30,6 +30,8 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 3. **Read the relevant ADR** before changing infrastructure or security code. ADRs live in `docs/adr/`. Currently 30 records; the full spec is in `docs/spec.html`.
 
+4. **Use Conventional Commits** (ADR-033). Every commit must start with one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`, optionally followed by `(scope)`, then `:`, then a subject ≤100 chars. Examples: `feat(headers): add Trusted Types policy`, `fix(viewer): block service worker registration`, `chore(deps): bump turbo to 2.5.4`. `feat` drives a minor bump on merge, `fix`/`perf` drive patch, `BREAKING CHANGE:` in the body drives major; everything else ships under the next release without bumping. **Merges to `main` are rebase-only** (ADR-033 revised) — every PR commit lands on `main` verbatim, so each one must individually follow the format. The local husky `commit-msg` hook lints commits at write time; the CI `commitlint` workflow re-lints every commit in the PR as belt-and-braces. **Curate your commits before opening the PR** (`git rebase -i`) so the on-main history reads cleanly — if you have a "fix typo" or "address review feedback" commit, squash it locally first.
+
 ## Style
 
 - **Functional, immutable** for `packages/domain/` and `packages/application/` (ADR-024). No new FP libraries — vanilla TS + 12-line `pipe()` + 15-line `Result<T, E>`.
@@ -50,7 +52,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
 2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local pre-push hook runs a subset.
 
-3. PRs receive **automated review from Claude and Gemini** (ADR-030). Per ADR-032 (solo-developer mode), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
+3. PRs receive **automated dual AI review** (ADR-030 — fully wired): Claude via `.github/workflows/claude-code-review.yml`, Gemini via `.github/workflows/gemini-review.yml`. Both auto-run on every PR open / sync / ready / reopen and post inline review comments. The `@claude` mention bot (`.github/workflows/claude.yml`) additionally responds in PR / issue / review-comment threads with `use_commit_signing: true` so any commits it pushes satisfy branch protection. Auth: `CLAUDE_CODE_OAUTH_TOKEN` (set by `/install-github-app`) and `GEMINI_API_KEY` (set by Phase 0b Terraform) — both already in repo secrets. Per ADR-032 (solo-developer mode), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. Bot reviews are advisory; they don't gate merge. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
 
 ## Infrastructure
 
@@ -72,6 +74,7 @@ This repo IS NOT:
 | ---------------------------------------- | ----------------------------------------------- |
 | Write code                               | `/tdd <task>` (ADR-022)                         |
 | Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
+| Iterate on bot review + CI on an open PR | `/pr-iterate <PR#>` (one pass) · `/loop /pr-iterate <PR#>` (continuous) |
 | Check docs are in sync                   | `/docs-check`                                   |
 | Update API surface                       | Edit `docs/api/openapi.yaml`; Bruno auto-regens |
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |

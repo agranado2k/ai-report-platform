@@ -8,14 +8,14 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | Phase 0c.1 merged at `2fa0d22` (PR #2 — green Vercel + ADR-032 solo-dev branch protection). Phase 0c.2 in progress: `packages/headers` shared security-headers package + Edge MW stubs (Service-Worker block + edge marker). Sub-PRs remaining: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection + Terraform-codify the Vercel Corepack env var. |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` (active worktree). Old 0b + 0c.1 worktrees cleaned up. |
-| **Branch**             | `feat/phase-0c-shared-headers` open against `main` (local, not pushed yet) |
-| **Last commit on main**        | `2fa0d22` — `Phase 0c.1: monorepo scaffold + skeleton Remix apps (#2)` |
+| **Phase**              | Phase 0c.2 merged at `c04de5c` (PR #3 — shared `arp-headers` package + Edge MW stubs). PR #4 in flight on `feat/phase-0c-commit-conventions`: Conventional Commits enforcement + semantic-release pipeline + rebase-merge revision (ADR-033) + Vercel Corepack env-var Terraform codification. Sub-PRs remaining after #4: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection. |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` (active worktree). Old 0b / 0c.1 / 0c.2 worktrees cleaned up. |
+| **Branch**             | `feat/phase-0c-commit-conventions` open against `main` (PR #4 — rebased on `c04de5c`) |
+| **Last commit on main**        | `c04de5c` — `Phase 0c.2: shared arp-headers + Edge MW stubs (#3)` |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
-| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (`ai-report-platform`, single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PR #2), GitHub repo with ADR-032 branch protection (0 required approvals). Vercel projects also have `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for `feat/phase-0c-skeleton-apps` preview — codification deferred to 0c.5. |
-| **Active worktrees**   | `feat/phase-0c-shared-headers` at `~/PetProjects/ai-report-platform/worktree/phase-0c-shared-headers/` |
-| **Spec status**        | rev 7 · 32 ADRs (ADR-031 + ADR-032 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
+| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PRs #2 and #3), GitHub repo with ADR-032 branch protection (0 required approvals, still squash-merge until PR #4 applies). `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for both PR #2 and PR #3 preview branches; PR #4 codifies it in `envs/prod/main.tf` so every future branch inherits it. |
+| **Active worktrees**   | `feat/phase-0c-commit-conventions` at `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` |
+| **Spec status**        | rev 7 · 33 ADRs (ADR-031 + ADR-032 + ADR-033 in diary; spec/HTML still on rev 7, sync deferred) · 13 infra + 31 feature verification tests · `docs/spec.html` |
 
 ### Open questions / unresolved decisions
 
@@ -401,3 +401,160 @@ Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stri
 - No unit tests yet — TDD scaffolding (`.claude/skills/tdd/SKILL.md` + hooks) is Phase 0e per ADR-022.
 
 **Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
+
+### 2026-06-02 — ADR-033: Conventional Commits + semantic-release
+
+Two things needed for a clean release pipeline that's auditable across the team and across time:
+
+1. **Commit-message format the team can parse** — humans and tools both. The Conventional Commits standard (`<type>(<scope>): <subject>`) is the de-facto choice, has tooling everywhere, and maps cleanly onto SemVer (`feat` → minor, `fix`/`perf` → patch, `BREAKING CHANGE:` → major).
+2. **An automatic version + tag + release pipeline** so we never debate "what's in prod right now" — the answer is `v1.4.2` and the GitHub Release has the bullet list of what changed.
+
+**Decision**: Adopt Conventional Commits across all commits and PR titles; use the `semantic-release` npm package on merge-to-`main` to compute the next version, write the git tag, and publish a GitHub Release with auto-generated notes. No npm publish (this isn't a distributed library); no in-repo `CHANGELOG.md` (GitHub Releases is the source of truth — see "branch-protection interaction" below).
+
+**Why semantic-release and not Changesets** (the obvious alternative): we evaluated. Changesets is the better fit for libraries published to npm where per-package versioning matters. Our shape is a SaaS — single application, multiple internal packages — and the team's stated preference is commit-driven (one less file to remember when opening a PR). Diary entry stands as the comparison record so this isn't relitigated.
+
+**Why no in-repo `CHANGELOG.md` + `@semantic-release/git` plugin**: those would push back to `main`, which under ADR-025 + ADR-032 still requires signed commits + linear history + no force-push. The GitHub Actions bot can't sign commits without extra secret machinery, and we're not adding that just to keep a markdown file. GitHub Releases gives the same audit trail without the push-to-protected-branch dance.
+
+**Allowed commit types** (`@commitlint/config-conventional` defaults, mirrored in `commitlint.config.js`): `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Bump mapping in `.releaserc.json`:
+
+| Type | Bump | Shows in release notes? |
+|---|---|---|
+| `feat` | minor | ✅ "Features" |
+| `fix` | patch | ✅ "Bug Fixes" |
+| `perf` | patch | ✅ "Performance" |
+| `refactor` | none | ✅ "Refactoring" |
+| `docs` | none | ✅ "Documentation" |
+| `chore` / `test` / `ci` / `build` / `style` | none | hidden by default |
+| `BREAKING CHANGE:` in body or `!` after type | major | ✅ "BREAKING CHANGES" |
+
+**Enforcement (two layers)**:
+
+1. **Local — `.husky/commit-msg`** runs `commitlint` on every commit. Bad message → rejected. Bypass with `--no-verify` exists for emergencies but is logged.
+2. **CI — `.github/workflows/pr-title.yml`** lints the PR title via `amannn/action-semantic-pull-request@v5`. Because branch protection only allows squash-merge, the PR title becomes the commit on `main` — the title is what `semantic-release` actually parses. Linting it stops a Conventional-Commits-violating merge from breaking the release pipeline.
+
+**Release workflow — `.github/workflows/release.yml`**: triggers on push to `main`, full git history checkout, Corepack-prepares pnpm 10.5.0, runs `pnpm exec semantic-release`. The Vercel-style `ENABLE_EXPERIMENTAL_COREPACK` dance isn't needed here — this is GitHub-hosted, not Vercel-hosted. `permissions.contents: write` lets the workflow create tags + releases without a PAT.
+
+**Files landed in this commit:**
+
+- `package.json` — added `prepare`, `commitlint`, `release`, `release:dry` scripts; 8 new devDependencies (commitlint, husky, semantic-release + 3 plugins, conventionalcommits preset)
+- `commitlint.config.js` — extends `@commitlint/config-conventional`, relaxes `body-max-line-length` (we paste log excerpts in commit bodies regularly)
+- `.husky/commit-msg` — runs `pnpm exec commitlint --edit "$1"`, executable bit set
+- `.releaserc.json` — branches `main`, `tagFormat: v${version}`, the three-plugin pipeline (commit-analyzer → release-notes-generator → github) with the bump table above
+- `.github/workflows/release.yml` — push-to-main trigger, concurrency-guarded, semantic-release run
+- `.github/workflows/pr-title.yml` — lints PR titles with the same type allowlist
+- `CLAUDE.md` — added rule #4 under "Before any change" with the commit-format rule + examples
+
+**Carry-over to 0c.5**: `release.yml` and `commitlint.yml` should be added to `required_status_checks` in the `github_branch_protection` module so a Conventional-Commits-failing PR can't merge.
+
+**Memory pointer**: zora-pantheon was the reference point for "find a release setup we've used before." Turned out it uses Changesets, not semantic-release; we adopted semantic-release anyway after weighing both. Don't conflate the two next time future-me hears "like the zora-pantheon setup."
+
+#### ADR-033 revision (same day) — rebase-merge only, every commit preserved
+
+Initial 0c.x convention was squash-merge: branch protection's `allow_squash_merge = true` + `allow_rebase_merge = false`, with the PR title becoming the single squash commit on `main`. A `pr-title.yml` workflow linted that title.
+
+User pushed back: squash-merge throws away every commit on the PR and collapses useful history (the debug-and-fix sequence for the Vercel Corepack hunt is a vivid example — four commits chasing the wrong fix before landing the right one; squash erases the trail). It also feeds `semantic-release` only one commit per PR, so a single PR can only contribute one release-notes bullet even if it did multiple `feat:` + `fix:` things.
+
+Revised decision: **rebase-merge only**. Every PR commit is replayed onto `main` in order, preserving full history while staying linear (branch protection's `required_linear_history = true` is happy — rebase produces a linear sequence). `semantic-release` on the next run sees every typed commit and aggregates them properly into the release notes.
+
+**Implications + the workflow churn:**
+
+- The PR title is no longer the merge commit, so `pr-title.yml` is obsolete. Deleted.
+- **Every individual commit** now matters. The local `.husky/commit-msg` hook stays. Added `.github/workflows/commitlint.yml` that lints every commit in the PR range (`pnpm exec commitlint --from $BASE_SHA --to $HEAD_SHA --verbose`) as belt-and-braces against commits made with `--no-verify` or pushed from outside this checkout.
+- **PR authors must curate before opening**: if a PR has a "fix typo" or "address review feedback" commit, squash it locally with `git rebase -i` first. The on-main history is the historical record; nobody wants a typo-fix line in v1.4.2's release notes. CLAUDE.md rule #4 updated accordingly.
+
+**Terraform diff:**
+
+- `modules/github-repo/main.tf` — `allow_squash_merge = true → false`; `allow_rebase_merge = false → true`. Comment block explaining the rationale + the trade-off.
+
+The decision lives under ADR-033 rather than a new ADR because it's the same problem (how does a commit reach `main` and what does it look like there) — the squash/rebase choice is internal to that decision, not an architectural pivot on its own.
+
+**Carry-over to 0c.5 (updated)**: register `Release` + `Commit messages (Conventional Commits)` as required status checks. `pr-title.yml` removed from the list since it no longer exists.
+
+### 2026-06-02 — Claude bot wiring (partial ADR-030 — Phase 0c.4a)
+
+User ran `/install-github-app` from Claude Code, which opens PR #5 with two workflows from the official `anthropics/claude-code-action@v1`. Rather than merge PR #5 separately, we folded its files into PR #4 with project-specific customization baked in:
+
+| File | What it does | Trigger |
+|---|---|---|
+| `.github/workflows/claude.yml` | `@claude` mention bot — responds in issue / PR / review-comment / review threads | `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `issues` (open/assign) — guarded by a job-level `if` that matches `@claude` in the relevant body |
+| `.github/workflows/claude-code-review.yml` | Auto-reviewer on every PR — uses the `code-review@claude-code-plugins` skill from Anthropic's plugin marketplace, posts inline review comments on the diff | `pull_request` opened / synchronize / ready_for_review / reopened |
+
+Customizations vs PR #5's defaults (all derived from the Claude Code Action [usage docs](https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md)):
+
+- **`use_commit_signing: true`** on `claude.yml` — our branch protection requires signed commits (ADR-025). The action signs via the GitHub API when this flag is on; no SSH key secret needed.
+- **`contents: write` + `pull-requests: write`** on `claude.yml` — the bot needs to commit fixes back and reply on review threads. PR #5 had only read permissions.
+- **`--max-turns 20`** on `claude.yml`, **`--max-turns 25`** on `claude-code-review.yml` — cost control.
+- **Project-policy `--system-prompt`** on `claude.yml` — tells Claude: every commit must be Conventional Commits (ADR-033), merges are rebase-only, ADR-024 forbids fp-ts / Effect / Remeda, never bypass the husky hook with `--no-verify`. Without this preamble, Claude would happily write non-conforming commits that fail the `commitlint` check and block the PR.
+- **Per-ADR prompt augmentation** on `claude-code-review.yml` — the plugin's default prompt is generic; we append project-specific flags (call out violations of ADR-013 / ADR-014 / ADR-024 / ADR-033 specifically). The reviewer learns our policies without manual context-paste.
+
+**Auth**: both workflows use `secrets.CLAUDE_CODE_OAUTH_TOKEN`, which the GitHub App install flow populated. Already in the repo's Actions secrets — no manual setup.
+
+**Scope vs ADR-030**: this is the Claude half. Gemini half (`gemini-review.yml`) is still pending for Phase 0c.4b — either as a separate official action or a custom workflow calling the Gemini API. Either way it's additive — review bots aren't gating (advisory only, per ADR-032).
+
+**Folding PR #5 into PR #4**: PR #5 will be closed after this PR merges. The bot workflows belong with the rest of the ADR-033 + ADR-030-related plumbing (commit-format enforcement + release pipeline + bot review wiring) so it all ships and applies together.
+
+**Carry-over to 0c.5**: do NOT add the Claude Code Review check to `required_status_checks` — bot reviews are advisory per ADR-032. The `Release` workflow and the `commitlint` workflow are the only release-pipeline checks worth gating on.
+
+### 2026-06-02 — Gemini bot wiring (closes ADR-030 — Phase 0c.4b)
+
+Adds the Gemini half of the dual AI review. With this, ADR-030's "Claude + Gemini auto-review on every PR" is fully wired — both bots run on every PR open / sync / ready / reopen, both post inline review comments, and neither gates the merge (advisory per ADR-032).
+
+**`.github/workflows/gemini-review.yml`** uses the official `google-github-actions/run-gemini-cli@v0` action with the `code-review` extension from `gemini-cli-extensions`. Adapted from the [upstream `pr-review` example](https://github.com/google-github-actions/run-gemini-cli/blob/main/examples/workflows/pr-review/gemini-review.yml), with the following deliberate simplifications:
+
+1. **Self-contained, not a `workflow_call`** — upstream is a reusable workflow that needs a separate dispatcher. We trigger directly on `pull_request` events to avoid the dispatcher layer for a solo-dev setup.
+2. **API-key auth, not Workload Identity Federation** — WIF is Google's recommended production path but needs a GCP project to federate against. Our `GEMINI_API_KEY` repo secret (already populated by Phase 0b's Terraform via `actions_secrets`) is sufficient for now. When a GCP project lands, swap the auth inputs — the action supports both modes simultaneously.
+3. **Project-policy prompt** — same pattern as `claude-code-review.yml`: the upstream's `/pr-code-review` slash command runs as-is, but we append flags directing Gemini to specifically call out violations of ADR-013 (security headers), ADR-014 (service workers blocked at edge), ADR-024 (no fp-ts/Effect/Remeda; readonly domain), ADR-033 (Conventional Commits + rebase-merge), and ADR-025/032 (solo-dev branch protection — so it doesn't flag the 0-approval setup as a finding).
+4. **GitHub MCP server** scoped to the three tools the reviewer actually needs (`add_comment_to_pending_review`, `pull_request_read`, `pull_request_review_write`) rather than the upstream's broader set. Smaller blast radius if the action is ever compromised.
+
+**A note on the consumer Gemini Code Assist GitHub App**: per Google's docs, the consumer-tier "Gemini Code Assist on GitHub" app is scheduled to shut down **2026-07-17**. We deliberately did NOT install that app — `run-gemini-cli` is the supported path forward. If we ever onboarded the App for one-click setup, we'd need to migrate before that shutdown anyway. Skipped the round-trip.
+
+**No mention bot for Gemini** (yet): the upstream provides a `gemini-invoke` workflow that responds to `@gemini-cli` mentions, mirroring our `claude.yml`. Skipped because:
+- The Claude mention bot is enough for "let an LLM help me on a PR" use cases.
+- The Gemini auto-reviewer is where ADR-030's value lives (second opinion on every PR).
+- Adding it later is a single file — no architectural lock-in.
+
+**Open question**: Gemini's review prompt currently asks it to read `CLAUDE.md` and `docs/diary.md`. CLAUDE.md is the Claude-aimed name, but the *content* is project policy applicable to any reviewer. Renaming to `AGENTS.md` or `CONTRIBUTING.md` would be more inclusive — flagged but not urgent. Tracking for the next housekeeping pass.
+
+**Carry-over to 0c.5**: same as the Claude review — do NOT add `Gemini Code Review` to `required_status_checks`. Advisory only.
+
+### 2026-06-02 — `/pr-iterate` skill: closed-loop PR drive-to-green (Phase 0c.4c)
+
+The dual AI review (ADR-030) is now wired, but the operator still has to manually read the bot comments + failing checks and decide what to do. That's the gap this slice closes — gives Claude Code (the local IDE/CLI tool) a procedure to drive an open PR to green on its own, advisory comments and all.
+
+**File**: `.claude/skills/pr-iterate/SKILL.md`
+
+**Invocation**:
+
+| Mode | Command | When to use |
+|---|---|---|
+| Single iteration | `/pr-iterate <PR#>` | After a manual push, to clean up any new bot feedback before walking away |
+| Continuous loop | `/loop /pr-iterate <PR#>` | "Set it and forget it" — the loop runner re-fires the skill every wake-up until the stop condition is reached |
+
+Each iteration runs the same five-step procedure: snapshot via `gh` → triage against project ADRs → apply / reply / escalate → commit + push as Conventional Commits → report status. The skill **never merges**, **never `--force-push`s**, and **never `--no-verify`s** the husky hook. It escalates when a bot suggestion contradicts an ADR or when it genuinely can't diagnose a failing check from the logs.
+
+**Why a skill rather than a hook**:
+
+- Hooks fire on events Claude Code knows about (`Stop`, `UserPromptSubmit`, etc.). A `Stop` hook that auto-fires `/pr-iterate` on session end was tempting, but the noise is high — every session would trigger a poll, even sessions that didn't touch a PR.
+- A skill is **opt-in by invocation**, which is the right blast radius. Operator decides when to start the loop; operator decides when to stop (`Ctrl-C` the loop or close the session).
+- A skill **composes with `/loop`** for free, which gives the auto-iteration behavior without writing custom scheduling logic.
+
+**Triage policy** (codified in the skill):
+
+| Suggestion class | Skill action |
+|---|---|
+| Improves security / correctness / readability, no ADR conflict | Apply, commit, optionally reply on thread |
+| Contradicts an ADR (e.g. "use fp-ts" violates ADR-024, "squash to one commit" violates ADR-033) | Reply on thread with the ADR number cited; don't apply |
+| Ambiguous — touches an open question or needs a design call | Escalate to operator with a one-line summary; stop the iteration |
+| Test failure I can't diagnose from logs | Escalate (don't guess at fixes) |
+
+**What it deliberately doesn't do**:
+
+- **No PR merging** — that's GitHub's gate, not Claude's.
+- **No branch-protection modification** — even via Terraform from inside the iteration. ADR-032 changes go through their own PR.
+- **No sleep-polling inside one iteration** when invoked via `/loop` — the loop runner schedules the next wake; the iteration just runs once and returns.
+- **No Stop-hook auto-trigger** for v1 — opt-in invocation is the right blast radius. Revisit if the manual cadence is genuinely annoying.
+
+**Cross-references the skill cites by ADR number in replies** (so future-greps work):
+- ADR-013 (security headers) · ADR-014 (SW block) · ADR-024 (no fp-ts) · ADR-025 (PR + signed commits + linear) · ADR-030 (dual AI review) · ADR-032 (0 approvals) · ADR-033 (Conventional Commits + rebase-merge)
+
+**Carry-over to a future polish pass**: when the skill encounters its first real "I can't apply this — needs a human" case, capture the pattern in the diary so the triage table grows over time. The current table covers the obvious cases; edge cases will emerge from use.

@@ -1,0 +1,123 @@
+name: Gemini Code Review
+
+# Automated PR review by Gemini (Phase 0c.4b / ADR-030 — the Gemini half
+# of the dual AI-review setup; Claude half lives in claude-code-review.yml).
+#
+# Uses the official `google-github-actions/run-gemini-cli@v0` action with
+# the `code-review` extension from `gemini-cli-extensions`. Auth via
+# GEMINI_API_KEY repo secret (populated by Phase 0b's Terraform).
+#
+# NOTE: We deliberately skip Workload Identity Federation here — that's
+# the production-grade path Google recommends, but our solo-dev setup
+# doesn't yet have a GCP project to federate against. When we add one,
+# swap GEMINI_API_KEY for the WIF inputs (gcp_workload_identity_provider,
+# gcp_service_account, etc.) — the action supports both modes.
+#
+# Read-only on contents; the action posts inline review comments via the
+# GitHub MCP server (Docker container `ghcr.io/github/github-mcp-server`).
+#
+# Consumer Gemini Code Assist on GitHub is being shut down July 17, 2026
+# — the run-gemini-cli action is the supported path forward.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Run Gemini PR review
+        # Bot review is advisory (ADR-032 — can't gate merge). Transient
+        # Gemini API outages (e.g. 503 UNAVAILABLE) shouldn't fail the
+        # PR check; the review just becomes a no-op for this run.
+        continue-on-error: true
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          github_pr_number: ${{ github.event.pull_request.number }}
+          workflow_name: gemini-review
+          settings: |
+            {
+              "model": {
+                "maxSessionTurns": 25
+              },
+              "telemetry": {
+                "enabled": true,
+                "target": "local",
+                "outfile": ".gemini/telemetry.log"
+              },
+              "mcpServers": {
+                "github": {
+                  "command": "docker",
+                  "args": [
+                    "run", "-i", "--rm",
+                    "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+                    "ghcr.io/github/github-mcp-server:v0.27.0"
+                  ],
+                  "includeTools": [
+                    "add_comment_to_pending_review",
+                    "pull_request_read",
+                    "pull_request_review_write"
+                  ],
+                  "env": {
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+                  }
+                }
+              },
+              "tools": {
+                "core": []
+              }
+            }
+          extensions: |
+            [
+              "https://github.com/gemini-cli-extensions/code-review"
+            ]
+          prompt: |
+            /pr-code-review
+
+            Project context: ai-report-platform. Before flagging anything,
+            read CLAUDE.md and docs/diary.md (ADRs are the contract).
+
+            Project-specific review focus — flag any code that violates:
+              - ADR-013: every viewer response must ship the full security
+                header stack (CSP + sandbox CSP + report-only + COOP/CORP +
+                Origin-Agent-Cluster + Permissions-Policy + HSTS).
+              - ADR-014: service workers blocked at the edge — viewer
+                middleware must reject `Service-Worker: script` with 403.
+              - ADR-024: domain and application layers use vanilla TS +
+                the in-repo `pipe()` / `Result<T,E>` helpers — no fp-ts,
+                Effect, or Remeda. All domain types are readonly.
+              - ADR-033: every commit follows Conventional Commits —
+                feat | fix | docs | style | refactor | perf | test |
+                build | ci | chore | revert, with optional (scope) and
+                subject <= 100 chars. Merges to main are rebase-only.
+              - ADR-025 / ADR-032: PR-only workflow; signed commits;
+                solo-dev mode (0 required approvals is intentional).
+
+            Provide constructive feedback in a structured format. Keep
+            comments inline on specific lines where possible.
