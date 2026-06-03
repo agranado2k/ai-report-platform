@@ -25,7 +25,7 @@ A previous attempt (recorded in `docs/diary.md` 2026-06-03) tried to resolve thi
 
 1. **Drop `require_signed_commits`** — Single Terraform line. Trade signing for UI rebase-merge working.
 2. **Switch to squash-merge** — GitHub web-flow auto-signs squash commits. Trade per-commit history for signed commits.
-3. **Custom bot-merge workflow** *(chosen)* — Workflow uses GitHub's git/commits REST API to create web-flow-signed copies of each PR commit on top of `main`; updates `refs/heads/main` via an operator-scoped PAT that is in `bypass_pull_request_allowances`. Preserves both ADRs.
+3. **Custom bot-merge workflow** *(chosen)* — Workflow uses GitHub's git/commits REST API to create web-flow-signed copies of each PR commit on top of `main`; updates `refs/heads/main` via an operator-scoped PAT whose node ID is listed in `pull_request_bypassers`. Preserves both ADRs.
 4. **Transfer repository to a GitHub organization → enable Merge Queue** — Unblocks the path the earlier merge-queue attempt tried to take. Requires reconciling Vercel, GitHub App installs, and Terraform state.
 
 ## Decision outcome
@@ -42,7 +42,7 @@ Mechanism:
 4. Workflow `PATCH /repos/{owner}/{repo}/git/refs/heads/main` to the new HEAD with `force=false`.
 5. Workflow verifies `commit.verification.verified == true` for the new HEAD and posts a result comment on the PR.
 
-Auth: the workflow uses `MERGE_BOT_TOKEN`, a fine-grained PAT scoped to this repository with `Contents: write` + `Pull requests: write` + `Metadata: read`. The PAT belongs to the operator (`agranado2k`), and `agranado2k` is added to `bypass_pull_request_allowances` inside `required_pull_request_reviews` in the `github_branch_protection.main` resource so the PATCH is permitted despite the PR requirement.
+Auth: the workflow uses `MERGE_BOT_TOKEN`, a fine-grained PAT scoped to this repository with `Contents: write` + `Pull requests: write` + `Metadata: read`. The PAT belongs to the operator (`agranado2k`), and `agranado2k`'s GraphQL node_id is listed in `pull_request_bypassers` (under `required_pull_request_reviews`) on the `github_branch_protection.main` resource so the PATCH is permitted despite the PR requirement. The node_id is resolved at apply time via a `data "github_user"` lookup.
 
 ### Consequences
 

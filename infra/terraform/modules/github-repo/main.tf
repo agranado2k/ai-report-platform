@@ -14,6 +14,13 @@ terraform {
   }
 }
 
+# Resolve the merge-bot user's GraphQL node_id at apply time so the
+# branch_protection.required_pull_request_reviews.pull_request_bypassers
+# list can reference it. See ADR-0035 for context.
+data "github_user" "merge_bot" {
+  username = "agranado2k"
+}
+
 resource "github_repository" "this" {
   name        = var.repo_name
   description = var.description
@@ -84,9 +91,12 @@ resource "github_branch_protection" "main" {
     # commits to `main`. Without this entry, the workflow's PATCH to
     # /git/refs/heads/main is rejected by branch protection even though
     # the API-created commits are signed.
-    bypass_pull_request_allowances {
-      users = ["agranado2k"]
-    }
+    #
+    # github_branch_protection (v4 / GraphQL) takes a list of GraphQL
+    # node IDs here — NOT a `bypass_pull_request_allowances { users }`
+    # sub-block (that's the v3 REST API shape). The `data "github_user"`
+    # lookup below resolves the username to its node_id at apply time.
+    pull_request_bypassers = [data.github_user.merge_bot.node_id]
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)
@@ -103,8 +113,8 @@ resource "github_branch_protection" "main" {
 # copies of each PR commit on top of `main`, then updates
 # `refs/heads/main` via the operator's identity (`agranado2k`,
 # authenticated via the MERGE_BOT_TOKEN secret). The
-# bypass_pull_request_allowances entry above permits the workflow's
-# PATCH despite branch protection's PR requirement.
+# pull_request_bypassers entry above permits the workflow's PATCH
+# despite branch protection's PR requirement.
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

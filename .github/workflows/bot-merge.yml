@@ -9,7 +9,7 @@ name: Bot merge (rebase + web-flow sign)
 # API-created commit is automatically web-flow-signed by GitHub, which
 # `require_signed_commits = true` accepts. The PATCH to /git/refs/heads/main
 # is permitted because `agranado2k` (the user the MERGE_BOT_TOKEN is
-# scoped to) is in `bypass_pull_request_allowances`.
+# scoped to) is listed in `pull_request_bypassers` on branch protection.
 #
 # Auth: `MERGE_BOT_TOKEN` — a fine-grained PAT scoped to this repo with
 # Contents (read+write) + Pull requests (read+write) + Metadata (read).
@@ -116,7 +116,7 @@ jobs:
         env:
           # Identity that can bypass branch protection PR requirement
           # (see github_branch_protection.required_pull_request_reviews.
-          #  bypass_pull_request_allowances in modules/github-repo/main.tf).
+          #  pull_request_bypassers in modules/github-repo/main.tf).
           GH_TOKEN: ${{ secrets.MERGE_BOT_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.issue.number }}
