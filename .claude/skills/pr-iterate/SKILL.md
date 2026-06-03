@@ -68,7 +68,29 @@ Bucket what you find:
 - **Human threads** — anyone who isn't a `[bot]`
 - **Top-level PR comments** vs **inline review-thread comments** — they live in different endpoints and reply differently
 
-### 2 — Triage
+### 2 — Independent code review (`/review-and-evaluate`)
+
+Before triaging external bot comments, invoke **`/review-and-evaluate`** locally to get our own project-aware reading of the diff. The skill runs two parallel agents:
+
+1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; 5 specialized sub-agents (Security, API/CRUD, Pattern, Simplicity, Test hygiene) produce a severity-bucketed finding list.
+2. **Context Alignment Analyst** — reads the commits, the changed files, `CLAUDE.md`, and `docs/diary.md` (the ADR record), then evaluates each finding for **Apply / Skip / Discuss**.
+
+The skill normally ends interactively ("Which items would you like me to apply?"). **In the `/pr-iterate` context, bypass the question** and consume the verdicts directly:
+
+| Verdict from `/review-and-evaluate` | What `/pr-iterate` does with it |
+|---|---|
+| **Apply** | Add to the iteration's Act list — fix it via one Conventional Commits commit. |
+| **Skip** | Record it in the iteration report ("not applied — reason: …") and move on. |
+| **Discuss** | Add to the escalation list. Don't apply; surface to operator at end of iteration. |
+
+The local review is **complementary** to the bot reviews from `claude-review` / `gemini-review`. They look at the same diff with different lenses:
+
+- **Bot reviews**: third-party AI, prompted with generic-plus-ADR context, posts inline GitHub comments.
+- **`/review-and-evaluate`**: our own skill run, fresh per iteration, has full local file access + the live diary content.
+
+Treat them as two independent reviewers. If both flag the same issue → almost certainly worth applying. If they disagree → it's a Discuss/escalation candidate.
+
+### 3 — Triage
 
 **For each failing check:**
 
@@ -104,7 +126,7 @@ Read the suggestion. Cross-reference with project policy:
 
 Answer it. Be direct, cite ADRs where relevant. Don't mark human threads resolved — only humans resolve human threads.
 
-### 3 — Act
+### 4 — Act
 
 **For applied fixes:**
 
@@ -152,7 +174,7 @@ gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "..."}
 
 (Get the `threadId` from the `gh api` listing of review threads.)
 
-### 4 — Wait
+### 5 — Wait
 
 After pushing, CI takes 1–5 min. Two modes:
 
@@ -168,7 +190,7 @@ until ! gh pr checks "$PR" 2>&1 | grep -qE 'pending'; do sleep 30; done
 
 …but only if explicitly asked.
 
-### 5 — Stop conditions
+### 6 — Stop conditions
 
 Stop iterating and report when ANY of:
 
@@ -189,11 +211,13 @@ Status:
   Checks:        <green>/<total> green · <failing> failing · <pending> pending
   Bot threads:   <open>/<total> open  (claude: <X>, gemini: <Y>)
   Human threads: <unresolved>/<total>
+  /review-and-evaluate verdicts:
+    Apply: <X>  · Skip: <Y> · Discuss: <Z>
 
 This iteration:
-  Applied:    <list of fixes with commit SHAs>
+  Applied:    <list of fixes with commit SHAs; mark source: bot|local|check>
   Replied:    <list of bot threads with one-line reasoning each>
-  Escalated:  <items needing operator judgment>
+  Escalated:  <items needing operator judgment — includes Discuss verdicts>
 
 Next: <continue / stop — converged / stop — escalation>
 ```
@@ -207,5 +231,10 @@ Next: <continue / stop — converged / stop — escalation>
 - ADR-030 (dual AI review — Claude + Gemini): `.github/workflows/claude-code-review.yml` + `.github/workflows/gemini-review.yml`
 - ADR-032 (solo-dev branch protection — 0 approvals): `infra/terraform/modules/github-repo/main.tf`
 - ADR-033 (Conventional Commits + semantic-release + rebase-merge): `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
+
+Sibling skills this one invokes:
+
+- **`/review-and-evaluate`** (`.claude/skills/review-and-evaluate/SKILL.md`) — the local review step inserted at iteration step 2.
+- **`/review-pr`** (`.claude/skills/review-pr/SKILL.md`) — used internally by `/review-and-evaluate` for the 5-sub-agent review.
 
 When citing an ADR in a reply, always include the number — future-me and future-collaborators will grep for it.

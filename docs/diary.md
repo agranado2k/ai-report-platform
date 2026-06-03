@@ -724,3 +724,24 @@ This repo is owned by a user account (`agranado2k`). Merge queue is not availabl
 - Populate `required_status_checks` with real check names (`Lint PR commits`, `plan-shared`, `plan-prod`, plus 0c.3 workflows once they land)
 - Codify `default_workflow_permissions = "write"` in the github-repo module so App-install drift can't recur silently
 - Sweep the 5 orphan per-branch `ENABLE_EXPERIMENTAL_COREPACK` Vercel entries
+
+### 2026-06-03 — `/review-and-evaluate` skill copied from zora-pantheon + wired into `/pr-iterate`
+
+User asked to fold zora-pantheon's `/review-and-evaluate` skill into our flow. Copied two skills from `~/HouseNumbers/zora-pantheon/.claude/commands/`:
+
+- `.claude/skills/review-pr/SKILL.md` — 5-sub-agent review (Security, API/CRUD, Pattern, Simplicity, Test hygiene) producing a severity-bucketed finding list (`C-N` / `H-N` / `M-N` / `L-N`). Original was zora-MongoDB-centric; adapted Agent 1 to also call out ADR-013/014/015/016 (our security stack) and Agent 3 to call out ADR-024 (vanilla TS, no fp-ts/Effect/Remeda) + ADR-020 (hexagonal, domain has no I/O).
+- `.claude/skills/review-and-evaluate/SKILL.md` — wrapper that runs `/review-pr` and a parallel "Context Alignment Analyst" agent that reads CLAUDE.md + `docs/diary.md` + the diff, then synthesizes Apply / Skip / Discuss verdicts per finding.
+
+`/pr-iterate` got a new **Step 2 — Independent code review** that invokes `/review-and-evaluate` between Snapshot and Triage:
+
+| Verdict from `/review-and-evaluate` | What `/pr-iterate` does with it |
+|---|---|
+| Apply | Add to the Act list — fix via a Conventional Commits commit. |
+| Skip | Record in the iteration report ("not applied — reason: …") and ignore. |
+| Discuss | Add to escalation list — surface to operator at end of iteration. |
+
+The local review is **complementary** to the bot reviews from `claude-review` / `gemini-review` (ADR-030). They look at the same diff with different lenses: bot reviews are third-party AI commenting via GitHub API; `/review-and-evaluate` is a fresh local run with full file access and the live diary. **If both flag the same issue → almost certainly worth applying. If they disagree → Discuss/escalation candidate.**
+
+CLAUDE.md quick reference got a row for `/review-and-evaluate`. The iteration report format in `pr-iterate/SKILL.md` got a new line for verdict counts (Apply / Skip / Discuss).
+
+**Carry-over (none).** Standalone improvement to the agent flow — no infra touch.
