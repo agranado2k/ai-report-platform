@@ -26,7 +26,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 
    Worktrees live under `worktree/` inside the project (gitignored). `<type>` is one of `feat`, `fix`, `refactor`, `chore`, `docs`. Examples: `feat/phase-0b-tf-modules`, `fix/r2-roundtrip-test`, `docs/adr-031-foo`.
 
-2. **Start with `/tdd`** for any code change (Phase 0e). Write the failing test first, then implementation, then refactor. See `.claude/skills/tdd/SKILL.md`.
+2. **Start with `/tdd`** for any code change. Write the failing test first, then implementation, then refactor. The procedural skill is at `.claude/skills/tdd/SKILL.md` (adapted from Matt Pocock's upstream); Phase 0e will add the enforcement hooks (`PostToolUse` / `Stop`) on top.
 
 3. **Read the relevant ADR** before changing infrastructure or security code. ADRs live in `docs/adr/` using the [MADR template](https://adr.github.io/madr/) — one file per decision, named `NNNN-short-kebab-title.md`. `docs/adr/INDEX.md` is the registry. ADR-001 through ADR-030 still live inside `docs/spec.html` pending extraction (see the backlog in `INDEX.md`); ADR-0035 onwards lives in `docs/adr/`. Several Phase 0c decisions are recorded as dated entries in `docs/diary.md` rather than as standalone ADRs (listed in `docs/adr/INDEX.md`) — they're still binding policy. **When writing a new ADR, create a file in `docs/adr/`; do NOT put architectural decision content in the diary.** The diary is the chronological development log — it can reference an ADR by number but is not the source of truth for any decision.
 
@@ -73,10 +73,15 @@ This repo IS NOT:
 
 | If you need to…                          | Skill / hook / doc                              |
 | ---------------------------------------- | ----------------------------------------------- |
-| Write code                               | `/tdd <task>` (ADR-022)                         |
+| Write code                               | `/tdd <task>` — red-green-refactor              |
 | Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
 | Iterate on bot review + CI on an open PR | `/pr-iterate <PR#>` (one pass) · `/loop /pr-iterate <PR#>` (continuous) |
 | Local PR review + alignment check        | `/review-and-evaluate` (2-agent: review + ADR-aware verdicts) · auto-invoked by `/pr-iterate` |
+| Force the agent to ask clarifying questions before coding | `/grill-me` (quick) · `/grill-with-docs` (also updates the glossary / ADR drafts) |
+| Diagnose a bug or perf issue methodically | `/diagnose` (reproduce → minimize → hypothesize → instrument → fix → test) |
+| Turn a conversation into a PRD as a GitHub issue | `/to-prd`                                       |
+| Get system-wide context on an unfamiliar area | `/zoom-out`                                  |
+| Rescue a deteriorating area of the codebase | `/improve-codebase-architecture` (deepening + interface design + ubiquitous language) |
 | Check docs are in sync                   | `/docs-check`                                   |
 | Update API surface                       | Edit `docs/api/openapi.yaml`; Bruno auto-regens |
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |

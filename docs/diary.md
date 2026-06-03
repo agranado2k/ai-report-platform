@@ -772,3 +772,34 @@ Files landed in this commit:
 - `CLAUDE.md` Style section — new bullet referencing ADR-0036, glossary, and context map
 
 **Carry-over for Phase 1+**: as the first features land, update the glossary in the same PR that introduces each new term. Aggregates with their invariants get their own tests (allowed by ADR-024 — no I/O needed). The context map gets revised if/when a new bounded context appears (none planned for v1).
+
+### 2026-06-03 — PR #10: copy 7 skills from Matt Pocock's open-source skills repo
+
+Copied seven skills from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT-licensed; attribution at `.claude/skills/LICENSE-mattpocock-skills.md`). All seven are the ones called out under the upstream README's *Why these skills exist* section.
+
+| Skill | Source | Use case |
+|---|---|---|
+| `grill-me` | productivity/grill-me | Force the agent to ask clarifying questions before coding |
+| `grill-with-docs` | engineering/grill-with-docs | Same, plus updates to the glossary + ADR drafts |
+| `tdd` | engineering/tdd | Red-green-refactor with sidecar guidance on tests, mocking, deep modules, interface design, refactoring |
+| `diagnose` | engineering/diagnose | Reproduce → minimize → hypothesize → instrument → fix → test |
+| `to-prd` | engineering/to-prd | Convert a conversation into a PRD as a GitHub issue |
+| `zoom-out` | engineering/zoom-out | Request broader context on an unfamiliar area |
+| `improve-codebase-architecture` | engineering/improve-codebase-architecture | Rescue deteriorating code through deepening + ubiquitous language |
+
+**Adaptations**:
+
+- **`grill-with-docs/ADR-FORMAT.md`** — REWRITTEN as a thin pointer to our MADR template and to `docs/adr/INDEX.md`. Matt's upstream proposes its own ADR shape; we use MADR per our own ADR discipline (established in PR #9). The skill's docs-update step now produces ADRs in our format.
+- **`tdd/SKILL.md`** — added a project-context prelude at the top: vitest, `pnpm turbo test --filter=<workspace>`, `*.spec.ts` / `*.spec-d.ts` conventions, pointer to `docs/domain-glossary.md` for naming. Body of the skill is otherwise upstream-unchanged.
+- **All other skills** copied verbatim — they're framework-agnostic enough that adaptation isn't needed.
+
+**Interaction with Phase 0e**: the original Phase 0e plan was to bring in `/tdd` from `~/HouseNumbers/zora-pantheon` along with four TDD hooks + two rules files. We took Matt's `/tdd` *procedural* skill now; Phase 0e will layer zora-pantheon's hooks on top as the enforcement mechanism. The two are complementary: Matt's SKILL.md tells you HOW to TDD; zora's hooks ENSURE you did.
+
+**CLAUDE.md**:
+- Quick-reference table — added seven new rows.
+- Rule 2 — removed the "(Phase 0e)" qualifier on `/tdd` since the procedural skill is available now.
+- Rule 1 quick-ref — removed a stale `(ADR-022)` reference.
+
+**License**: MIT. Attribution + full license text at `.claude/skills/LICENSE-mattpocock-skills.md`. The three in-house skills (`pr-iterate`, `review-pr`, `review-and-evaluate`) are explicitly called out as NOT from Matt's repo.
+
+**Carry-over for Phase 0e**: bring in zora-pantheon's TDD enforcement hooks (`PostToolUse` to auto-run nearest test after every edit; `Stop` to block completion if tests fail). The Matt's `tdd/SKILL.md` and zora's hooks compose cleanly.
