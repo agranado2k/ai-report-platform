@@ -757,3 +757,18 @@ Implementation notes:
 - Fails open — if the API call returns non-2xx (e.g., 422 because the author isn't a repo collaborator), the workflow logs and exits 0 so CI isn't blocked.
 
 Cost / scope: ~30 lines of YAML, no new secrets, no Terraform change. Not architectural (so no ADR file) — just a convenience.
+
+### 2026-06-04 — ADR-0036 lands: Domain-Driven Design adopted
+
+The architectural decision is in `docs/adr/0036-domain-driven-design.md` (MADR format). This entry is the chronological log only.
+
+Operator referenced [Martin Fowler's DDD bliki](https://martinfowler.com/bliki/DomainDrivenDesign.html) and asked the project to follow DDD principles. The decision complements ADR-020 (hexagonal layout) and ADR-024 (vanilla TS / functional style) — those covered *how the domain layer is built*; this one covers *how we model the domain*. Strategic patterns adopted (Ubiquitous Language, Bounded Contexts, Context Map) plus the tactical subset that aligns with our existing architecture (Entities, Value Objects, Aggregates, Repositories, Domain Events). CQRS and Event Sourcing are explicit non-goals.
+
+Files landed in this commit:
+- `docs/adr/0036-domain-driven-design.md` — the ADR
+- `docs/adr/INDEX.md` — registry row
+- `docs/domain-glossary.md` — seeded with ~15 terms covering the three contexts plus the shared kernel
+- `docs/context-map.md` — three bounded contexts with an ASCII diagram + integration patterns
+- `CLAUDE.md` Style section — new bullet referencing ADR-0036, glossary, and context map
+
+**Carry-over for Phase 1+**: as the first features land, update the glossary in the same PR that introduces each new term. Aggregates with their invariants get their own tests (allowed by ADR-024 — no I/O needed). The context map gets revised if/when a new bounded context appears (none planned for v1).

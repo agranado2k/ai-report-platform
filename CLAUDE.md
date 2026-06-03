@@ -38,6 +38,7 @@ If the diary disagrees with anything in this file or in `docs/spec.html`, the sp
 - **`readonly` on every domain type.** ESLint will fail the build otherwise.
 - **No side effects in domain code** — push all I/O to `packages/adapters/`.
 - **Repository pattern** for data access (ADR-020). Drizzle implementations live in adapters, not in use cases.
+- **Domain-Driven Design** (ADR-0036) — three bounded contexts (Reports & Folders / Identity & Access / Abuse & Moderation), Aggregates with one root entity each, Value Objects for branded types, Domain Events at aggregate boundaries. Use the names defined in `docs/domain-glossary.md` everywhere (code, commits, PR titles, ADRs). When introducing a new term, add it to the glossary in the same PR. Cross-context integration goes through events; the only shared kernel types are `UserId` and `OrgId`. See `docs/context-map.md` for the integration map. **Do NOT adopt CQRS or Event Sourcing** — explicit non-goals in ADR-0036.
 
 ## Before `git push`
 

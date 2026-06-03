@@ -7,6 +7,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | # | Title | Status |
 |---|---|---|
 | 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Accepted (2026-06-03) |
+| 0036 | [Adopt Domain-Driven Design principles](0036-domain-driven-design.md) | Accepted (2026-06-04) |
 
 ## Backlog (ADRs 1–30 from the spec)
 
