@@ -97,27 +97,14 @@ resource "github_branch_protection" "main" {
   allows_deletions                = false
 }
 
-# ADR-034 was reverted in ADR-035 (see the 2026-06-03 diary entry). Merge
-# queue cannot be enabled on user-owned repositories — the GitHub API
-# rejects the `merge_queue` rule type with a generic 422 regardless of
-# payload shape. Empirically confirmed via direct `gh api` POST to
-# /repos/{user}/{repo}/rulesets with multiple variants; the underlying
-# constraint is documented at
-# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue
-# ("available in any public repository owned by an organization").
-#
-# Resolution (ADR-035 Option C): keep `require_signed_commits = true`
-# AND rebase-merge via a custom workflow `.github/workflows/bot-merge.yml`.
-# The workflow uses GitHub's git/commits REST API to create web-flow-signed
-# copies of each PR commit on top of `main`, then updates `refs/heads/main`
-# via the operator's identity (`agranado2k`, authenticated via the
-# MERGE_BOT_TOKEN secret). The bypass_pull_request_allowances entry above
-# permits the workflow's PATCH despite branch protection's PR requirement.
-#
-# When this repo moves to a GitHub org, switch to Merge Queue:
-#   1. Remove `bot-merge.yml` and the bypass entry
-#   2. Re-add `github_repository_ruleset.merge_queue` with merge_method = REBASE
-#   3. The queue's web-flow signing accomplishes the same with less code
+# ADR-035: keep `require_signed_commits = true` AND rebase-merge by
+# routing every merge through `.github/workflows/bot-merge.yml`. That
+# workflow uses GitHub's git/commits REST API to create web-flow-signed
+# copies of each PR commit on top of `main`, then updates
+# `refs/heads/main` via the operator's identity (`agranado2k`,
+# authenticated via the MERGE_BOT_TOKEN secret). The
+# bypass_pull_request_allowances entry above permits the workflow's
+# PATCH despite branch protection's PR requirement.
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

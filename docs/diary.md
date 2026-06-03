@@ -749,8 +749,6 @@ The key insight that unblocks Option C: **GitHub's git/commits REST API automati
 
 **Bootstrap for THIS PR**: same as PRs #6/#7/#8 — one final temp-enable of squash-merge via API. PR #9 itself can't use the new workflow because the workflow doesn't exist on `main` yet. Squash-merge it once, then every future PR uses `/merge`.
 
-**Reversal trigger (still valid)**: when this repo moves to a GitHub organization, enable Merge Queue instead — it accomplishes the same thing with less code. Delete `bot-merge.yml`, delete the `bypass_pull_request_allowances` block, re-add `github_repository_ruleset.merge_queue` with `merge_method = "REBASE"`.
-
 **Carry-over to 0c.5 (revised)**: the `merge_group` triggers and merge-queue-related carry-overs are deleted. What stays:
 - Populate `required_status_checks` with real check names (`Lint PR commits`, `plan-shared`, `plan-prod`, plus 0c.3 workflows once they land)
 - Codify `default_workflow_permissions = "write"` in the github-repo module so App-install drift can't recur silently
