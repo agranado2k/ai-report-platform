@@ -1,8 +1,8 @@
 name: Bot merge (rebase + web-flow sign)
 
-# ADR-035 Option C — preserves both signed-commits (ADR-025) AND
-# rebase-merge (ADR-033 revision) by sidestepping GitHub's UI rebase
-# button, which cannot sign rewritten commits.
+# ADR-0035 — preserves both signed-commits (ADR-025) AND rebase-merge
+# semantics by sidestepping GitHub's UI rebase button, which cannot
+# sign rewritten commits.
 #
 # Flow: operator comments `/merge` on a green PR. This workflow re-creates
 # each PR commit on top of `main` via the git/commits REST API. Every

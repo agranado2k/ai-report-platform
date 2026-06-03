@@ -31,7 +31,7 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
-        # Bot review is advisory (ADR-032 — can't gate merge). Transient
+        # Bot review is advisory (solo-developer policy — can't gate merge). Transient
         # Anthropic API outages shouldn't fail the PR check; the review
         # just becomes a no-op for this run.
         continue-on-error: true
@@ -48,6 +48,6 @@ jobs:
             ADR-024 (no fp-ts/Effect/Remeda; vanilla TS only in domain /
             application layers), ADR-013 (the security header stack must
             ship on every viewer response), ADR-014 (service workers
-            blocked at the edge), or ADR-033 (Conventional Commits).
+            blocked at the edge), or the Conventional Commits convention.
           claude_args: |
             --max-turns 25

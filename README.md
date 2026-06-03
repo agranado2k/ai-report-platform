@@ -44,7 +44,7 @@ Files added:
 
 - **All work in feature worktrees** (ADR-025): `git worktree add ../<slug> -b <type>/<slug>`.
 - **Never push directly to `main`** — branch protection (Terraform-applied in Phase 0c) will block it.
-- **PR-only delivery** with signed commits + linear history. Human approval is currently 0 (solo-developer mode, ADR-032); AI review (Claude + Gemini) + CI status checks are the gates.
+- **PR-only delivery** with signed commits + linear history. Human approval is currently 0 (solo-developer branch-protection policy); AI review (Claude + Gemini) + CI status checks are the gates.
 - **Branch naming**: `feat/` `fix/` `refactor/` `chore/` `docs/`.
 
 See `CLAUDE.md` for the full agent operating manual.

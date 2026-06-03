@@ -125,8 +125,9 @@ jobs:
           add_github_comment: changes-only
           backend_config: backend.hcl
 
-  # plan-staging removed: ADR-031 dropped persistent staging. Per-PR previews
-  # via Vercel + ephemeral Neon branches cover what staging used to.
+  # plan-staging removed: we adopted continuous deployment to prod and
+  # dropped persistent staging (see the 2026-06-02 diary entry). Per-PR
+  # previews via Vercel + ephemeral Neon branches cover what staging used to.
 
   plan-prod:
     if: github.event_name == 'pull_request'
@@ -204,7 +205,8 @@ jobs:
       - name: Apply
         run: infra/terraform/scripts/tf.sh shared apply -auto-approve
 
-  # apply-staging removed: see ADR-031. CD chain is now shared → prod direct.
+  # apply-staging removed: CD chain is now shared → prod direct
+  # (continuous deployment policy; see 2026-06-02 diary entry).
 
   apply-prod:
     needs: apply-shared

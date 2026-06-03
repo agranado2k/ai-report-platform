@@ -41,7 +41,7 @@ Launch a general-purpose agent with the following task:
 > 2. Read the conversation context provided by the user (if any) to understand the broader project goals.
 > 3. Read the actual implementation files (changed files in branch scope).
 > 4. Read the existing pattern files that the new code is supposed to follow (identify these from imports, directory siblings, and `CLAUDE.md` references).
-> 5. Read `docs/diary.md` — the live ADR record — to understand decisions that constrain the design space (e.g., ADR-013 security headers, ADR-014 SW block, ADR-024 no fp-ts, ADR-033 Conventional Commits + rebase-merge, ADR-035 dropped signed-commits).
+> 5. Read `docs/adr/` (standalone ADR files), `docs/spec.html` (foundational ADR-001 through ADR-030), and `docs/diary.md` (dated entries for decisions not yet promoted to standalone ADRs) to understand decisions that constrain the design space (e.g., ADR-013 security headers, ADR-014 SW block, ADR-024 no fp-ts, the Conventional Commits + rebase-merge convention, ADR-0035 bot-merge workflow).
 > 6. Produce a detailed analysis:
 >    - **What was built**: Summarize each logical unit of work from the commits.
 >    - **Pattern compliance**: For each new file, compare against the existing pattern it mirrors. Note matches and deviations.

@@ -266,7 +266,7 @@ Also surfaced — and this one I should have caught when I wrote `tf.sh` origina
 
 **Net effect on the branch**: this commit. No infrastructure changes; layout + convention + diary only.
 
-### 2026-06-02 — ADR-031: continuous deployment to prod; persistent staging dropped
+### 2026-06-02 — Continuous deployment to prod; persistent staging dropped
 
 After applying shared, running staging through ~half a dozen real provider-quirk fixes (Neon org_id, Neon retention cap, Neon branch role inheritance, R2 location case, Upstash regional→global, Upstash free-tier limit, GitHub Variables permission), the user called the architectural question: **is persistent staging actually carrying its weight?**
 
@@ -332,7 +332,7 @@ Each PR is intended to be small enough to review in one sitting and to deploy on
 
 **Open issue carried into next session**: clean up `worktree/phase-0b-tf-modules` (its branch is merged). Command: `git worktree remove worktree/phase-0b-tf-modules && git branch -D feat/phase-0b-tf-modules` from the project root.
 
-### 2026-06-02 — ADR-032: solo-developer mode (no required human PR approval) + Vercel Corepack env-var hunt
+### 2026-06-02 — Solo-developer branch-protection mode (0 required approvals) + Vercel Corepack env-var hunt
 
 Two changes appended to PR #2 after the green-build celebration.
 
@@ -402,7 +402,7 @@ Both apps' `health.tsx` switched from `Response.json` to `new Response(JSON.stri
 
 **Open question for review**: the dashboard's CSP `connect-src` currently allowlists `https://*.clerk.accounts.dev` and `https://clerk.accounts.dev` (Clerk's default token endpoint). Once the prod Clerk instance has its own subdomain on `clerk.<our-domain>`, we narrow this. Tracked for Phase 0c.5 alongside Terraform-codified branch protection.
 
-### 2026-06-02 — ADR-033: Conventional Commits + semantic-release
+### 2026-06-02 — Conventional Commits + semantic-release + rebase-merge convention
 
 Two things needed for a clean release pipeline that's auditable across the team and across time:
 
@@ -650,7 +650,7 @@ After PR #6 merged at `f610f56`, push events on `main` started firing again (the
 
 **Carry-over for 0c.5** (now bigger): codify `default_workflow_permissions` + `actions/permissions` settings in the `github-repo` Terraform module so the App-install drift can't recur silently. Plus the carry-over from the prior entry still stands: add `Release` + `Commit messages (Conventional Commits)` + the Terraform `Apply` jobs to `required_status_checks`.
 
-### 2026-06-03 — ADR-034: GitHub Merge Queue (rebase-merge + signed-commits, both preserved)
+### 2026-06-03 — Attempted GitHub Merge Queue setup; rejected by API (user-owned repo limitation)
 
 PR #7 surfaced a documented GitHub limitation: with `require_signed_commits = true` AND rebase-merge as the only allowed merge method, the GitHub UI's **Rebase and merge** button rewrites each commit's committer date during the server-side rebase, which invalidates the existing signatures. GitHub cannot re-sign on the operator's behalf (only they hold the private key), so branch protection rejects the resulting unsigned commits and the PR never merges. Quote from the GitHub UI:
 
@@ -691,69 +691,39 @@ The queue is `grouping_strategy = "ALLGREEN"` (require all required checks to pa
 
 **Carry-over to 0c.5 (updated)**: when populating `required_status_checks` with real check names, include the merge_group-triggered ones (`commitlint` job, `terraform plan` jobs). The queue uses this list to decide green-ness; an empty list means it merges immediately with no gating.
 
-### 2026-06-03 — ADR-035: merge queue unavailable on user-owned repos → keep both ADRs via custom bot-merge workflow
+### 2026-06-03 — ADR-035 landed: bot-merge workflow (PR #9)
 
-PR #8's merge-queue ruleset failed to apply. Direct `gh api` debugging confirmed: GitHub returns `"Invalid rule 'merge_queue': "` with no detail regardless of payload variant. Root cause from the [official docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue):
+Architectural decision is recorded at **`docs/adr/0035-bot-merge-workflow.md`** (the contract). This entry is the development chronology only.
 
-> "Pull request merge queues are available in any public repository owned by an **organization**, or in private repositories owned by organizations using GitHub Enterprise Cloud."
+**Sequence of the day**:
 
-This repo is owned by a user account (`agranado2k`). Merge queue is not available — full stop, regardless of payload, plan tier, or workaround.
+1. Squash-merged PR #8 expecting Merge Queue to come online via the `github_repository_ruleset.merge_queue` resource. Terraform `apply-shared` failed with a generic `Invalid rule 'merge_queue'` 422 from the GitHub API.
+2. Reproduced the failure via direct `gh api` POSTs with multiple payload variants — same error every time. Located the root cause in [GitHub's docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue): Merge Queue is not available on user-owned repositories. ADR-034 abandoned.
+3. Opened PR #9 along the "drop `require_signed_commits`" path. Operator pushed back: *"Why can't we keep that?"*
+4. Researched the GitHub UI **Rebase and merge** signature loss: confirmed it's a documented, long-standing limitation (community discussions [#11639](https://github.com/orgs/community/discussions/11639), [#39886](https://github.com/orgs/community/discussions/39886)). The committer-date rewrite during server-side rebase invalidates signatures and GitHub cannot re-sign on the operator's behalf.
+5. Found the unblocking insight while researching alternatives: GitHub's git/commits REST API automatically web-flow-signs every commit it creates. We don't need any signing infrastructure — just call the API.
+6. Pivoted PR #9 to **Option C — custom bot-merge workflow**. ADR-035 records the decision.
 
-**The deeper issue**: GitHub's UI **"Rebase and merge"** rewrites each commit's committer date during the server-side rebase. This invalidates the locally-computed signatures, and GitHub cannot re-sign because only the operator holds the private key. With `require_signed_commits = true`, branch protection rejects the resulting unsigned commits and the merge fails. Documented limitation since 2020 — see community discussions [#11639](https://github.com/orgs/community/discussions/11639) and [#39886](https://github.com/orgs/community/discussions/39886) (still open as of February 2026).
+**Files in this PR**:
 
-The key insight that unblocks Option C: **GitHub's git/commits REST API automatically web-flow-signs every commit it creates.** We don't need to sign anything ourselves — we ask the API to create commits and GitHub's web-flow identity signs them. The web-flow signature satisfies `require_signed_commits`.
+- `docs/adr/INDEX.md` + `docs/adr/0035-bot-merge-workflow.md` — new. The actual ADR document (this diary entry is the log, not the decision).
+- `infra/terraform/modules/github-repo/main.tf` — kept `require_signed_commits = true`; added `bypass_pull_request_allowances { users = ["agranado2k"] }` inside `required_pull_request_reviews`.
+- `.github/workflows/bot-merge.yml` — new (~140 lines). Implements ADR-035.
+- `.github/workflows/commitlint.yml` + `.github/workflows/terraform.yml` — removed dead `merge_group:` triggers and fallbacks left over from ADR-034.
+- `CLAUDE.md` rule 4 — describes the `/merge` comment flow; explicit "do NOT click the UI Rebase and merge button".
+- `.claude/skills/review-and-evaluate/SKILL.md` + `.claude/skills/review-pr/SKILL.md` — copied from zora-pantheon and wired into `/pr-iterate`. Independent concern, shipped in the same PR cycle.
 
-**Options considered after this finding**:
+**Bootstrap for this PR**: same as PRs #6/#7/#8 — temp-enable squash-merge via API once more. PR #9 cannot use the new `/merge` workflow because the workflow doesn't exist on `main` until this PR merges. Squash-merge PR #9, then run the one-time operator setup (PAT issuance, secret population) described in ADR-035's "Decision outcome" section.
 
-| Option | Cost | Trade-off |
-|---|---|---|
-| A. Drop `require_signed_commits` | 5 min | Lose tamper-evidence on `main`. ADR-025's other invariants stay. |
-| B. Switch to squash-merge + keep signed-commits | 5 min | Lose per-commit history on `main` (PRs collapse). |
-| **C. Custom bot-merge workflow (chosen)** | ~150 lines YAML + a PAT | Preserves both ADRs unchanged. |
-| D. Transfer repo to an org → enable merge queue | 30–60 min + Vercel / GitHub App / Terraform state reconciliation | Preserves both ADRs |
+**Memory pointer for future-me**: I had been writing "ADRs" inline in this diary file (entries dated 2026-06-02 / 2026-06-03 carry "ADR-031" through "ADR-034" labels). That conflates two distinct artifacts — the diary is a chronological development log; ADRs are decision records with a fixed structure (per [adr.github.io](https://adr.github.io)). Cleaned up today (PR #9): those decisions stay recorded in the diary as plain dated entries (not as ADRs), the four old in-diary "ADR-NNN" labels are gone, and ADRs from now on live as standalone files under `docs/adr/` (see `INDEX.md`). The diary may reference ADRs by number; the ADR file is the source of truth for any decision.
 
-**Decision (ADR-035) — chose C**. Operator wanted both signed-commits AND rebase-merge preserved. The git/commits API path makes this achievable without an org transfer or a half-day of complex bot infrastructure.
+**Carry-over to 0c.5 (revised)**:
 
-**How `.github/workflows/bot-merge.yml` works**:
-
-1. Operator comments **`/merge`** on a green PR.
-2. Workflow validates: comment author has write access, PR is open and not conflicted, `mergeable_state ∈ {clean, has_hooks}`, PR base SHA matches current `main` HEAD (no drift).
-3. For each commit in the PR (in order): `POST /repos/{owner}/{repo}/git/commits` with the original commit's tree SHA, message, and author info, parent = previous new SHA (seeded as current `main`). GitHub web-flow-signs the new commit at creation time.
-4. `PATCH /repos/{owner}/{repo}/git/refs/heads/main` with the new HEAD SHA. `force=false` so non-fast-forward updates are rejected (concurrent `/merge` calls fail safely).
-5. Verifies the new HEAD's `verification.verified == true` and posts a result comment on the PR. PR auto-closes when GitHub detects its head's commits on `main`.
-
-**Auth + branch-protection bypass**:
-
-- Workflow uses `MERGE_BOT_TOKEN` (a fine-grained PAT scoped to this repo, `Contents: write` + `Pull requests: write` + `Metadata: read`). One-time operator setup after PR #9 merges.
-- `agranado2k` is added to `bypass_pull_request_allowances` inside `required_pull_request_reviews` in `github_branch_protection.main`. This permits the workflow's PATCH despite the PR-required rule. `enforce_admins = true` stays — bypass entries are explicit, not blanket.
-- All other branch-protection invariants are unchanged: signed-commits, linear history, no force-push, no delete, conversation resolution, 0-approval PR mechanism.
-
-**Code changes landed in this PR** (`fix/drop-signed-commits`):
-
-- `modules/github-repo/main.tf` — kept `require_signed_commits = true`. Added `bypass_pull_request_allowances { users = ["agranado2k"] }` inside `required_pull_request_reviews`. Updated the comment block to point at the new workflow.
-- `.github/workflows/bot-merge.yml` — new file (~140 lines). The whole flow described above.
-- `.github/workflows/commitlint.yml` — removed the dead `merge_group:` trigger and the `|| github.event.merge_group.*` fallbacks (left over from the failed ADR-034 attempt).
-- `.github/workflows/terraform.yml` — removed the dead `merge_group:` trigger and reverted the plan jobs' conditions to `pull_request` only.
-- `CLAUDE.md` rule 4 — describes the `/merge` comment flow; calls out **do not click the UI "Rebase and merge" button**.
-- `.claude/skills/review-and-evaluate/SKILL.md` + `.claude/skills/review-pr/SKILL.md` — copied from zora-pantheon and wired into `/pr-iterate` (separate concern, but shipped in the same PR).
-
-**One-time operator setup** (after PR #9 merges + Terraform applies):
-
-1. Create a fine-grained PAT (`https://github.com/settings/personal-access-tokens/new`):
-   - Name: `arp-merge-bot`
-   - Resource owner: `agranado2k`
-   - Repository: `agranado2k/ai-report-platform` (only)
-   - Permissions: Contents (Read and write), Pull requests (Read and write), Metadata (Read-only)
-2. `gh secret set MERGE_BOT_TOKEN` and paste the PAT.
-3. Test on a trivial PR: open it, wait for green, comment `/merge`. Should see the workflow create signed commits on `main` and the PR auto-close.
-
-**Bootstrap for THIS PR**: same as PRs #6/#7/#8 — one final temp-enable of squash-merge via API. PR #9 itself can't use the new workflow because the workflow doesn't exist on `main` yet. Squash-merge it once, then every future PR uses `/merge`.
-
-**Carry-over to 0c.5 (revised)**: the `merge_group` triggers and merge-queue-related carry-overs are deleted. What stays:
 - Populate `required_status_checks` with real check names (`Lint PR commits`, `plan-shared`, `plan-prod`, plus 0c.3 workflows once they land)
 - Codify `default_workflow_permissions = "write"` in the github-repo module so App-install drift can't recur silently
 - Codify the `MERGE_BOT_TOKEN` PAT issuance step in `docs/ops.md` (operator runbook addition)
 - Sweep the 5 orphan per-branch `ENABLE_EXPERIMENTAL_COREPACK` Vercel entries
+- Backfill ADRs 1–30 from `docs/spec.html` into `docs/adr/*.md` files (see `INDEX.md` backlog)
 
 ### 2026-06-03 — `/review-and-evaluate` skill copied from zora-pantheon + wired into `/pr-iterate`
 

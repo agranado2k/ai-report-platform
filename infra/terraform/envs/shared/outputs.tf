@@ -1,5 +1,6 @@
 # Outputs consumed by envs/prod via terraform_remote_state.
-# (envs/staging was removed in ADR-031 — continuous deployment to prod.)
+# (envs/staging was removed when we adopted continuous deployment to prod —
+# see the 2026-06-02 diary entry for the rationale.)
 
 output "apex_domain" {
   value = var.apex_domain

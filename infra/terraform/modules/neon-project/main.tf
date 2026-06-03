@@ -49,7 +49,8 @@ resource "neon_role" "main" {
 }
 
 # Note: there's no persistent `staging` branch here. The platform deploys
-# continuously to prod (ADR-031); the `main` branch is production and
+# continuously to prod (no persistent staging — see the 2026-06-02 diary entry);
+# the `main` branch is production and
 # per-PR ephemeral branches are created by CI on-demand via the Neon API,
 # not Terraform. If a long-lived staging branch becomes useful later
 # (e.g. for shared QA), add `neon_branch.staging` + `neon_endpoint.staging`

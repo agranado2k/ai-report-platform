@@ -23,7 +23,7 @@ resource "github_repository" "this" {
   has_projects = false
   has_wiki     = false
 
-  # ADR-033 revision: rebase-merge only.
+  # Rebase-merge only.
   #   - allow_merge_commit = false  → no merge-commits (would break the
   #     linear-history rule on branch protection anyway).
   #   - allow_squash_merge = false → squash-merge throws away every commit
@@ -66,19 +66,19 @@ resource "github_branch_protection" "main" {
     contexts = var.required_status_checks
   }
 
-  # Solo-developer mode (ADR-032): the PR mechanism is kept (no direct
-  # pushes to main; signed commits + linear history still apply), but
-  # human-approval-on-PR is dropped to 0 and the CODEOWNERS gate is off.
-  # Rationale: with one developer, requiring an approving review makes
-  # main unmergeable (GitHub won't let you approve your own PR). AI
-  # review (ADR-030) + CI status checks are the gates that remain.
-  # When a second developer joins, flip these back to `1` / `true`.
+  # Solo-developer branch-protection policy: the PR mechanism is kept
+  # (no direct pushes to main; signed commits + linear history still
+  # apply), but human-approval-on-PR is dropped to 0 and the CODEOWNERS
+  # gate is off. Rationale: with one developer, requiring an approving
+  # review makes main unmergeable (GitHub won't let you approve your
+  # own PR). AI review (ADR-030) + CI status checks are the gates that
+  # remain. When a second developer joins, flip these back to `1` / `true`.
   required_pull_request_reviews {
     required_approving_review_count = 0
     dismiss_stale_reviews           = true
     require_code_owner_reviews      = false
 
-    # ADR-035: the `agranado2k` user identity (authenticated via the
+    # ADR-0035: the `agranado2k` user identity (authenticated via the
     # MERGE_BOT_TOKEN repo secret) bypasses the PR requirement so the
     # `bot-merge.yml` workflow can push the rebased + web-flow-signed
     # commits to `main`. Without this entry, the workflow's PATCH to
@@ -90,14 +90,14 @@ resource "github_branch_protection" "main" {
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)
-  require_signed_commits          = true # ADR-025 + ADR-035 (kept via bot-merge.yml)
+  require_signed_commits          = true # ADR-025; kept via bot-merge.yml (ADR-0035)
   require_conversation_resolution = true
   required_linear_history         = true
   allows_force_pushes             = false
   allows_deletions                = false
 }
 
-# ADR-035: keep `require_signed_commits = true` AND rebase-merge by
+# ADR-0035: keep `require_signed_commits = true` AND rebase-merge by
 # routing every merge through `.github/workflows/bot-merge.yml`. That
 # workflow uses GitHub's git/commits REST API to create web-flow-signed
 # copies of each PR commit on top of `main`, then updates
