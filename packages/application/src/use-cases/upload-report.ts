@@ -5,36 +5,36 @@
 
 import {
   type AppError,
-  type FolderId,
-  type OrgId,
-  type Result,
-  type ScanStatus,
-  type UserId,
   addVersion,
   createReport,
   err,
+  type FolderId,
   insufficientScope,
   makeSlug,
   notAllowed,
   notFound,
+  type OrgId,
   ok,
-} from 'arp-domain';
+  type Result,
+  type ScanStatus,
+  type UserId,
+} from "arp-domain";
 import type {
   BlobStore,
   BundleProcessor,
   EventOutbox,
   Hasher,
-  IdGenerator,
   IdempotencyStore,
+  IdGenerator,
   PlanLimiter,
   ReportRepository,
   ScanQueue,
   SlugFactory,
   UnitOfWork,
-} from '../ports';
+} from "../ports";
 
-const ROUTE = 'POST /api/v1/reports';
-const WRITE_SCOPE = 'reports:write';
+const ROUTE = "POST /api/v1/reports";
+const WRITE_SCOPE = "reports:write";
 
 export interface UploadReportDeps {
   readonly reports: ReportRepository;
@@ -95,12 +95,15 @@ export async function uploadReport(
     route: ROUTE,
     // Derived key = hash(user ∥ route ∥ content_hash ∥ target), ADR-0039. The
     // \n separator can't occur in the segments, so no concat-collision.
-    key: cmd.idempotencyKey ?? deps.hasher.hash([cmd.actor.userId, ROUTE, bundle.contentHash, target].join('\n')),
+    key:
+      cmd.idempotencyKey ??
+      deps.hasher.hash([cmd.actor.userId, ROUTE, bundle.contentHash, target].join("\n")),
   };
   const begun = await deps.idempotency.begin(ref, `${bundle.contentHash}:${target}`);
   if (!begun.ok) return begun; // reuse w/ different body → 422
-  if (begun.value.outcome === 'in_flight') return err({ kind: 'IdempotencyInFlight', message: 'request in flight' });
-  if (begun.value.outcome === 'replay') {
+  if (begun.value.outcome === "in_flight")
+    return err({ kind: "IdempotencyInFlight", message: "request in flight" });
+  if (begun.value.outcome === "replay") {
     const prior = parseUploadResult(begun.value.record.responseBody);
     if (!prior.ok) return prior;
     return ok({ result: prior.value, replayed: true });
@@ -117,14 +120,18 @@ export async function uploadReport(
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
-  if (!newVersion) return err({ kind: 'Unexpected', message: 'no version after transition' });
+  if (!newVersion) return err({ kind: "Unexpected", message: "no version after transition" });
 
   // 6. Blobs first (R2-first; commit-last, ADR-0037 §5).
   const put = await deps.blobs.putVersionBundle(report.id, newVersion.id, bundle.files);
   if (!put.ok) return put;
 
   // 7. Atomic commit: report + outbox + idempotency record (ADR-0037 §5, ADR-0039).
-  const result: UploadResult = { slug: report.slug, version: newVersion.versionNo, scanStatus: newVersion.scanStatus };
+  const result: UploadResult = {
+    slug: report.slug,
+    version: newVersion.versionNo,
+    scanStatus: newVersion.scanStatus,
+  };
   const committed = await deps.uow.run(async () => {
     const saved = await deps.reports.save(report);
     if (!saved.ok) return saved;
@@ -148,8 +155,16 @@ export async function uploadReport(
 
 function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
   const b = body as Record<string, unknown> | null;
-  if (!b || typeof b.slug !== 'string' || typeof b.version !== 'number' || typeof b.scanStatus !== 'string') {
-    return err({ kind: 'Unexpected', message: 'stored idempotency response is not a valid UploadResult' });
+  if (
+    !b ||
+    typeof b.slug !== "string" ||
+    typeof b.version !== "number" ||
+    typeof b.scanStatus !== "string"
+  ) {
+    return err({
+      kind: "Unexpected",
+      message: "stored idempotency response is not a valid UploadResult",
+    });
   }
   return ok(b as unknown as UploadResult);
 }
@@ -162,7 +177,7 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, contentHash: string)
         orgId: cmd.actor.orgId,
         folderId: cmd.actor.folderId,
         slug: deps.slugs.newSlug(),
-        title: cmd.title ?? 'Untitled report',
+        title: cmd.title ?? "Untitled report",
         versionId: deps.ids.versionId(),
         contentHash,
         uploadedBy: cmd.actor.userId,
@@ -171,14 +186,20 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, contentHash: string)
   );
 }
 
-async function reUpload(deps: UploadReportDeps, updateSlug: string, actor: UploadActor, contentHash: string) {
+async function reUpload(
+  deps: UploadReportDeps,
+  updateSlug: string,
+  actor: UploadActor,
+  contentHash: string,
+) {
   const slugR = makeSlug(updateSlug);
   if (!slugR.ok) return slugR;
   const found = await deps.reports.findBySlug(slugR.value);
   if (!found.ok) return found;
-  if (!found.value) return err(notFound('report not found'));
+  if (!found.value) return err(notFound("report not found"));
   // canWrite (Phase 1: same org; folder grants land with collaboration).
-  if (found.value.orgId !== actor.orgId) return err(notAllowed('not allowed to update this report'));
+  if (found.value.orgId !== actor.orgId)
+    return err(notAllowed("not allowed to update this report"));
   return addVersion(found.value, {
     versionId: deps.ids.versionId(),
     contentHash,

@@ -8,15 +8,15 @@
 //
 // Side-effect-free: nothing is validated until a consumer calls defineEnv().
 // Tests pass a mock runtimeEnv; the server/adapters call defineEnv() once at boot.
-import { createEnv } from '@t3-oss/env-core';
-import { vercel } from '@t3-oss/env-core/presets-zod';
-import { clientSchema, serverSchema } from './schema';
+import { createEnv } from "@t3-oss/env-core";
+import { vercel } from "@t3-oss/env-core/presets-zod";
+import { clientSchema, serverSchema } from "./schema";
 
 export function defineEnv(runtimeEnv: Record<string, string | undefined> = process.env) {
   return createEnv({
     extends: [vercel()],
     server: serverSchema,
-    clientPrefix: 'PUBLIC_',
+    clientPrefix: "PUBLIC_",
     client: clientSchema,
     runtimeEnv,
     emptyStringAsUndefined: true,

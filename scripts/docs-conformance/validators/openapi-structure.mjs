@@ -4,7 +4,7 @@
 // the ADR-0040 status codes, and the machine-readable `code` registry).
 // Full schema validation (Spectral/Redocly) is a deferred enhancement.
 
-export const id = 'openapi-structure';
+export const id = "openapi-structure";
 
 export function run(ctx) {
   const out = [];
@@ -12,7 +12,13 @@ export function run(ctx) {
   const text = ctx.read(rel);
 
   if (text == null) {
-    out.push({ validator: id, file: rel, rule: 'openapi-missing', message: 'docs/api/openapi.yaml does not exist', hint: 'Author the OpenAPI 3.1 document (ADR-027).' });
+    out.push({
+      validator: id,
+      file: rel,
+      rule: "openapi-missing",
+      message: "docs/api/openapi.yaml does not exist",
+      hint: "Author the OpenAPI 3.1 document (ADR-027).",
+    });
     return out;
   }
 
@@ -21,9 +27,9 @@ export function run(ctx) {
       out.push({
         validator: id,
         file: rel,
-        rule: 'openapi-missing-token',
+        rule: "openapi-missing-token",
         message: `Required token "${token}" not found in the OpenAPI document`,
-        hint: ctx.config.openapi.hints?.[token] ?? 'Add it per ADR-0037..0040.',
+        hint: ctx.config.openapi.hints?.[token] ?? "Add it per ADR-0037..0040.",
       });
     }
   }

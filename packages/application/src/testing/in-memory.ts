@@ -6,18 +6,18 @@
 import {
   type AppError,
   type DomainEvent,
+  err,
+  reportId as makeReportId,
+  makeSlug,
+  versionId as makeVersionId,
   type OrgId,
+  ok,
   type Report,
   type ReportId,
   type Result,
   type Slug,
   type VersionId,
-  err,
-  makeSlug,
-  ok,
-  reportId as makeReportId,
-  versionId as makeVersionId,
-} from 'arp-domain';
+} from "arp-domain";
 import type {
   BlobFile,
   BlobStore,
@@ -25,18 +25,18 @@ import type {
   Clock,
   EventOutbox,
   Hasher,
-  IdGenerator,
   IdempotencyBegin,
   IdempotencyKeyRef,
   IdempotencyRecord,
   IdempotencyStore,
+  IdGenerator,
   PlanLimiter,
   ProcessedBundle,
   ReportRepository,
   ScanQueue,
   SlugFactory,
   UnitOfWork,
-} from '../ports';
+} from "../ports";
 
 export class InMemoryReportRepository implements ReportRepository {
   private readonly byId = new Map<string, Report>();
@@ -73,11 +73,18 @@ export class InMemoryBlobStore implements BlobStore {
     return ok(undefined);
   }
 
-  async readObject(reportId: ReportId, versionId: VersionId, path: string): Promise<Result<BlobFile | null, AppError>> {
+  async readObject(
+    reportId: ReportId,
+    versionId: VersionId,
+    path: string,
+  ): Promise<Result<BlobFile | null, AppError>> {
     return ok(this.objects.get(blobKey(reportId, versionId, path)) ?? null);
   }
 
-  async deleteVersionPrefix(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>> {
+  async deleteVersionPrefix(
+    reportId: ReportId,
+    versionId: VersionId,
+  ): Promise<Result<void, AppError>> {
     const prefix = `${reportId}/${versionId}/`;
     for (const k of [...this.objects.keys()]) if (k.startsWith(prefix)) this.objects.delete(k);
     return ok(undefined);
@@ -88,33 +95,39 @@ const idemKey = (ref: IdempotencyKeyRef) => `${ref.actingUserId}|${ref.route}|${
 
 interface IdemEntry {
   readonly fingerprint: string;
-  readonly state: 'in_flight' | 'completed';
+  readonly state: "in_flight" | "completed";
   readonly record?: IdempotencyRecord;
 }
 
 export class InMemoryIdempotencyStore implements IdempotencyStore {
   private readonly entries = new Map<string, IdemEntry>();
 
-  async begin(ref: IdempotencyKeyRef, fingerprint: string): Promise<Result<IdempotencyBegin, AppError>> {
+  async begin(
+    ref: IdempotencyKeyRef,
+    fingerprint: string,
+  ): Promise<Result<IdempotencyBegin, AppError>> {
     const k = idemKey(ref);
     const existing = this.entries.get(k);
     if (!existing) {
-      this.entries.set(k, { fingerprint, state: 'in_flight' });
-      return ok({ outcome: 'proceed' });
+      this.entries.set(k, { fingerprint, state: "in_flight" });
+      return ok({ outcome: "proceed" });
     }
     if (existing.fingerprint !== fingerprint) {
       return err({
-        kind: 'IdempotencyKeyReuseDifferentBody',
-        message: 'idempotency key reused with a different request',
+        kind: "IdempotencyKeyReuseDifferentBody",
+        message: "idempotency key reused with a different request",
       });
     }
-    if (existing.state === 'completed' && existing.record) {
-      return ok({ outcome: 'replay', record: existing.record });
+    if (existing.state === "completed" && existing.record) {
+      return ok({ outcome: "replay", record: existing.record });
     }
-    return ok({ outcome: 'in_flight' });
+    return ok({ outcome: "in_flight" });
   }
 
-  async complete(ref: IdempotencyKeyRef, record: IdempotencyRecord): Promise<Result<void, AppError>> {
+  async complete(
+    ref: IdempotencyKeyRef,
+    record: IdempotencyRecord,
+  ): Promise<Result<void, AppError>> {
     const k = idemKey(ref);
     const existing = this.entries.get(k);
     if (!existing) {
@@ -122,7 +135,7 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
       // in tests rather than create a ghost entry (immutable update otherwise).
       throw new Error(`InMemoryIdempotencyStore: complete() called without begin() for key ${k}`);
     }
-    this.entries.set(k, { ...existing, state: 'completed', record });
+    this.entries.set(k, { ...existing, state: "completed", record });
     return ok(undefined);
   }
 }
@@ -158,7 +171,9 @@ export class FakePlanLimiter implements PlanLimiter {
   }
 
   async assertWithinPlan(_orgId: OrgId): Promise<Result<void, AppError>> {
-    return this.withinPlan ? ok(undefined) : err({ kind: 'PlanLimitExceeded', message: 'plan limit exceeded' });
+    return this.withinPlan
+      ? ok(undefined)
+      : err({ kind: "PlanLimitExceeded", message: "plan limit exceeded" });
   }
 }
 
@@ -179,7 +194,7 @@ export class SequentialSlugFactory implements SlugFactory {
   private n = 0;
   newSlug(): Slug {
     this.n += 1;
-    const raw = `slug${this.n.toString().padStart(6, '0')}`; // 10 chars, nanoid alphabet
+    const raw = `slug${this.n.toString().padStart(6, "0")}`; // 10 chars, nanoid alphabet
     const r = makeSlug(raw);
     if (!r.ok) throw new Error(`fake slug invalid: ${raw}`);
     return r.value;
@@ -212,9 +227,15 @@ export class FakeBundleProcessor implements BundleProcessor {
     this.result =
       result ??
       ok({
-        files: [{ path: 'index.html', contentType: 'text/html', bytes: new TextEncoder().encode('<h1>ok</h1>') }],
-        entryDocument: 'index.html',
-        contentHash: 'hash-default',
+        files: [
+          {
+            path: "index.html",
+            contentType: "text/html",
+            bytes: new TextEncoder().encode("<h1>ok</h1>"),
+          },
+        ],
+        entryDocument: "index.html",
+        contentHash: "hash-default",
         sizeBytes: 11,
       });
   }
@@ -226,8 +247,14 @@ export class FakeBundleProcessor implements BundleProcessor {
   /** Convenience: succeed with a specific content hash (for idempotency tests). */
   setContentHash(contentHash: string): void {
     this.result = ok({
-      files: [{ path: 'index.html', contentType: 'text/html', bytes: new TextEncoder().encode('<h1>ok</h1>') }],
-      entryDocument: 'index.html',
+      files: [
+        {
+          path: "index.html",
+          contentType: "text/html",
+          bytes: new TextEncoder().encode("<h1>ok</h1>"),
+        },
+      ],
+      entryDocument: "index.html",
       contentHash,
       sizeBytes: 11,
     });
@@ -246,6 +273,6 @@ export class FakeHasher implements Hasher {
       h ^= input.charCodeAt(i);
       h = Math.imul(h, 0x01000193);
     }
-    return (h >>> 0).toString(16).padStart(8, '0');
+    return (h >>> 0).toString(16).padStart(8, "0");
   }
 }

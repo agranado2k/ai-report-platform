@@ -1,12 +1,12 @@
 // The platform's environment contract (Phase 1 surface). Split into server-only
 // secrets and client-safe PUBLIC_ vars so @t3-oss/env-core can guarantee a
 // secret never reaches the browser bundle. Grows as later phases add vars.
-import { z } from 'zod';
-import { trimmedString } from './schema-helpers';
+import { z } from "zod";
+import { trimmedString } from "./schema-helpers";
 
 /** Server-only — secrets + infra. NEVER bundled to the client. */
 export const serverSchema = {
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
   // Neon Postgres connection string (Reports & Folders persistence, ADR-020).
   DATABASE_URL: z.url(),
