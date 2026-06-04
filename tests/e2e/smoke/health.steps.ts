@@ -19,3 +19,8 @@ Then('the JSON field {string} is {string}', async ({}, field: string, value: str
   const body = (await response.json()) as Record<string, unknown>;
   expect(body[field]).toBe(value);
 });
+
+Then('the JSON field {string} is present', async ({}, field: string) => {
+  const body = (await response.json()) as Record<string, unknown>;
+  expect(body[field]).toBeDefined();
+});

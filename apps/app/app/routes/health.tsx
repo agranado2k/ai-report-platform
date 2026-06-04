@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { appHeaders } from "arp-headers/app";
+import pkg from "../../package.json";
 
 export async function loader(_args: LoaderFunctionArgs) {
   const headers = appHeaders();
@@ -11,6 +12,9 @@ export async function loader(_args: LoaderFunctionArgs) {
       status: "ok",
       service: "app",
       phase: "0c",
+      version: pkg.version,
+      // Vercel injects VERCEL_GIT_COMMIT_SHA at build + runtime; "dev" locally.
+      commit: process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
       checks: {
         process: "ok",
         neon: "not-wired",
