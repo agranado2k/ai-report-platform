@@ -85,8 +85,8 @@ const idemKey = (ref: IdempotencyKeyRef) => `${ref.actingUserId}|${ref.route}|${
 
 interface IdemEntry {
   readonly fingerprint: string;
-  state: 'in_flight' | 'completed';
-  record?: IdempotencyRecord;
+  readonly state: 'in_flight' | 'completed';
+  readonly record?: IdempotencyRecord;
 }
 
 export class InMemoryIdempotencyStore implements IdempotencyStore {
@@ -114,12 +114,12 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   async complete(ref: IdempotencyKeyRef, record: IdempotencyRecord): Promise<Result<void, AppError>> {
     const k = idemKey(ref);
     const existing = this.entries.get(k);
-    if (existing) {
-      existing.state = 'completed';
-      existing.record = record;
-    } else {
-      this.entries.set(k, { fingerprint: '', state: 'completed', record });
+    if (!existing) {
+      // complete() without a prior begin() is a contract violation — fail loud
+      // in tests rather than create a ghost entry (immutable update otherwise).
+      throw new Error(`InMemoryIdempotencyStore: complete() called without begin() for key ${k}`);
     }
+    this.entries.set(k, { ...existing, state: 'completed', record });
     return ok(undefined);
   }
 }
