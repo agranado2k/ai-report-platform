@@ -134,6 +134,13 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > Vercel binds the secret at build time, so **redeploy** after changing it. The
 > `e2e` job sends it as the `x-vercel-protection-bypass` header.
 
+> **Vercel project settings** (both `arp-app-prod` + `arp-view-prod`): `TURBO_FORCE=true`
+> + `VERCEL_FORCE_NO_BUILD_CACHE=1` (force clean builds so the Remix `vercelPreset()`
+> is detected — cached Turbo builds drop it and serve 404), and
+> **`autoExposeSystemEnvs: true`** (Settings → Environment Variables) so
+> `VERCEL_GIT_COMMIT_SHA` is in `process.env` at build+runtime — the `/health`
+> `commit` field relies on it (else it falls back to `"dev"`).
+
 **Repository variables** (`Settings → Variables`):
 
 | Variable | Example | Used by |
