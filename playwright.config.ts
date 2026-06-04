@@ -27,7 +27,13 @@ export default defineConfig({
     // the secret is present (Vercel → Protection Bypass for Automation; secret
     // in CI as VERCEL_AUTOMATION_BYPASS_SECRET). Absent locally → no header.
     extraHTTPHeaders: process.env.VERCEL_AUTOMATION_BYPASS_SECRET
-      ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
+      ? {
+          'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+          // Persist the bypass as a cookie so follow-up/browser navigations
+          // (the viewer page tests, later) stay authorized — per Vercel's
+          // recommended Playwright config. Harmless for the request-only smoke.
+          'x-vercel-set-bypass-cookie': 'true',
+        }
       : {},
     trace: 'on-first-retry',
   },
