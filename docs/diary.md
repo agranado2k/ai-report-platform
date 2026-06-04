@@ -910,3 +910,37 @@ The first executable Phase-1 code: the **pure `Report` domain** (ADR-0024/0036),
 **Deferred to 1c.3 (needs infra):** applying the migration to the Neon branch, a migration-drift CI check (`drizzle-kit check`), and the runtime client/driver (`@neondatabase/serverless`) — they land with the real adapters.
 
 **Process:** worktree `feat/phase-1c-db-schema`, branched off `main` (`033dd75`). Docs/schema only; no migration applied to a DB yet (that's 1c.3, against the CI Neon branch).
+
+### 2026-06-04 — fix: Claude auto-review on PR open was a silent no-op · worktree `ci/fix-claude-auto-review`
+
+The Claude side of the ADR-030 dual review never actually posted on PR open. Two
+broken mechanisms, both masked:
+
+- **`claude.yml` (the @claude mention bot):** the PR #15 follow-on had added a
+  `pull_request: [opened, ready_for_review]` trigger gated on `@claude` in the PR
+  body (seeded by `.github/pull_request_template.md`). But `claude.yml` carries no
+  `prompt:` input — on a `pull_request` event the action has no instruction to act
+  on (it only works off comment text), so it ran ~11s and did nothing.
+- **`claude-code-review.yml` (the dedicated auto-reviewer, the `claude-review`
+  check):** used `plugin_marketplaces` + `plugins: code-review@claude-code-plugins`;
+  the run errored (empty `ANTHROPIC_API_KEY` + a `claude-code-action` tsconfig
+  directory mismatch → "No buffered inline comments"), posting nothing — yet the
+  check showed green because the step is `continue-on-error`.
+
+**Fix.** `claude-code-review.yml` now drops the plugin path and uses the
+proven-working `claude_code_oauth_token` (the same credential `claude.yml` uses for
+mentions) with an explicit `prompt:` instructing a PR review, plus `track_progress`
+so the review attaches to the PR on a `pull_request` event. `continue-on-error`
+stays (advisory; must not gate merge under the solo-dev policy). Reverted the
+misguided auto-`@claude`-on-open path: `claude.yml` is mention-only again
+(issue_comment / pull_request_review_comment / pull_request_review / issues), the
+seeded `@claude` line and trigger explainer are gone from the PR template, and the
+matching sentence is removed from `CLAUDE.md`.
+
+Net: **auto-review on PR open is now solely `claude-code-review.yml`**; `@claude`
+mentions remain on-demand for follow-up. No new ADR — this implements ADR-030.
+
+**Process:** worktree `ci/fix-claude-auto-review`, branched off `main` (`45f5274`).
+CI-only change; `pnpm docs:check` green. This PR's own `claude-review` check
+exercises the fix (the workflow is `pull_request`-triggered), so a posted review on
+the PR is the confirmation.
