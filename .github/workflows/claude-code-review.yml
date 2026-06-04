@@ -23,7 +23,9 @@ jobs:
       contents: read
       pull-requests: write   # write needed: posts the review comments
       issues: read
-      id-token: write
+      # No id-token: the OIDC App-token exchange is bypassed by github_token,
+      # and Anthropic auth uses the claude_code_oauth_token secret — neither
+      # path needs OIDC, so we don't grant it.
 
     steps:
       - name: Checkout repository
