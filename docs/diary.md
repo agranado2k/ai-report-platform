@@ -952,3 +952,17 @@ mentions remain on-demand for follow-up. No new ADR — this implements ADR-030.
 CI-only change; `pnpm docs:check` green. This PR's own `claude-review` check
 exercises the fix (the workflow is `pull_request`-triggered), so a posted review on
 the PR is the confirmation.
+
+### 2026-06-04 — BDD execution harness (walking skeleton) · worktree `feat/e2e-bdd-harness`
+
+Answering the operator's "are the BDD tests running in CI?" (they weren't — `docs-conformance` only validates `.feature` presence/structure; Vitest excludes `tests/e2e`). This wires **playwright-bdd** (ADR-023) so Gherkin actually executes in CI, infrastructure-first (ADR-019). Plan: `/Users/agranado/.claude/plans/delegated-crunching-petal.md`.
+
+**Walking-skeleton scope:** one green **smoke** scenario hitting the app `/health` route on the live Vercel preview — proves the CI → preview → browser path end-to-end now. The 29 product `.feature` files are **not executed yet** (no step defs; playwright-bdd errors at collection on undefined steps), so the `defineBddConfig` features glob is scoped to `tests/e2e/smoke/**` for now and widens to `tests/e2e/features/**` as step defs land with **1d** (upload API) and **1e** (viewer).
+
+**Key decision — smoke lives in `tests/e2e/smoke/`, NOT `tests/e2e/features/`:** the docs-conformance `feature-presence` validator enforces a strict catalog↔file bijection over `tests/e2e/features/**`, and `gherkin-structure` forbids tags outside `{@phase-1..4,@wip,@security}`. Keeping the `@smoke` feature outside that dir means zero `config.mjs` changes and no fake `@phase-1` use case.
+
+**Files:** `playwright.config.ts` (defineBddConfig + `grep:/@smoke/`, `grepInvert:/@wip/`, baseURL from `PLAYWRIGHT_BASE_URL`, workers:1); `tests/e2e/smoke/health.feature` + `health.steps.ts` (uses the `request` fixture — no browser needed for the assertion); `tests/e2e/steps/.gitkeep`; root scripts `e2e:gen`/`e2e`; `.gitignore` (`.features-gen/`, `blob-report/`); deps `@playwright/test` + `playwright-bdd` (dev). `.github/workflows/e2e.yml` triggers on Vercel's `deployment_status` (state=success, app preview, non-prod) → `target_url` as `PLAYWRIGHT_BASE_URL` → `pnpm e2e`. **No new secret.**
+
+**Verification:** local `pnpm e2e:gen` ✓ + `playwright test --list` shows the 1 smoke test ✓; `pnpm docs:check` ✓ and `pnpm test` (20) ✓ unaffected (smoke invisible to the catalog; Vitest excludes `tests/e2e`). **CI-only / not self-testable on this PR:** `deployment_status` workflows run from the **default branch**, so `e2e.yml` first executes on the next preview deploy **after** this merges — the live smoke can't be exercised on its own PR. Grow step defs + widen the glob in lockstep with 1d/1e.
+
+**Process:** worktree `feat/e2e-bdd-harness`, branched off `main` (`033dd75`). Independent of PR #17. (PR-A, the migration runner + CI migration-check, follows once #17 merges, since it modifies `packages/db`.)
