@@ -97,6 +97,14 @@ describe('applyScanResult — promotion (ADR-0037 §8)', () => {
     ]);
   });
 
+  it('silently absorbs a scan result for an unknown version (idempotent stale-event)', () => {
+    const { report, events } = applyScanResult(newReport(), versionId('does-not-exist'), 'clean');
+    expect(report.liveVersionId).toBeNull();
+    expect(report.versions).toHaveLength(1);
+    expect(report.versions[0]?.scanStatus).toBe('pending');
+    expect(events).toEqual([]);
+  });
+
   it('never demotes: an out-of-order clean for an older version is ignored', () => {
     // v1 and v2 exist; v2 is live. A late clean verdict for v1 must not demote.
     let r = applyScanResult(newReport(), versionId('v1'), 'clean').report;

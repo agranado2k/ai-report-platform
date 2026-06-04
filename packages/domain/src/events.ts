@@ -5,7 +5,7 @@
 // drive promotion.
 
 import type { ReportId, VersionId } from './brand';
-import type { ScanStatus } from './value-objects';
+import type { TerminalScanStatus } from './value-objects';
 
 export interface ReportVersionUploaded {
   readonly type: 'ReportVersionUploaded';
@@ -18,7 +18,7 @@ export interface ReportVersionScanned {
   readonly type: 'ReportVersionScanned';
   readonly reportId: ReportId;
   readonly versionId: VersionId;
-  readonly verdict: ScanStatus;
+  readonly verdict: TerminalScanStatus;
 }
 
 export interface ReportPublished {
