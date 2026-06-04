@@ -125,6 +125,14 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `RESEND_DNS_RECORDS_JSON` | JSON-encoded list from Resend dashboard | shared |
 | `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |
 | `GEMINI_API_KEY` | for the Gemini PR-review workflow | shared (pass-through) |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | Vercel Protection Bypass for Automation secret | `e2e` (BDD smoke against the preview) |
+
+> **`VERCEL_AUTOMATION_BYPASS_SECRET`** lets the `e2e` workflow reach protected
+> Vercel previews (else 401). It is **per-project**: paste the *same* value into
+> Protection Bypass for Automation on **both** `arp-app-prod` and `arp-view-prod`
+> (Settings → Deployment Protection), and store that value as this repo secret.
+> Vercel binds the secret at build time, so **redeploy** after changing it. The
+> `e2e` job sends it as the `x-vercel-protection-bypass` header.
 
 **Repository variables** (`Settings → Variables`):
 
