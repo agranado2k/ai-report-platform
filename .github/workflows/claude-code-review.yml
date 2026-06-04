@@ -3,12 +3,14 @@ name: Claude Code Review
 # Automated code review on every PR (Phase 0c.4 / ADR-030 — the Claude
 # half of the dual AI-review setup; Gemini half lands separately).
 #
-# Uses the official `code-review@claude-code-plugins` skill from
-# Anthropic's plugin marketplace. The skill posts inline review comments
+# Auth uses `CLAUDE_CODE_OAUTH_TOKEN` (the GitHub App install token) — the
+# same proven-working credential that drives the @claude mention bot in
+# claude.yml. On a `pull_request` event there's no comment text to use as
+# the instruction, so we pass an explicit `prompt:` telling the action to
+# post a PR review with inline comments. The action posts review comments
 # on the diff; it does NOT commit or push.
 #
-# Read-only permissions — this workflow only posts comments. No
-# branch-protection interaction needed.
+# permissions: pull-requests write to post the review; the rest read-only.
 
 on:
   pull_request:
@@ -38,16 +40,15 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
+          # Force tag mode + a tracking comment so the review reliably attaches
+          # to the PR on a pull_request event (no comment text to ride on).
+          track_progress: true
           prompt: |
-            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
-
-            Apply project context: this repo follows the ADRs in CLAUDE.md
-            and docs/diary.md. Specifically flag any code that violates
-            ADR-024 (no fp-ts/Effect/Remeda; vanilla TS only in domain /
-            application layers), ADR-013 (the security header stack must
-            ship on every viewer response), ADR-014 (service workers
-            blocked at the edge), or the Conventional Commits convention.
+            Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            First read CLAUDE.md, docs/adr/, and docs/diary.md for the ADRs and project state.
+            Post a PR review with inline comments. Specifically flag: ADR-024 (no
+            fp-ts/Effect/Remeda; vanilla TS in domain/application), ADR-013 (viewer
+            security headers), ADR-014 (service-worker block at edge), Conventional
+            Commits violations, and any drift from docs/db-design.md / the glossary.
           claude_args: |
             --max-turns 25
