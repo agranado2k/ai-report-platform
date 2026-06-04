@@ -966,3 +966,17 @@ Answering the operator's "are the BDD tests running in CI?" (they weren't — `d
 **Verification:** local `pnpm e2e:gen` ✓ + `playwright test --list` shows the 1 smoke test ✓; `pnpm docs:check` ✓ and `pnpm test` (20) ✓ unaffected (smoke invisible to the catalog; Vitest excludes `tests/e2e`). **CI: the harness ran end-to-end on this PR** — Vercel creates the preview deployment against the PR head commit, so GitHub used `e2e.yml` from that ref (the `view` event correctly skipped via the `arp-app-prod` filter; the `app` event ran). It surfaced the real blocker: **the preview returns 401** because Vercel **Deployment Protection** guards preview URLs. Fix wired: send `x-vercel-protection-bypass` when `VERCEL_AUTOMATION_BYPASS_SECRET` is set (Vercel → *Protection Bypass for Automation*). **Operator prerequisite:** enable that on both Vercel projects + add the secret as a repo secret; until then the `E2E` check is red but non-blocking. Grow step defs + widen the glob in lockstep with 1d/1e.
 
 **Process:** worktree `feat/e2e-bdd-harness`, branched off `main` (`033dd75`). Independent of PR #17. (PR-A, the migration runner + CI migration-check, follows once #17 merges, since it modifies `packages/db`.)
+
+### 2026-06-04 — Phase 1 step 1c.2: application ports + in-memory fakes · worktree `feat/phase-1c2-ports`
+
+The driven-port layer the Phase-1 use cases sit on (hexagonal, ADR-0020), with in-memory fakes so 1d's `UploadReportUseCase` can be TDD'd without Neon/R2 (the real-infra e2e stays per ADR-0019; these fakes are unit-test-only).
+
+**`packages/application` (`arp-application`, dep `arp-domain`):**
+- **`src/ports.ts`** — `ReportRepository`, `BlobStore` (R2 key scheme), `IdempotencyStore` (begin→proceed/replay/in_flight, reuse-diff-body→422 kind; ADR-0039), `EventOutbox` (transactional outbox, ADR-0021), `ScanQueue` (scan port — Phase-1 stub yields clean), `PlanLimiter` (ADR-0006), pure services `IdGenerator`/`SlugFactory`/`Clock`, and `UnitOfWork` (atomic repo+outbox+idempotency, ADR-0037 §5). Fallible I/O returns `Promise<Result<T,AppError>>` (ADR-0024) — no throwing.
+- **`src/testing/` (exported via the `./testing` subpath)** — in-memory fakes for every port + deterministic `SequentialIdGenerator`/`SequentialSlugFactory`/`FixedClock` + `PassThroughUnitOfWork`. **6 contract tests** verify the fakes match the port semantics (idempotency replay/in-flight/422, blob put/read/delete-prefix, repo slug+id round-trip, outbox ordering, plan-limit toggle).
+
+**Verification (all local):** `pnpm test` → **32** (domain 20 + db 6 + application 6) ✓; all-package typecheck ✓ (now covers `arp-application`); `pnpm docs:check` ✓. No new deps beyond the workspace `arp-domain` link.
+
+**Next:** 1d — `UploadReportUseCase` (content-only pipeline: auth → scope → idempotency → folder/canWrite → sync pre-checks → blob put → UnitOfWork commit of report+outbox+idempotency → enqueue scan), TDD'd against these fakes; then 1e viewer loader, 1f promotion. PR-A (migration runner) is now also unblocked (#17 merged; `NEON_PROJECT_ID` repo variable set).
+
+**Process:** worktree `feat/phase-1c2-ports`, branched off `main` (`5a46a90`). Ports + fakes only — no use cases yet (that's 1d).
