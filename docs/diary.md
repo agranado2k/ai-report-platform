@@ -848,3 +848,23 @@ Second `/grill-with-docs` pass, this time on the **Phase 1 upload & serve flow**
 **Schema implications carried to Phase 1 / `docs/db-design.md`:** new `scan_jobs` table; new `idempotency_keys` table; `report_versions.scan_status` is a denormalized cache; R2 keys are `versionId`-scoped. The spec's ER ASCII still needs the redraw (deferred to when the real schema lands).
 
 **Process:** stacked worktree, docs-only, no code yet. The `/tdd` build of `UploadReportUseCase` + the viewer loader is the next step once these ADRs merge.
+
+### 2026-06-04 — Spec & use-case conformance harness + BDD corpus + OpenAPI · worktree `feat/spec-conformance` (PRD issue #13)
+
+`/to-prd` turned the "are our spec/use-cases well-formed?" question into PRD issue #13, then the operator said "create all the BDD and anything else we need." Delivered the **authoring + enforcement** the spec had been missing. ADR-0035..0040 are now on `main` (`bdaa8e7`); PRs #11/#12 merged before this branch.
+
+**Authored:**
+- **29 BDD `.feature` files** in `tests/e2e/features/` (the dir was empty despite the spec enumerating ~31 use-case tests). Phase-1 upload/serve use-cases are worked (real Given/When/Then in ubiquitous language, grounded in ADR-0037..0040); later-phase ones are valid `@wip` skeletons tagged by phase. Presence asserts existence + parse, **not** behavioral completeness — `@wip` keeps the catalog honest.
+- **`docs/api/openapi.yaml`** — OpenAPI 3.1 for the upload/serve surface (content-only `POST /api/v1/reports` + `Idempotency-Key` header + `GET /{slug}` viewer states), with an RFC 9457 `Problem` schema whose `code` enum is the ADR-0040 error registry. First implementation of ADR-027's "OpenAPI source of truth."
+
+**Built (the harness):**
+- **`scripts/docs-conformance/`** — dependency-free plain ESM, tested with Node's built-in `node:test` (26 fixture tests). Seven validators (ADR-MADR, ADR↔INDEX bijection, glossary banned-alias, canonical-event presence, feature-presence bijection, Gherkin structure, OpenAPI structure). Rules live in `config.mjs` (reviewable as data); validators hold no policy. `pnpm docs:check` / `pnpm docs:check:test`.
+- **`.github/workflows/docs-conformance.yml`** — runs the self-tests + `pnpm docs:check` on every PR (Node 24 / Corepack / pnpm 10, no install needed). **This is the single enforcement seam.**
+
+**ADR added — ADR-0041** (Documentation-as-contract — CI-enforced conformance harness): records that this implements **only the CI slice** of ADR-026; the `docs-prepush-guard.sh` pre-push hook and `/docs-check` skill are **deferred** (the runner stays hook-ready). Also flags lint-lite OpenAPI checks (Spectral/Redocly + markdown/link lint deferred) and that `node:test` is used here **without** committing the wider codebase to a test runner.
+
+**Deliberately NOT done / deferred (logged so the gap is explicit):** the ADR-026 pre-push hook + `/docs-check` skill; Spectral/Redocly OpenAPI schema lint; markdown + link-integrity lint; Bruno collection scaffolding (ADR-027); a project-wide test-runner decision. The spec's ER ASCII redraw and `docs/db-design.md` still pend Phase 1 code.
+
+**Decisions the operator made:** scope = author the missing use-case specs **and** build the conformance harness (not a one-off audit); enforcement seam = **CI workflow only**.
+
+**Process:** worktree `feat/spec-conformance` on `feat/spec-conformance`, branched off `main` (`bdaa8e7`). `pnpm docs:check` is green and the 26 self-tests pass locally. Lands via the normal PR flow (dual AI review, `/merge` bot-merge per ADR-0035). The `/tdd` build of `UploadReportUseCase` + the viewer loader remains the next code step; these features are its acceptance spec.

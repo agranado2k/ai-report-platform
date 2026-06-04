@@ -12,6 +12,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0038 | [Report viewer access & serving model](0038-report-viewer-access-serving.md) | Accepted (2026-06-04) |
 | 0039 | [Idempotent write API](0039-idempotent-write-api.md) | Accepted (2026-06-04) |
 | 0040 | [HTTP API error model (RFC 9457)](0040-http-api-error-model.md) | Accepted (2026-06-04) |
+| 0041 | [Documentation-as-contract — CI-enforced conformance harness](0041-docs-conformance-ci-harness.md) | Accepted (2026-06-04) |
 
 ## Backlog (ADRs 1–30 from the spec)
 
