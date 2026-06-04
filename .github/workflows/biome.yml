@@ -1,0 +1,37 @@
+name: Biome
+
+# Lint + format check across the monorepo with Biome (`biome ci .`). Per the
+# v7 spec this is a required PR gate, running in the fast-fail stage alongside
+# typecheck. Config lives in biome.json (2-space, double quotes, line width
+# 100; docs/ and generated output excluded). PRD: GitHub issue #13.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  biome:
+    name: Biome
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome CI (lint + format check)
+        run: pnpm lint
