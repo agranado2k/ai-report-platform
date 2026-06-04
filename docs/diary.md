@@ -980,3 +980,15 @@ The driven-port layer the Phase-1 use cases sit on (hexagonal, ADR-0020), with i
 **Next:** 1d — `UploadReportUseCase` (content-only pipeline: auth → scope → idempotency → folder/canWrite → sync pre-checks → blob put → UnitOfWork commit of report+outbox+idempotency → enqueue scan), TDD'd against these fakes; then 1e viewer loader, 1f promotion. PR-A (migration runner) is now also unblocked (#17 merged; `NEON_PROJECT_ID` repo variable set).
 
 **Process:** worktree `feat/phase-1c2-ports`, branched off `main` (`5a46a90`). Ports + fakes only — no use cases yet (that's 1d).
+
+### 2026-06-04 — Vercel deploy-404 fully fixed (Turbo remote cache) + Phase 1 VS-1: UploadReportUseCase · worktree `feat/phase-1d-upload-usecase`
+
+Operator chose a **thin vertical slice** to reach a manually-testable upload→view UI fastest: VS-1 `UploadReportUseCase` (this) → VS-2 real Neon/R2 adapters + scan-stub promotion → VS-3 HTTP route + viewer + deploy (= clickable).
+
+**Deploy-404 root cause fully resolved.** Earlier `VERCEL_FORCE_NO_BUILD_CACHE=1` disabled *Vercel's* build cache, but the app still 404'd because **Turbo's remote cache replayed `arp-app:build`** (`cache hit, replaying logs`) so `remix vite:build` never re-ran and `vercelPreset()` was never detected → plain Node output → 404 on all routes (Vercel reported the deploy READY regardless). Fix: set **`TURBO_FORCE=true`** on both Vercel projects (+ keep `VERCEL_FORCE_NO_BUILD_CACHE=1`). Verified: a clean redeploy re-ran vite/SSR (21s, no replay), preset detected, `/health` → 200. All future app deploys serve correctly — the prerequisite for any manual UI test.
+
+**VS-1 — `UploadReportUseCase` (`packages/application/src/use-cases/upload-report.ts`):** the content-only pipeline (ADR-0037/0039/0040), pure orchestration over the ports — scope (`reports:write`→403) → `BundleProcessor` pre-checks (new port: MIME/zip/entry-doc/caps + content hash; SVG→415, etc.) → idempotency (explicit or derived key; replay / in-flight→409 / reuse-diff-body→422) → `PlanLimiter` (402) → create vs re-upload (domain `createReport`/`addVersion`; cross-org→403) → R2-first blob put → `UnitOfWork` commit of save+outbox+idempotency → enqueue scan → `{slug,version,scan_status}`. Added the `BundleProcessor` port + a `FakeBundleProcessor`. **8 use-case tests** (scope/create/SVG-passthrough/plan-limit/replay/422/re-upload-v2/cross-org). `pnpm test` → **40** total ✓; all-package typecheck + `docs:check` ✓.
+
+**Next (VS-2):** real adapters — Drizzle `ReportRepository` (Neon), R2 `BlobStore`, idempotency/outbox tables, and the **scan-stub adapter** (`enqueueScan` → emits `ReportVersionScanned(clean)` → `PromoteVersionUseCase` promotes), then VS-3 wires `POST /api/v1/reports` + the viewer + deploy. **Manual UI test becomes possible at the end of VS-3.**
+
+**Process:** worktree `feat/phase-1d-upload-usecase`, branched off `main` (`61c68e9`). Pure use case + fakes; no infra yet.
