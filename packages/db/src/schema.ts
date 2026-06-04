@@ -4,6 +4,7 @@
 // ON DELETE RESTRICT by default; CASCADE only on report_versions→reports,
 // acls→reports, scan_jobs→report_versions (db-design.md → Conventions).
 
+import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigint,
@@ -17,6 +18,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 
 // ── Enums ────────────────────────────────────────────────────────────────
@@ -29,9 +31,11 @@ export const idempotencyStateEnum = pgEnum('idempotency_state', ['in_flight', 'c
 export const abuseStatusEnum = pgEnum('abuse_status', ['open', 'actioned', 'dismissed']);
 export const outboxStatusEnum = pgEnum('outbox_status', ['pending', 'delivered', 'failed']);
 
-const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
-const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
-const deletedAt = () => timestamp('deleted_at', { withTimezone: true });
+// timestamptz at millisecond precision (db-design.md → Conventions).
+const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
+const createdAt = () => tstz('created_at').notNull().defaultNow();
+const updatedAt = () => tstz('updated_at').notNull().defaultNow();
+const deletedAt = () => tstz('deleted_at');
 
 // ── Identity & Access ──────────────────────────────────────────────────────
 export const orgs = pgTable(
@@ -73,10 +77,10 @@ export const apiKeys = pgTable(
       .references(() => orgs.id, { onDelete: 'restrict' }),
     name: text('name').notNull(),
     scopes: jsonb('scopes').notNull(),
-    keyPrefix: text('key_prefix').notNull(),
+    keyPrefix: varchar('key_prefix', { length: 12 }).notNull(),
     keyHash: text('key_hash').notNull(),
-    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
-    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastUsedAt: tstz('last_used_at'),
+    revokedAt: tstz('revoked_at'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -117,11 +121,14 @@ export const reports = pgTable(
     folderId: uuid('folder_id')
       .notNull()
       .references(() => folders.id, { onDelete: 'restrict' }),
-    slug: text('slug').notNull(),
+    slug: varchar('slug', { length: 10 }).notNull(),
     title: text('title').notNull(),
     // Nullable + set after the first version commits — breaks the
-    // reports ↔ report_versions cycle (db-design.md).
-    liveVersionId: uuid('live_version_id').references((): AnyPgColumn => reportVersions.id),
+    // reports ↔ report_versions cycle (db-design.md). Explicit RESTRICT to
+    // match the stated FK policy (NO ACTION ≈ RESTRICT, but be explicit).
+    liveVersionId: uuid('live_version_id').references((): AnyPgColumn => reportVersions.id, {
+      onDelete: 'restrict',
+    }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
@@ -129,7 +136,8 @@ export const reports = pgTable(
   (t) => [
     uniqueIndex('reports_slug_uniq').on(t.slug),
     index('reports_org_folder_idx').on(t.orgId, t.folderId),
-    index('reports_deleted_at_idx').on(t.deletedAt),
+    // Partial: only soft-deleted rows (purge job lookup), per db-design.md.
+    index('reports_deleted_at_idx').on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
   ],
 );
 
@@ -148,7 +156,7 @@ export const reportVersions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     scanStatus: scanStatusEnum('scan_status').notNull().default('pending'),
-    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+    uploadedAt: tstz('uploaded_at').notNull().defaultNow(),
   },
   (t) => [
     index('report_versions_report_id_idx').on(t.reportId),
@@ -170,7 +178,7 @@ export const folderCollaborators = pgTable(
     addedBy: uuid('added_by')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+    addedAt: tstz('added_at').notNull().defaultNow(),
   },
   (t) => [
     index('folder_collaborators_folder_id_idx').on(t.folderId),
@@ -201,8 +209,8 @@ export const scanJobs = pgTable(
     status: scanJobStatusEnum('status').notNull().default('queued'),
     verdict: scanStatusEnum('verdict'),
     findings: jsonb('findings'),
-    startedAt: timestamp('started_at', { withTimezone: true }),
-    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    startedAt: tstz('started_at'),
+    finishedAt: tstz('finished_at'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -224,7 +232,7 @@ export const abuseReports = pgTable(
     status: abuseStatusEnum('status').notNull().default('open'),
     createdAt: createdAt(),
     actionedBy: uuid('actioned_by').references(() => users.id, { onDelete: 'restrict' }),
-    actionedAt: timestamp('actioned_at', { withTimezone: true }),
+    actionedAt: tstz('actioned_at'),
   },
   (t) => [
     index('abuse_reports_report_id_idx').on(t.reportId),
@@ -244,7 +252,7 @@ export const cspReports = pgTable(
     sourceFile: text('source_file'),
     lineNo: integer('line_no'),
     raw: jsonb('raw').notNull(),
-    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    receivedAt: tstz('received_at').notNull().defaultNow(),
   },
   (t) => [
     index('csp_reports_violated_directive_idx').on(t.violatedDirective),
@@ -282,9 +290,9 @@ export const outbox = pgTable(
     payload: jsonb('payload').notNull(),
     status: outboxStatusEnum('status').notNull().default('pending'),
     attempts: integer('attempts').notNull().default(0),
-    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+    availableAt: tstz('available_at').notNull().defaultNow(),
     createdAt: createdAt(),
-    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    deliveredAt: tstz('delivered_at'),
   },
   (t) => [
     index('outbox_status_available_at_idx').on(t.status, t.availableAt),
@@ -306,7 +314,7 @@ export const auditLog = pgTable(
     metaJson: jsonb('meta_json').notNull(),
     ipHash: text('ip_hash'),
     geo: text('geo'),
-    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    at: tstz('at').notNull().defaultNow(),
   },
   (t) => [index('audit_log_org_at_idx').on(t.orgId, t.at), index('audit_log_actor_user_id_idx').on(t.actorUserId)],
 );
