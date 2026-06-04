@@ -121,6 +121,11 @@ export interface Clock {
   now(): number;
 }
 
+export interface Hasher {
+  /** Stable digest of the input (e.g. sha-256 hex) — the derived idempotency key (ADR-0039). */
+  hash(input: string): string;
+}
+
 // ── Unit of work — atomic commit of repo + outbox + idempotency (ADR-0037 §5) ─
 export interface UnitOfWork {
   /**
