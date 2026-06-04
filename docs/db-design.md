@@ -6,11 +6,12 @@ is the **contract**; this doc is the column-level reference the Drizzle schema
 (`packages/db`, ADR-020) is generated from. Where the two disagree, the spec
 wins — fix this doc and flag it.
 
-Bounded contexts (ADR-0036): **Reports & Folders** owns `orgs`-scoped content
-(`folders`, `reports`, `report_versions`, `acls`, `folder_collaborators`);
-**Identity & Access** owns `users`, `api_keys`; **Abuse & Moderation** owns
-`scan_jobs`, `abuse_reports`, `csp_reports`. `outbox` / `audit_log` are
-cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId`.
+Bounded contexts (ADR-0036): **Reports & Folders** owns the content that belongs
+to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
+`folder_collaborators`); **Identity & Access** owns `orgs`, `users`, `api_keys`;
+**Abuse & Moderation** owns `scan_jobs`, `abuse_reports`, `csp_reports`. `outbox`
+/ `audit_log` are cross-cutting infrastructure. The only shared-kernel ids are
+`UserId`/`OrgId`.
 
 ## Conventions
 
@@ -27,10 +28,16 @@ cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId`.
   `plan_limits_json`, `scopes`, `findings`, `meta_json`, `allowed_emails`,
   `csp_extras`). Anything we filter or aggregate on gets a real column.
 - **Foreign keys**: `ON DELETE RESTRICT` by default; `ON DELETE CASCADE` only on
-  `report_versions → reports` and `acls → reports`. The app soft-deletes;
-  cascades defend against accidental hard-deletes via migrations.
-- **Partitioning**: `audit_log` and `outbox` partitioned monthly; old partitions
-  detached and cold-exported.
+  `report_versions → reports`, `acls → reports`, and
+  `scan_jobs → report_versions`. The app soft-deletes; cascades defend against
+  accidental hard-deletes via migrations (and keep the
+  `reports → report_versions → scan_jobs` chain consistent under a hard purge).
+- **Nullability**: every column is `NOT NULL` unless its Notes say `NULL`. All FK
+  columns (e.g. `report_versions.report_id`, `scan_jobs.report_version_id`,
+  `folders.org_id`) are `NOT NULL` except where explicitly marked nullable
+  (`folders.parent_id`, `reports.live_version_id`, `folder_collaborators.grantee_user_id`).
+- **Partitioning**: `audit_log` (by `at`) and `outbox` (by `created_at`)
+  partitioned monthly; old partitions detached and cold-exported.
 - **Migrations**: Drizzle migrations, up + down in every PR. CI applies them
   against a throwaway Neon branch and rolls back (ADR-019, infrastructure-first).
 
@@ -173,7 +180,7 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
-| `report_version_id` | uuid FK → report_versions | unique (one job per version) |
+| `report_version_id` | uuid FK → report_versions **ON DELETE CASCADE** | unique (one job per version) |
 | `status` | `scan_job_status` | `queued` → `running` → `done`/`failed` |
 | `verdict` | `scan_status` NULL | the outcome when `done` (`clean`/`flagged`/`blocked`) |
 | `findings` | jsonb NULL | ClamAV + phishing/miner heuristics |
@@ -201,9 +208,21 @@ Indexes: `report_id`, `status`, `created_at`.
 
 #### `csp_reports` (Phase 1.5)
 Inbound browser CSP-violation reports posted to `/csp-report`; 90-day retention;
-aggregated weekly for drift. Columns: `id` PK, `report_slug`, `document_uri`,
-`violated_directive`, `blocked_uri`, `source_file`, `line_no`, `raw` jsonb,
-`received_at`. Indexes: `violated_directive`, `received_at`.
+aggregated weekly for drift.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `report_slug` | text | the slug whose page violated CSP |
+| `document_uri` | text | |
+| `violated_directive` | text | |
+| `blocked_uri` | text | |
+| `source_file` | text NULL | |
+| `line_no` | int NULL | |
+| `raw` | jsonb | full report payload |
+| `received_at` | timestamptz | |
+
+Indexes: `violated_directive`, `received_at`.
 
 ### Cross-cutting infrastructure
 

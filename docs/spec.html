@@ -1616,7 +1616,7 @@ jobs:
     │ findings JSONB   │ │  │ response_status · body JSONB│
     │ started/finished │ │  │ state · created_at (24h TTL)│
     │ created_at       │ │  └────────────────────────────┘
-    └──────────────────┘ └─ 1:1 report_versions
+    └──────────────────┘ └─ 1:1 report_versions   (idempotency_keys.acting_user_id → users)
        (rev 8: scan findings moved off report_versions → scan_jobs)</div>
 
     <h3>Table catalog</h3>
