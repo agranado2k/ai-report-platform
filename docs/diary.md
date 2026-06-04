@@ -922,15 +922,23 @@ broken mechanisms, both masked:
   `prompt:` input — on a `pull_request` event the action has no instruction to act
   on (it only works off comment text), so it ran ~11s and did nothing.
 - **`claude-code-review.yml` (the dedicated auto-reviewer, the `claude-review`
-  check):** used `plugin_marketplaces` + `plugins: code-review@claude-code-plugins`;
-  the run errored (empty `ANTHROPIC_API_KEY` + a `claude-code-action` tsconfig
-  directory mismatch → "No buffered inline comments"), posting nothing — yet the
-  check showed green because the step is `continue-on-error`.
+  check):** used `plugin_marketplaces` + `plugins: code-review@claude-code-plugins`
+  and posted nothing — yet the check showed green because the step is
+  `continue-on-error`. Reading the run log closely surfaced the real cause: the
+  action's **OIDC → GitHub-App-token exchange 401s with "the workflow file must be
+  identical to the version on the default branch."** That gate fails on any PR that
+  edits this very workflow, so the review stalled before it could post (the empty
+  `ANTHROPIC_API_KEY` + tsconfig "directory mismatch" + "No buffered inline
+  comments" log lines are downstream noise after the token exchange already died).
 
 **Fix.** `claude-code-review.yml` now drops the plugin path and uses the
 proven-working `claude_code_oauth_token` (the same credential `claude.yml` uses for
-mentions) with an explicit `prompt:` instructing a PR review, plus `track_progress`
-so the review attaches to the PR on a `pull_request` event. `continue-on-error`
+mentions) for Anthropic auth, with an explicit `prompt:` instructing a PR review and
+`track_progress` so the review attaches to the PR on a `pull_request` event.
+Crucially it also sets **`github_token: ${{ secrets.GITHUB_TOKEN }}`** so the action
+posts via the workflow's own token instead of minting an App token through OIDC —
+sidestepping the default-branch workflow-validation gate that was the real blocker
+(and letting the fix verify on the PR that introduces it). `continue-on-error`
 stays (advisory; must not gate merge under the solo-dev policy). Reverted the
 misguided auto-`@claude`-on-open path: `claude.yml` is mention-only again
 (issue_comment / pull_request_review_comment / pull_request_review / issues), the
