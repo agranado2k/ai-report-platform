@@ -22,6 +22,13 @@ export default defineConfig({
     // Set by CI from the Vercel preview deployment_status.target_url; defaults
     // to a locally-served app for `pnpm e2e` on a dev box.
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
+    // Vercel preview deployments are protected by Deployment Protection — an
+    // unauthenticated request gets 401. Send the automation bypass header when
+    // the secret is present (Vercel → Protection Bypass for Automation; secret
+    // in CI as VERCEL_AUTOMATION_BYPASS_SECRET). Absent locally → no header.
+    extraHTTPHeaders: process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+      ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
+      : {},
     trace: 'on-first-retry',
   },
   // Run only smoke now; never run @wip (later-phase) scenarios once the product
