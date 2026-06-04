@@ -11,6 +11,8 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "typecheck": "turbo typecheck",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e:gen": "bddgen",
@@ -24,6 +26,7 @@
     "release:dry": "semantic-release --dry-run --no-ci"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
     "@playwright/test": "^1.60.0",

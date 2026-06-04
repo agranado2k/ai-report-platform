@@ -1007,3 +1007,14 @@ Operator asked to validate env vars with Zod (à la `zora-pantheon/.../environme
 **Next:** VS-2 (real Neon/R2 adapters) is the first consumer — its composition root calls `defineEnv()` once. Then VS-3 wires the apps (incl. the `PUBLIC_*` client vars) → manually testable upload→view.
 
 **Process:** worktree `feat/env-validation`, branched off `main` (`c9361b7`). New package + ADR-0043; no consumers wired yet (VS-2 does that).
+
+### 2026-06-04 — Wire the Biome lint+format gate (folded into PR #23)
+
+The v7 spec (`docs/spec.html`) has always listed `biome ci .` as a **required** PR check (lint + format across the monorepo), but no `biome.json` or workflow existed — so the gate was vapor. Operator called it "primordial"; wired it now, in the env-validation PR, rather than as a standalone follow-up.
+
+- **`biome.json`** (Biome 2.4.16): formatter = **2-space indent, double quotes, line width 100** (chosen to match the dominant existing layout — the codebase was already 2-space; quotes were mixed and unenforced, settled on double per operator). `linter.recommended`, `organizeImports` on. Excludes `docs/` (the design docs/spec.html — validated by the docs-conformance harness, not lintable source; its embedded `<style>`/`<script>` tripped CSS rules), plus generated output (`drizzle/`, `.features-gen/`, `*.gen.ts`, playwright reports).
+- **Scripts:** root `lint` (`biome ci .`) + `format` (`biome check --write .`). **Workflow** `.github/workflows/biome.yml` mirrors `unit.yml` (Node 24, Corepack pnpm 10, frozen install → `pnpm lint`).
+- **One-time normalization:** `biome check --write` reformatted 56 source files (quotes/indent/wrapping/import-order, no behavior change) + replaced the smoke step defs' empty-fixture `({}, …)` with `(_, …)` for `noEmptyPattern`. Verified: `pnpm lint` green, **44** unit tests + **26** docs-conformance tests pass, all-package typecheck + `docs:check` ✓.
+- No ADR — this **implements** an existing spec decision, not a new one. Also gives Finding 2b (boundary-import enforcement) a home: a future `no-restricted-imports`-style rule barring `arp-env` from `domain`/`application` can land in this config.
+
+**Process:** same worktree/branch as the env package above.
