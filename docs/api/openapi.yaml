@@ -1,0 +1,254 @@
+openapi: 3.1.0
+info:
+  title: AI Report Platform API
+  version: 0.1.0
+  description: >
+    HTTP API for uploading and serving hosted HTML reports. The HTTP API is the
+    source of truth (ADR-003); the MCP server is a thin wrapper over it. Every
+    mutating endpoint is idempotent (ADR-0039) and every error is an RFC 9457
+    Problem Details document with a stable machine-readable `code` (ADR-0040).
+    Phase 1 covers upload + viewer serving (ADR-0037, ADR-0038).
+servers:
+  - url: https://app.example.com
+    description: App origin (replace example.com with the live domain).
+tags:
+  - name: Reports
+    description: Upload and re-upload reports (ADR-0037).
+  - name: Viewer
+    description: >
+      Public capability-URL serving on the separate view.<domain> origin
+      (ADR-0002, ADR-0038). Documented here for contract completeness.
+
+paths:
+  /api/v1/reports:
+    post:
+      operationId: uploadReport
+      tags: [Reports]
+      summary: Upload or re-upload a report (content-only)
+      description: >
+        Content-only upload (ADR-0037). A bare upload creates a new Report
+        (slug + first ReportVersion); with `update_slug` it adds a new
+        ReportVersion to an existing Report and changes nothing else. Supplying
+        `title`, `folder_path`, or `acl` in the body on a re-upload returns 422
+        (those are dedicated operations). The response is 201 with
+        `scan_status: pending`; the version is promoted to live asynchronously
+        on a clean scan (monotonic promote-if-newer), never synchronously.
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    A single .html file OR a .zip bundle. The entry document is
+                    resolved by the index.html convention: a lone .html is
+                    normalised to index.html and a single wrapping directory is
+                    stripped; an ambiguous archive is rejected (422).
+                folder_path:
+                  type: string
+                  description: >
+                    CREATE only — placement. Omitted → the org root folder.
+                    Present on a re-upload → 422.
+                update_slug:
+                  type: string
+                  description: RE-UPLOAD — the slug of the report to add a version to.
+      responses:
+        '201':
+          description: Version accepted; scanning pending (promotion is asynchronous).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '402': { $ref: '#/components/responses/PlanLimitExceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /{slug}:
+    get:
+      operationId: viewReport
+      tags: [Viewer]
+      summary: Serve a report (view.<domain> origin)
+      description: >
+        Reason-opaque viewer state machine (ADR-0038). Served on the separate
+        PSL-isolated view.<domain> origin with the full ADR-0013 security-header
+        stack and X-Robots-Tag: noindex (always). `?v=N` passes through the same
+        ACL + scan gate as the live URL.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - name: v
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+          description: Serve a specific version ordinal instead of the live version.
+      responses:
+        '200':
+          description: >
+            A clean version is streamed, OR a "scanning… check back" holding page
+            is shown when the newest version is still pending.
+          content:
+            text/html:
+              schema: { type: string }
+        '404':
+          description: >
+            Unknown slug OR a blocked version — deliberately indistinguishable
+            (reason-opaque; we don't acknowledge serious-bad content).
+        '410':
+          description: The report was taken down (Gone); no public reason.
+        '451':
+          description: The relevant version is flagged — unavailable for review.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: >
+        API key (ADR-0008) carrying the `reports:write` scope (ADR-0016).
+        Hashed, prefixed, user-scoped so cross-org collaboration works.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+      description: >
+        Optional idempotency key (ADR-0039, IETF/Stripe style). If absent, the
+        server derives one from acting_user_id + method + route + a canonical
+        payload fingerprint (for upload: content_hash + target). A match replays
+        the stored response without re-executing; an explicit key reused with a
+        different body → 422; a concurrent in-flight retry → 409. Keys live 24h.
+
+  schemas:
+    UploadResult:
+      type: object
+      required: [slug, view_url, version, scan_status]
+      properties:
+        slug:
+          type: string
+          description: Permanent capability-URL slug (nanoid(10), ~10^18 entropy).
+        view_url:
+          type: string
+          format: uri
+          description: Public viewer URL on view.<domain>.
+        version:
+          type: integer
+          description: Display ordinal (version_no = max+1 at commit).
+        scan_status:
+          type: string
+          enum: [pending, clean, flagged, blocked]
+          description: Always `pending` at upload; the verdict arrives asynchronously.
+        dashboard_url:
+          type: string
+          format: uri
+          description: Owner dashboard URL on app.<domain>.
+
+    Problem:
+      description: RFC 9457 Problem Details (ADR-0040).
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code:
+          type: string
+          description: Stable, documented machine-readable error code.
+          enum:
+            - unauthenticated
+            - forbidden
+            - not_found
+            - unsupported_media_type
+            - payload_too_large
+            - validation_error
+            - idempotency_key_reuse
+            - idempotency_in_flight
+            - plan_limit_exceeded
+            - rate_limited
+            - internal_error
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid API key.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Unauthenticated, status: 401, code: unauthenticated }
+    Forbidden:
+      description: Authenticated but not allowed (no write grant, or insufficient scope).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Forbidden, status: 403, code: forbidden }
+    NotFound:
+      description: Slug, folder, or version not found.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Not found, status: 404, code: not_found }
+    PlanLimitExceeded:
+      description: A hard plan quota was hit (billing-actionable; distinct from 429).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Plan limit exceeded, status: 402, code: plan_limit_exceeded }
+    PayloadTooLarge:
+      description: Per-file / bundle-size / file-count cap or a decompression bomb.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Payload too large, status: 413, code: payload_too_large }
+    UnsupportedMediaType:
+      description: MIME not on the allowlist (content-sniffed), e.g. SVG (ADR-0015).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Unsupported media type, status: 415, code: unsupported_media_type }
+    ValidationError:
+      description: >
+        Bad body, missing/ambiguous entry document, or a content-only violation
+        (title/folder_path/acl on re-upload). Also returned for an explicit
+        Idempotency-Key reused with a different body (code idempotency_key_reuse).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Validation error, status: 422, code: validation_error }
+    IdempotencyInFlight:
+      description: A retry arrived while the original request is still processing.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Request in flight, status: 409, code: idempotency_in_flight }
+    RateLimited:
+      description: Too many requests (transient; clears with time, unlike 402).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Rate limited, status: 429, code: rate_limited }
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Internal server error, status: 500, code: internal_error }
