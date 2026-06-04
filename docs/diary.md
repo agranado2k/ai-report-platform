@@ -992,3 +992,18 @@ Operator chose a **thin vertical slice** to reach a manually-testable upload→v
 **Next (VS-2):** real adapters — Drizzle `ReportRepository` (Neon), R2 `BlobStore`, idempotency/outbox tables, and the **scan-stub adapter** (`enqueueScan` → emits `ReportVersionScanned(clean)` → `PromoteVersionUseCase` promotes), then VS-3 wires `POST /api/v1/reports` + the viewer + deploy. **Manual UI test becomes possible at the end of VS-3.**
 
 **Process:** worktree `feat/phase-1d-upload-usecase`, branched off `main` (`61c68e9`). Pure use case + fakes; no infra yet.
+
+### 2026-06-04 — Env-var validation: `packages/env` (Zod + @t3-oss/env-core) · ADR-0043 · worktree `feat/env-validation`
+
+Operator asked to validate env vars with Zod (à la `zora-pantheon/.../environment`), and to research better examples first. Research found the bare `parse(process.env)` reference is fine for a backend-only service but risky for **our** client-bundled Remix apps — the real hazard is leaking a server secret to the browser. So we adopt **`@t3-oss/env-core` + Zod** (ADR-0043), which adds the server/client split the bare pattern lacks.
+
+**`packages/env` (`arp-env`, deps `@t3-oss/env-core` + `zod` 4):**
+- `defineEnv(runtimeEnv = process.env)` wraps our Zod schemas with `createEnv`: **server** schema (`DATABASE_URL`, `R2_*`, `CLERK_SECRET_KEY`, Upstash optional) + **client** schema (`PUBLIC_CLERK_PUBLISHABLE_KEY`, `clientPrefix:'PUBLIC_'`) + the **Vercel preset** (typed `VERCEL_*`), with `emptyStringAsUndefined` + `onInvalidAccess`. Server secrets can't reach the client bundle (enforced at type+runtime); misconfig fails fast at boot.
+- `schema-helpers.ts` (`trimmedString`/`coercedNumber`/`boolFromString`/`csvList`) + `schema.ts` (the contract) + side-effect-free `index.ts` (the package validates nothing until a consumer calls `defineEnv`; tests inject a mock runtimeEnv).
+- **4 tests** (valid parse + NODE_ENV default, fail-fast on missing/malformed `DATABASE_URL`, empty-string→undefined). `pnpm test` → **44**; all-package typecheck + `docs:check` ✓.
+
+**Boundary-only (ADR-0024):** Zod/t3-env live in `packages/env`, `apps/*`, `packages/adapters/*` — never in `domain`/`application`. Zod will also back HTTP request-body validation later (ADR-0040).
+
+**Next:** VS-2 (real Neon/R2 adapters) is the first consumer — its composition root calls `defineEnv()` once. Then VS-3 wires the apps (incl. the `PUBLIC_*` client vars) → manually testable upload→view.
+
+**Process:** worktree `feat/env-validation`, branched off `main` (`c9361b7`). New package + ADR-0043; no consumers wired yet (VS-2 does that).
