@@ -50,6 +50,10 @@ jobs:
       - name: Run BDD smoke against the preview
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
+          # Bypasses Vercel Deployment Protection on the preview (else 401).
+          # Enable "Protection Bypass for Automation" on both Vercel projects and
+          # store the generated secret as this repo secret.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: pnpm e2e
 
       - name: Upload Playwright report
