@@ -21,6 +21,7 @@ import {
 import type {
   BlobFile,
   BlobStore,
+  BundleProcessor,
   Clock,
   EventOutbox,
   IdGenerator,
@@ -29,6 +30,7 @@ import type {
   IdempotencyRecord,
   IdempotencyStore,
   PlanLimiter,
+  ProcessedBundle,
   ReportRepository,
   ScanQueue,
   SlugFactory,
@@ -197,5 +199,40 @@ export class FixedClock implements Clock {
 export class PassThroughUnitOfWork implements UnitOfWork {
   async run<T>(work: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
     return work();
+  }
+}
+
+/** Returns a canned ProcessedBundle (default: one clean index.html), or a
+ *  configured AppError to exercise the 415/413/422 branches. */
+export class FakeBundleProcessor implements BundleProcessor {
+  private result: Result<ProcessedBundle, AppError>;
+
+  constructor(result?: Result<ProcessedBundle, AppError>) {
+    this.result =
+      result ??
+      ok({
+        files: [{ path: 'index.html', contentType: 'text/html', bytes: new TextEncoder().encode('<h1>ok</h1>') }],
+        entryDocument: 'index.html',
+        contentHash: 'hash-default',
+        sizeBytes: 11,
+      });
+  }
+
+  setResult(result: Result<ProcessedBundle, AppError>): void {
+    this.result = result;
+  }
+
+  /** Convenience: succeed with a specific content hash (for idempotency tests). */
+  setContentHash(contentHash: string): void {
+    this.result = ok({
+      files: [{ path: 'index.html', contentType: 'text/html', bytes: new TextEncoder().encode('<h1>ok</h1>') }],
+      entryDocument: 'index.html',
+      contentHash,
+      sizeBytes: 11,
+    });
+  }
+
+  async process(): Promise<Result<ProcessedBundle, AppError>> {
+    return this.result;
   }
 }

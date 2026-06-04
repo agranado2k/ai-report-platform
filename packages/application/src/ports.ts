@@ -42,6 +42,25 @@ export interface BlobStore {
   deleteVersionPrefix(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
 }
 
+// ── Bundle processing — sync pre-checks (ADR-0037 §1/§9, ADR-0015) ─────────
+export interface ProcessedBundle {
+  readonly files: readonly BlobFile[]; // normalized; entry resolved to index.html
+  readonly entryDocument: string; // typically 'index.html'
+  readonly contentHash: string; // bundle digest — idempotency-key input (ADR-0039)
+  readonly sizeBytes: number; // uncompressed total
+}
+
+export interface BundleProcessor {
+  /**
+   * Validate + normalize an upload: MIME allowlist via content-sniff (SVG → 415,
+   * ADR-0015), zip extraction + caps (per-file/count/decompression → 413),
+   * entry-document resolution (index.html convention; ambiguous → 422), and the
+   * content hash. Returns the processed bundle or the appropriate AppError.
+   * The real (zip/sniff) implementation is an adapter; the use case stays pure.
+   */
+  process(filename: string, bytes: Uint8Array): Promise<Result<ProcessedBundle, AppError>>;
+}
+
 // ── Idempotency (ADR-0039) ────────────────────────────────────────────────
 export interface IdempotencyKeyRef {
   readonly actingUserId: UserId;
