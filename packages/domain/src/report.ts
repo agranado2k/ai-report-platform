@@ -8,7 +8,7 @@ import type { DomainEvent, ReportPublished, ReportVersionUploaded } from './even
 import type { ReportVersion } from './report-version';
 import type { Result } from './result';
 import type { Slug } from './slug';
-import type { ScanStatus } from './value-objects';
+import type { TerminalScanStatus } from './value-objects';
 import { notFound } from './errors';
 import { err, ok } from './result';
 
@@ -106,8 +106,13 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
  * **only if** it is newer than the current live version (monotonic
  * promote-if-newer, ADR-0037 §8) and emits ReportPublished. `flagged`/`blocked`
  * never promote; an out-of-order clean for an older version never demotes.
+ *
+ * `verdict` is a `TerminalScanStatus` — `pending` is not a scan *result*. An
+ * unknown `scannedId` (a stale or duplicate scan event for a version this
+ * aggregate no longer holds) is **silently absorbed**: the aggregate is
+ * returned unchanged with no events. This idempotent no-op is intentional.
  */
-export function applyScanResult(report: Report, scannedId: VersionId, verdict: ScanStatus): Emission {
+export function applyScanResult(report: Report, scannedId: VersionId, verdict: TerminalScanStatus): Emission {
   const versions = report.versions.map((v) =>
     v.id === scannedId ? { ...v, scanStatus: verdict } : v,
   );
