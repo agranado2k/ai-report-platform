@@ -36,10 +36,17 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
   columns (e.g. `report_versions.report_id`, `scan_jobs.report_version_id`,
   `folders.org_id`) are `NOT NULL` except where explicitly marked nullable
   (`folders.parent_id`, `reports.live_version_id`, `folder_collaborators.grantee_user_id`).
-- **Partitioning**: `audit_log` (by `at`) and `outbox` (by `created_at`)
-  partitioned monthly; old partitions detached and cold-exported.
-- **Migrations**: Drizzle migrations, up + down in every PR. CI applies them
-  against a throwaway Neon branch and rolls back (ADR-019, infrastructure-first).
+- **Partitioning**: `audit_log` (by `at`) and `outbox` (by `created_at`) are
+  *targeted* for monthly partitioning; old partitions detached and cold-exported.
+  **Deferred in Phase 1** — Drizzle's schema DSL can't express `PARTITION BY`, so
+  these ship as plain tables now and are converted to partitioned tables via a
+  custom migration when they go hot (neither is write-heavy until the
+  audit/outbox dispatcher lands). Tracked as a follow-up.
+- **Migrations**: **forward-only** (Drizzle generates no down files). Every PR
+  ships the generated up migration; rollback is by **Neon branch reset / PITR**,
+  not a down-migration (the CI migration-check's "rollback" is deleting the
+  ephemeral branch). Pair with **expand/contract** discipline — no destructive
+  change in a single migration — so forward-only stays safe (ADR-019).
 
 ## Enums
 
@@ -92,7 +99,7 @@ Indexes: `clerk_user_id` unique, `email`.
 | `issued_in_org_id` | uuid FK → orgs | org the key was minted in |
 | `name` | text | |
 | `scopes` | jsonb | OAuth-style scope set |
-| `key_prefix` | text(12) | plaintext, shown in UI |
+| `key_prefix` | varchar(12) | plaintext, shown in UI |
 | `key_hash` | text | argon2id |
 | `last_used_at` | timestamptz NULL | |
 | `revoked_at` | timestamptz NULL | soft delete |
@@ -134,7 +141,7 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 | `id` | uuid PK | |
 | `org_id` | uuid FK → orgs | |
 | `folder_id` | uuid FK → folders | placement at create (ADR-0037) |
-| `slug` | text(10) | immutable `nanoid(10)`; the public URL + capability (ADR-0038) |
+| `slug` | varchar(10) | immutable `nanoid(10)`; the public URL + capability (ADR-0038) |
 | `title` | text | |
 | `live_version_id` | uuid FK → report_versions NULL | the served version; flips on scan-clean (monotonic, ADR-0037 §8) |
 | `created_at` / `updated_at` | timestamptz | |
@@ -288,6 +295,8 @@ promotion-logic change should be needed.
 
 ## Migrations
 
-Drizzle (`drizzle-kit`) under `packages/db`. Every PR ships the generated up +
-down SQL. CI applies them to a throwaway Neon branch and rolls back before
-merge. The first Phase-1 migration creates every table above.
+Drizzle (`drizzle-kit`) under `packages/db`, **forward-only** (no down files).
+Every PR ships the generated up migration; CI applies it to a throwaway Neon
+branch (and discards the branch — that deletion is the "rollback") before merge.
+Rollback in prod is a Neon branch reset / PITR, paired with expand/contract
+discipline. The first Phase-1 migration creates every table above.
