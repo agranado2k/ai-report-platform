@@ -5,6 +5,9 @@ name: Claude Code
 #   - a PR review comment (inline)
 #   - a PR review body
 #   - an issue body or title (on open / assign)
+#   - a PR description / body (on open or ready-for-review) — the PR template
+#     (.github/pull_request_template.md) seeds `@claude`, so every UI-opened PR
+#     auto-requests the review; delete the line from the body to opt out.
 #
 # Authentication uses `CLAUDE_CODE_OAUTH_TOKEN` (created by the GitHub App
 # install flow). Branch protection requires signed commits, so we set
@@ -20,6 +23,8 @@ on:
     types: [opened, assigned]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [opened, ready_for_review]
 
 jobs:
   claude:
@@ -27,6 +32,7 @@ jobs:
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
