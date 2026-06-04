@@ -8,7 +8,7 @@ import { trimmedString } from './schema-helpers';
 export const serverSchema = {
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  // Neon (Reports & Folders persistence, ADR-0004/0020).
+  // Neon Postgres connection string (Reports & Folders persistence, ADR-020).
   DATABASE_URL: z.url(),
 
   // Cloudflare R2 (blob storage, ADR-0004).
