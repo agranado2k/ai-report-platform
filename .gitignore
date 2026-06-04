@@ -51,6 +51,8 @@ dist/
 # ─── Test artifacts ─────────────────────────────────────────────────────
 playwright-report/
 test-results/
+blob-report/
+.features-gen/
 coverage/
 
 # ─── OS / editor ────────────────────────────────────────────────────────
