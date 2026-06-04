@@ -1776,36 +1776,37 @@ jobs:
     <h2>Upload &amp; viewer flows</h2>
 
     <h3>Upload flow (HTTP API &mdash; source of truth)</h3>
-<pre><code>POST /api/v1/reports
-  Auth: Bearer &lt;api_key&gt;
+<pre><code># Content-only upload (ADR-0037). Title / ACL / move are dedicated endpoints.
+POST /api/v1/reports
+  Auth: Bearer &lt;api_key&gt;              (scope: reports:write)
+  Idempotency-Key: &lt;uuid&gt;             # optional; derived from body if absent (ADR-0039)
   Body (multipart/form-data):
-    file: &lt;single .html OR .zip bundle&gt;
-    title?: string
-    folder_path?: string
-    update_slug?: string
-    acl?: { mode, password?, allowed_emails? }
-    csp_extras?: { connect_src?: [...] }   # paid-plan only
+    file: &lt;single .html OR .zip bundle&gt;   # the only content field
+    folder_path?: string                  # CREATE only (placement); omitted =&gt; org root folder
+    update_slug?: string                  # RE-UPLOAD; title/folder_path/acl in body =&gt; 422
   Response 201:
-    { slug, view_url, version, scan_status, dashboard_url }</code></pre>
+    { slug, view_url, version, scan_status, dashboard_url }
+  Errors: application/problem+json (RFC 9457, stable `code`) — ADR-0040</code></pre>
     <ol class="step-list">
       <li>Authenticate API key &rarr; resolve <code>acting_user_id</code> + scopes. <code>requireScope("reports:write")</code>.</li>
-      <li>Resolve target folder.</li>
+      <li><strong>Idempotency</strong> (ADR-0039): resolve the key (header, else derived from <code>acting_user_id</code> + route + <code>content_hash</code> + target). On a match, replay the stored response; in-flight &rarr; 409.</li>
+      <li>Resolve target folder: <code>folder_path</code> at <strong>create</strong> &rarr; that folder (omitted &rarr; the org's root folder); on <strong>re-upload</strong> <code>folder_path</code> present &rarr; 422.</li>
       <li><code>canWrite(user, folder)</code>: org member OR ancestor has folder grant &rarr; allowed; else 403.</li>
-      <li>If <code>update_slug</code>: load report, verify folder check covers it.</li>
-      <li>Sync pre-checks: size, file count, MIME content-sniff, zip-slip, decompression-ratio, SVG rejection.</li>
-      <li>Extract + upload to R2 at <code>reports/&lt;reportId&gt;/v&lt;n&gt;/&lt;path&gt;</code>.</li>
-      <li>Insert <code>report_versions</code> with <code>scan_status='pending'</code>; insert <code>outbox</code> row for <code>ReportVersionUploaded</code>. Single transaction.</li>
-      <li>Do <strong>not</strong> bump <code>live_version_id</code> &mdash; scanner promotes on <code>clean</code>.</li>
-      <li>Upsert <code>acls</code>. Return slug + viewer URL + scan_status.</li>
+      <li>If <code>update_slug</code>: load report, verify the folder check covers it; reject <code>title</code>/<code>folder_path</code>/<code>acl</code> in the body (422 &mdash; content-only, ADR-0037).</li>
+      <li>Sync pre-checks: MIME content-sniff <strong>allowlist</strong> (reject SVG, ADR-015), per-file/size/file-count/decompression-ratio caps, reject nested archives, resolve the <strong>entry document</strong> (<code>index.html</code>; strip a single wrapper dir; reject if ambiguous). <code>PlanLimiter.assertWithinPlan</code> (ADR-006).</li>
+      <li>Generate <code>versionId</code> (UUIDv7); upload all blobs to R2 at <code>reports/&lt;reportId&gt;/&lt;versionId&gt;/&lt;path&gt;</code> (UUID-keyed, ADR-0037).</li>
+      <li>In <strong>one transaction</strong>: insert <code>report_versions</code> (<code>version_no = max+1</code>, <code>scan_status='pending'</code>) + <code>outbox</code> row for <code>ReportVersionUploaded</code> + the <code>idempotency_keys</code> record. Commit-last; a pre-commit failure leaves only GC-able orphan blobs.</li>
+      <li>Do <strong>not</strong> bump <code>live_version_id</code> &mdash; promotion happens on <code>ReportVersionScanned(clean)</code>, monotonic (promote-if-newer).</li>
+      <li>Return 201 <code>{ slug, view_url, version, scan_status }</code>.</li>
     </ol>
 
     <h3>Viewer flow (<code>view.&lt;domain&gt;</code>)</h3>
     <ol class="step-list">
-      <li>Request <code>view.&lt;domain&gt;/&lt;slug&gt;</code> (optionally <code>?v=N</code>, <code>?token=&hellip;</code>).</li>
-      <li>Vercel Edge Middleware: per-IP rate limit; reject unknown slug; <strong>return 403 on <code>Service-Worker: script</code></strong>; scan-status pre-fetch &mdash; if <code>flagged</code>, render 451 without loader.</li>
-      <li>Remix loader on <code>routes/$slug.$.tsx</code>: ACL gate (public / password / org / allowlist).</li>
-      <li>Resolve <code>live_version_id</code> (or <code>?v=N</code>); fetch from R2; stream via <code>Response</code> with correct content-type.</li>
-      <li>Apply full security-header stack (ADR-013). Inject abuse-report link.</li>
+      <li>Request <code>view.&lt;domain&gt;/&lt;slug&gt;</code> (optionally <code>?v=N</code>, <code>?token=&hellip;</code>). <code>?v=N</code> uses the <strong>same ACL + scan gate</strong> as the live URL (ADR-0038).</li>
+      <li>Vercel Edge Middleware: per-IP rate limit; <strong>403 on <code>Service-Worker: script</code></strong>; scan-status pre-fetch for the resolved version.</li>
+      <li>Resolve version: <code>live_version_id</code> (or <code>?v=N</code>). Remix loader on <code>routes/$slug.$.tsx</code> applies the ACL gate (Phase 1: public capability-URL).</li>
+      <li><strong>State machine</strong> (reason-opaque, ADR-0038): clean &amp; passes ACL &rarr; <code>200</code> stream from R2; no live version yet / newest <code>pending</code> &rarr; <code>200</code> "scanning&hellip;" holding page (auto-refresh); <code>flagged</code> &rarr; <code>451</code>; <code>blocked</code> or unknown slug &rarr; <code>404</code>; taken down (<code>deleted_at</code>) &rarr; <code>410 Gone</code>.</li>
+      <li>Apply the full security-header stack (ADR-013) + <code>X-Robots-Tag: noindex</code> (always). Inject the abuse-report link. Non-clean previews are dashboard-only, never served here.</li>
     </ol>
   </section>
 
