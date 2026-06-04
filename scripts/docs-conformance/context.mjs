@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Build the read-only context every validator receives. Rooted at `repoRoot`
@@ -11,7 +11,7 @@ export function makeContext({ repoRoot, config }) {
   /** Read a repo-relative file, or null if it does not exist. */
   const read = (rel) => {
     const p = join(repoRoot, rel);
-    return existsSync(p) ? readFileSync(p, 'utf8') : null;
+    return existsSync(p) ? readFileSync(p, "utf8") : null;
   };
 
   /** List file names in a repo-relative dir, optionally filtered by extension. */
@@ -32,14 +32,14 @@ export function makeContext({ repoRoot, config }) {
     list,
     exists,
     paths: {
-      docs: 'docs',
-      adrDir: 'docs/adr',
-      adrIndex: 'docs/adr/INDEX.md',
-      glossary: 'docs/domain-glossary.md',
-      events: 'docs/events.md',
-      contextMap: 'docs/context-map.md',
-      features: 'tests/e2e/features',
-      openapi: 'docs/api/openapi.yaml',
+      docs: "docs",
+      adrDir: "docs/adr",
+      adrIndex: "docs/adr/INDEX.md",
+      glossary: "docs/domain-glossary.md",
+      events: "docs/events.md",
+      contextMap: "docs/context-map.md",
+      features: "tests/e2e/features",
+      openapi: "docs/api/openapi.yaml",
     },
   };
 }

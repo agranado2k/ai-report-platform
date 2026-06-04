@@ -2,15 +2,15 @@
 // pure: each operation returns a new Report plus the domain events it emitted.
 // No I/O (ADR-024); persistence lives in adapters (ADR-020).
 
-import type { FolderId, OrgId, ReportId, UserId, VersionId } from './brand';
-import type { AppError } from './errors';
-import type { DomainEvent, ReportPublished, ReportVersionUploaded } from './events';
-import type { ReportVersion } from './report-version';
-import type { Result } from './result';
-import type { Slug } from './slug';
-import type { TerminalScanStatus } from './value-objects';
-import { notFound } from './errors';
-import { err, ok } from './result';
+import type { FolderId, OrgId, ReportId, UserId, VersionId } from "./brand";
+import type { AppError } from "./errors";
+import { notFound } from "./errors";
+import type { DomainEvent, ReportPublished, ReportVersionUploaded } from "./events";
+import type { ReportVersion } from "./report-version";
+import type { Result } from "./result";
+import { err, ok } from "./result";
+import type { Slug } from "./slug";
+import type { TerminalScanStatus } from "./value-objects";
 
 export interface Report {
   readonly id: ReportId;
@@ -47,7 +47,7 @@ export function createReport(p: CreateReportParams): Emission {
     versionNo: 1,
     contentHash: p.contentHash,
     uploadedBy: p.uploadedBy,
-    scanStatus: 'pending',
+    scanStatus: "pending",
   };
   const report: Report = {
     id: p.id,
@@ -60,7 +60,7 @@ export function createReport(p: CreateReportParams): Emission {
     deletedAt: null,
   };
   const event: ReportVersionUploaded = {
-    type: 'ReportVersionUploaded',
+    type: "ReportVersionUploaded",
     reportId: p.id,
     versionId: p.versionId,
     versionNo: 1,
@@ -80,7 +80,7 @@ export interface AddVersionParams {
  * (ADR-0037 §2). A taken-down report rejects re-upload.
  */
 export function addVersion(report: Report, p: AddVersionParams): Result<Emission, AppError> {
-  if (report.deletedAt !== null) return err(notFound('report has been taken down'));
+  if (report.deletedAt !== null) return err(notFound("report has been taken down"));
 
   const nextNo = Math.max(...report.versions.map((v) => v.versionNo)) + 1;
   const version: ReportVersion = {
@@ -88,11 +88,11 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     versionNo: nextNo,
     contentHash: p.contentHash,
     uploadedBy: p.uploadedBy,
-    scanStatus: 'pending',
+    scanStatus: "pending",
   };
   const updated: Report = { ...report, versions: [...report.versions, version] };
   const event: ReportVersionUploaded = {
-    type: 'ReportVersionUploaded',
+    type: "ReportVersionUploaded",
     reportId: report.id,
     versionId: p.versionId,
     versionNo: nextNo,
@@ -112,13 +112,17 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
  * aggregate no longer holds) is **silently absorbed**: the aggregate is
  * returned unchanged with no events. This idempotent no-op is intentional.
  */
-export function applyScanResult(report: Report, scannedId: VersionId, verdict: TerminalScanStatus): Emission {
+export function applyScanResult(
+  report: Report,
+  scannedId: VersionId,
+  verdict: TerminalScanStatus,
+): Emission {
   const versions = report.versions.map((v) =>
     v.id === scannedId ? { ...v, scanStatus: verdict } : v,
   );
 
   const scanned = report.versions.find((v) => v.id === scannedId);
-  if (verdict !== 'clean' || scanned === undefined) {
+  if (verdict !== "clean" || scanned === undefined) {
     return { report: { ...report, versions }, events: [] };
   }
 
@@ -132,7 +136,7 @@ export function applyScanResult(report: Report, scannedId: VersionId, verdict: T
   }
 
   const published: ReportPublished = {
-    type: 'ReportPublished',
+    type: "ReportPublished",
     reportId: report.id,
     versionId: scannedId,
     firstPublish: report.liveVersionId === null,

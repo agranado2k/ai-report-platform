@@ -17,7 +17,7 @@ import type {
   Slug,
   UserId,
   VersionId,
-} from 'arp-domain';
+} from "arp-domain";
 
 // ── Reports & Folders persistence ─────────────────────────────────────────
 export interface ReportRepository {
@@ -36,8 +36,16 @@ export interface BlobFile {
 
 export interface BlobStore {
   /** Write all blobs for a version (R2-first; commit-last in the use case). */
-  putVersionBundle(reportId: ReportId, versionId: VersionId, files: readonly BlobFile[]): Promise<Result<void, AppError>>;
-  readObject(reportId: ReportId, versionId: VersionId, path: string): Promise<Result<BlobFile | null, AppError>>;
+  putVersionBundle(
+    reportId: ReportId,
+    versionId: VersionId,
+    files: readonly BlobFile[],
+  ): Promise<Result<void, AppError>>;
+  readObject(
+    reportId: ReportId,
+    versionId: VersionId,
+    path: string,
+  ): Promise<Result<BlobFile | null, AppError>>;
   /** GC: drop an orphaned version prefix after a pre-commit failure. */
   deleteVersionPrefix(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
 }
@@ -75,9 +83,9 @@ export interface IdempotencyRecord {
 
 /** Outcome of claiming a key, before executing the mutation. */
 export type IdempotencyBegin =
-  | { readonly outcome: 'proceed' } // new key claimed (state in_flight)
-  | { readonly outcome: 'replay'; readonly record: IdempotencyRecord } // completed match → replay
-  | { readonly outcome: 'in_flight' }; // concurrent retry still processing → 409
+  | { readonly outcome: "proceed" } // new key claimed (state in_flight)
+  | { readonly outcome: "replay"; readonly record: IdempotencyRecord } // completed match → replay
+  | { readonly outcome: "in_flight" }; // concurrent retry still processing → 409
 
 export interface IdempotencyStore {
   /**
