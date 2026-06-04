@@ -104,5 +104,11 @@ export interface Clock {
 
 // ── Unit of work — atomic commit of repo + outbox + idempotency (ADR-0037 §5) ─
 export interface UnitOfWork {
+  /**
+   * Run `work` atomically. For the upload pipeline the callback MUST include
+   * `ReportRepository.save` + `EventOutbox.enqueue` + `IdempotencyStore.complete`
+   * so they commit together (ADR-0037 §5, ADR-0039); the real adapter binds them
+   * to a single transaction (the in-memory fake just runs the callback).
+   */
   run<T>(work: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>>;
 }
