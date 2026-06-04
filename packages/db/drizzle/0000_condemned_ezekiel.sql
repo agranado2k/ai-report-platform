@@ -13,9 +13,9 @@ CREATE TABLE "abuse_reports" (
 	"reason" text NOT NULL,
 	"notes" text,
 	"status" "abuse_status" DEFAULT 'open' NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
 	"actioned_by" uuid,
-	"actioned_at" timestamp with time zone
+	"actioned_at" timestamp (3) with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "acls" (
@@ -24,7 +24,7 @@ CREATE TABLE "acls" (
 	"password_hash" text,
 	"allowed_emails" jsonb,
 	"csp_extras" jsonb,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "api_keys" (
@@ -33,11 +33,11 @@ CREATE TABLE "api_keys" (
 	"issued_in_org_id" uuid NOT NULL,
 	"name" text NOT NULL,
 	"scopes" jsonb NOT NULL,
-	"key_prefix" text NOT NULL,
+	"key_prefix" varchar(12) NOT NULL,
 	"key_hash" text NOT NULL,
-	"last_used_at" timestamp with time zone,
-	"revoked_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"last_used_at" timestamp (3) with time zone,
+	"revoked_at" timestamp (3) with time zone,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "audit_log" (
@@ -50,7 +50,7 @@ CREATE TABLE "audit_log" (
 	"meta_json" jsonb NOT NULL,
 	"ip_hash" text,
 	"geo" text,
-	"at" timestamp with time zone DEFAULT now() NOT NULL
+	"at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "csp_reports" (
@@ -62,7 +62,7 @@ CREATE TABLE "csp_reports" (
 	"source_file" text,
 	"line_no" integer,
 	"raw" jsonb NOT NULL,
-	"received_at" timestamp with time zone DEFAULT now() NOT NULL
+	"received_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "folder_collaborators" (
@@ -72,7 +72,7 @@ CREATE TABLE "folder_collaborators" (
 	"grantee_email" text NOT NULL,
 	"permission" "grant_level" NOT NULL,
 	"added_by" uuid NOT NULL,
-	"added_at" timestamp with time zone DEFAULT now() NOT NULL
+	"added_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "folders" (
@@ -81,9 +81,9 @@ CREATE TABLE "folders" (
 	"parent_id" uuid,
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deleted_at" timestamp with time zone
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"deleted_at" timestamp (3) with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "idempotency_keys" (
@@ -94,7 +94,7 @@ CREATE TABLE "idempotency_keys" (
 	"response_status" integer,
 	"response_body" jsonb,
 	"state" "idempotency_state" DEFAULT 'in_flight' NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "idempotency_keys_acting_user_id_route_key_pk" PRIMARY KEY("acting_user_id","route","key")
 );
 --> statement-breakpoint
@@ -104,9 +104,9 @@ CREATE TABLE "orgs" (
 	"name" text NOT NULL,
 	"plan" "plan" DEFAULT 'free' NOT NULL,
 	"plan_limits_json" jsonb NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deleted_at" timestamp with time zone
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"deleted_at" timestamp (3) with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "outbox" (
@@ -116,9 +116,9 @@ CREATE TABLE "outbox" (
 	"payload" jsonb NOT NULL,
 	"status" "outbox_status" DEFAULT 'pending' NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
-	"available_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"delivered_at" timestamp with time zone
+	"available_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"delivered_at" timestamp (3) with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "report_versions" (
@@ -130,19 +130,19 @@ CREATE TABLE "report_versions" (
 	"content_hash" text NOT NULL,
 	"uploaded_by_user" uuid NOT NULL,
 	"scan_status" "scan_status" DEFAULT 'pending' NOT NULL,
-	"uploaded_at" timestamp with time zone DEFAULT now() NOT NULL
+	"uploaded_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "reports" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"org_id" uuid NOT NULL,
 	"folder_id" uuid NOT NULL,
-	"slug" text NOT NULL,
+	"slug" varchar(10) NOT NULL,
 	"title" text NOT NULL,
 	"live_version_id" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deleted_at" timestamp with time zone
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"deleted_at" timestamp (3) with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "scan_jobs" (
@@ -151,17 +151,17 @@ CREATE TABLE "scan_jobs" (
 	"status" "scan_job_status" DEFAULT 'queued' NOT NULL,
 	"verdict" "scan_status",
 	"findings" jsonb,
-	"started_at" timestamp with time zone,
-	"finished_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"started_at" timestamp (3) with time zone,
+	"finished_at" timestamp (3) with time zone,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "users" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"clerk_user_id" text NOT NULL,
 	"email" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "abuse_reports" ADD CONSTRAINT "abuse_reports_report_id_reports_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."reports"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -181,7 +181,7 @@ ALTER TABLE "report_versions" ADD CONSTRAINT "report_versions_report_id_reports_
 ALTER TABLE "report_versions" ADD CONSTRAINT "report_versions_uploaded_by_user_users_id_fk" FOREIGN KEY ("uploaded_by_user") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reports" ADD CONSTRAINT "reports_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reports" ADD CONSTRAINT "reports_folder_id_folders_id_fk" FOREIGN KEY ("folder_id") REFERENCES "public"."folders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "reports" ADD CONSTRAINT "reports_live_version_id_report_versions_id_fk" FOREIGN KEY ("live_version_id") REFERENCES "public"."report_versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "reports" ADD CONSTRAINT "reports_live_version_id_report_versions_id_fk" FOREIGN KEY ("live_version_id") REFERENCES "public"."report_versions"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scan_jobs" ADD CONSTRAINT "scan_jobs_report_version_id_report_versions_id_fk" FOREIGN KEY ("report_version_id") REFERENCES "public"."report_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "abuse_reports_report_id_idx" ON "abuse_reports" USING btree ("report_id");--> statement-breakpoint
 CREATE INDEX "abuse_reports_status_idx" ON "abuse_reports" USING btree ("status");--> statement-breakpoint
@@ -208,7 +208,7 @@ CREATE UNIQUE INDEX "report_versions_report_version_uniq" ON "report_versions" U
 CREATE INDEX "report_versions_scan_status_idx" ON "report_versions" USING btree ("scan_status");--> statement-breakpoint
 CREATE UNIQUE INDEX "reports_slug_uniq" ON "reports" USING btree ("slug");--> statement-breakpoint
 CREATE INDEX "reports_org_folder_idx" ON "reports" USING btree ("org_id","folder_id");--> statement-breakpoint
-CREATE INDEX "reports_deleted_at_idx" ON "reports" USING btree ("deleted_at");--> statement-breakpoint
+CREATE INDEX "reports_deleted_at_idx" ON "reports" USING btree ("deleted_at") WHERE "reports"."deleted_at" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "scan_jobs_report_version_uniq" ON "scan_jobs" USING btree ("report_version_id");--> statement-breakpoint
 CREATE INDEX "scan_jobs_status_idx" ON "scan_jobs" USING btree ("status");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_clerk_user_id_uniq" ON "users" USING btree ("clerk_user_id");--> statement-breakpoint
