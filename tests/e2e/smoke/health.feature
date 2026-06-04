@@ -9,3 +9,5 @@ Feature: Platform health endpoint
     Then the response status is 200
     And the JSON field "status" is "ok"
     And the JSON field "service" is "app"
+    And the JSON field "version" is present
+    And the JSON field "commit" is present
