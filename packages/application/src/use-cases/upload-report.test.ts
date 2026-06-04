@@ -2,8 +2,8 @@ import { err, folderId, makeSlug, orgId, reportId, userId, versionId } from 'arp
 import { describe, expect, it } from 'vitest';
 import {
   FakeBundleProcessor,
+  FakeHasher,
   FakePlanLimiter,
-  FixedClock,
   InMemoryBlobStore,
   InMemoryEventOutbox,
   InMemoryIdempotencyStore,
@@ -39,7 +39,7 @@ function makeDeps() {
     planLimiter,
     ids: new SequentialIdGenerator(),
     slugs: new SequentialSlugFactory(),
-    clock: new FixedClock(0),
+    hasher: new FakeHasher(),
     uow: new PassThroughUnitOfWork(),
   };
   return { deps, reports, blobs, bundles, idempotency, outbox, scans, planLimiter };

@@ -22,8 +22,8 @@ import {
 import type {
   BlobStore,
   BundleProcessor,
-  Clock,
   EventOutbox,
+  Hasher,
   IdGenerator,
   IdempotencyStore,
   PlanLimiter,
@@ -46,7 +46,7 @@ export interface UploadReportDeps {
   readonly planLimiter: PlanLimiter;
   readonly ids: IdGenerator;
   readonly slugs: SlugFactory;
-  readonly clock: Clock;
+  readonly hasher: Hasher;
   readonly uow: UnitOfWork;
 }
 
@@ -93,13 +93,17 @@ export async function uploadReport(
   const ref = {
     actingUserId: cmd.actor.userId,
     route: ROUTE,
-    key: cmd.idempotencyKey ?? `${cmd.actor.userId}:${ROUTE}:${bundle.contentHash}:${target}`,
+    // Derived key = hash(user ∥ route ∥ content_hash ∥ target), ADR-0039. The
+    // \n separator can't occur in the segments, so no concat-collision.
+    key: cmd.idempotencyKey ?? deps.hasher.hash([cmd.actor.userId, ROUTE, bundle.contentHash, target].join('\n')),
   };
   const begun = await deps.idempotency.begin(ref, `${bundle.contentHash}:${target}`);
   if (!begun.ok) return begun; // reuse w/ different body → 422
   if (begun.value.outcome === 'in_flight') return err({ kind: 'IdempotencyInFlight', message: 'request in flight' });
   if (begun.value.outcome === 'replay') {
-    return ok({ result: begun.value.record.responseBody as UploadResult, replayed: true });
+    const prior = parseUploadResult(begun.value.record.responseBody);
+    if (!prior.ok) return prior;
+    return ok({ result: prior.value, replayed: true });
   }
 
   // 4. Plan limits.
@@ -107,10 +111,9 @@ export async function uploadReport(
   if (!plan.ok) return plan;
 
   // 5. Resolve create vs re-upload, run the domain transition.
-  const emissionR = cmd.updateSlug
-    ? await reUpload(deps, cmd.updateSlug, cmd.actor, bundle.contentHash)
-    : create(deps, cmd, bundle.contentHash);
-  const emission = await emissionR;
+  const emission = await (cmd.updateSlug
+    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle.contentHash)
+    : create(deps, cmd, bundle.contentHash));
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
@@ -130,7 +133,9 @@ export async function uploadReport(
     return deps.idempotency.complete(ref, { responseStatus: 201, responseBody: result });
   });
   if (!committed.ok) {
-    await deps.blobs.deleteVersionPrefix(report.id, newVersion.id); // GC the orphan blobs
+    // Best-effort cleanup; we return the original commit error, and the periodic
+    // GC sweep reclaims any orphan blobs left behind (ADR-0037 §5).
+    await deps.blobs.deleteVersionPrefix(report.id, newVersion.id);
     return committed;
   }
 
@@ -139,6 +144,14 @@ export async function uploadReport(
   if (!scan.ok) return scan;
 
   return ok({ result, replayed: false });
+}
+
+function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
+  const b = body as Record<string, unknown> | null;
+  if (!b || typeof b.slug !== 'string' || typeof b.version !== 'number' || typeof b.scanStatus !== 'string') {
+    return err({ kind: 'Unexpected', message: 'stored idempotency response is not a valid UploadResult' });
+  }
+  return ok(b as unknown as UploadResult);
 }
 
 function create(deps: UploadReportDeps, cmd: UploadCommand, contentHash: string) {
