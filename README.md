@@ -16,7 +16,9 @@
 | `apps/`                           | `apps/app` + `apps/view` Remix apps (Phase 0c)           |
 | `packages/`                       | `domain` · `application` · `adapters` · `db` · etc. (Phase 0c) |
 | `tests/e2e/infrastructure/`       | 13 Gherkin features gating Phase 1 (Phase 0d)            |
-| `tests/e2e/features/`             | Use-case features, written `@pending` (Phase 0d)         |
+| `tests/e2e/features/`             | 29 use-case `.feature` files; Phase-1 worked, later phases `@wip` |
+| `docs/api/openapi.yaml`           | OpenAPI 3.1 contract for the upload/serve API (ADR-027)  |
+| `scripts/docs-conformance/`       | Dependency-free harness that gates spec/use-case well-formedness (ADR-0041) |
 | `.claude/`                        | Skills + hooks for TDD / docs / worktrees (Phase 0e)     |
 
 ## Phase 0 — what's in this commit (0a)
@@ -39,6 +41,20 @@ Files added:
 | **0d**    | 13 infrastructure E2E features green; use-case features pending | Phase 1  |
 | **0e**    | TDD / BDD / FP lint / worktree skill / docs gate / Bruno     | Phase 1  |
 | **1+**    | Feature work — see `docs/spec.html`                          | —        |
+
+## Checking the docs
+
+The spec, ADRs, glossary, events doc, BDD `.feature` corpus, and OpenAPI document
+are kept well-formed and mutually consistent by a dependency-free harness:
+
+```bash
+pnpm docs:check        # gate: fails on any drift (run by the docs-conformance CI workflow)
+pnpm docs:check:test   # the harness's own fixture tests (node:test)
+```
+
+To add a use-case: add it to the catalog in `scripts/docs-conformance/config.mjs`
+and create `tests/e2e/features/<slug>.feature` (a phase tag, `Feature:`, and at
+least one `Scenario:`). See `scripts/docs-conformance/README.md`.
 
 ## Conventions
 
