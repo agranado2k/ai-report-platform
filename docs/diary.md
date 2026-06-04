@@ -898,3 +898,15 @@ The first executable Phase-1 code: the **pure `Report` domain** (ADR-0024/0036),
 **Next (1c):** ports + adapters — Drizzle schema/migrations from `db-design.md` (applied against the CI Neon branch), R2 blob store, repositories, idempotency store, transactional outbox, and the always-clean scan-port stub.
 
 **Process:** worktree `feat/phase-1b-domain`, branched off `main` (`4640553`). `pnpm test` (19) + package typecheck + `pnpm docs:check` all green locally.
+
+### 2026-06-04 — Phase 1 step 1c.1: Drizzle schema + initial migration · worktree `feat/phase-1c-db-schema`
+
+1c (ports + adapters) is large and infra-bound (real Neon/R2 per ADR-019), so it's split into verifiable slices: **1c.1 the Drizzle schema + migration (this, fully local)** → 1c.2 application port interfaces + in-memory fakes (lets 1d's use case be TDD'd without infra) → 1c.3 the real Drizzle/R2 adapters + integration tests against the CI Neon branch.
+
+**`packages/db` (`arp-db`):** the Drizzle schema (`src/schema.ts`) translating `docs/db-design.md` into all **14 tables + 8 enums**, grouped by bounded context, explicit snake_case columns, ids app-side (no DB default), FK policy from the doc (RESTRICT default; CASCADE on `report_versions→reports`, `acls→reports`, `scan_jobs→report_versions`), and the nullable `reports.live_version_id` breaking the reports↔report_versions cycle (`AnyPgColumn` thunk). `drizzle.config.ts` (dialect postgresql; URL only used by migrate/push in CI, not by generate). Generated the initial migration `drizzle/0000_*.sql` with `drizzle-kit generate` (no DB needed) and committed it. A `schema.test.ts` guards table names + enum value sets + snake_case mapping.
+
+**Verification (all local):** `drizzle-kit generate` ✓ (14 tables, FKs, indexes), `pnpm test` 23 (domain 20 + db 3) ✓, package typecheck ✓ (now covers `arp-db`), `pnpm docs:check` ✓. Deps added: `drizzle-orm` (runtime), `drizzle-kit` (dev); lockfile updated (regenerated with pnpm 10.5.0). No new ADR — ADR-020 (repository pattern) and ADR-004 (R2) already govern; this implements `db-design.md`.
+
+**Deferred to 1c.3 (needs infra):** applying the migration to the Neon branch, a migration-drift CI check (`drizzle-kit check`), and the runtime client/driver (`@neondatabase/serverless`) — they land with the real adapters.
+
+**Process:** worktree `feat/phase-1c-db-schema`, branched off `main` (`033dd75`). Docs/schema only; no migration applied to a DB yet (that's 1c.3, against the CI Neon branch).
