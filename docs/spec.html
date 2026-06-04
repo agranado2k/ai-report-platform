@@ -1566,8 +1566,7 @@ jobs:
             │ content_hash     │                                      │
             │ uploaded_by_user │──────────────────────────────────────┘
             │ scan_status      │   ('pending','clean','flagged','blocked')
-            │ scan_findings    │
-            │ scanned_at       │
+            │                  │   = cache of scan_jobs.verdict (rev 8)
             │ uploaded_at      │
             └──────────────────┘
                    ▲ 1
@@ -1605,7 +1604,20 @@ jobs:
     │ target_type · target_id · meta_json · at         │
     │  partitioned monthly; 1-year retention; export   │
     │  to cold storage at month-roll                   │
-    └──────────────────────────────────────────────────┘</div>
+    └──────────────────────────────────────────────────┘
+
+    ┌──────────────────┐    ┌────────────────────────────┐
+    │  scan_jobs       │    │  idempotency_keys          │  (rev 8, ADR-0039)
+    │──────────────────│    │────────────────────────────│
+    │ id PK            │    │ acting_user_id ┐            │
+    │ report_version_id│◀┐  │ route          │ PK         │
+    │ status           │ │  │ key            ┘            │
+    │ verdict          │ │  │ request_fingerprint         │
+    │ findings JSONB   │ │  │ response_status · body JSONB│
+    │ started/finished │ │  │ state · created_at (24h TTL)│
+    │ created_at       │ │  └────────────────────────────┘
+    └──────────────────┘ └─ 1:1 report_versions
+       (rev 8: scan findings moved off report_versions → scan_jobs)</div>
 
     <h3>Table catalog</h3>
 
@@ -1679,6 +1691,12 @@ jobs:
       <h4>outbox</h4>
       <p>Transactional outbox for domain events. Written inside the same transaction as the state change; drained by the dispatcher worker (~1s poll). <code>available_at</code> supports delayed dispatch (e.g. R2 purge at takedown + 24h).</p>
       <div class="meta-tags"><span>idx: (status, available_at)</span><span>idx: aggregate_id</span><span>partitioned monthly</span></div>
+    </div>
+
+    <div class="table-card">
+      <h4>idempotency_keys</h4>
+      <p><strong>Added in rev 8</strong> (ADR-0039). Makes every write idempotent. PK <code>(acting_user_id, route, key)</code> — <code>key</code> is the client's <code>Idempotency-Key</code> header or a server-derived fingerprint. Stores <code>request_fingerprint</code> (reuse with a different body &rarr; 422), the replayable <code>response_status</code>/<code>response_body</code>, and <code>state</code> (<code>in_flight</code> &rarr; <code>completed</code>; in-flight retry &rarr; 409). Written in the same transaction as the mutation + outbox row so it can't desync after a crash. 24h TTL, swept.</p>
+      <div class="meta-tags"><span>pk: (acting_user_id, route, key)</span><span>idx: created_at (sweep)</span><span>TTL 24h</span></div>
     </div>
 
     <div class="table-card">

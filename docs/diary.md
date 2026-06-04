@@ -868,3 +868,17 @@ Second `/grill-with-docs` pass, this time on the **Phase 1 upload & serve flow**
 **Decisions the operator made:** scope = author the missing use-case specs **and** build the conformance harness (not a one-off audit); enforcement seam = **CI workflow only**.
 
 **Process:** worktree `feat/spec-conformance` on `feat/spec-conformance`, branched off `main` (`bdaa8e7`). `pnpm docs:check` is green and the 26 self-tests pass locally. Lands via the normal PR flow (dual AI review, `/merge` bot-merge per ADR-0035). The `/tdd` build of `UploadReportUseCase` + the viewer loader remains the next code step; these features are its acceptance spec.
+
+### 2026-06-04 — Phase 1 build begins · Step 1a: schema & data design · worktree `docs/phase-1a-db-design`
+
+Started executing the **Phase 1 build plan** (steps 1a→1f agreed with the operator). 1a is the **schema design** — the contract the Drizzle code (1c) is generated from — delivered as docs, since migrations must apply against real Neon (ADR-019) in a later, verifiable coding step rather than be faked here.
+
+**Added — `docs/db-design.md`:** the column-level reference for all 14 tables grouped by bounded context, with PG types, PK/FK, indexes, the 8 enums, JSONB-shape policy, FK-cascade policy, the R2 key scheme, and a **Phase-1 scope** section (which tables Phase 1 creates vs first-writes-later).
+
+**Spec ER redraw (the diary's standing deferral, now done):** dropped the stale `scan_findings` / `scanned_at` from the `report_versions` ASCII box (rev-8: `scan_status` is just the cached verdict); added a `scan_jobs` box and an `idempotency_keys` box; added an `idempotency_keys` table-card to the catalog (the `scan_jobs` card already existed from the rev-8 sync).
+
+**Phase-1 scan stub decision (operator):** Phase 1 has no real scanner (that's Phase 1.5), so the scan step is a **stub that always emits `ReportVersionScanned(clean)`** — every upload auto-promotes (monotonic, ADR-0037 §8) so the viewer has a live version. Promotion machinery is built for real; only the verdict is hardcoded. Recorded in `db-design.md` (§Phase 1 scan stub) and in agent memory; the real scanner swaps in behind the scan port in Phase 1.5. *(Not an ADR — it's a temporary scaffold, not an architectural decision; ADR-0037/0012 still govern.)*
+
+**Build sequence from here (each its own TDD PR):** 1b domain model (pure: `Report` aggregate, `ReportVersion`, value objects, `Result<T,AppError>`) → 1c ports + adapters (Drizzle schema/migrations live here, applied against the CI Neon branch) + the scan-port stub → 1d `UploadReportUseCase` + HTTP action → 1e viewer loader → 1f promotion wiring. **Open prerequisite for 1b:** the project still has no test runner (flagged in ADR-0041); 1b will adopt Vitest (likely a short ADR-0042) since `node:test` is fine for the doc harness but not for the wider TS/Turbo codebase.
+
+**Process:** worktree `docs/phase-1a-db-design`, branched off `main` (`4640553`). Docs-only (no code, no migration run yet); `pnpm docs:check` green. Lands via the normal PR flow.
