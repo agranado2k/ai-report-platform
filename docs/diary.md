@@ -884,3 +884,17 @@ Started executing the **Phase 1 build plan** (steps 1a→1f agreed with the oper
 **Process:** worktree `docs/phase-1a-db-design`, branched off `main` (`4640553`). Docs-only (no code, no migration run yet); `pnpm docs:check` green. Lands via the normal PR flow.
 
 **Follow-on (folded into PR #15 during `/pr-iterate`):** applied the claude-review findings on the schema doc (notably M-1 — `scan_jobs.report_version_id` is now `ON DELETE CASCADE`, the third cascade exception, so a report hard-purge cascades cleanly; would have stalled 1c's migration). Also wired **auto-`@claude`-review on PR open** (extends ADR-030): added `.github/pull_request_template.md` seeding an `@claude` line, and gave `.github/workflows/claude.yml` a `pull_request: [opened, ready_for_review]` trigger gated on `contains(github.event.pull_request.body, '@claude')` — previously the mention bot ignored PR bodies, so a template mention alone wouldn't have fired it. Opt out by deleting the line from a PR body. Note: `gh pr create --body-file` bypasses the template, so agent-opened PRs must include `@claude` in the body to get the rich review (the lighter `claude-code-review.yml` inline pass runs on every PR regardless).
+
+### 2026-06-04 — Phase 1 step 1b: domain model (first real code) + Vitest · worktree `feat/phase-1b-domain` · ADR-0042
+
+The first executable Phase-1 code: the **pure `Report` domain** (ADR-0024/0036), TDD'd with Vitest. **19 tests green, typecheck clean.** Parallel to 1a (no dependency between them).
+
+**Test runner — ADR-0042 (adopt Vitest):** the repo had no test runner (left open in ADR-0041). Chose **Vitest**, **pinned to 3.x**: Vitest 4 needs Vite 6+, but the Remix apps pin Vite 5.4 and share one hoisted Vite, so Vitest 4 fails at startup (`vite` has no `./module-runner` export under v5) — confirmed empirically. `node:test` stays only for the dependency-free doc harness. Also: **committed the first `pnpm-lock.yaml`** (regenerated with pnpm 10.5.0 to match CI) and added a **`unit` CI workflow** (frozen install → package typecheck → `pnpm test`).
+
+**`packages/domain` (`arp-domain`):** functional core `Result<T,E>` + `pipe()` (no FP libs); branded ids (`OrgId`/`UserId`/`FolderId`/`ReportId`/`VersionId`); value objects (`ScanStatus`/`AclMode`/`GrantLevel`, `Slug` smart constructor over the nanoid alphabet); `AppError` union matching the ADR-0040 kinds; domain events (`ReportVersionUploaded`/`ReportVersionScanned`/`ReportPublished`); and the **`Report` aggregate** — `createReport`, `addVersion` (content-only, max+1, taken-down→NotFound), and `applyScanResult` carrying the **monotonic promote-if-newer** logic (ADR-0037 §8: clean+newer promotes & emits `ReportPublished`; flagged/blocked never promote; out-of-order older clean never demotes). All `readonly`, no I/O.
+
+**Merge order note (resolved):** PR #15 (1a) merged to `main` first; this branch was then rebased onto `main` and the expected `docs/diary.md` tail conflict resolved (1b entry placed after 1a). Only the diary overlapped; code/docs didn't.
+
+**Next (1c):** ports + adapters — Drizzle schema/migrations from `db-design.md` (applied against the CI Neon branch), R2 blob store, repositories, idempotency store, transactional outbox, and the always-clean scan-port stub.
+
+**Process:** worktree `feat/phase-1b-domain`, branched off `main` (`4640553`). `pnpm test` (19) + package typecheck + `pnpm docs:check` all green locally.
