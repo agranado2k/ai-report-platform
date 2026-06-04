@@ -146,6 +146,19 @@ importers:
         specifier: ^5.1.0
         version: 5.1.4(typescript@5.9.3)(vite@5.4.21(@types/node@25.9.1))
 
+  packages/application:
+    dependencies:
+      arp-domain:
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.1)
+
   packages/db:
     dependencies:
       drizzle-orm:
