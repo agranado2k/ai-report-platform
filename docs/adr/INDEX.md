@@ -8,6 +8,10 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 |---|---|---|
 | 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Accepted (2026-06-03) |
 | 0036 | [Adopt Domain-Driven Design principles](0036-domain-driven-design.md) | Accepted (2026-06-04) |
+| 0037 | [Report upload & versioning pipeline](0037-report-upload-versioning-pipeline.md) | Accepted (2026-06-04) |
+| 0038 | [Report viewer access & serving model](0038-report-viewer-access-serving.md) | Accepted (2026-06-04) |
+| 0039 | [Idempotent write API](0039-idempotent-write-api.md) | Accepted (2026-06-04) |
+| 0040 | [HTTP API error model (RFC 9457)](0040-http-api-error-model.md) | Accepted (2026-06-04) |
 
 ## Backlog (ADRs 1–30 from the spec)
 

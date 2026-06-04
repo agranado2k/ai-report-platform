@@ -830,3 +830,21 @@ Ran `/grill-with-docs` to reconcile the domain vocabulary **before** any Phase 1
 **Deliberately NOT done:** the spec's ER **ASCII diagram** still shows the pre-rev-8 schema (`scan_findings` on `report_versions`, no `scan_jobs` box) — the table-cards carry the rev-8 note; the ASCII gets redrawn when Phase 1 writes the real schema in `docs/db-design.md`. The diary **Current-state block** at the top is stale (frozen at `c04de5c`); flagged inline, full re-sync deferred.
 
 **Process:** worktree `docs/domain-language-alignment` on branch `docs/domain-language-alignment`. Lands via the normal PR flow (`/docs-check`, dual AI review, `/merge` bot-merge per ADR-0035). This was a docs-only grill/alignment pass — no code, no infrastructure.
+
+### 2026-06-04 — Phase 1 upload/serve design grill → ADR-0037..0040 · worktree `docs/phase-1-upload-serve` (stacked on #11)
+
+Second `/grill-with-docs` pass, this time on the **Phase 1 upload & serve flow** (the next real code). Twelve decision branches resolved; four ADRs written. Branch `docs/phase-1-upload-serve` is **stacked on `docs/domain-language-alignment`** (PR #11) because the ADRs reference the rev-8 glossary/spec — merge #11 first, then this PR.
+
+**ADRs added:**
+- **ADR-0037 — Report upload & versioning pipeline**: content-only upload (metadata via dedicated ops); `index.html` entry-document resolution (+ wrapper-dir stripping); `folder_path` at create only; UUID-keyed R2 blobs (`reports/<reportId>/<versionId>/<path>`) with R2-first/commit-last + orphan GC; `version_no` = commit-time `max+1` ordinal (unique-index retry under concurrency); `content_hash` informational (feeds the derived idempotency key); monotonic auto-promote on `clean`; MIME allowlist + two-tier limits (global security caps vs `PlanLimiter` quotas), benchmarked against Cloudflare Pages / GitHub Pages / zip-bomb research.
+- **ADR-0038 — Report viewer access & serving**: public capability-URL default (`slug` = ~10¹⁸-entropy capability) + `X-Robots-Tag: noindex`; reason-opaque viewer state machine (200 / scanning-200 / 451 flagged / 404 blocked-or-unknown / 410 taken-down); `?v=N` uses the same ACL + scan gate as live.
+- **ADR-0039 — Idempotent write API**: `Idempotency-Key` header with a server-**derived** fallback key (for upload, `content_hash` + target + user); record persisted in a Postgres `idempotency_keys` table **in the same tx** as the mutation + outbox; 24h TTL; replay / 422-on-reuse-diff-body / 409-in-flight. Operator directive: every mutating endpoint idempotent system-wide.
+- **ADR-0040 — HTTP API error model**: RFC 9457 `application/problem+json` with stable `code`; kind→status mapping in the HTTP adapter only (402 plan-limit, 409 idempotency-in-flight, 415 MIME, 413 too-large/bomb, 422 validation, …); scan verdicts are async (surfaced at serve, not as upload errors).
+
+**Research grounding** (operator asked for industry standards): Cloudflare Pages (25 MiB/file, 20k files), GitHub Pages (1 GB site), zip-bomb literature (DEFLATE ~1032:1, multi-threshold + depth + sandbox), SVG-XSS CVEs (content-sniff allowlist, reject SVG — already ADR-015), IETF Idempotency-Key draft, RFC 9457.
+
+**Docs synced (stacked on rev 8):** `docs/adr/INDEX.md` (+4 rows); `docs/domain-glossary.md` (+`Entry document`, +`Root folder`, `Slug`-as-capability note); `docs/spec.html` upload API contract (content-only body + `Idempotency-Key` + problem+json), upload step list (UUID keys, commit-last, GC, monotonic promote, allowlist, `assertWithinPlan`), and viewer flow (state machine + `?v=N` + `noindex`).
+
+**Schema implications carried to Phase 1 / `docs/db-design.md`:** new `scan_jobs` table; new `idempotency_keys` table; `report_versions.scan_status` is a denormalized cache; R2 keys are `versionId`-scoped. The spec's ER ASCII still needs the redraw (deferred to when the real schema lands).
+
+**Process:** stacked worktree, docs-only, no code yet. The `/tdd` build of `UploadReportUseCase` + the viewer loader is the next step once these ADRs merge.
