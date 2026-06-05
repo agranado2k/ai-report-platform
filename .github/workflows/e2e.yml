@@ -6,8 +6,14 @@ name: E2E (BDD)
 #
 # NOTE: deployment_status workflows run from the DEFAULT branch, so this file
 # only takes effect once merged to main — it does not self-test on its own PR.
-# Two Vercel projects (arp-app-prod, arp-view-prod) each emit an event; the `if`
-# below keys off the app preview, which serves the /health route the smoke hits.
+#
+# Two Vercel projects (arp-app-prod, arp-view-prod) each emit a deployment_status
+# event, so this workflow is invoked twice per commit. Only the app preview
+# serves the /health route the smoke hits. Rather than gate the JOB on the app
+# preview (which left a confusing "skipped" check from the view-project event),
+# a first "Gate" step decides whether to smoke and the remaining steps are
+# guarded on its output — so every invocation reports a single, green check, and
+# the non-app events simply no-op with a clear log line.
 # The 29 product .feature files are not executed yet (no step defs); step
 # definitions + a widened features glob land with 1d (upload API) and 1e (viewer).
 
@@ -20,34 +26,54 @@ permissions:
 jobs:
   e2e:
     name: E2E smoke against preview
-    if: >
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment_status.environment != 'Production' &&
-      contains(github.event.deployment_status.target_url, 'arp-app-prod')
     runs-on: ubuntu-latest
     steps:
+      # Decide whether this deployment_status is the successful APP preview.
+      # The event fields are read via env (never interpolated into the script)
+      # to avoid command injection from untrusted webhook data.
+      - name: Gate — only smoke the app preview
+        id: gate
+        env:
+          DS_STATE: ${{ github.event.deployment_status.state }}
+          DS_ENV: ${{ github.event.deployment_status.environment }}
+          DS_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          if [ "$DS_STATE" = "success" ] && [ "$DS_ENV" != "Production" ] && [[ "$DS_URL" == *arp-app-prod* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "App preview deploy succeeded — running the smoke."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not the app preview (state=$DS_STATE env=$DS_ENV) — no smoke to run."
+          fi
+
       - name: Checkout the deployed commit
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Setup Node 24
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Enable Corepack + pnpm 10
+        if: steps.gate.outputs.run == 'true'
         run: |
           corepack enable
           corepack prepare pnpm@10.5.0 --activate
 
       - name: Install (frozen lockfile)
+        if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
+        if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run BDD smoke against the preview
+        if: steps.gate.outputs.run == 'true'
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
           # Bypasses Vercel Deployment Protection on the preview (else 401).
@@ -57,7 +83,7 @@ jobs:
         run: pnpm e2e
 
       - name: Upload Playwright report
-        if: ${{ !cancelled() }}
+        if: steps.gate.outputs.run == 'true' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
