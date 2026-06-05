@@ -71,13 +71,24 @@ jobs:
             # No connection URI is present on a non-2xx body, so echoing it is safe.
             echo "::error::Neon branch create returned HTTP $code"; echo "$body"; exit 1
           fi
-          branch_id=$(printf '%s' "$body" | jq -r '.branch.id')
-          uri=$(printf '%s' "$body" | jq -r '.connection_uris[0].connection_uri')
-          if [ -z "$branch_id" ] || [ "$branch_id" = "null" ] || [ -z "$uri" ] || [ "$uri" = "null" ]; then
-            echo "::error::created branch but could not parse branch id / connection URI from the response"; exit 1
+          branch_id=$(printf '%s' "$body" | jq -r '.branch.id // empty')
+          if [ -z "$branch_id" ]; then
+            echo "::error::created branch but could not parse .branch.id"
+            echo "response keys: $(printf '%s' "$body" | jq -c 'keys')"
+            exit 1
+          fi
+          # Persist the id IMMEDIATELY so the teardown step always runs, even if
+          # the connection-URI parse below fails (otherwise the branch orphans).
+          echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
+          uri=$(printf '%s' "$body" | jq -r '.connection_uris[0].connection_uri // empty')
+          if [ -z "$uri" ]; then
+            echo "::error::branch $branch_id created but no connection URI in the response"
+            echo "response keys: $(printf '%s' "$body" | jq -c 'keys')"
+            echo "connection_uris length: $(printf '%s' "$body" | jq -r '.connection_uris | length // "absent"')"
+            echo "endpoints length: $(printf '%s' "$body" | jq -r '.endpoints | length // "absent"')"
+            exit 1
           fi
           echo "::add-mask::$uri"
-          echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
           echo "database_url=$uri" >> "$GITHUB_OUTPUT"
           echo "created Neon branch $branch_id ($name)"
 
