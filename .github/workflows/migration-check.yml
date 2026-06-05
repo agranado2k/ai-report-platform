@@ -45,6 +45,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.5.0 --activate
 
+      # Not --prod: drizzle-kit + pg are devDependencies, and db:migrate needs them.
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
@@ -71,6 +72,8 @@ jobs:
           done
 
           name="ci-pr-$pr-${{ github.run_id }}"
+          # No parent_id → Neon forks from the default (prod) branch head, so we
+          # verify the migration applies on top of the CURRENT prod schema.
           resp=$(curl -s -w $'\n%{http_code}' -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
             -H "Authorization: Bearer $NEON_API_KEY" \
             -H "Content-Type: application/json" \
