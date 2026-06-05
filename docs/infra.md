@@ -114,6 +114,8 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | --- | --- | --- |
 | `R2_TF_STATE_ACCESS_KEY_ID` | R2 token scoped to `tf-state` bucket | every job (backend auth) |
 | `R2_TF_STATE_SECRET_ACCESS_KEY` | same R2 token | every job (backend auth) |
+| `R2_APP_ACCESS_KEY_ID` | R2 token scoped to `arp-reports-prod` (Object R&W) — the **app's** blob store | prod (`TF_VAR_r2_access_key_id`) |
+| `R2_APP_SECRET_ACCESS_KEY` | same R2 app token | prod (`TF_VAR_r2_secret_access_key`) |
 | `CLOUDFLARE_ACCOUNT_ID` | dashboard URL | every job |
 | `CLOUDFLARE_API_TOKEN` | account-scoped Cloudflare token | every env |
 | `PG_LOCK_URL` | Neon connection string for the advisory lock | apply jobs |
@@ -135,6 +137,17 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > (Settings → Deployment Protection), and store that value as this repo secret.
 > Vercel binds the secret at build time, so **redeploy** after changing it. The
 > `e2e` job sends it as the `x-vercel-protection-bypass` header.
+
+> **`R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`** are a **separate** R2
+> token from the tf-state one — created in the dashboard (R2 → Manage R2 API
+> Tokens → **Object Read & Write**, bucket scope **`arp-reports-prod`**), the
+> bootstrap-PAT exception ADR-017 allows. They feed `var.r2_access_key_id` /
+> `var.r2_secret_access_key`, which the prod composition writes to the Vercel
+> app env as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The runtime data-plane
+> vars (`DATABASE_URL`, `CLERK_*`, `R2_*`) target **both `production` and
+> `preview`** so PR previews can serve upload→view; with no persistent staging
+> (2026-06-02), previews share the prod Neon DB + R2 bucket — fine pre-launch,
+> revisit with per-PR Neon branches / R2 key prefixes once there's real data.
 
 > **Vercel project settings** (both `arp-app-prod` + `arp-view-prod`): `TURBO_FORCE=true`
 > + `VERCEL_FORCE_NO_BUILD_CACHE=1` (force clean builds so the Remix `vercelPreset()`
