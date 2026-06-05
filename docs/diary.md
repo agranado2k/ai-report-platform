@@ -1018,3 +1018,16 @@ The v7 spec (`docs/spec.html`) has always listed `biome ci .` as a **required** 
 - No ADR — this **implements** an existing spec decision, not a new one. Also gives Finding 2b (boundary-import enforcement) a home: a future `no-restricted-imports`-style rule barring `arp-env` from `domain`/`application` can land in this config.
 
 **Process:** same worktree/branch as the env package above.
+
+### 2026-06-04 — Migration CI/CD pipeline · worktree `ci/db-migration-pipeline`
+
+While starting the Phase-1 real-DB slice, the question "who applies the schema migration to prod?" came up. Answer (operator directive, ADR-017/019): **only CI/CD — never a human, never locally.** The committed migration `0000` had never been applied to any persistent DB (deferred since 1c.1). This builds the runner that was planned-but-unbuilt.
+
+- **`packages/db` scripts:** `db:migrate` (`drizzle-kit migrate`) + `db:check` (`drizzle-kit check`, DB-less folder/journal consistency). Added `pg` so drizzle-kit can connect in CI.
+- **`migration-check.yml`** (PR, paths `packages/db/**`): `db:check`, then create an ephemeral Neon branch via the API → `db:migrate` against it → delete the branch (`if: always()`). Branch deletion is the rollback; prod is never touched. Verification gate, forward-only.
+- **`migrate-db.yml`** (push to `main`, paths `packages/db/**`): resolve the **default (`main`/prod) branch** connection URI from the Neon API (db `ai_report_platform`, role `app`) and apply pending migrations. The **only** path that mutates prod; serialized via a `migrate-db-prod` concurrency group. **When this PR merges, the `migrate-db` job applies `0000` to prod Neon** — the first persistent schema apply.
+- Both use `NEON_API_KEY` (secret) + `NEON_PROJECT_ID` (variable), already set; the connection URI is fetched at run time and `::add-mask::`ed, so **no `DATABASE_URL` is stored or handled locally**. `docs/db-design.md` Migrations section extended to describe both workflows.
+
+**Why this came up now:** the real-DB upload→view slice (VS-2) needs the schema live on prod Neon + R2 app credentials. This PR unblocks the DB half. **Still open for VS-2:** R2 has no application access key yet (the R2 module creates only the bucket; sole S3 keys are tf-state-scoped) — an R2 token must be provisioned + `R2_*`/`DATABASE_URL` added to the Vercel **preview** target (currently production-only) before the upload route can read/write on a PR preview.
+
+**Process:** worktree `ci/db-migration-pipeline`, branched off `main` (`806a0f1`). Active sibling worktree `feat/upload-view-slice` (the adapters + routes, parked until this lands + R2 is provisioned). No ADR (implements the existing forward-only migration decision).

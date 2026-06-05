@@ -300,3 +300,15 @@ Every PR ships the generated up migration; CI applies it to a throwaway Neon
 branch (and discards the branch — that deletion is the "rollback") before merge.
 Rollback in prod is a Neon branch reset / PITR, paired with expand/contract
 discipline. The first Phase-1 migration creates every table above.
+
+Migrations run **only through CI/CD — never by hand** (ADR-017/019). Two
+workflows, both driven by the Neon API (`NEON_API_KEY` secret + `NEON_PROJECT_ID`
+variable), so no `DATABASE_URL` is ever stored or run locally:
+
+- **`migration-check.yml`** (PR, on `packages/db/**`): `drizzle-kit check` for
+  folder/journal consistency, then create an ephemeral Neon branch → apply the
+  full migration set → delete the branch (the verification gate).
+- **`migrate-db.yml`** (push to `main`, on `packages/db/**`): resolve the prod
+  (default `main`) branch's connection URI from the Neon API and apply pending
+  migrations — the single path that mutates the prod DB. Serialized via a
+  `migrate-db-prod` concurrency group so two applies never race.
