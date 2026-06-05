@@ -58,20 +58,30 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
           set -euo pipefail
-          branch_id=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
-            -H "Authorization: Bearer $NEON_API_KEY" \
-            | jq -r '.branches[] | select(.default == true) | .id')
+          resp=$(curl -s -w $'\n%{http_code}' "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+            -H "Authorization: Bearer $NEON_API_KEY")
+          code=$(printf '%s' "$resp" | tail -n1)
+          body=$(printf '%s' "$resp" | sed '$d')
+          if [ "$code" != "200" ]; then
+            echo "::error::Neon list-branches returned HTTP $code"; echo "$body"; exit 1
+          fi
+          branch_id=$(printf '%s' "$body" | jq -r '.branches[] | select(.default == true) | .id')
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
             echo "::error::could not resolve the default (prod) Neon branch"; exit 1
           fi
-          uri=$(curl -sf -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
+          # Connection URI carries the role password — never echo it; mask on success.
+          resp=$(curl -s -w $'\n%{http_code}' -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
             -H "Authorization: Bearer $NEON_API_KEY" \
             --data-urlencode "branch_id=$branch_id" \
             --data-urlencode "database_name=$NEON_DATABASE" \
-            --data-urlencode "role_name=$NEON_ROLE" \
-            | jq -r '.uri')
+            --data-urlencode "role_name=$NEON_ROLE")
+          code=$(printf '%s' "$resp" | tail -n1)
+          if [ "$code" != "200" ]; then
+            echo "::error::Neon connection_uri returned HTTP $code (body withheld — may contain the URI)"; exit 1
+          fi
+          uri=$(printf '%s' "$resp" | sed '$d' | jq -r '.uri')
           if [ -z "$uri" ] || [ "$uri" = "null" ]; then
-            echo "::error::could not fetch the prod connection URI"; exit 1
+            echo "::error::could not parse the prod connection URI"; exit 1
           fi
           echo "::add-mask::$uri"
           echo "database_url=$uri" >> "$GITHUB_OUTPUT"
