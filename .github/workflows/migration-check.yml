@@ -61,14 +61,20 @@ jobs:
         run: |
           set -euo pipefail
           name="ci-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}"
-          resp=$(curl -sf -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+          resp=$(curl -s -w $'\n%{http_code}' -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
             -H "Authorization: Bearer $NEON_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"branch\":{\"name\":\"$name\"},\"endpoints\":[{\"type\":\"read_write\"}]}")
-          branch_id=$(echo "$resp" | jq -r '.branch.id')
-          uri=$(echo "$resp" | jq -r '.connection_uris[0].connection_uri')
+          code=$(printf '%s' "$resp" | tail -n1)
+          body=$(printf '%s' "$resp" | sed '$d')
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            # No connection URI is present on a non-2xx body, so echoing it is safe.
+            echo "::error::Neon branch create returned HTTP $code"; echo "$body"; exit 1
+          fi
+          branch_id=$(printf '%s' "$body" | jq -r '.branch.id')
+          uri=$(printf '%s' "$body" | jq -r '.connection_uris[0].connection_uri')
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ] || [ -z "$uri" ] || [ "$uri" = "null" ]; then
-            echo "::error::failed to create Neon branch or parse its connection URI"; exit 1
+            echo "::error::created branch but could not parse branch id / connection URI from the response"; exit 1
           fi
           echo "::add-mask::$uri"
           echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
