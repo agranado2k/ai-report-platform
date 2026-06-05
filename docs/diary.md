@@ -1035,3 +1035,18 @@ While starting the Phase-1 real-DB slice, the question "who applies the schema m
 **Verified:** `migration-check` is green — it creates an ephemeral Neon branch, applies `0000` (`[✓] migrations applied successfully!`), and deletes the branch; a leftover-branch sweep self-heals orphans from earlier runs.
 
 **Process:** worktree `ci/db-migration-pipeline`, branched off `main` (`806a0f1`). Active sibling worktree `feat/upload-view-slice` (the adapters + routes, parked until this lands + R2 is provisioned). No ADR (implements the existing forward-only migration decision).
+
+### 2026-06-05 — Schema live on prod; adapters started; R2 + preview env wiring
+
+**Milestones:** PR #24 (migration CI/CD) merged → the `migrate-db` job applied migration `0000` to **prod Neon** (`neondb`) — first persistent schema apply, via CI/CD only. PR #25 (e2e gate cleanup) open. Pruned the merged/stale worktrees.
+
+**`arp-adapters` started** (worktree `feat/arp-adapters`): pure-service port impls — `UuidV7IdGenerator`, `NanoidSlugFactory`, `Sha256Hasher`, `SystemClock` (+9 tests). Drizzle repo / R2 store / idempotency / outbox / unit-of-work land next.
+
+**R2 + preview env wiring (worktree `chore/prod-env-r2-preview`):** the app had no R2 S3 credential (the bucket exists; the only S3 keys are tf-state-scoped) and the runtime env vars were **production-target only**, so PR previews couldn't serve the data plane. Changes:
+- New prod vars `r2_access_key_id` / `r2_secret_access_key` (sensitive), wired into the app's Vercel env as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`.
+- `DATABASE_URL`, `CLERK_*`, `R2_*` now target **`production` + `preview`** (previews share the prod Neon DB + R2 bucket — acceptable pre-launch with no staging; revisit with per-PR Neon branches / R2 prefixes once there's real data).
+- `terraform.yml` prod plan + apply jobs feed `TF_VAR_r2_access_key_id` / `TF_VAR_r2_secret_access_key` from new GH secrets `R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`.
+
+**Operator actions to make prod applyable + R2-capable:** (1) create the R2 app token (dashboard, Object R&W, scope `arp-reports-prod`) → set the two `R2_APP_*` GH secrets (and add to `.tfvars.local` for local applies); (2) put real `pk_live_`/`sk_live_` Clerk keys in `CLERK_PUBLISHABLE_KEY_PROD` (variable) + `CLERK_SECRET_KEY_PROD` (secret) so `tf.sh prod apply` stops failing on the `REPLACE_ME` placeholders. On merge to `main`, `terraform.yml` applies prod and the env reaches both targets.
+
+**Process:** worktree `chore/prod-env-r2-preview`, off `main` (`e563c59`). Active worktrees: `feat/arp-adapters` (in progress), `ci/e2e-gate-cleanup` (PR #25). No ADR (env composition detail).
