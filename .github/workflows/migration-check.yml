@@ -26,6 +26,8 @@ concurrency:
 env:
   NEON_API: https://console.neon.tech/api/v2
   NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+  NEON_DATABASE: ai_report_platform
+  NEON_ROLE: app
 
 jobs:
   migration-check:
@@ -60,7 +62,17 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
           set -euo pipefail
-          name="ci-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          pr="${{ github.event.pull_request.number }}"
+          # Self-heal: delete any leftover branches from earlier runs of THIS PR
+          # (cancel-in-progress means no concurrent run competes for them).
+          for b in $(curl -s "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              | jq -r --arg p "ci-pr-$pr-" '.branches[] | select(.name | startswith($p)) | .id'); do
+            curl -s -X DELETE "$NEON_API/projects/$NEON_PROJECT_ID/branches/$b" \
+              -H "Authorization: Bearer $NEON_API_KEY" >/dev/null && echo "swept stale branch $b" || true
+          done
+
+          name="ci-pr-$pr-${{ github.run_id }}"
           resp=$(curl -s -w $'\n%{http_code}' -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
             -H "Authorization: Bearer $NEON_API_KEY" \
             -H "Content-Type: application/json" \
@@ -68,25 +80,34 @@ jobs:
           code=$(printf '%s' "$resp" | tail -n1)
           body=$(printf '%s' "$resp" | sed '$d')
           if [ "$code" != "200" ] && [ "$code" != "201" ]; then
-            # No connection URI is present on a non-2xx body, so echoing it is safe.
             echo "::error::Neon branch create returned HTTP $code"; echo "$body"; exit 1
           fi
           branch_id=$(printf '%s' "$body" | jq -r '.branch.id // empty')
           if [ -z "$branch_id" ]; then
             echo "::error::created branch but could not parse .branch.id"
-            echo "response keys: $(printf '%s' "$body" | jq -c 'keys')"
-            exit 1
+            echo "response keys: $(printf '%s' "$body" | jq -c 'keys')"; exit 1
           fi
-          # Persist the id IMMEDIATELY so the teardown step always runs, even if
-          # the connection-URI parse below fails (otherwise the branch orphans).
+          # Persist the id IMMEDIATELY so teardown always runs (no orphans).
           echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
-          uri=$(printf '%s' "$body" | jq -r '.connection_uris[0].connection_uri // empty')
+
+          # The create response carries no connection URI — fetch it from the
+          # dedicated endpoint for our db/role (retry once; the new endpoint may
+          # need a moment). The URI holds the role password, so never echo it.
+          uri=""
+          for attempt in 1 2 3; do
+            uresp=$(curl -s -w $'\n%{http_code}' -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              --data-urlencode "branch_id=$branch_id" \
+              --data-urlencode "database_name=$NEON_DATABASE" \
+              --data-urlencode "role_name=$NEON_ROLE")
+            ucode=$(printf '%s' "$uresp" | tail -n1)
+            if [ "$ucode" = "200" ]; then
+              uri=$(printf '%s' "$uresp" | sed '$d' | jq -r '.uri // empty'); [ -n "$uri" ] && break
+            fi
+            echo "connection_uri attempt $attempt: HTTP $ucode — retrying"; sleep 3
+          done
           if [ -z "$uri" ]; then
-            echo "::error::branch $branch_id created but no connection URI in the response"
-            echo "response keys: $(printf '%s' "$body" | jq -c 'keys')"
-            echo "connection_uris length: $(printf '%s' "$body" | jq -r '.connection_uris | length // "absent"')"
-            echo "endpoints length: $(printf '%s' "$body" | jq -r '.endpoints | length // "absent"')"
-            exit 1
+            echo "::error::could not fetch the connection URI for branch $branch_id (db=$NEON_DATABASE role=$NEON_ROLE)"; exit 1
           fi
           echo "::add-mask::$uri"
           echo "database_url=$uri" >> "$GITHUB_OUTPUT"
