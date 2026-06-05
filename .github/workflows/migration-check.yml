@@ -90,24 +90,33 @@ jobs:
           # Persist the id IMMEDIATELY so teardown always runs (no orphans).
           echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
 
+          # Derive the actual db + owning role from the create response (the
+          # hardcoded names 404'd — discover instead of assume).
+          db_name=$(printf '%s' "$body" | jq -r '.databases[0].name // empty')
+          role_name=$(printf '%s' "$body" | jq -r '.databases[0].owner_name // .roles[0].name // empty')
+          echo "branch databases: $(printf '%s' "$body" | jq -c '[.databases[].name]') roles: $(printf '%s' "$body" | jq -c '[.roles[].name]')"
+          if [ -z "$db_name" ] || [ -z "$role_name" ]; then
+            echo "::error::branch $branch_id has no database/role to connect with"; exit 1
+          fi
+
           # The create response carries no connection URI — fetch it from the
-          # dedicated endpoint for our db/role (retry once; the new endpoint may
-          # need a moment). The URI holds the role password, so never echo it.
+          # dedicated endpoint (retry; the new endpoint may need a moment). The
+          # URI holds the role password, so never echo it.
           uri=""
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4; do
             uresp=$(curl -s -w $'\n%{http_code}' -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
               -H "Authorization: Bearer $NEON_API_KEY" \
               --data-urlencode "branch_id=$branch_id" \
-              --data-urlencode "database_name=$NEON_DATABASE" \
-              --data-urlencode "role_name=$NEON_ROLE")
+              --data-urlencode "database_name=$db_name" \
+              --data-urlencode "role_name=$role_name")
             ucode=$(printf '%s' "$uresp" | tail -n1)
             if [ "$ucode" = "200" ]; then
               uri=$(printf '%s' "$uresp" | sed '$d' | jq -r '.uri // empty'); [ -n "$uri" ] && break
             fi
-            echo "connection_uri attempt $attempt: HTTP $ucode — retrying"; sleep 3
+            echo "connection_uri attempt $attempt (db=$db_name role=$role_name): HTTP $ucode — retrying"; sleep 3
           done
           if [ -z "$uri" ]; then
-            echo "::error::could not fetch the connection URI for branch $branch_id (db=$NEON_DATABASE role=$NEON_ROLE)"; exit 1
+            echo "::error::could not fetch the connection URI for branch $branch_id (db=$db_name role=$role_name)"; exit 1
           fi
           echo "::add-mask::$uri"
           echo "database_url=$uri" >> "$GITHUB_OUTPUT"
