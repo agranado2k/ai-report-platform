@@ -1,0 +1,92 @@
+name: Migration check
+
+# Proves the committed Drizzle migrations apply cleanly, on every PR that
+# touches the schema. Forward-only (ADR-019, docs/db-design.md): we spin up an
+# ephemeral Neon branch forked from prod, apply the full migration set against
+# it, then delete the branch — the branch deletion IS the rollback, so prod is
+# never touched here. Migrations only ever run through CI/CD, never by hand.
+#
+# Needs NEON_API_KEY (secret) + NEON_PROJECT_ID (variable); both already set.
+# PRD: GitHub issue #13.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "packages/db/**"
+      - ".github/workflows/migration-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  NEON_API: https://console.neon.tech/api/v2
+  NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+
+jobs:
+  migration-check:
+    name: Migration check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Fast, DB-less: validates the ./drizzle folder + journal are consistent
+      # (catches colliding NNNN_* migrations from parallel PRs) before we pay
+      # for a Neon branch.
+      - name: Migration folder consistency (drizzle-kit check)
+        run: pnpm --filter arp-db run db:check
+
+      - name: Create ephemeral Neon branch
+        id: branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          name="ci-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          resp=$(curl -sf -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"branch\":{\"name\":\"$name\"},\"endpoints\":[{\"type\":\"read_write\"}]}")
+          branch_id=$(echo "$resp" | jq -r '.branch.id')
+          uri=$(echo "$resp" | jq -r '.connection_uris[0].connection_uri')
+          if [ -z "$branch_id" ] || [ "$branch_id" = "null" ] || [ -z "$uri" ] || [ "$uri" = "null" ]; then
+            echo "::error::failed to create Neon branch or parse its connection URI"; exit 1
+          fi
+          echo "::add-mask::$uri"
+          echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
+          echo "database_url=$uri" >> "$GITHUB_OUTPUT"
+          echo "created Neon branch $branch_id ($name)"
+
+      - name: Apply migrations to the ephemeral branch
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.database_url }}
+        run: pnpm --filter arp-db run db:migrate
+
+      - name: Delete the ephemeral Neon branch
+        if: always() && steps.branch.outputs.branch_id != ''
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          curl -sf -X DELETE \
+            "$NEON_API/projects/$NEON_PROJECT_ID/branches/${{ steps.branch.outputs.branch_id }}" \
+            -H "Authorization: Bearer $NEON_API_KEY" >/dev/null \
+            && echo "deleted Neon branch ${{ steps.branch.outputs.branch_id }}" \
+            || echo "::warning::failed to delete Neon branch ${{ steps.branch.outputs.branch_id }} — sweep manually"

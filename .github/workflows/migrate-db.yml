@@ -1,0 +1,83 @@
+name: Migrate DB (prod)
+
+# Applies pending Drizzle migrations to the PRODUCTION Neon branch (`main`)
+# whenever a schema change lands on the default branch. This is the ONLY path
+# that mutates the prod database — migrations are never run by hand (ADR-017,
+# ADR-019). Forward-only; rollback = Neon branch reset / PITR (docs/db-design.md).
+#
+# The prod connection URI is fetched at run time from the Neon API
+# (NEON_API_KEY secret + NEON_PROJECT_ID variable) and masked — no long-lived
+# DATABASE_URL secret is stored. Prod branch = `main`, db = ai_report_platform,
+# role = app (infra/terraform/modules/neon-project).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/db/**"
+      - ".github/workflows/migrate-db.yml"
+
+permissions:
+  contents: read
+
+# Serialize: never let two applies race against prod.
+concurrency:
+  group: migrate-db-prod
+  cancel-in-progress: false
+
+env:
+  NEON_API: https://console.neon.tech/api/v2
+  NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+  NEON_DATABASE: ai_report_platform
+  NEON_ROLE: app
+
+jobs:
+  migrate-db:
+    name: Migrate prod DB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve the prod (default) branch connection URI
+        id: conn
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          branch_id=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            | jq -r '.branches[] | select(.default == true) | .id')
+          if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
+            echo "::error::could not resolve the default (prod) Neon branch"; exit 1
+          fi
+          uri=$(curl -sf -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            --data-urlencode "branch_id=$branch_id" \
+            --data-urlencode "database_name=$NEON_DATABASE" \
+            --data-urlencode "role_name=$NEON_ROLE" \
+            | jq -r '.uri')
+          if [ -z "$uri" ] || [ "$uri" = "null" ]; then
+            echo "::error::could not fetch the prod connection URI"; exit 1
+          fi
+          echo "::add-mask::$uri"
+          echo "database_url=$uri" >> "$GITHUB_OUTPUT"
+          echo "resolved prod branch $branch_id"
+
+      - name: Apply migrations to prod
+        env:
+          DATABASE_URL: ${{ steps.conn.outputs.database_url }}
+        run: pnpm --filter arp-db run db:migrate
