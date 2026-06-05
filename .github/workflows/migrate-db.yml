@@ -7,15 +7,18 @@ name: Migrate DB (prod)
 #
 # The prod connection URI is fetched at run time from the Neon API
 # (NEON_API_KEY secret + NEON_PROJECT_ID variable) and masked — no long-lived
-# DATABASE_URL secret is stored. Prod branch = `main`, db = ai_report_platform,
-# role = app (infra/terraform/modules/neon-project).
+# DATABASE_URL secret is stored. Prod branch = `main`; the database + owning
+# role are discovered from the Neon API at run time (the prod branch actually
+# uses neondb/neondb_owner, not the TF-declared names — see docs/diary.md).
 
 on:
   push:
     branches: [main]
+    # Schema paths only — NOT this workflow file. Editing the workflow must not
+    # trigger a prod migration apply (the apply is idempotent, but the trigger
+    # should track schema changes, not CI edits).
     paths:
       - "packages/db/**"
-      - ".github/workflows/migrate-db.yml"
 
 permissions:
   contents: read
@@ -47,8 +50,14 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.5.0 --activate
 
+      # Not --prod: drizzle-kit + pg are devDependencies, and db:migrate needs them.
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
+
+      # DB-less guard: catch a malformed migration folder/journal before we open
+      # a connection to prod.
+      - name: Migration folder consistency (drizzle-kit check)
+        run: pnpm --filter arp-db run db:check
 
       - name: Resolve the prod (default) branch connection URI
         id: conn
