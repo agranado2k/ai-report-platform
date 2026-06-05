@@ -53,17 +53,26 @@ locals {
     # of type URLSearchParams`). Apply to all build environments.
     ENABLE_EXPERIMENTAL_COREPACK      = { value = "1", target = ["production", "preview", "development"], sensitive = false }
     NODE_ENV                          = { value = "production", target = ["production"], sensitive = false }
-    DATABASE_URL                      = { value = local.neon_uri, target = ["production"] }
-    CLERK_PUBLISHABLE_KEY             = { value = module.clerk.publishable_key, target = ["production"], sensitive = false }
-    CLERK_SECRET_KEY                  = { value = module.clerk.secret_key, target = ["production"] }
     UPSTASH_REDIS_REST_URL            = { value = module.upstash.rest_url, target = ["production"], sensitive = false }
     UPSTASH_REDIS_REST_TOKEN          = { value = module.upstash.rest_token, target = ["production"] }
     UPSTASH_REDIS_READONLY_REST_TOKEN = { value = module.upstash.read_only_rest_token, target = ["production"] }
-    R2_ACCOUNT_ID                     = { value = var.cloudflare_account_id, target = ["production"], sensitive = false }
-    R2_BUCKET                         = { value = "arp-reports-prod", target = ["production"], sensitive = false }
-    R2_ENDPOINT                       = { value = module.r2.endpoint, target = ["production"], sensitive = false }
     APP_ORIGIN                        = { value = "https://app.${local.apex}", target = ["production"], sensitive = false }
     VIEW_ORIGIN                       = { value = "https://view.${local.apex}", target = ["production"], sensitive = false }
+
+    # ── Runtime data plane — also on `preview` ───────────────────────────────
+    # PR previews need these to serve the upload→view flow. With no persistent
+    # staging (2026-06-02 diary), previews share the prod Neon DB + R2 bucket;
+    # acceptable pre-launch (no real data), revisit with per-PR Neon branches /
+    # R2 key prefixes when we have users. R2_ACCESS_KEY_ID/SECRET are the new
+    # app-scoped S3 token for arp-reports-prod (var.r2_*).
+    DATABASE_URL          = { value = local.neon_uri, target = ["production", "preview"] }
+    CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production", "preview"], sensitive = false }
+    CLERK_SECRET_KEY      = { value = module.clerk.secret_key, target = ["production", "preview"] }
+    R2_ACCOUNT_ID         = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
+    R2_BUCKET             = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
+    R2_ENDPOINT           = { value = module.r2.endpoint, target = ["production", "preview"], sensitive = false }
+    R2_ACCESS_KEY_ID      = { value = var.r2_access_key_id, target = ["production", "preview"], sensitive = false }
+    R2_SECRET_ACCESS_KEY  = { value = var.r2_secret_access_key, target = ["production", "preview"] }
   }
 }
 
