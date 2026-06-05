@@ -26,8 +26,6 @@ concurrency:
 env:
   NEON_API: https://console.neon.tech/api/v2
   NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
-  NEON_DATABASE: ai_report_platform
-  NEON_ROLE: app
 
 jobs:
   migration-check:

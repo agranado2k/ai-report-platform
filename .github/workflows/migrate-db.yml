@@ -28,8 +28,6 @@ concurrency:
 env:
   NEON_API: https://console.neon.tech/api/v2
   NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
-  NEON_DATABASE: ai_report_platform
-  NEON_ROLE: app
 
 jobs:
   migrate-db:
@@ -69,12 +67,22 @@ jobs:
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
             echo "::error::could not resolve the default (prod) Neon branch"; exit 1
           fi
+          # Discover the db + owning role from the branch (don't assume names —
+          # the prod branch uses neondb/neondb_owner, not the TF-declared names).
+          dbs=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches/$branch_id/databases" \
+            -H "Authorization: Bearer $NEON_API_KEY")
+          db_name=$(printf '%s' "$dbs" | jq -r '.databases[0].name // empty')
+          role_name=$(printf '%s' "$dbs" | jq -r '.databases[0].owner_name // empty')
+          if [ -z "$db_name" ] || [ -z "$role_name" ]; then
+            echo "::error::could not resolve the prod database/role"; exit 1
+          fi
+          echo "prod branch $branch_id db=$db_name role=$role_name"
           # Connection URI carries the role password — never echo it; mask on success.
           resp=$(curl -s -w $'\n%{http_code}' -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
             -H "Authorization: Bearer $NEON_API_KEY" \
             --data-urlencode "branch_id=$branch_id" \
-            --data-urlencode "database_name=$NEON_DATABASE" \
-            --data-urlencode "role_name=$NEON_ROLE")
+            --data-urlencode "database_name=$db_name" \
+            --data-urlencode "role_name=$role_name")
           code=$(printf '%s' "$resp" | tail -n1)
           if [ "$code" != "200" ]; then
             echo "::error::Neon connection_uri returned HTTP $code (body withheld — may contain the URI)"; exit 1
