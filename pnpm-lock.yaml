@@ -149,6 +149,28 @@ importers:
         specifier: ^5.1.0
         version: 5.1.4(typescript@5.9.3)(vite@5.4.21(@types/node@25.9.1))
 
+  packages/adapters:
+    dependencies:
+      arp-application:
+        specifier: workspace:*
+        version: link:../application
+      arp-domain:
+        specifier: workspace:*
+        version: link:../domain
+      nanoid:
+        specifier: ^5.0.9
+        version: 5.1.11
+      uuid:
+        specifier: ^11.0.3
+        version: 11.1.1
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.1)
+
   packages/application:
     dependencies:
       arp-domain:
@@ -3520,6 +3542,11 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  nanoid@5.1.11:
+    resolution: {integrity: sha512-v+KEsUv2ps74PaSKv0gHTxTCgMXOIfBEbaqa6w6ISIGC7ZsvHN4N9oJ8d4cmf0n5oTzQz2SLmThbQWhjd/8eKg==}
+    engines: {node: ^18 || >=20}
+    hasBin: true
+
   negotiator@0.6.3:
     resolution: {integrity: sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg==}
     engines: {node: '>= 0.6'}
@@ -4683,6 +4710,10 @@ packages:
   utils-merge@1.0.1:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
+
+  uuid@11.1.1:
+    resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
+    hasBin: true
 
   uvu@0.5.6:
     resolution: {integrity: sha512-+g8ENReyr8YsOc6fv/NVJs2vFdHBnBNdfE49rshrTzDWOlUx4Gq7KOS2GD8eqhy2j+Ejq29+SbKH8yjkAqXqoA==}
@@ -8265,6 +8296,8 @@ snapshots:
 
   nanoid@3.3.12: {}
 
+  nanoid@5.1.11: {}
+
   negotiator@0.6.3: {}
 
   negotiator@0.6.4: {}
@@ -9414,6 +9447,8 @@ snapshots:
       which-typed-array: 1.1.21
 
   utils-merge@1.0.1: {}
+
+  uuid@11.1.1: {}
 
   uvu@0.5.6:
     dependencies:
