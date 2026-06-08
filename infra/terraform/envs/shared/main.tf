@@ -21,7 +21,20 @@ locals {
     { name = "view", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production viewer" },
   ]
 
-  all_records = concat(local.app_view_records, module.resend_domain.dns_records)
+  # Clerk production instance: Account Portal + Frontend API custom domains, plus
+  # the email DKIM/return-path records. ALL DNS-only (proxied = false) — Clerk
+  # terminates TLS at *.clerk.services and proxying breaks CNAME flattening +
+  # cert issuance. Targets are Clerk-issued per instance; re-run Clerk "Verify"
+  # after these propagate.
+  clerk_records = [
+    { name = "accounts", type = "CNAME", value = "accounts.clerk.services", proxied = false, comment = "Clerk Account Portal" },
+    { name = "clerk", type = "CNAME", value = "frontend-api.clerk.services", proxied = false, comment = "Clerk Frontend API" },
+    { name = "clk._domainkey", type = "CNAME", value = "dkim1.d6r9n5il5s3x.clerk.services", proxied = false, comment = "Clerk email DKIM 1" },
+    { name = "clk2._domainkey", type = "CNAME", value = "dkim2.d6r9n5il5s3x.clerk.services", proxied = false, comment = "Clerk email DKIM 2" },
+    { name = "clkmail", type = "CNAME", value = "mail.d6r9n5il5s3x.clerk.services", proxied = false, comment = "Clerk email return-path" },
+  ]
+
+  all_records = concat(local.app_view_records, local.clerk_records, module.resend_domain.dns_records)
 }
 
 module "cloudflare_zone" {
