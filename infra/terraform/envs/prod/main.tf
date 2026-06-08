@@ -60,18 +60,24 @@ locals {
     VIEW_ORIGIN                       = { value = "https://view.${local.apex}", target = ["production"], sensitive = false }
 
     # ── Runtime data plane — also on `preview` ───────────────────────────────
-    # PR previews need these to serve the upload→view flow. With no persistent
-    # staging (2026-06-02 diary), previews share the prod Neon DB + R2 bucket;
-    # acceptable pre-launch (no real data), revisit with per-PR Neon branches /
-    # R2 key prefixes when we have users. R2_ACCESS_KEY_ID/SECRET are the new
-    # app-scoped S3 token for arp-reports-prod (var.r2_*).
+    # PR previews need these to serve the upload→view flow.
+    #
+    # FOLLOW-UP (before the first real user): with no persistent staging
+    # (2026-06-02 diary), previews currently share the prod Neon DB + R2 bucket
+    # — acceptable pre-launch (no real data). Isolate previews then: per-PR Neon
+    # branch (reuse the migration-check pattern) + an `pr-<N>/` R2 key prefix,
+    # and drop `preview` from these targets. (claude-review L-1 on PR #26.)
+    #
+    # R2_ACCESS_KEY_ID/SECRET are the new app-scoped S3 token for
+    # arp-reports-prod (var.r2_*). Both omit `sensitive` → masked in Vercel
+    # (module default), matching their sensitive=true TF vars.
     DATABASE_URL          = { value = local.neon_uri, target = ["production", "preview"] }
     CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production", "preview"], sensitive = false }
     CLERK_SECRET_KEY      = { value = module.clerk.secret_key, target = ["production", "preview"] }
     R2_ACCOUNT_ID         = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
     R2_BUCKET             = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
     R2_ENDPOINT           = { value = module.r2.endpoint, target = ["production", "preview"], sensitive = false }
-    R2_ACCESS_KEY_ID      = { value = var.r2_access_key_id, target = ["production", "preview"], sensitive = false }
+    R2_ACCESS_KEY_ID      = { value = var.r2_access_key_id, target = ["production", "preview"] }
     R2_SECRET_ACCESS_KEY  = { value = var.r2_secret_access_key, target = ["production", "preview"] }
   }
 }
