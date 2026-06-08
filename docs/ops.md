@@ -1,0 +1,82 @@
+# Operations runbook
+
+Operator procedures that aren't fully captured by Terraform — credential
+issuance, one-time bootstraps, rotations.
+
+## Bot-merge (`/merge`) signing setup — ADR-0035
+
+The `/merge` bot (`.github/workflows/bot-merge.yml`) rebases a PR's commits onto
+`main`, **GPG-signs** them, and pushes. To make `require_signed_commits = true`
+accept the result, four things must be in place. Do these once.
+
+### 1. Generate a passphraseless GPG signing key
+
+Use an email that is a **verified email on the `agranado2k` GitHub account**
+(Settings → Emails). Web-flow "Verified" requires the committer email to match.
+
+```bash
+cat > /tmp/merge-bot-key <<EOF
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Subkey-Type: eddsa
+Subkey-Curve: ed25519
+Name-Real: ARP Merge Bot
+Name-Email: <your-verified-github-email>
+Expire-Date: 0
+%commit
+EOF
+gpg --batch --generate-key /tmp/merge-bot-key && rm /tmp/merge-bot-key
+
+# Get the key id + export both halves
+KEYID=$(gpg --list-secret-keys --keyid-format=long --with-colons | awk -F: '$1=="sec"{print $5; exit}')
+gpg --armor --export "$KEYID"        > /tmp/merge-bot.pub.asc     # public  → GitHub
+gpg --armor --export-secret-keys "$KEYID" > /tmp/merge-bot.key.asc # private → secret
+```
+
+`%no-protection` makes it passphraseless (so CI can sign non-interactively).
+Keep `/tmp/merge-bot.key.asc` secret and delete it after step 3.
+
+### 2. Register the public key on GitHub
+
+`https://github.com/settings/keys` → **New GPG key** → paste the contents of
+`/tmp/merge-bot.pub.asc`. (This is what makes GitHub mark the signed commits
+"Verified".)
+
+### 3. Set the repo secrets + variables
+
+```bash
+gh secret set   MERGE_BOT_GPG_PRIVATE_KEY < /tmp/merge-bot.key.asc && rm /tmp/merge-bot.key.asc
+gh variable set MERGE_BOT_NAME  --body "ARP Merge Bot"
+gh variable set MERGE_BOT_EMAIL --body "<your-verified-github-email>"
+# MERGE_BOT_TOKEN: fine-grained PAT on agranado2k, this repo only —
+# Contents: read+write, Pull requests: read+write, Metadata: read.
+gh secret set   MERGE_BOT_TOKEN   # paste the github_pat_… value
+```
+
+> Rotate `MERGE_BOT_TOKEN` (PAT expiry) and re-issue on operator account
+> changes. The GPG key has no expiry; rotate if compromised.
+
+### 4. Apply the branch-protection PR-bypass
+
+The push to `main` bypasses the "require a PR" rule via
+`pull_request_bypassers` (TF `infra/terraform/modules/github-repo`). **Verify it
+is actually applied** — a `null` bypass list blocks the push even with valid
+signatures:
+
+```bash
+gh api repos/agranado2k/ai-report-platform/branches/main/protection/required_pull_request_reviews \
+  --jq .bypass_pull_request_allowances     # must include agranado2k, not null
+```
+
+If `null`, apply the shared env (`tf.sh shared apply`) or set it in the
+dashboard (Settings → Branches → main → *Allow specified actors to bypass
+required pull requests* → add `agranado2k`).
+
+### Bootstrap (first time only)
+
+Fixing the bot-merge requires merging the fix — but merging is what's broken.
+Break the deadlock once: in **Settings → Branches → `main`**, temporarily
+**uncheck "Require signed commits"** (or add `agranado2k` to the PR-bypass and
+merge via the bot once signing is set up), land the fix PR, then re-enable.
+After that, `/merge` is self-sustaining.
