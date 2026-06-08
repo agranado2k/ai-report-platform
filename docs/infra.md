@@ -88,6 +88,8 @@ Each invocation initializes the S3-on-R2 backend with the env-specific state key
 
 > Once the repo is pushed and GitHub Actions are wired up, **CI handles this for you**. On every PR that touches `infra/terraform/**`, `.github/workflows/terraform.yml` runs `terraform plan` for shared/staging/prod (in parallel) and posts each diff as a sticky PR comment. On merge to `main`, the workflow runs `terraform apply` for **shared → staging → prod sequentially** (a failure in `shared` halts the chain). The commands below are the local-operator escape hatch — first apply on a fresh repo, or recovery situations where you can't go through a PR.
 
+> **DNS is managed as-code** in the `cloudflare-zone` module via the `records` list assembled in `envs/shared/main.tf` (`app_view_records` + `clerk_records` + Resend's records). All app CNAMEs are **DNS-only (`proxied = false`)** — proxying breaks Vercel/Clerk CNAME flattening + cert issuance. **Clerk** custom-domain records live in `local.clerk_records` (`accounts` → `accounts.clerk.services`, `clerk` → `frontend-api.clerk.services`, `clk._domainkey`/`clk2._domainkey`/`clkmail` → the instance DKIM/mail targets). They apply with the shared env; afterwards re-run Clerk's domain **Verify**. Don't add Clerk records by hand in the Cloudflare dashboard — that drifts from this list.
+
 ```bash
 # Shared resources (single-instance: GitHub repo, Cloudflare zone, Resend)
 infra/terraform/scripts/tf.sh shared plan
