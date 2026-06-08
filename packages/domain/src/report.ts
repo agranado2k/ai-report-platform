@@ -6,7 +6,7 @@ import type { FolderId, OrgId, ReportId, UserId, VersionId } from "./brand";
 import type { AppError } from "./errors";
 import { notFound } from "./errors";
 import type { DomainEvent, ReportPublished, ReportVersionUploaded } from "./events";
-import type { ReportVersion } from "./report-version";
+import type { ReportVersion, VersionManifest } from "./report-version";
 import type { Result } from "./result";
 import { err, ok } from "./result";
 import type { Slug } from "./slug";
@@ -38,6 +38,8 @@ export interface CreateReportParams {
   readonly versionId: VersionId;
   readonly contentHash: string;
   readonly uploadedBy: UserId;
+  readonly manifest: VersionManifest;
+  readonly sizeBytes: number;
 }
 
 /** Create a new Report with its first ReportVersion (version 1, pending scan). */
@@ -48,6 +50,8 @@ export function createReport(p: CreateReportParams): Emission {
     contentHash: p.contentHash,
     uploadedBy: p.uploadedBy,
     scanStatus: "pending",
+    manifest: p.manifest,
+    sizeBytes: p.sizeBytes,
   };
   const report: Report = {
     id: p.id,
@@ -72,6 +76,8 @@ export interface AddVersionParams {
   readonly versionId: VersionId;
   readonly contentHash: string;
   readonly uploadedBy: UserId;
+  readonly manifest: VersionManifest;
+  readonly sizeBytes: number;
 }
 
 /**
@@ -89,6 +95,8 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     contentHash: p.contentHash,
     uploadedBy: p.uploadedBy,
     scanStatus: "pending",
+    manifest: p.manifest,
+    sizeBytes: p.sizeBytes,
   };
   const updated: Report = { ...report, versions: [...report.versions, version] };
   const event: ReportVersionUploaded = {

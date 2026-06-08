@@ -29,6 +29,8 @@ const sampleReport = () =>
     versionId: versionId("v1"),
     contentHash: "h1",
     uploadedBy: userId("u1"),
+    manifest: { entryDocument: "index.html", files: ["index.html"] },
+    sizeBytes: 11,
   }).report;
 
 describe("InMemoryReportRepository", () => {
