@@ -32,17 +32,28 @@ A previous attempt (recorded in `docs/diary.md` 2026-06-03) tried to resolve thi
 
 **Chosen: Option 3 — custom bot-merge workflow** at `.github/workflows/bot-merge.yml`.
 
-Key insight: GitHub's git/commits REST API automatically web-flow-signs every commit it creates. We never sign anything ourselves; we ask the API to create the commits and GitHub's web-flow identity signs them. The resulting signatures satisfy `require_signed_commits`.
+> **Correction (2026-06-08) — mechanism, not decision, revised.** The original
+> premise below was **wrong**: the low-level `POST /git/commits` REST API does
+> **NOT** web-flow-sign commits — they come back `verified:false / reason:unsigned`,
+> and `require_signed_commits` rejects them (HTTP 422). The decision (a bot that
+> does signed rebase-merge) stands; the **signing mechanism is corrected** to a
+> real **GPG signature** applied by the workflow. Web-flow auto-signing only
+> happens for higher-level operations (the web UI, merge/squash buttons, the
+> `contents` API, the GraphQL `createCommitOnBranch` mutation) — not `git/commits`.
 
-Mechanism:
+Mechanism (corrected):
 
 1. Operator comments **`/merge`** on a green PR.
 2. Workflow validates: comment author has write access, PR is open and mergeable, PR base equals current `main` HEAD.
-3. For each commit in PR order, the workflow `POST /repos/{owner}/{repo}/git/commits` with the original tree, message, and author; parent is seeded as `main`'s HEAD and chained through subsequent commits.
-4. Workflow `PATCH /repos/{owner}/{repo}/git/refs/heads/main` to the new HEAD with `force=false`.
+3. Workflow **checks out `main`**, fetches the PR head, and `git rebase --force-rebase --gpg-sign`s the PR's commits onto `main` — re-creating each commit **GPG-signed** with the merge-bot key (linear, rebase-merge semantics preserved).
+4. Workflow `git push origin HEAD:main` as the bypass-listed identity.
 5. Workflow verifies `commit.verification.verified == true` for the new HEAD and posts a result comment on the PR.
 
-Auth: the workflow uses `MERGE_BOT_TOKEN`, a fine-grained PAT scoped to this repository with `Contents: write` + `Pull requests: write` + `Metadata: read`. The PAT belongs to the operator (`agranado2k`), and `agranado2k`'s GraphQL node_id is listed in `pull_request_bypassers` (under `required_pull_request_reviews`) on the `github_branch_protection.main` resource so the PATCH is permitted despite the PR requirement. The node_id is resolved at apply time via a `data "github_user"` lookup.
+Auth + signing config (one-time operator setup — see `docs/ops.md`):
+- `MERGE_BOT_TOKEN` — a fine-grained PAT (`Contents: write` + `Pull requests: write` + `Metadata: read`) owned by `agranado2k`, used for the push.
+- `MERGE_BOT_GPG_PRIVATE_KEY` (secret) — an ASCII-armored **passphraseless** GPG private key; its public half is registered to `agranado2k` so GitHub marks the commits "Verified".
+- `MERGE_BOT_NAME` / `MERGE_BOT_EMAIL` (variables) — committer identity; the email **must be a verified email on `agranado2k`** matching the key UID, or commits show "unverified".
+- Branch protection: `agranado2k` must be in `bypass_pull_request_allowances` (TF `pull_request_bypassers`) so the direct push to `main` is permitted despite the PR requirement. **This must actually be applied** — a `null` bypass list blocks the push with "Changes must be made through a pull request" even when the commits are validly signed.
 
 ### Consequences
 
