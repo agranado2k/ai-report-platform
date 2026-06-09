@@ -144,10 +144,18 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > bootstrap-PAT exception ADR-017 allows. They feed `var.r2_access_key_id` /
 > `var.r2_secret_access_key`, which the prod composition writes to the Vercel
 > app env as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The runtime data-plane
-> vars (`DATABASE_URL`, `CLERK_*`, `R2_*`) target **both `production` and
-> `preview`** so PR previews can serve upload→view; with no persistent staging
-> (2026-06-02), previews share the prod Neon DB + R2 bucket — fine pre-launch,
-> revisit with per-PR Neon branches / R2 key prefixes once there's real data.
+> vars (`DATABASE_URL`, `CLERK_SECRET_KEY`, `PUBLIC_CLERK_PUBLISHABLE_KEY`,
+> `R2_*`) target **both `production` and `preview`** so PR previews can serve
+> upload→view; with no persistent staging (2026-06-02), previews share the prod
+> Neon DB + R2 bucket — fine pre-launch, revisit with per-PR Neon branches / R2
+> key prefixes once there's real data.
+>
+> **Browser-exposed vars carry the `PUBLIC_` prefix.** The app's env contract
+> (`packages/env`, ADR-0043) routes client-safe vars through `@t3-oss/env-core`'s
+> `clientPrefix`, so the Vercel env **key** must be `PUBLIC_CLERK_PUBLISHABLE_KEY`
+> (not the bare `CLERK_PUBLISHABLE_KEY`). A name mismatch leaves the var undefined
+> and `defineEnv()` throws at boot — `/health` stays green (no `deps()`) while
+> every data-plane route (`/upload`, `/r/$slug`) 500s.
 
 > **Vercel project settings** (both `arp-app-prod` + `arp-view-prod`): `TURBO_FORCE=true`
 > + `VERCEL_FORCE_NO_BUILD_CACHE=1` (force clean builds so the Remix `vercelPreset()`
