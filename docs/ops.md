@@ -3,6 +3,28 @@
 Operator procedures that aren't fully captured by Terraform — credential
 issuance, one-time bootstraps, rotations.
 
+## Prod Neon DB — destroy protection
+
+The prod Neon `neon_project` / `neon_database` / `neon_role`
+(`infra/terraform/modules/neon-project`) carry `lifecycle { prevent_destroy = true }`.
+Any `terraform apply` whose plan would **destroy or replace** them now **fails at
+plan time** rather than silently recreating prod (which already happened once and
+wiped the schema — see `migrate-db.yml` + the diary).
+
+**If `tf.sh shared plan/apply` errors with `Instance cannot be destroyed` on a
+neon resource, that is the guard working — do NOT force past it casually.** It
+means some change wants to *replace* the prod DB. Steps:
+
+1. Read the plan: find which attribute forces replacement (Neon immutable fields
+   like `region_id` / `pg_version` / `org_id` are common culprits). Fix the config
+   so it no longer forces a replace, if possible.
+2. Only if a destroy is genuinely intended (e.g. a deliberate prod migration to a
+   new project, data already backed up via PITR/branch): **explicitly** remove the
+   `prevent_destroy` block in a dedicated PR, apply, then add it back. There is no
+   bypass flag — removing the guard in a reviewed PR *is* the explicit "yes".
+3. After any prod-branch recreation, re-run **`migrate-db`** (`gh workflow run
+   migrate-db.yml --ref main`) — the fresh branch has no schema.
+
 ## Merging to `main` — signed merge commits (ADR-0044)
 
 **Current flow:** on a green PR, click the GitHub **"Create a merge commit"**
