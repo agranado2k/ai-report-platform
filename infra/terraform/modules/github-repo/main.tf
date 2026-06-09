@@ -16,7 +16,8 @@ terraform {
 
 # Resolve the merge-bot user's GraphQL node_id at apply time so the
 # branch_protection.required_pull_request_reviews.pull_request_bypassers
-# list can reference it. See ADR-0035 for context.
+# list can reference it. VESTIGIAL: ADR-0035 is superseded by ADR-0044
+# (native signed merge commits) — this + the bypasser are slated for removal.
 data "github_user" "merge_bot" {
   username = "agranado2k"
 }
@@ -55,6 +56,15 @@ resource "github_repository" "this" {
   allow_auto_merge       = true
   delete_branch_on_merge = true
 
+  # When a PR is squash-merged, the single resulting commit drives
+  # semantic-release. Take its SUBJECT from the PR title (which must be
+  # Conventional-Commits-compliant — same rule as commits) and its BODY from
+  # the squashed commit messages, so CC footers (e.g. BREAKING CHANGE) survive.
+  # (Merge commits — the default — preserve each commit as-is, so this only
+  # affects the squash path.)
+  squash_merge_commit_title   = "PR_TITLE"
+  squash_merge_commit_message = "COMMIT_MESSAGES"
+
   # We use signed-commit enforcement via branch protection rather than the
   # repo-level setting (which is dashboard-only).
 
@@ -92,12 +102,11 @@ resource "github_branch_protection" "main" {
     dismiss_stale_reviews           = true
     require_code_owner_reviews      = false
 
-    # ADR-0035: the `agranado2k` user identity (authenticated via the
-    # MERGE_BOT_TOKEN repo secret) bypasses the PR requirement so the
-    # `bot-merge.yml` workflow can push the rebased + web-flow-signed
-    # commits to `main`. Without this entry, the workflow's PATCH to
-    # /git/refs/heads/main is rejected by branch protection even though
-    # the API-created commits are signed.
+    # VESTIGIAL (ADR-0035, superseded by ADR-0044). This entry let the
+    # `bot-merge.yml` workflow's PATCH to /git/refs/heads/main bypass the PR
+    # requirement. That workflow never worked on this personal repo (bypass
+    # API HTTP 500) and is replaced by native signed merge commits, so this
+    # bypasser is now a no-op. Slated for removal with bot-merge.yml.
     #
     # github_branch_protection (v4 / GraphQL) takes a list of GraphQL
     # node IDs here — NOT a `bypass_pull_request_allowances { users }`

@@ -29,7 +29,7 @@ We need a merge path that produces signed history on `main` through the normal G
 
 - `allow_merge_commit = true` — the merge button creates a merge commit. GitHub **web-flow signs the merge commit**, *and* the PR's own commits land on `main` **verbatim with their existing signatures**. So `require_signed_commits` is satisfied natively, with no bot.
 - `allow_rebase_merge = false` — rebase is the one method GitHub can't sign; drop it.
-- `allow_squash_merge = true` — GitHub refuses to leave merge-commit as the *sole* method ("you must allow squash or rebase"). Squash is the safe second option (also web-flow-signed). Default to **"Create a merge commit"**; use squash only to collapse a noisy PR.
+- `allow_squash_merge = true` — GitHub refuses to leave merge-commit as the *sole* method ("you must allow squash or rebase"). Squash is the safe second option (also web-flow-signed). Default to **"Create a merge commit"**; use squash only to collapse a noisy PR. When squashing, the single commit drives semantic-release, so the repo sets `squash_merge_commit_title = "PR_TITLE"` + `squash_merge_commit_message = "COMMIT_MESSAGES"` — **the PR title must be Conventional-Commits-compliant** (same rule as commit subjects) for a squash merge.
 - `required_linear_history = false` — merge commits are non-linear by definition; the rule would block the merge button. Accepted trade-off: `main` gains merge bubbles.
 
 `require_signed_commits`, `enforce_admins`, and the solo-dev `required_approving_review_count = 0` are **unchanged**.
