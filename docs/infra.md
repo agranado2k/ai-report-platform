@@ -131,12 +131,21 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `GEMINI_API_KEY` | for the Gemini PR-review workflow | shared (pass-through) |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | Vercel Protection Bypass for Automation secret | `e2e` (BDD smoke against the preview) |
 
-> **`VERCEL_AUTOMATION_BYPASS_SECRET`** lets the `e2e` workflow reach protected
-> Vercel previews (else 401). It is **per-project**: paste the *same* value into
-> Protection Bypass for Automation on **both** `arp-app-prod` and `arp-view-prod`
-> (Settings → Deployment Protection), and store that value as this repo secret.
-> Vercel binds the secret at build time, so **redeploy** after changing it. The
-> `e2e` job sends it as the `x-vercel-protection-bypass` header.
+> **Preview access is public** (`vercel_authentication = { deployment_type =
+> "none" }` in `modules/vercel-app`) — we gate report access via the viewer's
+> own ACL (ADR-0038), not Vercel SSO. So the `e2e` smoke reaches previews
+> directly (no 401) and needs no bypass secret. **Pitfall:** `vercel_authentication
+> = null` does *not* disable protection — it leaves the team default (Standard
+> Protection) on, which 401s anonymous + CI requests; `deployment_type = "none"`
+> is required to actually make deployments public.
+>
+> **`VERCEL_AUTOMATION_BYPASS_SECRET`** is now belt-and-braces: the `e2e` job
+> still sends it as `x-vercel-protection-bypass` (harmless when previews are
+> public) so the smoke keeps working if Deployment Protection is ever re-enabled.
+> If you do re-enable it, the secret is **per-project**: paste the *same* value
+> into Protection Bypass for Automation on **both** `arp-app-prod` and
+> `arp-view-prod`, store it as this repo secret, and **redeploy** (Vercel binds
+> it at build time).
 
 > **`R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`** are a **separate** R2
 > token from the tf-state one — created in the dashboard (R2 → Manage R2 API
