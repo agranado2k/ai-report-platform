@@ -20,6 +20,11 @@ export async function loader({ params }: LoaderFunctionArgs) {
   if (!found.value) throw new Response("Report not found", { status: 404 });
 
   const report = found.value;
+  // ADR-0038 §2: a taken-down report is 410 Gone, not served. (The full state
+  // machine — pending→holding page, flagged→451, blocked→404 — lands with the
+  // promoting scan stub; see the gap noted on PR #29.)
+  if (report.deletedAt !== null) throw new Response("Report removed", { status: 410 });
+
   const version = report.versions[report.versions.length - 1];
   if (!version) throw new Response("Report has no version", { status: 404 });
 
