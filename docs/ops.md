@@ -6,14 +6,16 @@ issuance, one-time bootstraps, rotations.
 ## Re-running prod migrations (`migrate-db`)
 
 The `migrate-db` workflow applies Drizzle migrations to the prod Neon `main`
-branch. It auto-runs on `push` to `main` that touches `packages/db/**` (a schema
-change). It also has a **`workflow_dispatch`** trigger for the case the path
-trigger can't catch: **the prod schema is lost without a schema-file change** —
-e.g. a `terraform apply` recreates the Neon project/branch (as in 2026-06, when
-the prod branch went `br-tiny-hall-aqqs1klw` → `br-wispy-flower-aqtttj6n`). Then
-the fresh branch has no schema and nothing re-applies it.
+branch. **Migrate-on-deploy: it auto-runs on EVERY push to `main`.** `drizzle-kit
+migrate` is idempotent, so when prod is current it's a no-op, and when prod is
+behind (e.g. a `terraform apply` recreated the Neon branch and wiped the schema,
+as in 2026-06: `br-tiny-hall-aqqs1klw` → `br-wispy-flower-aqtttj6n`) the next
+merge self-heals it — **no human in the loop**. Safe because `migration-check`
+validates every migration on the PR (an ephemeral Neon branch) before it reaches
+`main`.
 
-To re-migrate the current prod branch **via CI/CD** (never by hand):
+A **`workflow_dispatch`** trigger remains as a manual escape hatch — to recover
+immediately without waiting for the next push:
 
 ```bash
 gh workflow run migrate-db.yml --ref main

@@ -5,34 +5,30 @@ name: Migrate DB (prod)
 # run by hand (ADR-017, ADR-019). Forward-only; rollback = Neon branch reset /
 # PITR (docs/db-design.md).
 #
-# Two triggers (see `on:`):
-#   - push to main on `packages/db/**` — a SCHEMA change → apply it.
-#   - workflow_dispatch — on-demand. REQUIRED because the prod schema can be lost
-#     by an event that ISN'T a schema-file change: a `terraform apply` that
-#     recreates the Neon project/branch. That happened 2026-06 (the prod branch
-#     went br-tiny-hall-aqqs1klw → br-wispy-flower-aqtttj6n while reconciling the
-#     TF db/role drift), which dropped the already-applied `0000`. Nothing under
-#     packages/db changed, so the path trigger never re-ran — leaving the fresh
-#     prod branch unmigrated. Dispatching this workflow re-applies pending
-#     migrations to the current prod branch. Still CI/CD (the pipeline), NOT a
-#     hand-run psql/drizzle.
+# Migrate-on-deploy: runs on EVERY push to `main`, not just schema-file changes.
+# `drizzle-kit migrate` is idempotent (it tracks applied migrations in
+# __drizzle_migrations), so:
+#   - when prod is already current → a cheap no-op;
+#   - when prod is BEHIND → it self-heals.
+# The narrow `packages/db/**`-only trigger was the bug behind the 2026-06
+# outage: a `terraform apply` recreated the Neon project/branch
+# (br-tiny-hall-aqqs1klw → br-wispy-flower-aqtttj6n) and wiped the applied
+# `0000`, but nothing under packages/db changed, so the migration never re-ran
+# and the app 500'd with "relation does not exist". Running on every merge means
+# the next push to main re-applies the schema with no human in the loop. Safe to
+# auto-apply because `migration-check` validates every migration on the PR (an
+# ephemeral Neon branch) before it reaches main. `workflow_dispatch` stays as a
+# manual escape hatch (e.g. to recover without waiting for a push).
 #
 # The prod connection URI is fetched at run time from the Neon API
 # (NEON_API_KEY secret + NEON_PROJECT_ID variable) and masked — no long-lived
 # DATABASE_URL secret is stored. Prod branch = `main`; the database + owning
-# role are discovered from the Neon API at run time. The apply is idempotent
-# (drizzle tracks applied migrations in __drizzle_migrations), so a dispatch
-# against an already-current branch is a safe no-op.
+# role are discovered from the Neon API at run time.
 
 on:
-  workflow_dispatch: # on-demand CI/CD run — e.g. after a Neon branch reset
+  workflow_dispatch: # manual escape hatch — recover without waiting for a push
   push:
-    branches: [main]
-    # Schema paths only — NOT this workflow file. Editing the workflow must not
-    # trigger a prod migration apply (the apply is idempotent, but the trigger
-    # should track schema changes, not CI edits).
-    paths:
-      - "packages/db/**"
+    branches: [main] # migrate-on-deploy: every merge re-applies pending migrations (idempotent)
 
 permissions:
   contents: read
