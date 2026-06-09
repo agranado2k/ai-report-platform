@@ -18,6 +18,7 @@ import {
   type Result,
   type ScanStatus,
   type UserId,
+  type VersionManifest,
 } from "arp-domain";
 import type {
   BlobStore,
@@ -27,6 +28,7 @@ import type {
   IdempotencyStore,
   IdGenerator,
   PlanLimiter,
+  ProcessedBundle,
   ReportRepository,
   ScanQueue,
   SlugFactory,
@@ -115,8 +117,8 @@ export async function uploadReport(
 
   // 5. Resolve create vs re-upload, run the domain transition.
   const emission = await (cmd.updateSlug
-    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle.contentHash)
-    : create(deps, cmd, bundle.contentHash));
+    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle)
+    : create(deps, cmd, bundle));
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
@@ -169,7 +171,12 @@ function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
   return ok(b as unknown as UploadResult);
 }
 
-function create(deps: UploadReportDeps, cmd: UploadCommand, contentHash: string) {
+/** The version manifest persisted with the row: entry document + file paths. */
+function manifestOf(bundle: ProcessedBundle): VersionManifest {
+  return { entryDocument: bundle.entryDocument, files: bundle.files.map((f) => f.path) };
+}
+
+function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBundle) {
   return Promise.resolve(
     ok(
       createReport({
@@ -179,8 +186,10 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, contentHash: string)
         slug: deps.slugs.newSlug(),
         title: cmd.title ?? "Untitled report",
         versionId: deps.ids.versionId(),
-        contentHash,
+        contentHash: bundle.contentHash,
         uploadedBy: cmd.actor.userId,
+        manifest: manifestOf(bundle),
+        sizeBytes: bundle.sizeBytes,
       }),
     ),
   );
@@ -190,7 +199,7 @@ async function reUpload(
   deps: UploadReportDeps,
   updateSlug: string,
   actor: UploadActor,
-  contentHash: string,
+  bundle: ProcessedBundle,
 ) {
   const slugR = makeSlug(updateSlug);
   if (!slugR.ok) return slugR;
@@ -202,7 +211,9 @@ async function reUpload(
     return err(notAllowed("not allowed to update this report"));
   return addVersion(found.value, {
     versionId: deps.ids.versionId(),
-    contentHash,
+    contentHash: bundle.contentHash,
     uploadedBy: actor.userId,
+    manifest: manifestOf(bundle),
+    sizeBytes: bundle.sizeBytes,
   });
 }

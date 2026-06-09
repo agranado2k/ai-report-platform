@@ -19,6 +19,8 @@ const newReport = (): Report => {
     versionId: versionId("v1"),
     contentHash: "hash-1",
     uploadedBy: userId("u1"),
+    manifest: { entryDocument: "index.html", files: ["index.html"] },
+    sizeBytes: 11,
   });
   return report;
 };
@@ -34,6 +36,8 @@ describe("createReport", () => {
       versionId: versionId("v1"),
       contentHash: "hash-1",
       uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
     });
     expect(report.versions).toHaveLength(1);
     expect(report.versions[0]?.versionNo).toBe(1);
@@ -42,6 +46,12 @@ describe("createReport", () => {
     expect(events).toEqual([
       { type: "ReportVersionUploaded", reportId: "r1", versionId: "v1", versionNo: 1 },
     ]);
+  });
+
+  it("records the version manifest + size on the created version", () => {
+    const v = newReport().versions[0];
+    expect(v?.manifest).toEqual({ entryDocument: "index.html", files: ["index.html"] });
+    expect(v?.sizeBytes).toBe(11);
   });
 });
 
@@ -52,6 +62,8 @@ describe("addVersion", () => {
       versionId: versionId("v2"),
       contentHash: "hash-2",
       uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -69,6 +81,8 @@ describe("addVersion", () => {
       versionId: versionId("v2"),
       contentHash: "h",
       uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe("NotFound");
@@ -100,6 +114,8 @@ describe("applyScanResult — promotion (ADR-0037 §8)", () => {
       versionId: versionId("v2"),
       contentHash: "h2",
       uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
     });
     if (!added.ok) throw new Error("addVersion failed");
     const { report, events } = applyScanResult(added.value.report, versionId("v2"), "clean");
@@ -124,6 +140,8 @@ describe("applyScanResult — promotion (ADR-0037 §8)", () => {
       versionId: versionId("v2"),
       contentHash: "h2",
       uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
     });
     if (!added.ok) throw new Error("addVersion failed");
     r = applyScanResult(added.value.report, versionId("v2"), "clean").report; // v2 live
