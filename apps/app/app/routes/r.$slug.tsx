@@ -8,6 +8,7 @@
 // before pointing real/untrusted uploads at it.
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { makeSlug } from "arp-domain";
+import { viewHeaders } from "arp-headers/view";
 import { deps } from "../server/container.server";
 
 export async function loader({ params }: LoaderFunctionArgs) {
@@ -26,10 +27,13 @@ export async function loader({ params }: LoaderFunctionArgs) {
   if (!blob.ok) throw new Response("Read failed", { status: 500 });
   if (!blob.value) throw new Response("Report content missing", { status: 404 });
 
-  return new Response(blob.value.bytes as unknown as BodyInit, {
-    headers: {
-      "content-type": blob.value.contentType,
-      "cache-control": "no-store",
-    },
-  });
+  // ADR-013: serve untrusted report HTML under the full viewer security stack
+  // (enforcing + sandbox CSP, COOP/CORP, Origin-Agent-Cluster, Permissions-Policy,
+  // HSTS). Reuses arp-headers/view (the same stack the view origin applies) so
+  // inline scripts in uploaded HTML can't escape the sandbox even on this origin.
+  const headers = viewHeaders();
+  headers.set("content-type", blob.value.contentType);
+  headers.set("cache-control", "no-store"); // never cache untrusted content
+  headers.set("x-robots-tag", "noindex, nofollow");
+  return new Response(blob.value.bytes as unknown as BodyInit, { headers });
 }
