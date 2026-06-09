@@ -46,8 +46,16 @@ We need a merge path that produces signed history on `main` through the normal G
 
 Settings live in `infra/terraform/modules/github-repo/main.tf` (`allow_merge_commit`/`allow_squash_merge`/`allow_rebase_merge` on the repo; `required_linear_history` on the branch protection). They were applied live via the API to unblock open PRs and mirrored here so `tf.sh shared apply` reconciles to the same state (no drift).
 
-## Alternatives considered
+## Considered options
 
+- **Signed merge commits (chosen)** — `allow_merge_commit = true`, drop linear history. GitHub web-flow signs the merge commit and the PR's commits keep their signatures; works through the UI with no bot.
 - **Squash-merge only** — web-flow-signed and keeps linear history, but collapses each PR to a single commit, losing per-commit granularity. Rejected as the default; kept enabled as the secondary method.
 - **Fix the bot-merge workflow** — blocked by the personal-repo `bypass_pull_request_allowances` HTTP 500; would also require either an org migration or a GitHub App. Not worth the complexity versus native merge commits.
 - **Local fast-forward push during a protection window** — preserves signed + linear history, but is a manual, protection-toggling ritual per merge; not a durable policy.
+
+## More information
+
+- Supersedes [ADR-0035](0035-bot-merge-workflow.md) (bot-merge workflow) and amends ADR-025 (linear history).
+- Settings live in `infra/terraform/modules/github-repo/main.tf` (`allow_merge_commit` / `allow_squash_merge` / `allow_rebase_merge` on the repo; `required_linear_history` on the branch protection); ops note in `docs/ops.md`; merge instructions in `CLAUDE.md`.
+- GitHub: ["Rebase merges cannot be automatically signed by GitHub"](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/about-merge-methods-on-github) — only merge-commit and squash merges are web-flow-signed.
+- Follow-up: remove the obsolete `.github/workflows/bot-merge.yml` and the `pull_request_bypassers = [merge_bot]` entry.
