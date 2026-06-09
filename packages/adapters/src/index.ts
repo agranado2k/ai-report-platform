@@ -1,8 +1,18 @@
 // Public surface of the adapters package (arp-adapters) — concrete
 // implementations of the application's driven ports (ADR-0020, hexagonal).
-// The Drizzle repository, R2 blob store, and the Postgres idempotency/outbox/
-// unit-of-work adapters land alongside these pure services in the same slice.
+//
+// Drizzle (Neon) for persistence, aws4fetch for R2 blobs, plus the pure
+// deterministic services. The composition root (the HTTP route) builds an
+// UploadReportDeps from these using env from defineEnv() (arp-env).
+export * from "./client";
+export * from "./event-outbox";
+export * from "./idempotency-store";
+export * from "./plan-limiter";
+export * from "./r2-blob-store";
+export * from "./report-repository";
+export * from "./scan-queue";
 export * from "./services/clock";
 export * from "./services/hasher";
 export * from "./services/ids";
 export * from "./services/slugs";
+export * from "./unit-of-work";

@@ -13,8 +13,12 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
     "arp-application": "workspace:*",
+    "arp-db": "workspace:*",
     "arp-domain": "workspace:*",
+    "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.2",
     "nanoid": "^5.0.9",
     "uuid": "^11.0.3"
   },
