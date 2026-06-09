@@ -71,14 +71,21 @@ locals {
     # R2_ACCESS_KEY_ID/SECRET are the new app-scoped S3 token for
     # arp-reports-prod (var.r2_*). Both omit `sensitive` → masked in Vercel
     # (module default), matching their sensitive=true TF vars.
-    DATABASE_URL          = { value = local.neon_uri, target = ["production", "preview"] }
-    CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production", "preview"], sensitive = false }
-    CLERK_SECRET_KEY      = { value = module.clerk.secret_key, target = ["production", "preview"] }
-    R2_ACCOUNT_ID         = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
-    R2_BUCKET             = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
-    R2_ENDPOINT           = { value = module.r2.endpoint, target = ["production", "preview"], sensitive = false }
-    R2_ACCESS_KEY_ID      = { value = var.r2_access_key_id, target = ["production", "preview"] }
-    R2_SECRET_ACCESS_KEY  = { value = var.r2_secret_access_key, target = ["production", "preview"] }
+    DATABASE_URL = { value = local.neon_uri, target = ["production", "preview"] }
+    # The app's env contract (packages/env, ADR-0043) exposes the Clerk
+    # publishable key to the browser, so it MUST carry the PUBLIC_ prefix that
+    # @t3-oss/env-core's clientPrefix enforces. Provisioning it as the bare
+    # CLERK_PUBLISHABLE_KEY left PUBLIC_CLERK_PUBLISHABLE_KEY undefined, so
+    # defineEnv() threw on every deps() route (/upload, /r/$slug → 500).
+    PUBLIC_CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production", "preview"], sensitive = false }
+    CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production", "preview"] }
+    R2_ACCOUNT_ID                = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
+    R2_BUCKET                    = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
+    # No R2_ENDPOINT: the app derives the S3 endpoint inline from R2_ACCOUNT_ID
+    # (container.server.ts) and it's not in the env contract (packages/env), so
+    # provisioning it here was dead config. (claude-review pass-4 on PR #29.)
+    R2_ACCESS_KEY_ID     = { value = var.r2_access_key_id, target = ["production", "preview"] }
+    R2_SECRET_ACCESS_KEY = { value = var.r2_secret_access_key, target = ["production", "preview"] }
   }
 }
 

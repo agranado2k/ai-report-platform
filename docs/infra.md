@@ -131,12 +131,21 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `GEMINI_API_KEY` | for the Gemini PR-review workflow | shared (pass-through) |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | Vercel Protection Bypass for Automation secret | `e2e` (BDD smoke against the preview) |
 
-> **`VERCEL_AUTOMATION_BYPASS_SECRET`** lets the `e2e` workflow reach protected
-> Vercel previews (else 401). It is **per-project**: paste the *same* value into
-> Protection Bypass for Automation on **both** `arp-app-prod` and `arp-view-prod`
-> (Settings → Deployment Protection), and store that value as this repo secret.
-> Vercel binds the secret at build time, so **redeploy** after changing it. The
-> `e2e` job sends it as the `x-vercel-protection-bypass` header.
+> **Preview access is public** (`vercel_authentication = { deployment_type =
+> "none" }` in `modules/vercel-app`) — we gate report access via the viewer's
+> own ACL (ADR-0038), not Vercel SSO. So the `e2e` smoke reaches previews
+> directly (no 401) and needs no bypass secret. **Pitfall:** `vercel_authentication
+> = null` does *not* disable protection — it leaves the team default (Standard
+> Protection) on, which 401s anonymous + CI requests; `deployment_type = "none"`
+> is required to actually make deployments public.
+>
+> **`VERCEL_AUTOMATION_BYPASS_SECRET`** is now belt-and-braces: the `e2e` job
+> still sends it as `x-vercel-protection-bypass` (harmless when previews are
+> public) so the smoke keeps working if Deployment Protection is ever re-enabled.
+> If you do re-enable it, the secret is **per-project**: paste the *same* value
+> into Protection Bypass for Automation on **both** `arp-app-prod` and
+> `arp-view-prod`, store it as this repo secret, and **redeploy** (Vercel binds
+> it at build time).
 
 > **`R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`** are a **separate** R2
 > token from the tf-state one — created in the dashboard (R2 → Manage R2 API
@@ -144,10 +153,18 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > bootstrap-PAT exception ADR-017 allows. They feed `var.r2_access_key_id` /
 > `var.r2_secret_access_key`, which the prod composition writes to the Vercel
 > app env as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The runtime data-plane
-> vars (`DATABASE_URL`, `CLERK_*`, `R2_*`) target **both `production` and
-> `preview`** so PR previews can serve upload→view; with no persistent staging
-> (2026-06-02), previews share the prod Neon DB + R2 bucket — fine pre-launch,
-> revisit with per-PR Neon branches / R2 key prefixes once there's real data.
+> vars (`DATABASE_URL`, `CLERK_SECRET_KEY`, `PUBLIC_CLERK_PUBLISHABLE_KEY`,
+> `R2_*`) target **both `production` and `preview`** so PR previews can serve
+> upload→view; with no persistent staging (2026-06-02), previews share the prod
+> Neon DB + R2 bucket — fine pre-launch, revisit with per-PR Neon branches / R2
+> key prefixes once there's real data.
+>
+> **Browser-exposed vars carry the `PUBLIC_` prefix.** The app's env contract
+> (`packages/env`, ADR-0043) routes client-safe vars through `@t3-oss/env-core`'s
+> `clientPrefix`, so the Vercel env **key** must be `PUBLIC_CLERK_PUBLISHABLE_KEY`
+> (not the bare `CLERK_PUBLISHABLE_KEY`). A name mismatch leaves the var undefined
+> and `defineEnv()` throws at boot — `/health` stays green (no `deps()`) while
+> every data-plane route (`/upload`, `/r/$slug`) 500s.
 
 > **Vercel project settings** (both `arp-app-prod` + `arp-view-prod`): `TURBO_FORCE=true`
 > + `VERCEL_FORCE_NO_BUILD_CACHE=1` (force clean builds so the Remix `vercelPreset()`
