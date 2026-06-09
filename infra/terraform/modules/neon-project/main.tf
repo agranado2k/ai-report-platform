@@ -33,6 +33,16 @@ resource "neon_project" "this" {
   # The default endpoint is auto-created on the default branch; its compute
   # bounds are set via `neon_endpoint.staging` below for staging and stay at
   # provider defaults for prod (which is fine for v1; tune in v1.1).
+
+  # PROD DATA SAFETY: never let `terraform apply` destroy or REPLACE the prod
+  # Neon project. A forced replacement already wiped the applied schema once
+  # (2026-06: br-tiny-hall → br-wispy-flower — see docs/diary.md + migrate-db.yml).
+  # With this guard, any plan that would destroy/recreate this resource ERRORS
+  # at plan time instead of silently nuking prod. To intentionally allow it,
+  # remove this block in a deliberate PR (the operator's explicit "yes").
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "neon_database" "main" {
@@ -40,12 +50,22 @@ resource "neon_database" "main" {
   branch_id  = neon_project.this.default_branch_id
   name       = var.database_name
   owner_name = neon_role.main.name
+
+  # The schema + all report data live here — guard it like the project above.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "neon_role" "main" {
   project_id = neon_project.this.id
   branch_id  = neon_project.this.default_branch_id
   name       = var.role_name
+
+  # Dropping/recreating the owning role cascades to its objects — guard it too.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Note: there's no persistent `staging` branch here. The platform deploys
