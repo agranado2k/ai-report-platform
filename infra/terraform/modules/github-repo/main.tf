@@ -30,21 +30,28 @@ resource "github_repository" "this" {
   has_projects = false
   has_wiki     = false
 
-  # Rebase-merge only.
-  #   - allow_merge_commit = false  → no merge-commits (would break the
-  #     linear-history rule on branch protection anyway).
-  #   - allow_squash_merge = false → squash-merge throws away every commit
-  #     on the PR and writes a single one using the PR title. That collapses
-  #     useful history (e.g. a debug-and-fix sequence) and means
-  #     semantic-release only sees one commit per PR.
-  #   - allow_rebase_merge = true  → each PR commit is replayed onto main
-  #     in order, preserving full history while staying linear. Combined
-  #     with the husky commit-msg hook (every commit Conventional-Commits
-  #     formatted), semantic-release on the next push sees every typed
-  #     commit and aggregates them into the release notes.
-  allow_merge_commit     = false
-  allow_squash_merge     = false
-  allow_rebase_merge     = true
+  # Merge-commit strategy (ADR-0044 — supersedes the rebase-merge choice of
+  # ADR-0035 / linear-history of ADR-025).
+  #   - allow_merge_commit = true  → the merge button creates a merge commit.
+  #     GitHub web-flow SIGNS that merge commit, AND the PR's own commits land
+  #     on main verbatim with THEIR signatures intact. So `require_signed_commits`
+  #     is satisfied natively — no bot-merge workflow needed. This is what fixed
+  #     the "rebase merges cannot be automatically signed by GitHub" wall: GitHub
+  #     never signs rebased commits, and the bot-merge workaround can't push to a
+  #     protected branch on a personal (non-org) repo (bypass API returns HTTP 500).
+  #   - allow_squash_merge = true  → kept because GitHub refuses to leave
+  #     merge-commit as the SOLE method ("must allow squash or rebase"); squash
+  #     is the safe second option (web-flow-signed too). Use "Create a merge
+  #     commit" by default; squash only to collapse a noisy PR.
+  #   - allow_rebase_merge = false → dropped: it's the one method GitHub can't
+  #     sign, so it can never satisfy require_signed_commits.
+  # Per-commit history + semantic-release: a merge commit preserves every PR
+  # commit (Conventional-Commits formatted via the husky hook), so release notes
+  # still see each typed commit. Trade-off: main is no longer linear (merge
+  # bubbles) — accepted in ADR-0044.
+  allow_merge_commit     = true
+  allow_squash_merge     = true
+  allow_rebase_merge     = false
   allow_auto_merge       = true
   delete_branch_on_merge = true
 
@@ -100,21 +107,25 @@ resource "github_branch_protection" "main" {
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)
-  require_signed_commits          = true # ADR-025; kept via bot-merge.yml (ADR-0035)
+  require_signed_commits          = true # ADR-025; satisfied natively by signed merge commits (ADR-0044)
   require_conversation_resolution = true
-  required_linear_history         = true
-  allows_force_pushes             = false
-  allows_deletions                = false
+  # Linear history is OFF (ADR-0044): merge commits are non-linear by
+  # definition, and required_linear_history would block the merge button. The
+  # trade-off (merge bubbles on main) is accepted to get natively-signed merges
+  # without the (broken-on-personal-repo) bot-merge workflow.
+  required_linear_history = false
+  allows_force_pushes     = false
+  allows_deletions        = false
 }
 
-# ADR-0035: keep `require_signed_commits = true` AND rebase-merge by
-# routing every merge through `.github/workflows/bot-merge.yml`. That
-# workflow uses GitHub's git/commits REST API to create web-flow-signed
-# copies of each PR commit on top of `main`, then updates
-# `refs/heads/main` via the operator's identity (`agranado2k`,
-# authenticated via the MERGE_BOT_TOKEN secret). The
-# pull_request_bypassers entry above permits the workflow's PATCH
-# despite branch protection's PR requirement.
+# SUPERSEDED by ADR-0044. ADR-0035's plan — keep `require_signed_commits = true`
+# AND rebase-merge by routing every merge through `.github/workflows/bot-merge.yml`
+# — never worked on this personal (non-org) repo: the bot can't push to a
+# protected branch (the bypass-allowances API returns HTTP 500 on user repos),
+# and GitHub does not sign rebased commits. ADR-0044 switches to merge commits,
+# which GitHub web-flow signs natively, so no bot is needed. The
+# `pull_request_bypassers` entry above is now vestigial (harmless); bot-merge.yml
+# is obsolete and slated for removal in a follow-up.
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach
