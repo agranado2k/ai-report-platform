@@ -3,6 +3,32 @@
 Operator procedures that aren't fully captured by Terraform — credential
 issuance, one-time bootstraps, rotations.
 
+## Re-running prod migrations (`migrate-db`)
+
+The `migrate-db` workflow applies Drizzle migrations to the prod Neon `main`
+branch. It auto-runs on `push` to `main` that touches `packages/db/**` (a schema
+change). It also has a **`workflow_dispatch`** trigger for the case the path
+trigger can't catch: **the prod schema is lost without a schema-file change** —
+e.g. a `terraform apply` recreates the Neon project/branch (as in 2026-06, when
+the prod branch went `br-tiny-hall-aqqs1klw` → `br-wispy-flower-aqtttj6n`). Then
+the fresh branch has no schema and nothing re-applies it.
+
+To re-migrate the current prod branch **via CI/CD** (never by hand):
+
+```bash
+gh workflow run migrate-db.yml --ref main
+# then watch it + confirm which DB it targeted:
+gh run watch "$(gh run list --workflow=migrate-db.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+```
+
+Or use the GitHub UI: **Actions → Migrate DB (prod) → Run workflow**. The apply is
+idempotent (drizzle tracks applied migrations in `__drizzle_migrations`), so a
+dispatch on an already-current branch is a safe no-op. **Verify** the run log line
+`prod branch <id> db=<name> role=<role>` matches the database the app's
+`DATABASE_URL` uses (the project's default `neondb`) — if it targets a different
+DB (e.g. the TF-declared `ai_report_platform`), the app will still 500 and the
+db-discovery needs reconciling (see the diary drift note).
+
 ## Merging to `main` — signed merge commits (ADR-0044)
 
 **Current flow:** on a green PR, click the GitHub **"Create a merge commit"**

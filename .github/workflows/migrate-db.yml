@@ -1,17 +1,31 @@
 name: Migrate DB (prod)
 
-# Applies pending Drizzle migrations to the PRODUCTION Neon branch (`main`)
-# whenever a schema change lands on the default branch. This is the ONLY path
-# that mutates the prod database — migrations are never run by hand (ADR-017,
-# ADR-019). Forward-only; rollback = Neon branch reset / PITR (docs/db-design.md).
+# Applies pending Drizzle migrations to the PRODUCTION Neon branch (`main`).
+# This is the ONLY path that mutates the prod database — migrations are never
+# run by hand (ADR-017, ADR-019). Forward-only; rollback = Neon branch reset /
+# PITR (docs/db-design.md).
+#
+# Two triggers (see `on:`):
+#   - push to main on `packages/db/**` — a SCHEMA change → apply it.
+#   - workflow_dispatch — on-demand. REQUIRED because the prod schema can be lost
+#     by an event that ISN'T a schema-file change: a `terraform apply` that
+#     recreates the Neon project/branch. That happened 2026-06 (the prod branch
+#     went br-tiny-hall-aqqs1klw → br-wispy-flower-aqtttj6n while reconciling the
+#     TF db/role drift), which dropped the already-applied `0000`. Nothing under
+#     packages/db changed, so the path trigger never re-ran — leaving the fresh
+#     prod branch unmigrated. Dispatching this workflow re-applies pending
+#     migrations to the current prod branch. Still CI/CD (the pipeline), NOT a
+#     hand-run psql/drizzle.
 #
 # The prod connection URI is fetched at run time from the Neon API
 # (NEON_API_KEY secret + NEON_PROJECT_ID variable) and masked — no long-lived
 # DATABASE_URL secret is stored. Prod branch = `main`; the database + owning
-# role are discovered from the Neon API at run time (the prod branch actually
-# uses neondb/neondb_owner, not the TF-declared names — see docs/diary.md).
+# role are discovered from the Neon API at run time. The apply is idempotent
+# (drizzle tracks applied migrations in __drizzle_migrations), so a dispatch
+# against an already-current branch is a safe no-op.
 
 on:
+  workflow_dispatch: {} # on-demand CI/CD run — e.g. after a Neon branch reset
   push:
     branches: [main]
     # Schema paths only — NOT this workflow file. Editing the workflow must not
