@@ -25,7 +25,7 @@ name: Migrate DB (prod)
 # against an already-current branch is a safe no-op.
 
 on:
-  workflow_dispatch: {} # on-demand CI/CD run — e.g. after a Neon branch reset
+  workflow_dispatch: # on-demand CI/CD run — e.g. after a Neon branch reset
   push:
     branches: [main]
     # Schema paths only — NOT this workflow file. Editing the workflow must not
