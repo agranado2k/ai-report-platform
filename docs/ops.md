@@ -25,6 +25,14 @@ means some change wants to *replace* the prod DB. Steps:
 3. After any prod-branch recreation, re-run **`migrate-db`** (`gh workflow run
    migrate-db.yml --ref main`) — the fresh branch has no schema.
 
+> **Which database holds the data?** Despite the Terraform resource being named
+> `neon_database.main` = `ai_report_platform`, the app's `DATABASE_URL`
+> (`neon_project.connection_uri`) and the live report data are in Neon's default
+> **`neondb`** (owned by `neondb_owner`) — the TF-declared `ai_report_platform`/`app`
+> are a separate, currently-unused db/role (the unreconciled drift in the diary).
+> So when recovering, the database to re-migrate and verify is **`neondb`**; the
+> `migrate-db` run log line `db=<name>` must read `db=neondb`.
+
 ## Merging to `main` — signed merge commits (ADR-0044)
 
 **Current flow:** on a green PR, click the GitHub **"Create a merge commit"**
