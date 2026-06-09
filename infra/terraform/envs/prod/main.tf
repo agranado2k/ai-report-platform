@@ -81,9 +81,11 @@ locals {
     CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production", "preview"] }
     R2_ACCOUNT_ID                = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
     R2_BUCKET                    = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
-    R2_ENDPOINT                  = { value = module.r2.endpoint, target = ["production", "preview"], sensitive = false }
-    R2_ACCESS_KEY_ID             = { value = var.r2_access_key_id, target = ["production", "preview"] }
-    R2_SECRET_ACCESS_KEY         = { value = var.r2_secret_access_key, target = ["production", "preview"] }
+    # No R2_ENDPOINT: the app derives the S3 endpoint inline from R2_ACCOUNT_ID
+    # (container.server.ts) and it's not in the env contract (packages/env), so
+    # provisioning it here was dead config. (claude-review pass-4 on PR #29.)
+    R2_ACCESS_KEY_ID     = { value = var.r2_access_key_id, target = ["production", "preview"] }
+    R2_SECRET_ACCESS_KEY = { value = var.r2_secret_access_key, target = ["production", "preview"] }
   }
 }
 
