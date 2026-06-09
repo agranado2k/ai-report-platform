@@ -6,7 +6,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 
 | # | Title | Status |
 |---|---|---|
-| 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Accepted (2026-06-03) |
+| 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Superseded by 0044 (2026-06-09) |
 | 0036 | [Adopt Domain-Driven Design principles](0036-domain-driven-design.md) | Accepted (2026-06-04) |
 | 0037 | [Report upload & versioning pipeline](0037-report-upload-versioning-pipeline.md) | Accepted (2026-06-04) |
 | 0038 | [Report viewer access & serving model](0038-report-viewer-access-serving.md) | Accepted (2026-06-04) |
@@ -15,6 +15,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0041 | [Documentation-as-contract — CI-enforced conformance harness](0041-docs-conformance-ci-harness.md) | Accepted (2026-06-04) |
 | 0042 | [Adopt Vitest as the unit/integration test runner](0042-adopt-vitest-test-runner.md) | Accepted (2026-06-04) |
 | 0043 | [Validate environment variables with Zod + @t3-oss/env-core](0043-zod-env-validation.md) | Accepted (2026-06-04) |
+| 0044 | [Signed merge commits instead of rebase-merge + bot-merge](0044-merge-commit-strategy.md) | Accepted (2026-06-09) |
 
 ## Backlog (ADRs 1–30 from the spec)
 

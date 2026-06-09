@@ -3,7 +3,24 @@
 Operator procedures that aren't fully captured by Terraform — credential
 issuance, one-time bootstraps, rotations.
 
-## Bot-merge (`/merge`) signing setup — ADR-0035
+## Merging to `main` — signed merge commits (ADR-0044)
+
+**Current flow:** on a green PR, click the GitHub **"Create a merge commit"**
+button. GitHub web-flow signs the merge commit and the PR's own commits land
+with their signatures intact, so `require_signed_commits = true` is satisfied
+with no bot and no manual protection toggling. Rebase-merge is disabled (GitHub
+can't sign rebased commits); squash-merge is enabled as a secondary option.
+There is **no operator setup** for this — it's just the merge button.
+
+---
+
+## ~~Bot-merge (`/merge`) signing setup — ADR-0035~~ (OBSOLETE, superseded by ADR-0044)
+
+> **Obsolete.** The `/merge` bot never worked on this personal (non-org) repo:
+> the `bypass_pull_request_allowances` API returns HTTP 500, so the workflow
+> can't push to protected `main`. Replaced by native signed merge commits
+> (ADR-0044, above). `bot-merge.yml` + the GPG-key secrets below are slated for
+> removal; the steps are kept only for historical context.
 
 The `/merge` bot (`.github/workflows/bot-merge.yml`) rebases a PR's commits onto
 `main`, **GPG-signs** them, and pushes. To make `require_signed_commits = true`

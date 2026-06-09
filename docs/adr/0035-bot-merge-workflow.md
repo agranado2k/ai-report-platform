@@ -1,10 +1,10 @@
 # ADR-0035: Bot-merge workflow for signed-commits + rebase-merge
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0044
 - **Date**: 2026-06-03
 - **Deciders**: agranado2k
 - **Supersedes / amends**: ADR-025 (signed commits) and the project's rebase-merge convention. Both stay in force; this ADR resolves the interaction between them.
-- **Superseded by**: —
+- **Superseded by**: [ADR-0044](0044-merge-commit-strategy.md) (2026-06-09) — the bot-merge workflow never worked on this personal repo (bypass API HTTP 500); replaced by native signed merge commits.
 
 ## Context and problem statement
 
