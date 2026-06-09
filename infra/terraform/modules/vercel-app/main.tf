@@ -28,8 +28,14 @@ resource "vercel_project" "this" {
 
   # Where the Remix build outputs come from in a Turborepo. Vercel auto-detects
   # for simple repos but a monorepo benefits from the explicit hint.
-  root_directory             = var.root_directory
-  vercel_authentication      = null # public previews; we gate via our own ACL
+  root_directory = var.root_directory
+  # Public previews — we gate access via our own ACL (the viewer's, ADR-0038),
+  # not Vercel's SSO. `null` does NOT disable Vercel Authentication (it leaves
+  # the team-level default = Standard Protection ON, which 401s previews for
+  # anonymous + CI automation); `deployment_type = "none"` is required to
+  # actually make deployments public. The bare `null` is why the BDD smoke got
+  # 401 against the preview.
+  vercel_authentication      = { deployment_type = "none" }
   serverless_function_region = var.region
 }
 
