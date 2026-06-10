@@ -1,9 +1,9 @@
 name: Commit messages (Conventional Commits)
 
-# Lints every commit added by the PR. The bot-merge workflow (ADR-0035)
-# replays each PR commit onto `main` verbatim — so each one must
-# individually follow Conventional Commits and is what semantic-release
-# parses on the next release run.
+# Lints every commit added by the PR. A signed merge commit (ADR-0044) brings
+# each PR commit onto `main` verbatim — so each one must individually follow
+# Conventional Commits, which is what semantic-release parses on the next
+# release run.
 #
 # Belt-and-braces to the local husky commit-msg hook: catches commits
 # made with `--no-verify`, commits from outside this checkout, or

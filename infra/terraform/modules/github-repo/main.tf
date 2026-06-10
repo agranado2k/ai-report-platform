@@ -14,14 +14,6 @@ terraform {
   }
 }
 
-# Resolve the merge-bot user's GraphQL node_id at apply time so the
-# branch_protection.required_pull_request_reviews.pull_request_bypassers
-# list can reference it. VESTIGIAL: ADR-0035 is superseded by ADR-0044
-# (native signed merge commits) — this + the bypasser are slated for removal.
-data "github_user" "merge_bot" {
-  username = "agranado2k"
-}
-
 resource "github_repository" "this" {
   name        = var.repo_name
   description = var.description
@@ -101,18 +93,9 @@ resource "github_branch_protection" "main" {
     required_approving_review_count = 0
     dismiss_stale_reviews           = true
     require_code_owner_reviews      = false
-
-    # VESTIGIAL (ADR-0035, superseded by ADR-0044). This entry let the
-    # `bot-merge.yml` workflow's PATCH to /git/refs/heads/main bypass the PR
-    # requirement. That workflow never worked on this personal repo (bypass
-    # API HTTP 500) and is replaced by native signed merge commits, so this
-    # bypasser is now a no-op. Slated for removal with bot-merge.yml.
-    #
-    # github_branch_protection (v4 / GraphQL) takes a list of GraphQL
-    # node IDs here — NOT a `bypass_pull_request_allowances { users }`
-    # sub-block (that's the v3 REST API shape). The `data "github_user"`
-    # lookup below resolves the username to its node_id at apply time.
-    pull_request_bypassers = [data.github_user.merge_bot.node_id]
+    # No PR bypassers: merges go through GitHub's signed merge-commit button
+    # (ADR-0044), which is the normal PR flow — nothing pushes to `main` out of
+    # band. (The old `bot-merge` bypasser was removed with that workflow.)
   }
 
   enforce_admins                  = true # owner cannot bypass (ADR-025)
@@ -127,14 +110,11 @@ resource "github_branch_protection" "main" {
   allows_deletions        = false
 }
 
-# SUPERSEDED by ADR-0044. ADR-0035's plan — keep `require_signed_commits = true`
-# AND rebase-merge by routing every merge through `.github/workflows/bot-merge.yml`
-# — never worked on this personal (non-org) repo: the bot can't push to a
-# protected branch (the bypass-allowances API returns HTTP 500 on user repos),
-# and GitHub does not sign rebased commits. ADR-0044 switches to merge commits,
-# which GitHub web-flow signs natively, so no bot is needed. The
-# `pull_request_bypassers` entry above is now vestigial (harmless); bot-merge.yml
-# is obsolete and slated for removal in a follow-up.
+# Merges to `main` use GitHub's signed merge-commit button (ADR-0044): the merge
+# commit is web-flow-signed and the PR's commits keep their signatures, so
+# `require_signed_commits = true` is satisfied with no bot. (This supersedes
+# ADR-0035's bot-merge workflow, which never worked on this personal repo —
+# the bypass-allowances API returns HTTP 500 — and has been removed.)
 
 # NOTE: CODEOWNERS is committed as a normal file at `.github/CODEOWNERS`,
 # NOT managed by Terraform. The earlier `github_repository_file` approach

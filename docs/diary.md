@@ -1067,3 +1067,15 @@ While starting the Phase-1 real-DB slice, the question "who applies the schema m
 **Still open:** the physical `neondb` database (Neon's auto-created default, NOT TF-managed) is now empty + unused but still exists. Dropping it is a deliberate, destructive prod-DB op via the Neon API — pending explicit operator authorization. Older diary entries that describe the `neondb` drift are left intact as the historical record.
 
 **Process:** worktree `fix/align-prod-db-to-app`, off `main` (`dc90a70`). PRs #32 (migrate-on-deploy) + #33 (prevent_destroy) merged.
+
+---
+
+## 2026-06-10 — 🎉 Phase 1 upload→view is LIVE; bot-merge removed
+
+**Milestone:** the manually-testable upload→view vertical slice works end-to-end in production. `app.agranado.com/upload` accepts pasted HTML → stored in Neon (`ai_report_platform`) + R2 → served at `app.agranado.com/r/<slug>` with the full ADR-013 security stack (enforcing+sandbox CSP, COOP/CORP, OAC, HSTS, `X-Robots-Tag: noindex`, `cache-control: no-store`). First real report uploaded by the operator (`/r/a6fzoxckZ6`). Path to green required, in order: PR #29 (adapters + routes), #30 (Clerk `PUBLIC_` env + public previews), #31 (signed merge commits, ADR-0044), #32 (migrate-on-deploy), #33 (`prevent_destroy` on prod Neon), #35 (align app+migrate-db to `ai_report_platform`/`app`, drop `neondb` usage) → `apply-prod` repointed `DATABASE_URL` → production redeploy picked up the new env.
+
+**This PR (`chore/remove-bot-merge`):** removes the obsolete bot-merge machinery now that ADR-0044 (signed merge commits) is the merge path — deletes `.github/workflows/bot-merge.yml`, the `data "github_user" "merge_bot"` source + `pull_request_bypassers` from the github-repo module, the obsolete `docs/ops.md` section, and corrects the `commitlint.yml` header. `apply-shared` will drop the PR-bypasser from branch protection (no resource replacement).
+
+**Open follow-ups:** (1) physically drop the empty `neondb` (Neon default, not TF-managed — needs a deliberate console/API delete); (2) promoting scan stub + ADR-0038 viewer state machine (next); (3) `deleted_at IS NULL` repo filter; (4) real API `POST /api/v1/reports`, Clerk auth (drop `DEMO_ACTOR`), dedicated view-origin (ADR-0038), e2e step defs; (5) pre-launch: real scanner, preview isolation. The stale `ci/e2e-gate-cleanup` branch (no PR) is unmerged — review or prune. The `MERGE_BOT_*` repo secrets/variables are now unused (manual `gh secret delete` when convenient — not TF-managed).
+
+**Process:** worktree `chore/remove-bot-merge`, off `main` (`17a560d`). All prior feature worktrees pruned.
