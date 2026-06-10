@@ -4,7 +4,8 @@
 // POST /api/v1/reports (ADR-0037); this page is the manually-testable surface.
 import { type ActionFunctionArgs, json, type MetaFunction } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { uploadReport } from "arp-application";
+import { processScanResult, uploadReport } from "arp-application";
+import { makeSlug } from "arp-domain";
 import { DEMO_ACTOR, deps, ensureDevIdentity } from "../server/container.server";
 
 export const meta: MetaFunction = () => [{ title: "Upload a report — ai-report-platform" }];
@@ -25,6 +26,27 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: `${result.error.kind}: ${result.error.message}` }, { status: 400 });
   }
   const { slug, version, scanStatus } = result.value.result;
+
+  // Phase-1 always-clean scan stub: synchronously complete the scan so the new
+  // version promotes to live immediately (ADR-0037 §8). Skipped on idempotent
+  // replay (already scanned on the first request). The real scanner (Phase 1.5)
+  // invokes processScanResult the same way with the actual verdict. Best-effort:
+  // if it fails the upload still succeeded — the version stays `pending` and the
+  // viewer shows the "scanning…" holding page until a retry promotes it.
+  if (!result.value.replayed) {
+    const sg = makeSlug(slug);
+    const found = sg.ok ? await deps().reports.findBySlug(sg.value) : null;
+    const report = found?.ok ? found.value : null;
+    const newVersion = report?.versions.find((v) => v.versionNo === version);
+    if (report && newVersion) {
+      await processScanResult(deps(), {
+        reportId: report.id,
+        versionId: newVersion.id,
+        verdict: "clean",
+      });
+    }
+  }
+
   return json({ ok: true as const, slug, version, scanStatus, viewUrl: `/r/${slug}` });
 }
 
