@@ -133,8 +133,9 @@ acquire_lock() {
     echo "Failed to acquire lock '$LOCK_KEY' within 60s." >&2
     echo "Inspect with:" >&2
     echo "  psql \"\$PG_LOCK_URL\" -c \"SELECT * FROM pg_locks WHERE locktype='advisory';\"" >&2
-    echo "Release manually if it's stale:" >&2
-    echo "  psql \"\$PG_LOCK_URL\" -c \"SELECT pg_advisory_unlock(hashtext('$LOCK_KEY'));\"" >&2
+    echo "If it's stale, terminate the holding backend (advisory-unlock from a" >&2
+    echo "different session is a no-op — the lock is owned by its acquiring session):" >&2
+    echo "  psql \"\$PG_LOCK_URL\" -c \"SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype='advisory';\"" >&2
     return 1
   }
 }
