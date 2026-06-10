@@ -71,6 +71,7 @@ paths:
         '402': { $ref: '#/components/responses/PlanLimitExceeded' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
@@ -179,6 +180,7 @@ components:
             - unauthenticated
             - forbidden
             - not_found
+            - method_not_allowed
             - unsupported_media_type
             - payload_too_large
             - validation_error
@@ -207,6 +209,16 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
           example: { type: about:blank, title: Not found, status: 404, code: not_found }
+    MethodNotAllowed:
+      description: The endpoint exists but does not support this HTTP method (only POST).
+      headers:
+        Allow:
+          schema: { type: string }
+          description: The methods the endpoint supports.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: about:blank, title: Method not allowed, status: 405, code: method_not_allowed }
     PlanLimitExceeded:
       description: A hard plan quota was hit (billing-actionable; distinct from 429).
       content:
