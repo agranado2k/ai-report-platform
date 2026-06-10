@@ -33,7 +33,10 @@ Then(
     expect(typeof body.slug).toBe("string");
     expect((body.slug as string).length).toBeGreaterThan(0);
     expect(typeof body.view_url).toBe("string");
-    expect(body.view_url as string).toContain(`/r/${body.slug}`);
+    // Assert the invariant (the slug is in the URL), not the route prefix — the
+    // /r/<slug> path is a Phase-1 detail flagged for change (viewer-origin split).
+    // The round-trip fetch below is the real functional coverage regardless of path.
+    expect(body.view_url as string).toContain(body.slug as string);
     expect(body.version).toBe(version);
     expect(body.scan_status).toBe(scanStatus);
   },
