@@ -104,6 +104,21 @@ needs_lock() {
 
 acquire_lock() {
   local got
+  # Preflight: distinguish "can't reach the lock host" from "lock held". Without
+  # this, a stale/unreachable PG_LOCK_URL makes psql fail and the `|| echo "f"`
+  # below silently reports it as contention — a connectivity/credentials problem
+  # then masquerades as a stuck lock (which wedged the apply chain for hours
+  # once the lock host's old Neon project was deleted, 2026-06). Fail loud and
+  # specific instead.
+  if ! psql "$PG_LOCK_URL" -qAt -c "SELECT 1" >/dev/null 2>&1; then
+    echo "ERROR: cannot connect to PG_LOCK_URL (the advisory-lock host)." >&2
+    echo "  This is a connectivity/credentials problem, NOT lock contention." >&2
+    echo "  Verify the connection string points at a live Neon endpoint:" >&2
+    echo "    psql \"\$PG_LOCK_URL\" -c \"SELECT 1\"" >&2
+    echo "  Prefer the DIRECT endpoint host (no '-pooler') for the lock." >&2
+    return 1
+  fi
+
   got=$(psql "$PG_LOCK_URL" -qAt -c \
     "SELECT pg_try_advisory_lock(hashtext('$LOCK_KEY'))" 2>/dev/null || echo "f")
   if [[ "$got" == "t" ]]; then

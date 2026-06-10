@@ -37,11 +37,14 @@ export TF_VAR_cloudflare_account_id="$R2_ACCOUNT_ID"
 export AWS_ACCESS_KEY_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 export AWS_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# Connection string for the bootstrap Neon project's `main` branch — the
-# Postgres advisory lock that tf.sh uses lives here.
-# IMPORTANT: must be the DIRECT (non-pooler) endpoint. The pooler URL
-# (contains "-pooler" in the hostname) breaks session-level advisory locks.
-export PG_LOCK_URL="postgresql://USER:PASS@HOST.neon.tech/neondb?sslmode=require"
+# Connection string the Postgres advisory lock lives on (tf.sh serializes
+# state-mutating commands with it). Point it at your Neon project's `main`
+# branch — there is ONE Neon project; the lock just needs a reachable Postgres.
+# IMPORTANT: use the DIRECT (non-pooler) endpoint — the pooler URL (contains
+# "-pooler" in the hostname) is best avoided for session-level advisory locks.
+# If this points at a stale/deleted endpoint, tf.sh now fails with a clear
+# "cannot connect to PG_LOCK_URL" error (not a misleading "lock held").
+export PG_LOCK_URL="postgresql://USER:PASS@HOST.neon.tech/dbname?sslmode=require"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Provider tokens — shared across envs
@@ -91,6 +94,11 @@ export TF_VAR_operator_email="you@example.com"
 #   Administration, Contents, Secrets, Variables; Metadata (read-only,
 #   auto-granted). Nothing else needed.
 export TF_VAR_github_token="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# Do NOT also export a bare `GITHUB_TOKEN` or `GH_TOKEN` here: the `gh` CLI
+# prefers those env vars over your keyring login, so `source`-ing this file
+# before a `gh` command silently authenticates `gh` with this PAT (and if it
+# lacks scope/expires, `gh` fails with a confusing 401). Terraform reads
+# `TF_VAR_github_token`; leave the gh-CLI auth to `gh auth login`.
 
 # AI PR-review keys (passed through to GitHub Actions secrets by the
 # github_repo module, then consumed by the claude-review.yml / gemini-review.yml
