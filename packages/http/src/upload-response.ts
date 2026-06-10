@@ -33,6 +33,11 @@ export function uploadResultToHttp(
   }
 
   const p = problemFor(result.error);
+  // Domain 4xx messages are author-controlled and safe to surface. Unexpected
+  // (500) carries raw infrastructure detail (R2 bodies, DB driver text) from the
+  // adapters — never echo it to the client; log it server-side instead.
+  const detail =
+    result.error.kind === "Unexpected" ? "An unexpected error occurred." : result.error.message;
   return {
     status: p.status,
     contentType: "application/problem+json",
@@ -40,7 +45,7 @@ export function uploadResultToHttp(
       type: "about:blank",
       title: p.title,
       status: p.status,
-      detail: result.error.message,
+      detail,
       code: p.code,
     },
   };

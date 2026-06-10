@@ -85,6 +85,23 @@ describe("uploadResultToHttp — errors (ADR-0040, RFC 9457)", () => {
     const res = uploadResultToHttp(err(error), OPTS);
     expect(res.status).toBe(status);
     expect(res.contentType).toBe("application/problem+json");
-    expect(res.body).toMatchObject({ type: "about:blank", status, code, detail: "x" });
+    expect(res.body).toMatchObject({ type: "about:blank", status, code });
+  });
+
+  // A 500 must NOT echo the raw internal error message — adapters embed infra
+  // detail (R2 response bodies, DB driver text) in Unexpected.message. Domain 4xx
+  // messages are author-controlled and safe, so they DO pass through (see the
+  // ValidationError test above).
+  it("does not leak the raw internal message on a 500 Unexpected", () => {
+    const res = uploadResultToHttp(
+      err({ kind: "Unexpected", message: "R2 put failed (503): <secret bucket internals>" }),
+      OPTS,
+    );
+
+    expect(res.status).toBe(500);
+    const body = res.body as { detail: string };
+    expect(body.detail).not.toContain("R2 put failed");
+    expect(body.detail).not.toContain("secret bucket internals");
+    expect(body.detail.length).toBeGreaterThan(0);
   });
 });
