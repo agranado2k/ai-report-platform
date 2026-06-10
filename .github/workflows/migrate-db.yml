@@ -86,8 +86,15 @@ jobs:
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
             echo "::error::could not resolve the default (prod) Neon branch"; exit 1
           fi
-          # Discover the db + owning role from the branch (don't assume names —
-          # the prod branch uses neondb/neondb_owner, not the TF-declared names).
+          # Discover the db + owning role from the branch rather than hardcoding.
+          # NOTE: this picks `.databases[0]` — fine while the prod branch has a
+          # single database (Neon's default `neondb`/`neondb_owner`, which is what
+          # the app's DATABASE_URL = neon_project.connection_uri uses). The TF
+          # module also declares a separate `ai_report_platform`/`app` db/role
+          # that nothing currently reads (unreconciled drift, see docs/diary.md);
+          # if it ever materializes on this branch, `[0]` is ambiguous and must
+          # select the app's db explicitly. The run echoes `db=` below — it must
+          # read `db=neondb`. (Tracked follow-up; see PR #32.)
           dbs=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches/$branch_id/databases" \
             -H "Authorization: Bearer $NEON_API_KEY")
           db_name=$(printf '%s' "$dbs" | jq -r '.databases[0].name // empty')
