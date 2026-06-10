@@ -19,6 +19,7 @@ immediately without waiting for the next push:
 
 ```bash
 gh workflow run migrate-db.yml --ref main
+sleep 5   # let the new run register, else `run list` returns the PREVIOUS run
 # then watch it + confirm which DB it targeted:
 gh run watch "$(gh run list --workflow=migrate-db.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
