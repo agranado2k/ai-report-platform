@@ -116,6 +116,20 @@ export interface ScanQueue {
   completeScan(versionId: VersionId, verdict: TerminalScanStatus): Promise<Result<void, AppError>>;
 }
 
+// ── Scanner (Abuse & Moderation). The verdict engine, behind a port so the ──
+// Phase-1.5a always-clean stub and the real ClamAV/heuristics scanner are
+// interchangeable with zero call-site change. Infra (pg-boss, ClamAV, …) lives
+// in the adapter, never here (ADR-0024).
+export interface ScanRequest {
+  readonly reportId: ReportId;
+  readonly versionId: VersionId;
+}
+
+export interface Scanner {
+  /** Inspect a version's bundle and return a terminal verdict. */
+  scan(req: ScanRequest): Promise<Result<TerminalScanStatus, AppError>>;
+}
+
 // ── Plan limits (ADR-0006) ─────────────────────────────────────────────────
 export interface PlanLimiter {
   /** err(PlanLimitExceeded) (402) when the org is over a hard quota. */

@@ -12,6 +12,7 @@ export * from "./plan-limiter";
 export * from "./r2-blob-store";
 export * from "./report-repository";
 export * from "./scan-queue";
+export * from "./scanners/clean-stub-scanner";
 export * from "./services/clock";
 export * from "./services/hasher";
 export * from "./services/ids";
