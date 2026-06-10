@@ -27,10 +27,10 @@ gh run watch "$(gh run list --workflow=migrate-db.yml --limit 1 --json databaseI
 Or use the GitHub UI: **Actions → Migrate DB (prod) → Run workflow**. The apply is
 idempotent (drizzle tracks applied migrations in `__drizzle_migrations`), so a
 dispatch on an already-current branch is a safe no-op. **Verify** the run log line
-`prod branch <id> db=<name> role=<role>` matches the database the app's
-`DATABASE_URL` uses (the project's default `neondb`) — if it targets a different
-DB (e.g. the TF-declared `ai_report_platform`), the app will still 500 and the
-db-discovery needs reconciling (see the diary drift note).
+`prod branch <id> db=<name> role=<role>` must read **`db=ai_report_platform
+role=app`** — the dedicated db/role the app's `DATABASE_URL` points to. If it
+targets anything else, the app will 500 (`relation … does not exist`) because
+the schema landed in the wrong database.
 
 ## Prod Neon DB — destroy protection
 
@@ -54,13 +54,12 @@ means some change wants to *replace* the prod DB. Steps:
 3. After any prod-branch recreation, re-run **`migrate-db`** (`gh workflow run
    migrate-db.yml --ref main`) — the fresh branch has no schema.
 
-> **Which database holds the data?** Despite the Terraform resource being named
-> `neon_database.main` = `ai_report_platform`, the app's `DATABASE_URL`
-> (`neon_project.connection_uri`) and the live report data are in Neon's default
-> **`neondb`** (owned by `neondb_owner`) — the TF-declared `ai_report_platform`/`app`
-> are a separate, currently-unused db/role (the unreconciled drift in the diary).
-> So when recovering, the database to re-migrate and verify is **`neondb`**; the
-> `migrate-db` run log line `db=<name>` must read `db=neondb`.
+> **Which database holds the data?** The app uses the dedicated TF-declared
+> database **`ai_report_platform`** (owned by role **`app`**) — both the app's
+> `DATABASE_URL` (built from `neon_role.main` + `neon_database.main` in the
+> neon-project module) and `migrate-db` target it. So recovery re-migrates and
+> verifies **`ai_report_platform`**; the `migrate-db` log line must read
+> `db=ai_report_platform role=app`.
 
 ## Merging to `main` — signed merge commits (ADR-0044)
 

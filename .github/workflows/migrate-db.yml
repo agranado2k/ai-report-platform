@@ -86,21 +86,18 @@ jobs:
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
             echo "::error::could not resolve the default (prod) Neon branch"; exit 1
           fi
-          # Discover the db + owning role from the branch rather than hardcoding.
-          # NOTE: this picks `.databases[0]` — fine while the prod branch has a
-          # single database (Neon's default `neondb`/`neondb_owner`, which is what
-          # the app's DATABASE_URL = neon_project.connection_uri uses). The TF
-          # module also declares a separate `ai_report_platform`/`app` db/role
-          # that nothing currently reads (unreconciled drift, see docs/diary.md);
-          # if it ever materializes on this branch, `[0]` is ambiguous and must
-          # select the app's db explicitly. The run echoes `db=` below — it must
-          # read `db=neondb`. (Tracked follow-up; see PR #32.)
+          # Target the app's database by NAME: `ai_report_platform`, owned by
+          # `app` — the dedicated db/role the app's DATABASE_URL points to. We
+          # select by name (not `.databases[0]` by position) so the migration
+          # always lands on the same db the app reads; fail loudly if it's
+          # missing rather than silently migrating the wrong database.
           dbs=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches/$branch_id/databases" \
             -H "Authorization: Bearer $NEON_API_KEY")
-          db_name=$(printf '%s' "$dbs" | jq -r '.databases[0].name // empty')
-          role_name=$(printf '%s' "$dbs" | jq -r '.databases[0].owner_name // empty')
+          db_row=$(printf '%s' "$dbs" | jq -c '[.databases[] | select(.name=="ai_report_platform")][0] // empty')
+          db_name=$(printf '%s' "$db_row" | jq -r '.name // empty')
+          role_name=$(printf '%s' "$db_row" | jq -r '.owner_name // empty')
           if [ -z "$db_name" ] || [ -z "$role_name" ]; then
-            echo "::error::could not resolve the prod database/role"; exit 1
+            echo "::error::ai_report_platform db/role not found on the prod branch"; exit 1
           fi
           echo "prod branch $branch_id db=$db_name role=$role_name"
           # Connection URI carries the role password — never echo it; mask on success.

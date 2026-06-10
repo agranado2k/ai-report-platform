@@ -1050,3 +1050,20 @@ While starting the Phase-1 real-DB slice, the question "who applies the schema m
 **Operator actions to make prod applyable + R2-capable:** (1) create the R2 app token (dashboard, Object R&W, scope `arp-reports-prod`) → set the two `R2_APP_*` GH secrets (and add to `.tfvars.local` for local applies); (2) put real `pk_live_`/`sk_live_` Clerk keys in `CLERK_PUBLISHABLE_KEY_PROD` (variable) + `CLERK_SECRET_KEY_PROD` (secret) so `tf.sh prod apply` stops failing on the `REPLACE_ME` placeholders. On merge to `main`, `terraform.yml` applies prod and the env reaches both targets.
 
 **Process:** worktree `chore/prod-env-r2-preview`, off `main` (`e563c59`). Active worktrees: `feat/arp-adapters` (in progress), `ci/e2e-gate-cleanup` (PR #25). No ADR (env composition detail).
+
+---
+
+## 2026-06-10 — Align prod DB to `ai_report_platform`/`app`; drop `neondb`
+
+**What broke:** the upload→view demo 500'd with `relation … does not exist`. Root cause chain: a `terraform apply` had recreated the prod Neon project (`br-tiny-hall-aqqs1klw` → `steep-bar-51267535`/`br-wispy-flower-aqtttj6n`), wiping the schema; `migrate-db` only triggered on `packages/db/**` so nothing re-applied it; once `migrate-db` was made migrate-on-deploy (#32), its `.databases[0]` discovery applied `0000` to **`ai_report_platform`** while the app's `DATABASE_URL` (= `neon_project.connection_uri`) read Neon's default **`neondb`** — schema in the wrong database.
+
+**Decision (operator):** standardize on the dedicated TF-declared **`ai_report_platform`** (owner role **`app`**) and **drop `neondb`** entirely. Rationale: dedicated least-privilege role over Neon's broad default `neondb_owner`; one database, no ambiguity.
+
+**Changes (PR `fix/align-prod-db-to-app`):**
+- `modules/neon-project/outputs.tf` — `prod_connection_uri` now builds the app-db URI from `neon_role.main` + `neon_database.main` + `neon_project.database_host`, instead of `neon_project.connection_uri` (which pointed at `neondb`). On apply, Vercel's `DATABASE_URL` repoints to `ai_report_platform`/`app`.
+- `migrate-db.yml` — selects the `ai_report_platform` database by NAME (fails loudly if absent), not `.databases[0]`. Run log must read `db=ai_report_platform role=app`.
+- `docs/ops.md` — `neondb` references removed; recovery/verify target is `ai_report_platform`.
+
+**Still open:** the physical `neondb` database (Neon's auto-created default, NOT TF-managed) is now empty + unused but still exists. Dropping it is a deliberate, destructive prod-DB op via the Neon API — pending explicit operator authorization. Older diary entries that describe the `neondb` drift are left intact as the historical record.
+
+**Process:** worktree `fix/align-prod-db-to-app`, off `main` (`dc90a70`). PRs #32 (migrate-on-deploy) + #33 (prevent_destroy) merged.
