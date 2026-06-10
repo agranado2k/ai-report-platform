@@ -81,7 +81,10 @@ function problemFor(error: AppError): ProblemSpec {
       return { status: 402, code: "plan_limit_exceeded", title: "Plan limit exceeded" };
     case "RateLimited":
       return { status: 429, code: "rate_limited", title: "Rate limited" };
-    default:
+    case "Unexpected":
       return { status: 500, code: "internal_error", title: "Internal server error" };
+    // No `default`: when a new AppError kind is added (ADR-0040 plans TooManyFiles
+    // + DecompressionBomb → 413), TypeScript fails the typecheck gate here until
+    // it's mapped — instead of silently returning 500 at runtime.
   }
 }
