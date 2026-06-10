@@ -1,15 +1,21 @@
-// DrizzleScanQueue — Phase-1 scan stub. Per docs/db-design.md "Phase 1 scan
-// stub" + ADR-0037 §8, the Phase-1 stub is meant to drive the job queued→done
-// with verdict='clean' and emit ReportVersionScanned(clean), promoting
-// live_version_id; only the REAL scanner lands in Phase 1.5.
-//
-// KNOWN GAP (flagged on PR #29): this enqueue only records a `queued` row and
-// never completes the job, so live_version_id stays null and the viewer falls
-// back to serving the latest version directly. Wiring the promoting stub + the
-// ADR-0038 viewer state machine is tracked as a follow-up.
+// DrizzleScanQueue — the scan_jobs side of the scan pipeline. Per
+// docs/db-design.md "Phase 1 scan stub" + ADR-0037 §8: `enqueueScan` records a
+// `queued` row on upload; `completeScan` drives it `queued → done` with the
+// terminal verdict. Promotion of `live_version_id` itself lives in the
+// processScanResult use case (application layer) — this adapter only owns the
+// scan_jobs row. Phase 1 calls completeScan synchronously with `clean`;
+// Phase 1.5's real scanner calls it with the actual verdict.
 import type { ScanQueue } from "arp-application";
 import { scanJobs } from "arp-db/schema";
-import { type AppError, ok, type ReportId, type Result, type VersionId } from "arp-domain";
+import {
+  type AppError,
+  ok,
+  type ReportId,
+  type Result,
+  type TerminalScanStatus,
+  type VersionId,
+} from "arp-domain";
+import { and, eq, ne } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbContext } from "./client";
 
@@ -30,6 +36,32 @@ export class DrizzleScanQueue implements ScanQueue {
         error: {
           kind: "Unexpected",
           message: `scan.enqueue: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      };
+    }
+  }
+
+  async completeScan(
+    versionId: VersionId,
+    verdict: TerminalScanStatus,
+  ): Promise<Result<void, AppError>> {
+    try {
+      // Guard `status != 'done'` so re-completing an already-terminal job is a
+      // no-op rather than clobbering its verdict — matters once the real scanner
+      // (Phase 1.5) runs async and a duplicate event could race. (The Phase-1
+      // stub goes queued → done directly; the `running` state is Phase 1.5.)
+      await this.ctx
+        .current()
+        .update(scanJobs)
+        .set({ status: "done", verdict, finishedAt: new Date() })
+        .where(and(eq(scanJobs.reportVersionId, versionId), ne(scanJobs.status, "done")));
+      return ok(undefined);
+    } catch (e) {
+      return {
+        ok: false,
+        error: {
+          kind: "Unexpected",
+          message: `scan.complete: ${e instanceof Error ? e.message : String(e)}`,
         },
       };
     }

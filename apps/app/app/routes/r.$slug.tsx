@@ -1,5 +1,5 @@
-// Phase-1 viewer (resource route) — serves a report's entry document by slug,
-// read from R2. Resolves slug → Report → latest version → R2 entry doc.
+// Phase-1 viewer (resource route) — serves a report's LIVE (clean-scanned)
+// version by slug, read from R2, through the ADR-0038 §2 state machine.
 //
 // SECURITY NOTE (ADR-0038): the production viewer serves report content from a
 // SEPARATE sandboxed origin (view.<domain>) with a strict CSP, never the app
@@ -11,26 +11,58 @@ import { makeSlug } from "arp-domain";
 import { viewHeaders } from "arp-headers/view";
 import { deps } from "../server/container.server";
 
+// 200 "scanning…" holding page (ADR-0038 §2): shown when a report exists but has
+// no clean live version yet. Our own static HTML (no untrusted content), so the
+// strict view CSP + a meta-refresh (no script) are fine. noindex.
+function scanningHoldingPage(): Response {
+  const headers = viewHeaders();
+  headers.set("content-type", "text/html; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  headers.set("x-robots-tag", "noindex, nofollow");
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta http-equiv="refresh" content="5" />
+<title>Scanning…</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;text-align:center">
+<h1>Scanning…</h1><p>This report is being checked. This page refreshes automatically.</p>
+</body></html>`;
+  return new Response(body, { status: 200, headers });
+}
+
 export async function loader({ params }: LoaderFunctionArgs) {
   const slug = makeSlug(params.slug ?? "");
-  if (!slug.ok) throw new Response("Invalid report id", { status: 400 });
+  // Unknown/invalid slug is indistinguishable from blocked content → 404
+  // (ADR-0038 §2: never acknowledge serious-bad content).
+  if (!slug.ok) throw new Response("Not found", { status: 404 });
 
   const found = await deps().reports.findBySlug(slug.value);
   if (!found.ok) throw new Response("Lookup failed", { status: 500 });
-  if (!found.value) throw new Response("Report not found", { status: 404 });
+  if (!found.value) throw new Response("Not found", { status: 404 });
 
   const report = found.value;
-  // ADR-0038 §2: a taken-down report is 410 Gone, not served. (The full state
-  // machine — pending→holding page, flagged→451, blocked→404 — lands with the
-  // promoting scan stub; see the gap noted on PR #29.)
-  if (report.deletedAt !== null) throw new Response("Report removed", { status: 410 });
 
-  const version = report.versions[report.versions.length - 1];
-  if (!version) throw new Response("Report has no version", { status: 404 });
+  // ADR-0038 §2 state machine.
+  // 1. Taken down → 410 Gone (no public reason).
+  if (report.deletedAt !== null) throw new Response("No longer available", { status: 410 });
 
-  const blob = await deps().blobs.readObject(report.id, version.id, version.manifest.entryDocument);
+  // 2. No clean live version yet → branch on the newest version's scan status.
+  if (report.liveVersionId === null) {
+    const newest = report.versions[report.versions.length - 1];
+    if (!newest) throw new Response("Not found", { status: 404 });
+    if (newest.scanStatus === "pending") return scanningHoldingPage(); // 200, scanning
+    if (newest.scanStatus === "flagged")
+      throw new Response("Unavailable — flagged for review", { status: 451 });
+    // `blocked` (or any non-servable state) is indistinguishable from unknown → 404.
+    throw new Response("Not found", { status: 404 });
+  }
+
+  // 3. Clean live version → stream it from R2.
+  const live = report.versions.find((v) => v.id === report.liveVersionId);
+  if (!live) throw new Response("Not found", { status: 404 });
+
+  const blob = await deps().blobs.readObject(report.id, live.id, live.manifest.entryDocument);
   if (!blob.ok) throw new Response("Read failed", { status: 500 });
-  if (!blob.value) throw new Response("Report content missing", { status: 404 });
+  if (!blob.value) throw new Response("Not found", { status: 404 });
 
   // ADR-013: serve untrusted report HTML under the full viewer security stack
   // (enforcing + sandbox CSP, COOP/CORP, Origin-Agent-Cluster, Permissions-Policy,
