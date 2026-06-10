@@ -45,13 +45,20 @@ export async function action({ request }: ActionFunctionArgs) {
   // 4. Phase-1 always-clean scan stub: promote the fresh version so /r/<slug>
   //    serves it. The 201 still reports `pending` per the contract — promotion is
   //    asynchronous from the client's view (it re-fetches the slug). Skipped on
-  //    idempotent replay. Best-effort: a failure leaves the version `pending`.
+  //    idempotent replay. Genuinely best-effort: this side effect must never turn
+  //    the upload the client already earned into a 500 — a throw (e.g. a DB
+  //    hiccup in findById, outside the use case's own tx-rollback catch) only
+  //    leaves the version `pending`, which the viewer's holding page handles.
   if (result.ok && !result.value.replayed && result.value.reportId && result.value.versionId) {
-    await processScanResult(deps(), {
-      reportId: result.value.reportId,
-      versionId: result.value.versionId,
-      verdict: "clean",
-    });
+    try {
+      await processScanResult(deps(), {
+        reportId: result.value.reportId,
+        versionId: result.value.versionId,
+        verdict: "clean",
+      });
+    } catch (e) {
+      console.warn(`[api.v1.reports] scan-stub promotion failed (version stays pending):`, e);
+    }
   }
 
   return toResponse(uploadResultToHttp(result, opts));
