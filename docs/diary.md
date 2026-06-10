@@ -1095,3 +1095,22 @@ After #35/#36/#37 merged, `apply-shared` on `main` failed repeatedly with "lock 
 Note: the advisory lock is session-scoped and acquired+released within a single `psql -c`, so real apply-serialization rests on the GitHub Actions concurrency group; making the lock span the whole apply is a possible future improvement, not done here.
 
 **Operator follow-ups (credentials, out of band):** rotate the `app` DB password (it appeared in a session transcript), remove the bare `GITHUB_TOKEN` from local `.tfvars.local`, and confirm `.tfvars.local` ↔ CI secrets are back in sync. Stale `ci/e2e-gate-cleanup` branch (superseded by the gate already on `main`) pruned.
+
+---
+
+## 2026-06-10 — Production upload API: `POST /api/v1/reports` (#40)
+
+**Milestone:** the production HTTP upload API is live — `POST /api/v1/reports` (ADR-0037 / ADR-0039 / ADR-0040), the contract surface the `/upload` demo page stood in for. This closes most of open follow-up (4) from the "Phase 1 LIVE" entry above (real API route + e2e seam); Clerk auth (dropping `DEMO_ACTOR`) and the dedicated view-origin remain.
+
+**Shipped (issue #39 → PR #40), test-first as vertical slices:**
+- **`packages/http` (`arp-http`)** — new transport-adapter package. `uploadResultToHttp`: pure `Result<UploadOutcome, AppError> → HttpResponse` — 201 JSON + `Location` on success, RFC 9457 `application/problem+json` over the full ADR-0040 `code` registry on error. The `problemFor` switch is **exhaustive** (no `default` → a new `AppError` kind fails the typecheck gate), and **500s emit a generic detail** (never echo raw adapter/infra messages). 15 unit tests — the only pure-TDD seam.
+- **Actor-resolver seam** (`apps/app/app/server/auth.server.ts`) — `resolveUploadActor(request) → Result<UploadActor, AppError>`; Phase-1 returns the seeded `DEMO_ACTOR`, real API-key / Clerk auth slots in behind the same signature (401 Unauthenticated / 403 InsufficientScope) without the route changing.
+- **Resource route** (`apps/app/app/routes/api.v1.reports.ts`) — thin transport adapter: resolve actor → parse multipart `file` + `Idempotency-Key` → `uploadReport` → serialize via the mapper. The 201 reports `scan_status: pending` **per the contract** (promotion is async from the client's view); the Phase-1 always-clean stub then promotes (genuinely **best-effort** — wrapped in try/catch so a promotion failure never turns the earned 201 into a 500) so `/r/<slug>` serves. `folder_path` rejected on re-upload (create-only); non-POST → 405.
+- **e2e** — `@smoke` upload-API scenario in `tests/e2e/smoke/` (invisible to the feature-catalog bijection validator): POST → 201 → GET `view_url` → 200 serving the content, green against the live Vercel preview (ADR-0019). The `@phase-1` catalog features stay the acceptance spec — their internal-state ("entry doc index.html", "org root folder") and async-scan-timing ("no live version until ReportVersionScanned clean") scenarios can't be honestly black-boxed against the synchronous-promote stub, and playwright-bdd errors at collection on any undefined step. `grep` widens to `@phase-1` when the Phase-1.5 async scanner makes them truthful.
+- **OpenAPI** — documented the `405` / `method_not_allowed` the route emits (registry + response + operation).
+
+**Review:** dual-AI (Claude + Gemini, ADR-030) plus an independent local review, driven to green over 3 `/pr-iterate` passes. Applied: 500 info-disclosure (HIGH), best-effort promotion (MEDIUM), exhaustive switch (MEDIUM), e2e path-coupling (MEDIUM). The bot reconciliation pass verdict: "Ready to merge."
+
+**Deferred → issue #41 (Phase 1.5):** `view_url` / `Location` emit `app-origin/r/<slug>` (correct for today's co-located viewer — the e2e smoke proves the round-trip) rather than the canonical PSL-isolated `view.<domain>/<slug>` (ADR-002 / ADR-0038). Operator chose **merge-now + tracked follow-up** (separate `apps/view` deploy + DNS + a validated `VIEWER_BASE_URL` env seam per ADR-0043 + `/r/`→`/` path), to land with the async scanner. Also tracked there: RFC 9457 `instance` — deferred because the naive value (`request.url`) is constant per endpoint and so isn't the per-occurrence anchor RFC 9457 §3.2 intends; needs a request-id middleware.
+
+**Process:** worktree `feat/api-v1-reports`, off `main` (`7973eae`); merged as `2545f95` (#40). The infra worktree `chore/infra-lock-hardening` (#38) also merged. Both feature worktrees pruned. (This entry shipped via a small `docs/diary-phase1-api` worktree, since `main` is PR-protected.)
