@@ -44,14 +44,13 @@ Terraform stores its own state in R2. Chicken-and-egg: the bucket must exist bef
 
 ## 2. Bootstrap the Postgres lock host (~5 min)
 
-The advisory lock that `tf.sh` uses to serialize `terraform apply` lives on Neon. We can't have Terraform manage Neon before we have the lock, so this is a one-off manual step.
+The advisory lock that `tf.sh` uses to serialize `terraform apply` lives on Neon. It only needs **a reachable Postgres** — any Neon project's `main` branch works (the lock touches no data; key = `hashtext('tf-' || $env)`). On a fresh bootstrap you may create a dedicated project for it; in practice this repo's lock points at the platform's own (single) Neon project.
 
-1. Neon console → **New project** → name it `ai-report-platform-bootstrap`
-2. Choose a region; PostgreSQL 16
-3. From the project overview, copy the **connection string** for the `main` branch
-4. Paste it into `.tfvars.local` as `PG_LOCK_URL`
+1. Neon console → pick (or create) a project
+2. Copy the **connection string** for its `main` branch — **use the DIRECT endpoint host** (no `-pooler`)
+3. Set it in `.tfvars.local` as `PG_LOCK_URL` **and** as the `PG_LOCK_URL` GitHub Actions secret (CI reads the secret, not your local file)
 
-> The advisory-lock key is `hashtext('tf-' || $env)`. The hashtext semantics are stable across Postgres versions and branches — Phase 0b can replace this bootstrap Neon project with the Terraform-managed one without re-keying any locks.
+> **If the lock host endpoint ever changes or is deleted** (e.g. a Neon project was recreated), repoint `PG_LOCK_URL` — both the local file and the CI secret — at a live direct endpoint. `tf.sh` now fails fast with a clear *"cannot connect to PG_LOCK_URL"* error in that case, rather than a misleading "lock held". The `hashtext` key is stable across hosts, so repointing never re-keys locks.
 
 ---
 
@@ -204,17 +203,25 @@ All 13 Gherkin features in `tests/e2e/infrastructure/` should pass green. If any
 
 ### Stuck advisory lock
 
-If `tf.sh` is waiting for a lock that never releases, a previous invocation likely crashed without cleanup. Inspect:
+**First rule out a connectivity problem.** A `tf.sh` advisory lock is session-scoped — a crashed invocation's lock auto-releases when its Postgres session ends — so a *genuinely* stuck lock is rare. Far more common: `PG_LOCK_URL` points at a stale/deleted endpoint or has bad creds, and the lock attempt fails to connect. `tf.sh` now reports that as a clear *"cannot connect to PG_LOCK_URL"* error; if you see it, fix the connection string (live **direct** endpoint, valid creds, in both `.tfvars.local` **and** the CI secret) — there is no lock to clear. Confirm reachability with:
+
+```bash
+psql "$PG_LOCK_URL" -c "SELECT 1"
+```
+
+If the host is reachable but a lock genuinely persists, inspect it:
 
 ```bash
 psql "$PG_LOCK_URL" -c "SELECT * FROM pg_locks WHERE locktype = 'advisory';"
 ```
 
-If no live process holds it, release manually:
+Then either release it from the holding session, or — since the holding session is usually gone — terminate the lingering backend (advisory unlock from a *different* session is a no-op):
 
 ```bash
-psql "$PG_LOCK_URL" -c "SELECT pg_advisory_unlock(hashtext('tf-<env>'));"
+psql "$PG_LOCK_URL" -c "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory';"
 ```
+
+(Local `gh`/`psql` gotcha: don't `source .tfvars.local` before a `gh` command — a bare `GITHUB_TOKEN`/`GH_TOKEN` in that file shadows your `gh` login. Run `gh` with `env -u GH_TOKEN -u GITHUB_TOKEN` if needed.)
 
 ### State drift
 

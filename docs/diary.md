@@ -1079,3 +1079,19 @@ While starting the Phase-1 real-DB slice, the question "who applies the schema m
 **Open follow-ups:** (1) physically drop the empty `neondb` (Neon default, not TF-managed — needs a deliberate console/API delete); (2) promoting scan stub + ADR-0038 viewer state machine (next); (3) `deleted_at IS NULL` repo filter; (4) real API `POST /api/v1/reports`, Clerk auth (drop `DEMO_ACTOR`), dedicated view-origin (ADR-0038), e2e step defs; (5) pre-launch: real scanner, preview isolation. The stale `ci/e2e-gate-cleanup` branch (no PR) is unmerged — review or prune. The `MERGE_BOT_*` repo secrets/variables are now unused (manual `gh secret delete` when convenient — not TF-managed).
 
 **Process:** worktree `chore/remove-bot-merge`, off `main` (`17a560d`). All prior feature worktrees pruned.
+
+---
+
+## 2026-06-10 — Infra credential-drift cleanup + tf.sh lock hardening
+
+After #35/#36/#37 merged, `apply-shared` on `main` failed repeatedly with "lock held by another tf.sh invocation." It was **not** a stuck lock and **not** a code issue — it was accumulated credential drift from the Neon console work, compounded by a `tf.sh` bug:
+
+- **Root cause:** `PG_LOCK_URL` still pointed at `ep-divine-glitter` — an endpoint of the *old* Neon project that was destroyed when prod was recreated (`br-tiny-hall` → `steep-bar-51267535`). psql couldn't connect, and `acquire_lock`'s `psql … 2>/dev/null || echo "f"` swallowed the connection failure as "lock held." Repointed `PG_LOCK_URL` (secret + `.tfvars.local`) at the live project's **direct** endpoint (`ep-shy-pine-aqqb9ts5…`, no `-pooler`).
+- Also stale: the CI `NEON_API_KEY` secret (neon provider 401'd on plan) — re-synced from the working local key.
+- `gh` gotcha hit mid-fix: `source .tfvars.local` exported a bare `GITHUB_TOKEN` that shadowed the `gh` keyring login → `gh secret set` 401'd until run with `env -u GH_TOKEN -u GITHUB_TOKEN`.
+
+**This PR (`chore/infra-lock-hardening`):** `tf.sh acquire_lock` now preflights connectivity and fails with a clear "cannot connect to PG_LOCK_URL" instead of misreporting it as contention. `.tfvars.local.example` warns against a bare `GITHUB_TOKEN`/`GH_TOKEN` (gh-shadowing) and clarifies the lock host (one Neon project, direct endpoint). `docs/infra.md` reconciles the lock-host section (no separate bootstrap project) and rewrites the stuck-lock runbook (rule out connectivity first; terminate the backend, not advisory-unlock from another session).
+
+Note: the advisory lock is session-scoped and acquired+released within a single `psql -c`, so real apply-serialization rests on the GitHub Actions concurrency group; making the lock span the whole apply is a possible future improvement, not done here.
+
+**Operator follow-ups (credentials, out of band):** rotate the `app` DB password (it appeared in a session transcript), remove the bare `GITHUB_TOKEN` from local `.tfvars.local`, and confirm `.tfvars.local` ↔ CI secrets are back in sync. Stale `ci/e2e-gate-cleanup` branch (superseded by the gate already on `main`) pruned.
