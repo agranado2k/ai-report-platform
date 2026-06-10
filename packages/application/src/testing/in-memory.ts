@@ -34,7 +34,9 @@ import type {
   PlanLimiter,
   ProcessedBundle,
   ReportRepository,
+  ScanJobMessage,
   ScanQueue,
+  ScanWorkQueue,
   SlugFactory,
   UnitOfWork,
 } from "../ports";
@@ -157,6 +159,7 @@ export class InMemoryEventOutbox implements EventOutbox {
 
 export class RecordingScanQueue implements ScanQueue {
   readonly enqueued: Array<{ readonly reportId: ReportId; readonly versionId: VersionId }> = [];
+  readonly running: VersionId[] = [];
   readonly completed: Array<{
     readonly versionId: VersionId;
     readonly verdict: TerminalScanStatus;
@@ -167,11 +170,48 @@ export class RecordingScanQueue implements ScanQueue {
     return ok(undefined);
   }
 
+  async markRunning(versionId: VersionId): Promise<Result<void, AppError>> {
+    this.running.push(versionId);
+    return ok(undefined);
+  }
+
   async completeScan(
     versionId: VersionId,
     verdict: TerminalScanStatus,
   ): Promise<Result<void, AppError>> {
     this.completed.push({ versionId, verdict });
+    return ok(undefined);
+  }
+}
+
+/**
+ * In-memory ScanWorkQueue fake. `fetch` claims (removes) published jobs so a
+ * second drain doesn't re-deliver them; `complete`/`fail` just record. Models
+ * pg-boss closely enough to unit-test the drain orchestration.
+ */
+export class InMemoryScanWorkQueue implements ScanWorkQueue {
+  private seq = 0;
+  readonly available: ScanJobMessage[] = [];
+  readonly completedJobs: string[] = [];
+  readonly failedJobs: Array<{ readonly jobId: string; readonly reason: string }> = [];
+
+  async publish(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>> {
+    this.seq += 1;
+    this.available.push({ reportId, versionId, jobId: `job-${this.seq}` });
+    return ok(undefined);
+  }
+
+  async fetch(batchSize: number): Promise<Result<readonly ScanJobMessage[], AppError>> {
+    return ok(this.available.splice(0, batchSize));
+  }
+
+  async complete(jobId: string): Promise<Result<void, AppError>> {
+    this.completedJobs.push(jobId);
+    return ok(undefined);
+  }
+
+  async fail(jobId: string, reason: string): Promise<Result<void, AppError>> {
+    this.failedJobs.push({ jobId, reason });
     return ok(undefined);
   }
 }

@@ -41,6 +41,28 @@ export class DrizzleScanQueue implements ScanQueue {
     }
   }
 
+  async markRunning(versionId: VersionId): Promise<Result<void, AppError>> {
+    try {
+      // Best-effort `queued → running` when the worker claims the job. Guarded
+      // `status = 'queued'` so a duplicate delivery (job already running/done) is
+      // a no-op, not a backwards transition.
+      await this.ctx
+        .current()
+        .update(scanJobs)
+        .set({ status: "running", startedAt: new Date() })
+        .where(and(eq(scanJobs.reportVersionId, versionId), eq(scanJobs.status, "queued")));
+      return ok(undefined);
+    } catch (e) {
+      return {
+        ok: false,
+        error: {
+          kind: "Unexpected",
+          message: `scan.markRunning: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      };
+    }
+  }
+
   async completeScan(
     versionId: VersionId,
     verdict: TerminalScanStatus,
@@ -48,8 +70,8 @@ export class DrizzleScanQueue implements ScanQueue {
     try {
       // Guard `status != 'done'` so re-completing an already-terminal job is a
       // no-op rather than clobbering its verdict — matters once the real scanner
-      // (Phase 1.5) runs async and a duplicate event could race. (The Phase-1
-      // stub goes queued → done directly; the `running` state is Phase 1.5.)
+      // (Phase 1.5) runs async and a duplicate event could race. The async worker
+      // drives queued → running → done (markRunning above, then this).
       await this.ctx
         .current()
         .update(scanJobs)
