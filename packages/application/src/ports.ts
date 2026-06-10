@@ -15,6 +15,7 @@ import type {
   ReportId,
   Result,
   Slug,
+  TerminalScanStatus,
   UserId,
   VersionId,
 } from "arp-domain";
@@ -105,7 +106,14 @@ export interface EventOutbox {
 
 // ── Scan port (Abuse & Moderation). Phase 1 stub always yields clean. ──────
 export interface ScanQueue {
+  /** Record a queued scan for a freshly-uploaded version (status `queued`). */
   enqueueScan(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
+  /**
+   * Drive the version's scan job `queued → done` with the terminal verdict
+   * (called inside the same UnitOfWork as the promotion in processScanResult).
+   * Phase 1: invoked synchronously with `clean`; Phase 1.5: by the scanner worker.
+   */
+  completeScan(versionId: VersionId, verdict: TerminalScanStatus): Promise<Result<void, AppError>>;
 }
 
 // ── Plan limits (ADR-0006) ─────────────────────────────────────────────────

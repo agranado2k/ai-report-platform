@@ -16,6 +16,7 @@ import {
   type ReportId,
   type Result,
   type Slug,
+  type TerminalScanStatus,
   type VersionId,
 } from "arp-domain";
 import type {
@@ -156,9 +157,21 @@ export class InMemoryEventOutbox implements EventOutbox {
 
 export class RecordingScanQueue implements ScanQueue {
   readonly enqueued: Array<{ readonly reportId: ReportId; readonly versionId: VersionId }> = [];
+  readonly completed: Array<{
+    readonly versionId: VersionId;
+    readonly verdict: TerminalScanStatus;
+  }> = [];
 
   async enqueueScan(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>> {
     this.enqueued.push({ reportId, versionId });
+    return ok(undefined);
+  }
+
+  async completeScan(
+    versionId: VersionId,
+    verdict: TerminalScanStatus,
+  ): Promise<Result<void, AppError>> {
+    this.completed.push({ versionId, verdict });
     return ok(undefined);
   }
 }
