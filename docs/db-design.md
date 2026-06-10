@@ -308,7 +308,11 @@ variable), so no `DATABASE_URL` is ever stored or run locally:
 - **`migration-check.yml`** (PR, on `packages/db/**`): `drizzle-kit check` for
   folder/journal consistency, then create an ephemeral Neon branch → apply the
   full migration set → delete the branch (the verification gate).
-- **`migrate-db.yml`** (push to `main`, on `packages/db/**`): resolve the prod
-  (default `main`) branch's connection URI from the Neon API and apply pending
-  migrations — the single path that mutates the prod DB. Serialized via a
-  `migrate-db-prod` concurrency group so two applies never race.
+- **`migrate-db.yml`** (**migrate-on-deploy — every push to `main`**, plus
+  `workflow_dispatch`): resolve the prod (default `main`) branch's connection URI
+  from the Neon API and apply pending migrations — the single path that mutates
+  the prod DB. `drizzle-kit migrate` is idempotent, so it's a no-op when prod is
+  current and self-heals when it's behind (e.g. after a Neon branch reset wiped
+  the schema). It runs on *every* merge, not just `packages/db/**` changes,
+  because an infra-driven DB reset has no schema-file change to ride on.
+  Serialized via a `migrate-db-prod` concurrency group so two applies never race.

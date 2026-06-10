@@ -3,6 +3,35 @@
 Operator procedures that aren't fully captured by Terraform — credential
 issuance, one-time bootstraps, rotations.
 
+## Re-running prod migrations (`migrate-db`)
+
+The `migrate-db` workflow applies Drizzle migrations to the prod Neon `main`
+branch. **Migrate-on-deploy: it auto-runs on EVERY push to `main`.** `drizzle-kit
+migrate` is idempotent, so when prod is current it's a no-op, and when prod is
+behind (e.g. a `terraform apply` recreated the Neon branch and wiped the schema,
+as in 2026-06: `br-tiny-hall-aqqs1klw` → `br-wispy-flower-aqtttj6n`) the next
+merge self-heals it — **no human in the loop**. Safe because `migration-check`
+validates every migration on the PR (an ephemeral Neon branch) before it reaches
+`main`.
+
+A **`workflow_dispatch`** trigger remains as a manual escape hatch — to recover
+immediately without waiting for the next push:
+
+```bash
+gh workflow run migrate-db.yml --ref main
+sleep 5   # let the new run register, else `run list` returns the PREVIOUS run
+# then watch it + confirm which DB it targeted:
+gh run watch "$(gh run list --workflow=migrate-db.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+```
+
+Or use the GitHub UI: **Actions → Migrate DB (prod) → Run workflow**. The apply is
+idempotent (drizzle tracks applied migrations in `__drizzle_migrations`), so a
+dispatch on an already-current branch is a safe no-op. **Verify** the run log line
+`prod branch <id> db=<name> role=<role>` matches the database the app's
+`DATABASE_URL` uses (the project's default `neondb`) — if it targets a different
+DB (e.g. the TF-declared `ai_report_platform`), the app will still 500 and the
+db-discovery needs reconciling (see the diary drift note).
+
 ## Prod Neon DB — destroy protection
 
 The prod Neon `neon_project` / `neon_database` / `neon_role`

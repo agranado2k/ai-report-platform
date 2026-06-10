@@ -1,24 +1,34 @@
 name: Migrate DB (prod)
 
-# Applies pending Drizzle migrations to the PRODUCTION Neon branch (`main`)
-# whenever a schema change lands on the default branch. This is the ONLY path
-# that mutates the prod database — migrations are never run by hand (ADR-017,
-# ADR-019). Forward-only; rollback = Neon branch reset / PITR (docs/db-design.md).
+# Applies pending Drizzle migrations to the PRODUCTION Neon branch (`main`).
+# This is the ONLY path that mutates the prod database — migrations are never
+# run by hand (ADR-017, ADR-019). Forward-only; rollback = Neon branch reset /
+# PITR (docs/db-design.md).
+#
+# Migrate-on-deploy: runs on EVERY push to `main`, not just schema-file changes.
+# `drizzle-kit migrate` is idempotent (it tracks applied migrations in
+# __drizzle_migrations), so:
+#   - when prod is already current → a cheap no-op;
+#   - when prod is BEHIND → it self-heals.
+# The narrow `packages/db/**`-only trigger was the bug behind the 2026-06
+# outage: a `terraform apply` recreated the Neon project/branch
+# (br-tiny-hall-aqqs1klw → br-wispy-flower-aqtttj6n) and wiped the applied
+# `0000`, but nothing under packages/db changed, so the migration never re-ran
+# and the app 500'd with "relation does not exist". Running on every merge means
+# the next push to main re-applies the schema with no human in the loop. Safe to
+# auto-apply because `migration-check` validates every migration on the PR (an
+# ephemeral Neon branch) before it reaches main. `workflow_dispatch` stays as a
+# manual escape hatch (e.g. to recover without waiting for a push).
 #
 # The prod connection URI is fetched at run time from the Neon API
 # (NEON_API_KEY secret + NEON_PROJECT_ID variable) and masked — no long-lived
 # DATABASE_URL secret is stored. Prod branch = `main`; the database + owning
-# role are discovered from the Neon API at run time (the prod branch actually
-# uses neondb/neondb_owner, not the TF-declared names — see docs/diary.md).
+# role are discovered from the Neon API at run time.
 
 on:
+  workflow_dispatch: # manual escape hatch — recover without waiting for a push
   push:
-    branches: [main]
-    # Schema paths only — NOT this workflow file. Editing the workflow must not
-    # trigger a prod migration apply (the apply is idempotent, but the trigger
-    # should track schema changes, not CI edits).
-    paths:
-      - "packages/db/**"
+    branches: [main] # migrate-on-deploy: every merge re-applies pending migrations (idempotent)
 
 permissions:
   contents: read
@@ -76,8 +86,15 @@ jobs:
           if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
             echo "::error::could not resolve the default (prod) Neon branch"; exit 1
           fi
-          # Discover the db + owning role from the branch (don't assume names —
-          # the prod branch uses neondb/neondb_owner, not the TF-declared names).
+          # Discover the db + owning role from the branch rather than hardcoding.
+          # NOTE: this picks `.databases[0]` — fine while the prod branch has a
+          # single database (Neon's default `neondb`/`neondb_owner`, which is what
+          # the app's DATABASE_URL = neon_project.connection_uri uses). The TF
+          # module also declares a separate `ai_report_platform`/`app` db/role
+          # that nothing currently reads (unreconciled drift, see docs/diary.md);
+          # if it ever materializes on this branch, `[0]` is ambiguous and must
+          # select the app's db explicitly. The run echoes `db=` below — it must
+          # read `db=neondb`. (Tracked follow-up; see PR #32.)
           dbs=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches/$branch_id/databases" \
             -H "Authorization: Bearer $NEON_API_KEY")
           db_name=$(printf '%s' "$dbs" | jq -r '.databases[0].name // empty')
