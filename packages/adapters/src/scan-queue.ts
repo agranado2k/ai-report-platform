@@ -15,7 +15,7 @@ import {
   type TerminalScanStatus,
   type VersionId,
 } from "arp-domain";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbContext } from "./client";
 
@@ -46,11 +46,15 @@ export class DrizzleScanQueue implements ScanQueue {
     verdict: TerminalScanStatus,
   ): Promise<Result<void, AppError>> {
     try {
+      // Guard `status != 'done'` so re-completing an already-terminal job is a
+      // no-op rather than clobbering its verdict — matters once the real scanner
+      // (Phase 1.5) runs async and a duplicate event could race. (The Phase-1
+      // stub goes queued → done directly; the `running` state is Phase 1.5.)
       await this.ctx
         .current()
         .update(scanJobs)
         .set({ status: "done", verdict, finishedAt: new Date() })
-        .where(eq(scanJobs.reportVersionId, versionId));
+        .where(and(eq(scanJobs.reportVersionId, versionId), ne(scanJobs.status, "done")));
       return ok(undefined);
     } catch (e) {
       return {

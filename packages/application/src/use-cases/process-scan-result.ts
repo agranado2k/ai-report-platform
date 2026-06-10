@@ -6,6 +6,14 @@
 // successful upload (verdict `clean`). Phase 1.5: the real scanner worker invokes
 // it with the actual verdict when a `ReportVersionScanned` event is consumed.
 // Either way the body is identical — the verdict is the only input that changes.
+//
+// BOUNDED-CONTEXT NOTE (ADR-0036): this commits a Reports & Folders write
+// (promote live_version_id) and an Abuse & Moderation write (completeScan on
+// scan_jobs) in one transaction — an intentional Phase-1 expedient. The clean
+// split is: Abuse & Moderation owns the scan, emits ReportVersionScanned, and
+// Reports & Folders consumes that event to promote (cross-context via events,
+// not a shared transaction). Phase 1.5 moves the completeScan side into the
+// A&M context behind the event; the domain applyScanResult call stays here.
 
 import {
   type AppError,

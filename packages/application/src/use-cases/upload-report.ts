@@ -15,9 +15,11 @@ import {
   notFound,
   type OrgId,
   ok,
+  type ReportId,
   type Result,
   type ScanStatus,
   type UserId,
+  type VersionId,
   type VersionManifest,
 } from "arp-domain";
 import type {
@@ -76,6 +78,11 @@ export interface UploadResult {
 export interface UploadOutcome {
   readonly result: UploadResult;
   readonly replayed: boolean; // true → idempotent replay of a prior response
+  // Internal handles to the just-created version, so the caller can drive the
+  // Phase-1 scan stub without a second findBySlug round-trip. Present only on a
+  // fresh upload (undefined on idempotent replay — already scanned first time).
+  readonly reportId?: ReportId;
+  readonly versionId?: VersionId;
 }
 
 export async function uploadReport(
@@ -148,11 +155,12 @@ export async function uploadReport(
     return committed;
   }
 
-  // 8. Enqueue the scan (Phase-1 stub yields clean → async promotion).
+  // 8. Enqueue the scan. The caller drives it to a verdict via processScanResult
+  //    (Phase-1 stub: synchronously clean; Phase 1.5: the real scanner worker).
   const scan = await deps.scans.enqueueScan(report.id, newVersion.id);
   if (!scan.ok) return scan;
 
-  return ok({ result, replayed: false });
+  return ok({ result, replayed: false, reportId: report.id, versionId: newVersion.id });
 }
 
 function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
