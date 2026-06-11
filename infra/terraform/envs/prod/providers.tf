@@ -6,6 +6,7 @@ terraform {
     vercel     = { source = "vercel/vercel", version = "~> 2.0" }
     upstash    = { source = "upstash/upstash", version = "~> 1.5" }
     random     = { source = "hashicorp/random", version = "~> 3.6" }
+    null       = { source = "hashicorp/null", version = "~> 3.2" }
   }
 
   backend "s3" {

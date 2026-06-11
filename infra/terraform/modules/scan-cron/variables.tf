@@ -24,6 +24,28 @@ variable "drain_secret" {
   description = "Shared bearer secret the Worker presents; matches the app's SCAN_DRAIN_SECRET."
 }
 
+variable "cf_api_token" {
+  type        = string
+  sensitive   = true
+  description = <<-EOT
+    Cloudflare API token (needs Workers Scripts: Edit) used to register the
+    account workers.dev subdomain via the API. No native TF resource exists for
+    this in v4 or v5 — only the per-script `workers_script_subdomain` toggle —
+    so it's done with a null_resource + curl (the pattern the r2 module's
+    versioning TODO already contemplates).
+  EOT
+}
+
+variable "workers_subdomain" {
+  type        = string
+  description = <<-EOT
+    Globally-unique workers.dev subdomain to register for the account, one-time
+    (CF error 10063 blocks any Worker cron trigger until it exists). Cosmetic —
+    our cron Worker never serves on it. If the apply fails "subdomain taken",
+    pick another name.
+  EOT
+}
+
 variable "schedules" {
   type        = list(string)
   default     = ["* * * * *"]
