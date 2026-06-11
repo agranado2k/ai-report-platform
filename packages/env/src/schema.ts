@@ -12,8 +12,11 @@ export const serverSchema = {
   DATABASE_URL: z.url(),
 
   // Async scan pipeline (ADR-0045). Shared secret the Cloudflare cron Worker
-  // presents to POST /internal/scan-drain — required, so the drain is fail-closed.
-  SCAN_DRAIN_SECRET: trimmedString,
+  // presents to POST /internal/scan-drain. OPTIONAL at the env layer (it's
+  // provisioned by Terraform independently of the code deploy, so the app must
+  // boot without it) — the drain route itself is fail-closed: it returns 503
+  // when this is unset and 401 on a mismatch.
+  SCAN_DRAIN_SECRET: trimmedString.optional(),
   // pg-boss connection string (node-postgres TCP). Defaults to DATABASE_URL when
   // unset; set it to Neon's POOLED endpoint so the drain doesn't exhaust
   // connections under serverless cold starts. Optional.

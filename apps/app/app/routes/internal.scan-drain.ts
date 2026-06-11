@@ -43,6 +43,11 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const env = defineEnv();
+  // Fail-closed: if the secret isn't provisioned yet (Terraform not applied),
+  // the drain refuses rather than running unauthenticated.
+  if (!env.SCAN_DRAIN_SECRET) {
+    return jsonResponse(503, { error: "scan_drain_not_configured" });
+  }
   const provided = bearerToken(request.headers.get("authorization"));
   if (!provided || !secretMatches(provided, env.SCAN_DRAIN_SECRET)) {
     return jsonResponse(401, { error: "unauthorized" });
