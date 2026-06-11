@@ -42,9 +42,41 @@ Then(
   },
 );
 
-Then('fetching the "view_url" serves the uploaded report', async ({ request }) => {
-  const viewUrl = body.view_url as string;
-  const viewed = await request.get(viewUrl);
-  expect(viewed.status(), `GET ${viewUrl}`).toBe(200);
-  expect(await viewed.text()).toContain(MARKER);
+Then('the "view_url" shows the scanning holding page', async ({ request }) => {
+  // Promotion is async now (ADR-0045): immediately after upload the version is
+  // `pending`, so the viewer serves the ADR-0038 holding page (200, noindex),
+  // not the content. This is the core behavior this PR introduces.
+  const viewed = await request.get(body.view_url as string);
+  expect(viewed.status()).toBe(200);
+  const text = await viewed.text();
+  expect(text).toContain("Scanning");
+  expect(text).not.toContain(MARKER);
+  expect(viewed.headers()["x-robots-tag"] ?? "").toContain("noindex");
 });
+
+Then(
+  'after the scan drain runs, the "view_url" serves the uploaded report',
+  async ({ request }) => {
+    // The full drain→promote round-trip needs the bearer secret to POST the
+    // drain (CF cron only targets prod). When it's exposed to the test env we
+    // drive it and poll until the clean version is promoted + served; otherwise
+    // the holding-page assertion above is the CI coverage. (Follow-up: expose
+    // SCAN_DRAIN_SECRET to the e2e job so this runs in CI too.)
+    const secret = process.env.SCAN_DRAIN_SECRET;
+    if (!secret) {
+      // biome-ignore lint/suspicious/noConsole: surfaces the partial coverage in CI logs.
+      console.warn("SCAN_DRAIN_SECRET unset — skipping the drain→promote round-trip");
+      return;
+    }
+    const drain = await request.post("/internal/scan-drain", {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(drain.status(), await drain.text()).toBe(200);
+    await expect
+      .poll(async () => (await request.get(body.view_url as string)).then((r) => r.text()), {
+        timeout: 30_000,
+        intervals: [1_000, 2_000, 3_000, 5_000],
+      })
+      .toContain(MARKER);
+  },
+);
