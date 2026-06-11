@@ -24,7 +24,10 @@ resource "null_resource" "workers_subdomain" {
     }
     command = <<-EOT
       set -euo pipefail
-      resp=$(curl -fsS -X PUT \
+      # No `-f`: on a 4xx/5xx we WANT the response body (Cloudflare populates a
+      # human-readable `errors` array) — the success check below is the real gate,
+      # so `-f` would only swallow that diagnostic and return a bare exit 22.
+      resp=$(curl -sS -X PUT \
         "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/subdomain" \
         -H "Authorization: Bearer $CF_API_TOKEN" \
         -H "Content-Type: application/json" \
