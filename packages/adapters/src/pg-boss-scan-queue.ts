@@ -25,7 +25,13 @@ export class PgBossScanWorkQueue implements ScanWorkQueue {
 
   async publish(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>> {
     try {
-      await this.boss.send(SCAN_QUEUE, { reportId, versionId } satisfies ScanJobData);
+      // singletonKey = versionId dedupes: the drain re-publishes still-`queued`
+      // rows every tick, so without this an unprocessed version would accumulate
+      // a duplicate pg-boss job per tick. With it, at most one live job exists
+      // per version (processing stays idempotent regardless).
+      await this.boss.send(SCAN_QUEUE, { reportId, versionId } satisfies ScanJobData, {
+        singletonKey: versionId,
+      });
       return ok(undefined);
     } catch (e) {
       return unexpected("scanWork.publish", e);
