@@ -109,6 +109,20 @@ describe("drainScans", () => {
     expect(saved.ok && saved.value?.liveVersionId).toBe(null);
   });
 
+  it("reconciles queued scan_jobs into the work queue, then processes them", async () => {
+    const d = deps(scannerReturning("clean"));
+    await seedPendingReport(d.reports);
+    // Nothing published directly — the row is only in scan_jobs (status queued).
+    d.scans.queuedList = [{ reportId: RID, versionId: VID }];
+
+    const r = await drainScans(d, { batchSize: 10 });
+
+    expect(r.ok && r.value).toEqual({ processed: 1, failed: 0 });
+    const saved = await d.reports.findById(RID);
+    expect(saved.ok && saved.value?.liveVersionId).toBe(VID);
+    expect(d.outbox.drained().filter((e) => e.type === "ReportPublished")).toHaveLength(1);
+  });
+
   it("is idempotent under duplicate delivery: re-processing the same version promotes only once", async () => {
     const d = deps(scannerReturning("clean"));
     await seedPendingReport(d.reports);

@@ -5,8 +5,8 @@
 // processScanResult use case (application layer) — this adapter only owns the
 // scan_jobs row. Phase 1 calls completeScan synchronously with `clean`;
 // Phase 1.5's real scanner calls it with the actual verdict.
-import type { ScanQueue } from "arp-application";
-import { scanJobs } from "arp-db/schema";
+import type { ScanQueue, ScanRequest } from "arp-application";
+import { reportVersions, scanJobs } from "arp-db/schema";
 import {
   type AppError,
   ok,
@@ -36,6 +36,34 @@ export class DrizzleScanQueue implements ScanQueue {
         error: {
           kind: "Unexpected",
           message: `scan.enqueue: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      };
+    }
+  }
+
+  async listQueued(limit: number): Promise<Result<readonly ScanRequest[], AppError>> {
+    try {
+      // Join report_versions to recover the reportId the work queue needs
+      // (scan_jobs only holds report_version_id). Indexed by scan_jobs_status_idx.
+      const rows = await this.ctx
+        .current()
+        .select({ reportId: reportVersions.reportId, versionId: scanJobs.reportVersionId })
+        .from(scanJobs)
+        .innerJoin(reportVersions, eq(reportVersions.id, scanJobs.reportVersionId))
+        .where(eq(scanJobs.status, "queued"))
+        .limit(limit);
+      return ok(
+        rows.map((r) => ({
+          reportId: r.reportId as ReportId,
+          versionId: r.versionId as VersionId,
+        })),
+      );
+    } catch (e) {
+      return {
+        ok: false,
+        error: {
+          kind: "Unexpected",
+          message: `scan.listQueued: ${e instanceof Error ? e.message : String(e)}`,
         },
       };
     }

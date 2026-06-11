@@ -3,6 +3,7 @@ import { defineEnv } from "./define-env";
 
 const valid: Record<string, string | undefined> = {
   DATABASE_URL: "postgres://user:pass@db.neon.tech/main",
+  SCAN_DRAIN_SECRET: "drain-secret",
   R2_ACCOUNT_ID: "acct",
   R2_ACCESS_KEY_ID: "akid",
   R2_SECRET_ACCESS_KEY: "r2secret",

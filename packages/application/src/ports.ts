@@ -109,6 +109,13 @@ export interface ScanQueue {
   /** Record a queued scan for a freshly-uploaded version (status `queued`). */
   enqueueScan(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
   /**
+   * The versions still awaiting a scan (`scan_jobs.status = 'queued'`), capped at
+   * `limit`. The drain reconciles these into the work queue each tick — so a
+   * lost enqueue never strands a version at `pending` (scan_jobs is the work
+   * list of record; the work queue is just the retrying processor).
+   */
+  listQueued(limit: number): Promise<Result<readonly ScanRequest[], AppError>>;
+  /**
    * Best-effort `queued → running` transition (guarded queued-only) when the
    * worker picks the job up — the observability state the Phase-1 stub skipped.
    */

@@ -4,20 +4,23 @@
 // this is the ONLY place the concrete adapters are assembled.
 import {
   AllowAllPlanLimiter,
+  CleanStubScanner,
   DbContext,
   DrizzleEventOutbox,
   DrizzleIdempotencyStore,
   DrizzleReportRepository,
   DrizzleScanQueue,
   DrizzleUnitOfWork,
+  getBoss,
   HtmlBundleProcessor,
   NanoidSlugFactory,
+  PgBossScanWorkQueue,
   R2BlobStore,
   Sha256Hasher,
   SystemClock,
   UuidV7IdGenerator,
 } from "arp-adapters";
-import type { UploadActor, UploadReportDeps } from "arp-application";
+import type { DrainScansDeps, UploadActor, UploadReportDeps } from "arp-application";
 import { folders, orgs, users } from "arp-db/schema";
 import { folderId, orgId, userId } from "arp-domain";
 import { defineEnv } from "arp-env";
@@ -75,6 +78,26 @@ export function deps(): UploadReportDeps {
     uow: new DrizzleUnitOfWork(ctx),
   };
   return _deps;
+}
+
+/**
+ * Deps for the async scan drain (ADR-0045). Reuses the Drizzle ports from deps()
+ * and adds the pg-boss work queue + the (Phase-1.5a stub) Scanner. pg-boss runs
+ * over node-postgres TCP against the POOLED Neon endpoint (SCAN_QUEUE_DATABASE_URL,
+ * falling back to DATABASE_URL) — separate from DbContext's WebSocket pool.
+ */
+export async function scanDrainDeps(): Promise<DrainScansDeps> {
+  const env = defineEnv();
+  const base = deps();
+  const boss = await getBoss(env.SCAN_QUEUE_DATABASE_URL ?? env.DATABASE_URL);
+  return {
+    reports: base.reports,
+    scans: base.scans,
+    outbox: base.outbox,
+    uow: base.uow,
+    scanWork: new PgBossScanWorkQueue(boss),
+    scanner: new CleanStubScanner(),
+  };
 }
 
 /** Idempotently ensure the dev org/user/folder exist (FK targets for uploads). */

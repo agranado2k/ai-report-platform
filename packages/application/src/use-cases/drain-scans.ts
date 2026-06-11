@@ -29,6 +29,19 @@ export async function drainScans(
   deps: DrainScansDeps,
   cmd: DrainScansCommand,
 ): Promise<Result<DrainScansOutcome, AppError>> {
+  // Reconcile: hand every still-queued version to the work queue. scan_jobs is
+  // the work list of record, so a version uploaded while a prior tick was in
+  // flight (or whose enqueue was otherwise lost) is always picked up here —
+  // nothing strands at `pending`. Re-publishing an in-flight job is harmless:
+  // processing is idempotent (completeScan guard + monotonic promote), and the
+  // job moves to `running` this same tick so it won't be re-listed next time.
+  const queued = await deps.scans.listQueued(cmd.batchSize);
+  if (!queued.ok) return queued;
+  for (const req of queued.value) {
+    // Best-effort: a publish failure leaves the row `queued` for the next tick.
+    await deps.scanWork.publish(req.reportId, req.versionId);
+  }
+
   const batch = await deps.scanWork.fetch(cmd.batchSize);
   if (!batch.ok) return batch;
 

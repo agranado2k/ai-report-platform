@@ -8,6 +8,8 @@ export * from "./bundle-processor";
 export * from "./client";
 export * from "./event-outbox";
 export * from "./idempotency-store";
+export * from "./pg-boss";
+export * from "./pg-boss-scan-queue";
 export * from "./plan-limiter";
 export * from "./r2-blob-store";
 export * from "./report-repository";

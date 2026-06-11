@@ -11,6 +11,14 @@ export const serverSchema = {
   // Neon Postgres connection string (Reports & Folders persistence, ADR-020).
   DATABASE_URL: z.url(),
 
+  // Async scan pipeline (ADR-0045). Shared secret the Cloudflare cron Worker
+  // presents to POST /internal/scan-drain — required, so the drain is fail-closed.
+  SCAN_DRAIN_SECRET: trimmedString,
+  // pg-boss connection string (node-postgres TCP). Defaults to DATABASE_URL when
+  // unset; set it to Neon's POOLED endpoint so the drain doesn't exhaust
+  // connections under serverless cold starts. Optional.
+  SCAN_QUEUE_DATABASE_URL: z.url().optional(),
+
   // Cloudflare R2 (blob storage, ADR-0004).
   R2_ACCOUNT_ID: trimmedString,
   R2_ACCESS_KEY_ID: trimmedString,

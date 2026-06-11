@@ -36,6 +36,7 @@ import type {
   ReportRepository,
   ScanJobMessage,
   ScanQueue,
+  ScanRequest,
   ScanWorkQueue,
   SlugFactory,
   UnitOfWork,
@@ -164,10 +165,16 @@ export class RecordingScanQueue implements ScanQueue {
     readonly versionId: VersionId;
     readonly verdict: TerminalScanStatus;
   }> = [];
+  /** Test-settable: the rows listQueued returns (the reconcile work list). */
+  queuedList: ScanRequest[] = [];
 
   async enqueueScan(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>> {
     this.enqueued.push({ reportId, versionId });
     return ok(undefined);
+  }
+
+  async listQueued(_limit: number): Promise<Result<readonly ScanRequest[], AppError>> {
+    return ok(this.queuedList);
   }
 
   async markRunning(versionId: VersionId): Promise<Result<void, AppError>> {
