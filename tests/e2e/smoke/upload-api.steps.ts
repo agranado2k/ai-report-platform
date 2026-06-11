@@ -9,9 +9,13 @@ const { When, Then } = createBdd();
 let response: APIResponse;
 let body: Record<string, unknown>;
 
-// A unique marker so the served page can be asserted to be THIS upload (the slug
-// factory is random; the marker is the only content we control end-to-end).
-const MARKER = "arp-smoke-upload-marker";
+// A marker unique PER RUN. Two reasons: (1) it identifies THIS upload in the
+// served page; (2) — critically — it keeps the upload hermetic. Previews share
+// the prod DB, and an identical body derives the same idempotency key (ADR-0039),
+// so fixed content would *replay* a prior run's upload (which an earlier run may
+// have promoted to live) — making the "holding page" assertion flaky. Unique
+// content => a fresh `pending` report every run => the viewer truly holds.
+const MARKER = `arp-smoke-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const HTML = `<!doctype html><html><body><h1>${MARKER}</h1></body></html>`;
 
 When("I upload an HTML report file to {string}", async ({ request }, path: string) => {
