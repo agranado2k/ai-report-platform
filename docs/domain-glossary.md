@@ -41,6 +41,8 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 ## Abuse & Moderation context
 
 - **ScanJob** — the aggregate tracking the upload-time content scan of a `ReportVersion` through its lifecycle (`queued` → `running` → `done` / `failed`). Owns the scan `findings` (ClamAV + phishing/miner heuristics). On completion it emits `ReportVersionScanned` carrying the verdict; Reports & Folders caches that verdict on `ReportVersion.scan_status`. Spec: ADR-012.
+- **Scanner** — the port (verdict engine) a `ScanJob` runs a `ReportVersion` through to obtain its terminal verdict (`clean` / `flagged` / `blocked`). Phase-1.5a: `CleanStubScanner` always returns `clean` (invite-only MVP); the real ClamAV + phishing/miner engine slots in behind the same port with no call-site change. Spec: ADR-0045.
+- **ScanWorkQueue** — the delivery port that hands queued `ReportVersion`s to the async scan worker (the drain) and tracks ack/retry; distinct from `ScanJob`/`scan_jobs`, which remain the source of truth for the cached `scan_status`. Implemented on pg-boss; swappable. Spec: ADR-0045.
 - **Abuse report** — a user-submitted complaint about a hosted `Report` (phishing, malware, CSAM, other). Aggregate root. Tracked with `status` and an action audit trail. Spec: ADR-012.
 - **Takedown** — the operator action that withdraws a `Report` from public serving. Emits `ReportTakenDown`; Reports & Folders soft-deletes the `Report` row (`deleted_at`) and the R2 keys are queued for purge after the appeal window. Spec: ADR-012.
 - **CSP report** — an inbound Content-Security-Policy violation report sent by viewer browsers to `/csp-report`. Used for policy drift detection. Spec: ADR-013.

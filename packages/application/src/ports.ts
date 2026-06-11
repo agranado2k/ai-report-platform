@@ -109,11 +109,59 @@ export interface ScanQueue {
   /** Record a queued scan for a freshly-uploaded version (status `queued`). */
   enqueueScan(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
   /**
-   * Drive the version's scan job `queued → done` with the terminal verdict
+   * The versions still awaiting a scan (`scan_jobs.status = 'queued'`), capped at
+   * `limit`. The drain reconciles these into the work queue each tick — so a
+   * lost enqueue never strands a version at `pending` (scan_jobs is the work
+   * list of record; the work queue is just the retrying processor).
+   */
+  listQueued(limit: number): Promise<Result<readonly ScanRequest[], AppError>>;
+  /**
+   * Best-effort `queued → running` transition (guarded queued-only) when the
+   * worker picks the job up — the observability state the Phase-1 stub skipped.
+   */
+  markRunning(versionId: VersionId): Promise<Result<void, AppError>>;
+  /**
+   * Drive the version's scan job `running → done` with the terminal verdict
    * (called inside the same UnitOfWork as the promotion in processScanResult).
    * Phase 1: invoked synchronously with `clean`; Phase 1.5: by the scanner worker.
    */
   completeScan(versionId: VersionId, verdict: TerminalScanStatus): Promise<Result<void, AppError>>;
+}
+
+// ── Scan work queue (delivery). Distinct from the domain ScanQueue (scan_jobs
+// is the source of truth for the viewer's cached scan_status); this is the
+// transport that hands queued versions to the async worker — pg-boss on Neon in
+// production, an in-memory fake in tests. Infra stays in the adapter (ADR-0024).
+export interface ScanJobMessage {
+  readonly reportId: ReportId;
+  readonly versionId: VersionId;
+  /** The delivery-layer job handle (pg-boss job id) — opaque to the application. */
+  readonly jobId: string;
+}
+
+export interface ScanWorkQueue {
+  /** Hand a freshly-uploaded version to the worker (best-effort, post-commit). */
+  publish(reportId: ReportId, versionId: VersionId): Promise<Result<void, AppError>>;
+  /** Claim up to `batchSize` queued jobs for processing (marks them in-flight). */
+  fetch(batchSize: number): Promise<Result<readonly ScanJobMessage[], AppError>>;
+  /** Remove a job from the queue after it was processed successfully. */
+  complete(jobId: string): Promise<Result<void, AppError>>;
+  /** Return a job to the queue (retried on a later tick) after a failure. */
+  fail(jobId: string, reason: string): Promise<Result<void, AppError>>;
+}
+
+// ── Scanner (Abuse & Moderation). The verdict engine, behind a port so the ──
+// Phase-1.5a always-clean stub and the real ClamAV/heuristics scanner are
+// interchangeable with zero call-site change. Infra (pg-boss, ClamAV, …) lives
+// in the adapter, never here (ADR-0024).
+export interface ScanRequest {
+  readonly reportId: ReportId;
+  readonly versionId: VersionId;
+}
+
+export interface Scanner {
+  /** Inspect a version's bundle and return a terminal verdict. */
+  scan(req: ScanRequest): Promise<Result<TerminalScanStatus, AppError>>;
 }
 
 // ── Plan limits (ADR-0006) ─────────────────────────────────────────────────

@@ -16,6 +16,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0042 | [Adopt Vitest as the unit/integration test runner](0042-adopt-vitest-test-runner.md) | Accepted (2026-06-04) |
 | 0043 | [Validate environment variables with Zod + @t3-oss/env-core](0043-zod-env-validation.md) | Accepted (2026-06-04) |
 | 0044 | [Signed merge commits instead of rebase-merge + bot-merge](0044-merge-commit-strategy.md) | Accepted (2026-06-09) |
+| 0045 | [Async content-scan pipeline (pg-boss on Neon, Cloudflare cron)](0045-async-content-scan-pipeline.md) | Accepted (2026-06-11) |
 
 ## Backlog (ADRs 1–30 from the spec)
 
