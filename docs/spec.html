@@ -1975,6 +1975,8 @@ POST /api/v1/reports
     <div class="adr">
       <h3><span class="adr-id">ADR-012</span> Upload content scanning <span class="status">Accepted</span> <span class="pill p0">P0</span></h3>
       <p class="field"><b>Decision</b> Three-stage pipeline: sync pre-checks → async scan (ClamAV + phishing heuristics + miners) → clean/flagged/blocked. Per-page abuse-report link.</p>
+      <p class="field"><b>Layered model</b> For hosting untrusted static HTML, the layers are, in order of importance: (1) sync pre-checks (MIME allowlist, size/count/decompression caps, ADR-037 §9); (2) <em>origin isolation + sandbox CSP</em> (ADR-013/038) — the <b>primary</b> runtime containment; for static HTML <b>isolation &gt; AV</b>; (3) async signature scan (ClamAV) for known-malware downloads; (4) phishing/miner heuristics; (5) reactive abuse-report + takedown. Signature AV is one layer of defense-in-depth, not the main gate.</p>
+      <p class="field pill updated"><b>Phase 1.5a (ADR-0045)</b> The async <em>transport</em> is built — pg-boss on Neon, drained by a free Cloudflare cron Worker hitting <code>POST /internal/scan-drain</code>, behind a swappable <code>Scanner</code> port. The verdict is a dummy <code>clean</code> stub for the invite-only MVP; the real ClamAV/heuristics <em>engine</em> (layers 3–4) slots in later with no call-site change. Full record: <code>docs/adr/0045-async-content-scan-pipeline.md</code>.</p>
     </div>
 
     <div class="adr">

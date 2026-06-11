@@ -199,6 +199,21 @@ All 13 Gherkin features in `tests/e2e/infrastructure/` should pass green. If any
 
 ---
 
+## Async scan pipeline (ADR-0045)
+
+The async content-scan pipeline runs on infrastructure you already have, plus one free Cloudflare Worker:
+
+- **Queue: pg-boss on the prod Neon database.** It **self-manages** a dedicated `pgboss` schema at runtime (the `app` role owns the DB, so no grant is needed). This schema is **not** in the Drizzle/`migrate-db` pipeline by design (pg-boss 12's partitioned per-queue tables can't be frozen into a static migration). Our `public` app tables still go through Drizzle.
+- **Trigger: `modules/scan-cron`** — a Cloudflare Cron Trigger Worker (`arp-scan-drain-prod`, free Workers plan) that POSTs `https://app.<apex>/internal/scan-drain` every minute with a shared bearer secret.
+- **Secret: `SCAN_DRAIN_SECRET`** — a self-generated `random_password` (no operator input), set on the Vercel app for **production + preview** (preview so the e2e can drive the drain itself, since cron only targets prod).
+- **Optional `SCAN_QUEUE_DATABASE_URL`** — point pg-boss at Neon's **pooled** endpoint at scale; defaults to `DATABASE_URL` (direct) which is fine for low volume.
+
+**Operator prerequisite:** the Cloudflare API token (`TF_VAR_cloudflare_api_token`) must include **Workers Scripts: Edit** (in addition to the DNS/zone/R2 permissions it already has) — otherwise `tf.sh prod apply` fails creating `cloudflare_workers_script.scan_drain`. Add the permission in the Cloudflare dashboard (My Profile → API Tokens) and re-run.
+
+**Verify after apply:** the Worker appears under Workers & Pages with a cron schedule; `POST https://app.<apex>/internal/scan-drain` with `Authorization: Bearer $SCAN_DRAIN_SECRET` returns `200 {"drained":N,"failed":0}` (401 without the header). Upload a report → it shows the "scanning…" holding page → within ~1 min it serves the content (the cron drain promoted it).
+
+---
+
 ## Common issues
 
 ### Stuck advisory lock
