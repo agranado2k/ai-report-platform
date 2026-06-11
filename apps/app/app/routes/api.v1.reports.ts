@@ -4,7 +4,7 @@
 // arp-http mapper. All policy lives in the application/domain; this file only
 // translates HTTP ⇆ use-case Result and never throws a bare error to the client.
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { processScanResult, type UploadActor, uploadReport } from "arp-application";
+import { type UploadActor, uploadReport } from "arp-application";
 import { err } from "arp-domain";
 import { type HttpResponse, uploadResultToHttp } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
@@ -38,28 +38,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const commandResult = await parseUploadCommand(request, actor);
   if (!commandResult.ok) return toResponse(uploadResultToHttp(commandResult, opts));
 
-  // 3. Run the use case against the real adapters.
+  // 3. Run the use case against the real adapters. The version is committed as
+  //    `pending`; promotion happens asynchronously when the scan drain processes
+  //    it (ADR-0045) — the 201 truthfully returns scan_status: pending, and the
+  //    viewer shows the holding page until the drain promotes the clean version.
   await ensureDevIdentity();
   const result = await uploadReport(deps(), commandResult.value);
-
-  // 4. Phase-1 always-clean scan stub: promote the fresh version so /r/<slug>
-  //    serves it. The 201 still reports `pending` per the contract — promotion is
-  //    asynchronous from the client's view (it re-fetches the slug). Skipped on
-  //    idempotent replay. Genuinely best-effort: this side effect must never turn
-  //    the upload the client already earned into a 500 — a throw (e.g. a DB
-  //    hiccup in findById, outside the use case's own tx-rollback catch) only
-  //    leaves the version `pending`, which the viewer's holding page handles.
-  if (result.ok && !result.value.replayed && result.value.reportId && result.value.versionId) {
-    try {
-      await processScanResult(deps(), {
-        reportId: result.value.reportId,
-        versionId: result.value.versionId,
-        verdict: "clean",
-      });
-    } catch (e) {
-      console.warn(`[api.v1.reports] scan-stub promotion failed (version stays pending):`, e);
-    }
-  }
 
   return toResponse(uploadResultToHttp(result, opts));
 }
