@@ -1114,3 +1114,22 @@ Note: the advisory lock is session-scoped and acquired+released within a single 
 **Deferred → issue #41 (Phase 1.5):** `view_url` / `Location` emit `app-origin/r/<slug>` (correct for today's co-located viewer — the e2e smoke proves the round-trip) rather than the canonical PSL-isolated `view.<domain>/<slug>` (ADR-002 / ADR-0038). Operator chose **merge-now + tracked follow-up** (separate `apps/view` deploy + DNS + a validated `VIEWER_BASE_URL` env seam per ADR-0043 + `/r/`→`/` path), to land with the async scanner. Also tracked there: RFC 9457 `instance` — deferred because the naive value (`request.url`) is constant per endpoint and so isn't the per-occurrence anchor RFC 9457 §3.2 intends; needs a request-id middleware.
 
 **Process:** worktree `feat/api-v1-reports`, off `main` (`7973eae`); merged as `2545f95` (#40). The infra worktree `chore/infra-lock-hardening` (#38) also merged. Both feature worktrees pruned. (This entry shipped via a small `docs/diary-phase1-api` worktree, since `main` is PR-protected.)
+
+---
+
+## 2026-06-11 — Phase 1.5a: async content-scan pipeline (ADR-0045)
+
+**Milestone:** the scan pipeline is now genuinely **asynchronous** — uploads commit `pending`, and a background drain promotes the clean version (no more synchronous always-clean promote in the request). The verdict is still a **dummy `clean` stub** (invite-only MVP); the *transport* is real. Full rationale in **ADR-0045**.
+
+**Architecture (PR #43, merged `f2afd1c`):**
+- **pg-boss on the existing Neon DB** (pinned `12.18.3`, no Redis — BullMQ is incompatible with Upstash serverless Redis). It **self-manages its `pgboss` schema** (`migrate:true`; the `app` role owns the DB) — a deliberate exception to the migrate-db pipeline, because pg-boss 12's partitioned per-queue tables can't be frozen into a static migration. Confined to two adapter files behind a `ScanWorkQueue` port → swappable.
+- **`Scanner` port + `CleanStubScanner`** — the verdict-engine seam; the real ClamAV/heuristics engine slots in here later with zero call-site change.
+- **`drainScans`** reconciles `queued` `scan_jobs` (the work list of record) → fetch → `markRunning` → scan → `processScanResult` (monotonic promote). Uploads stay fast (no pg-boss on the upload path); nothing strands at `pending`.
+- **`POST /internal/scan-drain`** — fail-closed bearer-secret auth; **no cron-overlap lock** (pg-boss `fetch` is `FOR UPDATE SKIP LOCKED`). Triggered by a free **Cloudflare cron Worker** (`modules/scan-cron`) every minute.
+- **Content-scanning model** documented: for untrusted static HTML, *origin isolation + sandbox CSP (ADR-013/038) is the primary control — isolation > AV*; signature AV is one defense-in-depth layer.
+
+**Flip (PR `refactor/scan-async-only`):** removed the synchronous `processScanResult("clean")` from `api.v1.reports.ts` + `upload.tsx`, so the 201 truthfully returns `scan_status: pending` and the viewer shows the ADR-0038 holding page until the drain promotes. e2e smoke updated to assert the holding page (always-green in CI) + a drain→promote round-trip guarded by `SCAN_DRAIN_SECRET` (CI doesn't expose it yet — follow-up).
+
+**⚠ Operator action (apply failed):** the merge-triggered `apply-prod` created the `SCAN_DRAIN_SECRET` env (on app+view, prod+preview) but **failed creating the Cloudflare Worker** — `Authentication error (10000)`: the CF API token lacks **`Workers Scripts: Edit`**. Grant that scope, then **re-run the apply via CI** (per the infra-applies-via-CI/CD rule) so the cron Worker + trigger land. Until then the drain has no scheduled trigger on prod (the e2e/manual `POST /internal/scan-drain` still works).
+
+**Process:** worktree `feat/phase-1.5a-scan-pipeline` (#43) merged + pruned; the flip on `refactor/scan-async-only`, off `main` (`f2afd1c`). Scanning section mirrored into `~/Desktop/html-report-platform-spec.html`. The real scan **engine** (ClamAV + heuristics) is a later phase.
