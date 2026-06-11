@@ -5,6 +5,7 @@ terraform {
     cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.40" }
     vercel     = { source = "vercel/vercel", version = "~> 2.0" }
     upstash    = { source = "upstash/upstash", version = "~> 1.5" }
+    random     = { source = "hashicorp/random", version = "~> 3.6" }
   }
 
   backend "s3" {

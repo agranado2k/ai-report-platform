@@ -44,6 +44,21 @@ module "clerk" {
   secret_key      = var.clerk_secret_key
 }
 
+# Shared secret between the Cloudflare scan-cron Worker and the app's
+# /internal/scan-drain route (ADR-0045). Self-generated — no operator input.
+resource "random_password" "scan_drain_secret" {
+  length  = 48
+  special = false
+}
+
+module "scan_cron" {
+  source       = "../../modules/scan-cron"
+  account_id   = var.cloudflare_account_id
+  env          = "prod"
+  drain_url    = "https://app.${local.apex}/internal/scan-drain"
+  drain_secret = random_password.scan_drain_secret.result
+}
+
 locals {
   shared_env = {
     # Codified here so every preview branch gets it
@@ -86,6 +101,11 @@ locals {
     # provisioning it here was dead config. (claude-review pass-4 on PR #29.)
     R2_ACCESS_KEY_ID     = { value = var.r2_access_key_id, target = ["production", "preview"] }
     R2_SECRET_ACCESS_KEY = { value = var.r2_secret_access_key, target = ["production", "preview"] }
+
+    # Async scan drain (ADR-0045). The bearer secret the Cloudflare scan-cron
+    # Worker presents to POST /internal/scan-drain. On `preview` too, so the e2e
+    # can drive the drain deterministically (CF cron only targets prod).
+    SCAN_DRAIN_SECRET = { value = random_password.scan_drain_secret.result, target = ["production", "preview"] }
   }
 }
 
