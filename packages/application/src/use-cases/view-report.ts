@@ -45,6 +45,10 @@ export async function resolveViewableReport(
   }
 
   const liveVersion = report.versions.find((v) => v.id === report.liveVersionId);
-  if (!liveVersion) return ok({ kind: "notfound" });
+  // Defense-in-depth: the live version is `clean` by the ADR-0037 §8 promotion
+  // invariant (live_version_id is only set on a clean scan), but the gate asserts
+  // it anyway — if a bug or data-integrity issue ever pointed liveVersionId at a
+  // non-clean version, the viewer still refuses to serve untrusted content.
+  if (!liveVersion || liveVersion.scanStatus !== "clean") return ok({ kind: "notfound" });
   return ok({ kind: "serve", report, liveVersion });
 }

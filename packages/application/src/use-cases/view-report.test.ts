@@ -80,6 +80,18 @@ describe("resolveViewableReport (ADR-0038 viewer gate)", () => {
     expect(r.ok && r.value.kind).toBe("deleted");
   });
 
+  it("refuses to serve if liveVersionId points at a non-clean version (defense-in-depth)", async () => {
+    // A data-integrity violation of the ADR-0037 invariant: live is set but the
+    // resolved version isn't clean. The gate must still refuse (reason-opaque).
+    const clean = buildReport({ verdict: "clean" });
+    const tampered: Report = {
+      ...clean,
+      versions: clean.versions.map((v) => ({ ...v, scanStatus: "flagged" as const })),
+    };
+    const r = await resolve(tampered);
+    expect(r.ok && r.value.kind).toBe("notfound");
+  });
+
   it("returns 'notfound' for an unknown slug", async () => {
     const r = await resolve(); // empty repo
     expect(r.ok && r.value.kind).toBe("notfound");
