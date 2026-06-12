@@ -53,4 +53,20 @@ describe("defineEnv", () => {
       expect(() => defineEnv({ ...valid, R2_BUCKET: "" })).toThrow();
     });
   });
+
+  it("accepts an optional VIEW_ORIGIN URL (canonical viewer origin)", () => {
+    const env = defineEnv({ ...valid, VIEW_ORIGIN: "https://view.example" });
+    expect(env.VIEW_ORIGIN).toBe("https://view.example");
+  });
+
+  it("treats VIEW_ORIGIN as optional (undefined when unset, e.g. on previews)", () => {
+    const env = defineEnv(valid);
+    expect(env.VIEW_ORIGIN).toBeUndefined();
+  });
+
+  it("rejects a malformed VIEW_ORIGIN", () => {
+    silently(() => {
+      expect(() => defineEnv({ ...valid, VIEW_ORIGIN: "not-a-url" })).toThrow();
+    });
+  });
 });

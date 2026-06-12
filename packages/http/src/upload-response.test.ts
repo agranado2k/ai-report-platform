@@ -3,7 +3,7 @@ import { type AppError, err, ok } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { uploadResultToHttp } from "./upload-response";
 
-const OPTS = { viewBaseUrl: "https://app.example" };
+const OPTS = { viewBaseUrl: "https://view.example" };
 
 const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => ({
   result: { slug: "abcde12345", version: 1, scanStatus: "clean", ...over },
@@ -11,18 +11,19 @@ const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => 
 });
 
 describe("uploadResultToHttp — success", () => {
-  it("maps a fresh upload to 201 JSON with the wire body + Location", () => {
-    const res = uploadResultToHttp(ok(outcome()), { viewBaseUrl: "https://app.example" });
+  it("maps a fresh upload to 201 JSON with the canonical view URL + Location", () => {
+    const res = uploadResultToHttp(ok(outcome()), { viewBaseUrl: "https://view.example" });
 
     expect(res.status).toBe(201);
     expect(res.contentType).toBe("application/json");
     expect(res.body).toEqual({
       slug: "abcde12345",
-      view_url: "https://app.example/r/abcde12345",
+      // Canonical viewer URL: view.<domain>/<slug>, no /r/ prefix (ADR-002 / ADR-0038).
+      view_url: "https://view.example/abcde12345",
       version: 1,
       scan_status: "clean",
     });
-    expect(res.headers?.Location).toBe("https://app.example/r/abcde12345");
+    expect(res.headers?.Location).toBe("https://view.example/abcde12345");
   });
 });
 

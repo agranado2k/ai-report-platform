@@ -1,9 +1,9 @@
 // resolveViewableReport — the ADR-0038 §2 viewer gate as a pure, testable
 // function. Given a (validated) slug, resolve what the viewer should do: serve
 // the clean live version, or a reason-opaque non-serve outcome. Pure orchestration
-// over ReportRepository (ADR-0024); the route maps the outcome to an HTTP response
-// (410 / holding page / 451 / 404 / stream) and does the R2 read. Shared by the
-// app-origin demo viewer and the view-origin viewer (apps/view).
+// (no I/O — ADR-0024) over the ReportRepository port (repository pattern, ADR-0020);
+// the route maps the outcome to an HTTP response (410 / holding page / 451 / 404 /
+// stream) and does the R2 read. Serves the view-origin viewer (apps/view).
 //
 // Reason-opaque (ADR-0038): unknown slug, blocked content, a missing version, and
 // "no live version" all collapse to `notfound` — we never acknowledge serious-bad

@@ -1150,3 +1150,20 @@ Note: the advisory lock is session-scoped and acquired+released within a single 
 **Sequencing lesson:** #44 (async-only) was merged before the cron was confirmed live (number-confusion at the merge button), so prod uploads briefly stalled at the holding page until #47's apply brought the drain online — recoverable (the drain reconciler backfills queued jobs), but the gate existed for a reason. Verifying between merges (the plan's intent) caught both `null_resource` bugs before they could do worse.
 
 **Process:** worktrees `refactor/scan-async-only` (#44), `fix/scan-cron-workers-subdomain` (#45), `fix/scan-cron-success-check` (#46), `fix/scan-cron-subdomain-idempotent` (#47) — all merged + pruned. Phase 1.5a complete; the real scan **engine** + the `view.<domain>` viewer-origin split (issue #41) are next.
+
+### 2026-06-12 — Viewer-origin split complete: `view.<domain>/<slug>` is canonical (issue #41)
+
+The viewer moved off the app origin onto the PSL-isolated `view.<domain>` origin (ADR-002 / ADR-0038), shipped as two PRs.
+
+**PR #49 (`feat/view-origin-viewer`, additive)** — stood the viewer up on the view origin without changing `view_url` yet:
+- Extracted the ADR-0038 §2 gate into a pure, unit-tested use case `resolveViewableReport(slug, reports)` (`packages/application`) — the security gate finally has coverage (8 tests: serve / scanning / flagged / blocked→notfound / deleted / non-clean-live→notfound / unknown-slug / infra-error). Defence-in-depth: refuses to serve unless the live version is `scan_status === "clean"`, even though ADR-0037 §8 already guarantees it.
+- Wired `apps/view` composition root (`viewerDeps()` — slim `reports` + `blobs` only) and the `$slug` route serving from R2 under the full `viewHeaders()` stack.
+
+**PR #50 (`refactor/view-url-canonical`, the flip)** — made `view.<domain>/<slug>` the canonical URL:
+- New optional env var **`VIEW_ORIGIN`** (`packages/env`, Zod `z.url().optional()`) — Terraform sets it on prod only; previews/dev fall back to the request origin.
+- Mapper `view_url = ${viewBaseUrl}/${slug}` (dropped the `/r/` prefix); `api.v1.reports.ts` + `upload.tsx` use `defineEnv().VIEW_ORIGIN ?? new URL(request.url).origin`.
+- **Deleted `apps/app/app/routes/r.$slug.tsx`** — the viewer lives only on the view origin now; old `app/r/<slug>` links 404 (accepted pre-launch). The app middleware SW-block stays as defence-in-depth (its rationale updated — the app no longer serves untrusted HTML).
+- e2e smoke now asserts the canonical `view_url` shape (slug is the whole path, no `/r/`, origin = `VIEW_ORIGIN` on prod); the cross-origin functional serve is post-merge prod verification (the gate behaviour is covered by the `resolveViewableReport` unit tests).
+- Folded in the three #49 review carry-overs: corrected a wrong ADR citation (repository port is ADR-0020, not ADR-0024), hoisted the double `viewerDeps()` call, and gave thrown error responses (404/410/451/500) the `viewHeaders()` stack so even an error sets HSTS.
+
+OpenAPI already documented `GET /{slug}` + `view_url` on `view.<domain>` (no change needed). Worktrees `feat/view-origin-viewer` (#49) + `refactor/view-url-canonical` (#50). Post-merge prod check: upload via the API → `view_url = https://view.<apex>/<slug>` serves the report under the ADR-013 stack, and `app.<apex>/r/<slug>` 404s.

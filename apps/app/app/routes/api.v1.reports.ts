@@ -8,7 +8,7 @@ import { type UploadActor, uploadReport } from "arp-application";
 import { err } from "arp-domain";
 import { type HttpResponse, uploadResultToHttp } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
-import { deps, ensureDevIdentity } from "../server/container.server";
+import { deps, ensureDevIdentity, viewOrigin } from "../server/container.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
@@ -26,8 +26,10 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  const viewBaseUrl = new URL(request.url).origin;
-  const opts = { viewBaseUrl };
+  // The report is served on the PSL-isolated view origin (ADR-002 / ADR-0038):
+  // view_url = `${viewBaseUrl}/${slug}`. The composition root owns env access
+  // (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
+  const opts = { viewBaseUrl: viewOrigin(request) };
 
   // 1. Resolve the acting principal (Phase-1 dev identity; real auth later).
   const actorResult = await resolveUploadActor(request);

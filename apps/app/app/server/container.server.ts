@@ -53,6 +53,17 @@ export function dbContext(): DbContext {
   return context();
 }
 
+/**
+ * The canonical viewer origin for building `view_url` (ADR-002 / ADR-0038):
+ * `${viewOrigin}/${slug}`. Reads the validated `VIEW_ORIGIN` from the env
+ * contract HERE, in the composition root — route handlers never touch
+ * `defineEnv()` directly (ADR-0043). Falls back to the request origin on
+ * previews/dev, where Terraform leaves `VIEW_ORIGIN` unset.
+ */
+export function viewOrigin(request: Request): string {
+  return defineEnv().VIEW_ORIGIN ?? new URL(request.url).origin;
+}
+
 export function deps(): UploadReportDeps {
   if (_deps) return _deps;
   const env = defineEnv();
