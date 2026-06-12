@@ -13,7 +13,12 @@ export interface HttpResponse {
 }
 
 export interface UploadResponseOptions {
-  /** Origin the viewer is served from, e.g. "https://app.example" (no trailing slash). */
+  /**
+   * Origin the viewer is served from, e.g. "https://view.example" (no trailing
+   * slash). The canonical viewer URL is `${viewBaseUrl}/${slug}` — the report is
+   * served on the PSL-isolated view origin (ADR-002 / ADR-0038), never under an
+   * `/r/` prefix on the app origin.
+   */
   readonly viewBaseUrl: string;
 }
 
@@ -23,7 +28,7 @@ export function uploadResultToHttp(
 ): HttpResponse {
   if (result.ok) {
     const { slug, version, scanStatus } = result.value.result;
-    const viewUrl = `${opts.viewBaseUrl}/r/${slug}`;
+    const viewUrl = `${opts.viewBaseUrl}/${slug}`;
     return {
       status: 201,
       contentType: "application/json",

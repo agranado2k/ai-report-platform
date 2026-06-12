@@ -7,11 +7,11 @@ export const config = {
 /**
  * Vercel Edge Middleware for the dashboard origin (`app.<domain>`).
  *
- * ADR-014: block service-worker registration at the edge. The Phase-1 viewer
- * (`/r/<slug>`) currently serves uploaded HTML from THIS origin (until the
- * dedicated sandboxed view-origin lands, ADR-0038), so the same SW guard the
- * view origin applies must hold here — a registered SW could persist abusive
- * content past takedown. Mirrors `apps/view/middleware.ts`.
+ * ADR-014: block service-worker registration at the edge. Untrusted report HTML
+ * is now served only on the sandboxed view origin (ADR-002 / ADR-0038) — the app
+ * origin no longer serves it. We keep the SW guard here as defense-in-depth: the
+ * dashboard origin should never allow a service worker to be registered against
+ * it. Mirrors `apps/view/middleware.ts`.
  *
  * Phase 0c.2 stub otherwise. Real responsibilities land in Phase 1:
  *   - Signup / login / magic-link rate limit via Upstash.

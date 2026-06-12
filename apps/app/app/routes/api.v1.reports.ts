@@ -6,6 +6,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { type UploadActor, uploadReport } from "arp-application";
 import { err } from "arp-domain";
+import { defineEnv } from "arp-env";
 import { type HttpResponse, uploadResultToHttp } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, ensureDevIdentity } from "../server/container.server";
@@ -26,7 +27,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  const viewBaseUrl = new URL(request.url).origin;
+  // The report is served on the PSL-isolated view origin (ADR-002 / ADR-0038):
+  // view_url = `${VIEW_ORIGIN}/${slug}`. VIEW_ORIGIN is set by Terraform on the
+  // production target only; on previews/dev it's unset, so we fall back to the
+  // request origin (the cross-origin serve is then prod-only — by design).
+  const viewBaseUrl = defineEnv().VIEW_ORIGIN ?? new URL(request.url).origin;
   const opts = { viewBaseUrl };
 
   // 1. Resolve the acting principal (Phase-1 dev identity; real auth later).
