@@ -1133,3 +1133,20 @@ Note: the advisory lock is session-scoped and acquired+released within a single 
 **⚠ Operator action (apply failed):** the merge-triggered `apply-prod` created the `SCAN_DRAIN_SECRET` env (on app+view, prod+preview) but **failed creating the Cloudflare Worker** — `Authentication error (10000)`: the CF API token lacks **`Workers Scripts: Edit`**. Grant that scope, then **re-run the apply via CI** (per the infra-applies-via-CI/CD rule) so the cron Worker + trigger land. Until then the drain has no scheduled trigger on prod (the e2e/manual `POST /internal/scan-drain` still works).
 
 **Process:** worktree `feat/phase-1.5a-scan-pipeline` (#43) merged + pruned; the flip on `refactor/scan-async-only`, off `main` (`f2afd1c`). Scanning section mirrored into `~/Desktop/html-report-platform-spec.html`. The real scan **engine** (ClamAV + heuristics) is a later phase.
+
+---
+
+## 2026-06-12 — 🎉 Phase 1.5a async cutover LIVE on prod (the scan-cron saga)
+
+**Milestone:** the async scan pipeline is fully operational in production. Uploads commit `pending`; the **Cloudflare cron Worker** (`arp-scan-drain-prod`) pokes `POST /internal/scan-drain` every minute; the drain promotes the clean (stub) version → `/r/<slug>` serves it within ~1–2 min. `apply-prod` is green; the synchronous promote is gone (PR #44).
+
+**Cutover order (all merged):** #43 machinery → **#44 async-only flip** (removed the sync promote) → #45 subdomain+cron module → #46 + #47 hotfixes (below). `apply-prod` on `main` (`5598e1a`) created `cloudflare_workers_cron_trigger.scan_drain`.
+
+**The scan-cron saga — three operator/agent snags getting the cron Worker deployed:**
+1. **CF token scope** — first `apply-prod` failed `Authentication error (10000)`: the Cloudflare API token lacked **Workers Scripts: Edit**. Operator granted it (token value unchanged → no secret rotation).
+2. **workers.dev subdomain (CF `10063`)** — a Worker cron trigger can't be created until the account has a workers.dev subdomain, and **no native TF resource exists** (v4 or v5 — checked the full resource list of both; only the per-script `workers_script_subdomain`). So we register it via the API in a `null_resource` (PR #45). *Aside:* this killed a brief detour to upgrade the CF provider v4→v5 — v5 doesn't add the resource either, so we stayed on v4.40.
+3. **Two `null_resource` bugs (both mine), fixed in #46 + #47:** (a) the success-check grep was whitespace-fragile (`"success":true` vs CF's pretty-printed `"success": true`) → matched a *successful* call as failure; (b) the subdomain `PUT` is **not idempotent** — re-`PUT` of an existing subdomain returns `success:false`, so the tainted `null_resource` kept failing on re-apply. Final design: **GET-then-PUT** — only `PUT` when no subdomain is set; re-applies are no-ops.
+
+**Sequencing lesson:** #44 (async-only) was merged before the cron was confirmed live (number-confusion at the merge button), so prod uploads briefly stalled at the holding page until #47's apply brought the drain online — recoverable (the drain reconciler backfills queued jobs), but the gate existed for a reason. Verifying between merges (the plan's intent) caught both `null_resource` bugs before they could do worse.
+
+**Process:** worktrees `refactor/scan-async-only` (#44), `fix/scan-cron-workers-subdomain` (#45), `fix/scan-cron-success-check` (#46), `fix/scan-cron-subdomain-idempotent` (#47) — all merged + pruned. Phase 1.5a complete; the real scan **engine** + the `view.<domain>` viewer-origin split (issue #41) are next.
