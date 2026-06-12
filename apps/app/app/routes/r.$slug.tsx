@@ -7,6 +7,7 @@
 // the sandboxed view-origin loader is the follow-up (1e). Keep that in mind
 // before pointing real/untrusted uploads at it.
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { resolveViewableReport } from "arp-application";
 import { makeSlug } from "arp-domain";
 import { viewHeaders } from "arp-headers/view";
 import { deps } from "../server/container.server";
@@ -35,32 +36,27 @@ export async function loader({ params }: LoaderFunctionArgs) {
   // (ADR-0038 §2: never acknowledge serious-bad content).
   if (!slug.ok) throw new Response("Not found", { status: 404 });
 
-  const found = await deps().reports.findBySlug(slug.value);
-  if (!found.ok) throw new Response("Lookup failed", { status: 500 });
-  if (!found.value) throw new Response("Not found", { status: 404 });
-
-  const report = found.value;
-
-  // ADR-0038 §2 state machine.
-  // 1. Taken down → 410 Gone (no public reason).
-  if (report.deletedAt !== null) throw new Response("No longer available", { status: 410 });
-
-  // 2. No clean live version yet → branch on the newest version's scan status.
-  if (report.liveVersionId === null) {
-    const newest = report.versions[report.versions.length - 1];
-    if (!newest) throw new Response("Not found", { status: 404 });
-    if (newest.scanStatus === "pending") return scanningHoldingPage(); // 200, scanning
-    if (newest.scanStatus === "flagged")
+  // ADR-0038 §2 viewer gate (shared, unit-tested in arp-application).
+  const outcome = await resolveViewableReport(slug.value, deps().reports);
+  if (!outcome.ok) throw new Response("Lookup failed", { status: 500 });
+  switch (outcome.value.kind) {
+    case "deleted":
+      throw new Response("No longer available", { status: 410 }); // taken down, no reason
+    case "scanning":
+      return scanningHoldingPage(); // 200, no clean live version yet
+    case "flagged":
       throw new Response("Unavailable — flagged for review", { status: 451 });
-    // `blocked` (or any non-servable state) is indistinguishable from unknown → 404.
-    throw new Response("Not found", { status: 404 });
+    case "notfound":
+      throw new Response("Not found", { status: 404 }); // unknown / blocked (reason-opaque)
   }
 
-  // 3. Clean live version → stream it from R2.
-  const live = report.versions.find((v) => v.id === report.liveVersionId);
-  if (!live) throw new Response("Not found", { status: 404 });
-
-  const blob = await deps().blobs.readObject(report.id, live.id, live.manifest.entryDocument);
+  // Clean live version → stream it from R2.
+  const { report, liveVersion } = outcome.value;
+  const blob = await deps().blobs.readObject(
+    report.id,
+    liveVersion.id,
+    liveVersion.manifest.entryDocument,
+  );
   if (!blob.ok) throw new Response("Read failed", { status: 500 });
   if (!blob.value) throw new Response("Not found", { status: 404 });
 
