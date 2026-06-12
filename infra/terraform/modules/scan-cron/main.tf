@@ -32,7 +32,9 @@ resource "null_resource" "workers_subdomain" {
         -H "Authorization: Bearer $CF_API_TOKEN" \
         -H "Content-Type: application/json" \
         --data "{\"subdomain\":\"$SUBDOMAIN\"}")
-      echo "$resp" | grep -q '"success":true' || { echo "workers.dev subdomain registration failed: $resp" >&2; exit 1; }
+      # Whitespace-tolerant: Cloudflare pretty-prints the response, so the field
+      # is `"success": true` (with a space) — a `"success":true` literal misses it.
+      echo "$resp" | grep -qE '"success":[[:space:]]*true' || { echo "workers.dev subdomain registration failed: $resp" >&2; exit 1; }
     EOT
   }
 }
