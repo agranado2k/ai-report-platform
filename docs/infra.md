@@ -163,7 +163,7 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > `clientPrefix`, so the Vercel env **key** must be `PUBLIC_CLERK_PUBLISHABLE_KEY`
 > (not the bare `CLERK_PUBLISHABLE_KEY`). A name mismatch leaves the var undefined
 > and `defineEnv()` throws at boot — `/health` stays green (no `deps()`) while
-> every data-plane route (`/upload`, `/r/$slug`) 500s.
+> every data-plane route (app `/upload`, view `/$slug`) 500s.
 
 > **Vercel project settings** (both `arp-app-prod` + `arp-view-prod`): `TURBO_FORCE=true`
 > + `VERCEL_FORCE_NO_BUILD_CACHE=1` (force clean builds so the Remix `vercelPreset()`
