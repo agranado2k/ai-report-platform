@@ -52,11 +52,13 @@ resource "random_password" "scan_drain_secret" {
 }
 
 module "scan_cron" {
-  source       = "../../modules/scan-cron"
-  account_id   = var.cloudflare_account_id
-  env          = "prod"
-  drain_url    = "https://app.${local.apex}/internal/scan-drain"
-  drain_secret = random_password.scan_drain_secret.result
+  source            = "../../modules/scan-cron"
+  account_id        = var.cloudflare_account_id
+  env               = "prod"
+  drain_url         = "https://app.${local.apex}/internal/scan-drain"
+  drain_secret      = random_password.scan_drain_secret.result
+  cf_api_token      = var.cloudflare_api_token
+  workers_subdomain = var.workers_subdomain
 }
 
 locals {
