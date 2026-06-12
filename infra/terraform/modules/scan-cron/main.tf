@@ -24,16 +24,20 @@ resource "null_resource" "workers_subdomain" {
     }
     command = <<-EOT
       set -euo pipefail
-      # No `-f`: on a 4xx/5xx we WANT the response body (Cloudflare populates a
-      # human-readable `errors` array) — the success check below is the real gate,
-      # so `-f` would only swallow that diagnostic and return a bare exit 22.
-      resp=$(curl -sS -X PUT \
-        "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/subdomain" \
-        -H "Authorization: Bearer $CF_API_TOKEN" \
-        -H "Content-Type: application/json" \
+      url="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/subdomain"
+      auth="Authorization: Bearer $CF_API_TOKEN"
+      # Idempotent by design: the workers.dev subdomain PUT is NOT idempotent —
+      # once an account has a subdomain, re-PUT returns success:false ("can't be
+      # changed"). So GET first and only register when none is set. (No `-f`, so a
+      # 4xx body — CF's human-readable `errors` array — survives for diagnostics.)
+      current=$(curl -sS "$url" -H "$auth")
+      if echo "$current" | grep -qE '"subdomain":[[:space:]]*"[^"]+"'; then
+        echo "workers.dev subdomain already registered; nothing to do."
+        exit 0
+      fi
+      resp=$(curl -sS -X PUT "$url" -H "$auth" -H "Content-Type: application/json" \
         --data "{\"subdomain\":\"$SUBDOMAIN\"}")
-      # Whitespace-tolerant: Cloudflare pretty-prints the response, so the field
-      # is `"success": true` (with a space) — a `"success":true` literal misses it.
+      # Whitespace-tolerant: CF pretty-prints, so the field is `"success": true`.
       echo "$resp" | grep -qE '"success":[[:space:]]*true' || { echo "workers.dev subdomain registration failed: $resp" >&2; exit 1; }
     EOT
   }
