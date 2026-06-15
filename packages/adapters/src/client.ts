@@ -24,10 +24,8 @@ export class DbContext {
   // requests on a warm lambda never clobber each other's transaction.
   private readonly als = new AsyncLocalStorage<Db>();
 
-  // Production builds the Neon Pool + drizzle from a connection string. Tests
-  // inject an already-built drizzle Db (e.g. pglite-backed) to exercise the real
-  // adapter SQL in-process — the query-builder + transaction surface the adapters
-  // use is identical across drivers.
+  // Production builds the Neon Pool from a URL; tests inject an already-built
+  // (pglite-backed) Db to exercise the real adapter SQL in-process.
   constructor(databaseUrl: string);
   constructor(injected: { readonly base: Db });
   constructor(arg: string | { readonly base: Db }) {
