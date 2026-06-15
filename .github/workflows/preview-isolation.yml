@@ -29,10 +29,12 @@ env:
   NEON_API: https://console.neon.tech/api/v2
   NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
   VERCEL_API: https://api.vercel.com
-  VERCEL_TEAM: team_BZ8ZtjtTRHadVsKLQY8DNzf3
-  APP_PROJECT: prj_ohnQ6f0hUNARINhpLE4ZW8S0UlaK
-  VIEW_PROJECT: prj_uz7Lew6rkoVtZ8LE6oXdYAVgbeM1
-  GH_REPO_ID: "1246699531"
+  # The Vercel team slug works as the API `teamId` param (verified). IDs live in
+  # repo variables like NEON_PROJECT_ID, not hardcoded.
+  VERCEL_TEAM: ${{ vars.VERCEL_TEAM_ID }}
+  APP_PROJECT: ${{ vars.VERCEL_APP_PROJECT_ID }}
+  VIEW_PROJECT: ${{ vars.VERCEL_VIEW_PROJECT_ID }}
+  GH_REPO_ID: ${{ vars.GH_REPO_ID }}
   R2_BUCKET: arp-reports-prod
   PR: ${{ github.event.pull_request.number }}
   BRANCH_REF: ${{ github.event.pull_request.head.ref }}
@@ -45,6 +47,22 @@ jobs:
     name: Isolate preview data plane
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
       - name: Create or reuse the per-PR Neon branch
         id: branch
         env:
@@ -88,6 +106,16 @@ jobs:
           [ -n "$uri" ] || { echo "::error::could not fetch connection URI for $branch_id"; exit 1; }
           echo "::add-mask::$uri"
           echo "database_url=$uri" >> "$GITHUB_OUTPUT"
+
+      - name: Apply this PR's migrations to the branch
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.database_url }}
+        # The branch is forked from prod head (prod's schema). The PR's code may
+        # add migrations prod doesn't have yet, so apply the PR's full set here —
+        # otherwise a schema-changing PR's preview runs against a stale schema.
+        # drizzle-kit migrate is idempotent (tracks applied), so this is a no-op
+        # for PRs that touch no migrations.
+        run: pnpm --filter arp-db run db:migrate
 
       - name: Inject branch-scoped Vercel env on both projects
         env:
