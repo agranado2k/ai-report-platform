@@ -1,0 +1,211 @@
+name: Preview data isolation
+
+# Per-PR preview data plane (ADR-0047). On a PR opened/updated, fork an ephemeral
+# Neon branch from prod head and point THIS PR's preview deployments at it via a
+# git-branch-scoped Vercel DATABASE_URL, plus an R2 key prefix (pr-<N>/) so preview
+# blobs are namespaced. On PR close, tear it all down.
+#
+# SOFT isolation (operator decision, ADR-0047): prod env vars remain as the preview
+# fallback, so a preview built BEFORE this workflow finishes uses prod. We mitigate
+# by failing LOUD here (a red check) if branch creation or env injection fails, and
+# by triggering a redeploy so the isolated env takes effect. The DB is the hard
+# boundary; R2 stays namespaced within the prod bucket.
+#
+# Needs secrets: NEON_API_KEY, VERCEL_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_APP_ACCESS_KEY_ID,
+# R2_APP_SECRET_ACCESS_KEY. Vars: NEON_PROJECT_ID.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-isolation-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  NEON_API: https://console.neon.tech/api/v2
+  NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+  VERCEL_API: https://api.vercel.com
+  # The Vercel team slug works as the API `teamId` param (verified). IDs live in
+  # repo variables like NEON_PROJECT_ID, not hardcoded.
+  VERCEL_TEAM: ${{ vars.VERCEL_TEAM_ID }}
+  APP_PROJECT: ${{ vars.VERCEL_APP_PROJECT_ID }}
+  VIEW_PROJECT: ${{ vars.VERCEL_VIEW_PROJECT_ID }}
+  GH_REPO_ID: ${{ vars.GH_REPO_ID }}
+  R2_BUCKET: arp-reports-prod
+  PR: ${{ github.event.pull_request.number }}
+  BRANCH_REF: ${{ github.event.pull_request.head.ref }}
+  NEON_BRANCH: preview-pr-${{ github.event.pull_request.number }}
+
+jobs:
+  # ── Provision: fork a Neon branch + inject the per-PR env, then redeploy ──────
+  isolate:
+    if: github.event.action != 'closed'
+    name: Isolate preview data plane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Create or reuse the per-PR Neon branch
+        id: branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Reuse the branch across pushes within a PR (data persists); create on first push.
+          branch_id=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            | jq -r --arg n "$NEON_BRANCH" '.branches[] | select(.name == $n) | .id' | head -n1)
+
+          if [ -z "$branch_id" ]; then
+            resp=$(curl -s -w $'\n%{http_code}' -X POST "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+              -H "Authorization: Bearer $NEON_API_KEY" -H "Content-Type: application/json" \
+              -d "{\"branch\":{\"name\":\"$NEON_BRANCH\"},\"endpoints\":[{\"type\":\"read_write\"}]}")
+            code=$(printf '%s' "$resp" | tail -n1); body=$(printf '%s' "$resp" | sed '$d')
+            [ "$code" = "200" ] || [ "$code" = "201" ] || { echo "::error::Neon branch create HTTP $code"; echo "$body"; exit 1; }
+            branch_id=$(printf '%s' "$body" | jq -r '.branch.id // empty')
+            echo "created Neon branch $NEON_BRANCH ($branch_id)"
+          else
+            echo "reusing Neon branch $NEON_BRANCH ($branch_id)"
+          fi
+          [ -n "$branch_id" ] || { echo "::error::no branch id"; exit 1; }
+
+          # Discover db + owning role, then fetch the connection URI (holds a password — masked).
+          meta=$(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches/$branch_id/databases" \
+            -H "Authorization: Bearer $NEON_API_KEY")
+          db_name=$(printf '%s' "$meta" | jq -r '.databases[0].name // empty')
+          role_name=$(printf '%s' "$meta" | jq -r '.databases[0].owner_name // empty')
+          [ -n "$db_name" ] && [ -n "$role_name" ] || { echo "::error::branch has no db/role"; exit 1; }
+
+          uri=""
+          for a in 1 2 3 4; do
+            u=$(curl -s -w $'\n%{http_code}' -G "$NEON_API/projects/$NEON_PROJECT_ID/connection_uri" \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              --data-urlencode "branch_id=$branch_id" --data-urlencode "database_name=$db_name" \
+              --data-urlencode "role_name=$role_name" --data-urlencode "pooled=true")
+            [ "$(printf '%s' "$u" | tail -n1)" = "200" ] && uri=$(printf '%s' "$u" | sed '$d' | jq -r '.uri // empty') && [ -n "$uri" ] && break
+            sleep 3
+          done
+          [ -n "$uri" ] || { echo "::error::could not fetch connection URI for $branch_id"; exit 1; }
+          echo "::add-mask::$uri"
+          echo "database_url=$uri" >> "$GITHUB_OUTPUT"
+
+      - name: Apply this PR's migrations to the branch
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.database_url }}
+        # The branch is forked from prod head (prod's schema). The PR's code may
+        # add migrations prod doesn't have yet, so apply the PR's full set here —
+        # otherwise a schema-changing PR's preview runs against a stale schema.
+        # drizzle-kit migrate is idempotent (tracks applied), so this is a no-op
+        # for PRs that touch no migrations.
+        run: pnpm --filter arp-db run db:migrate
+
+      - name: Inject branch-scoped Vercel env on both projects
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DATABASE_URL: ${{ steps.branch.outputs.database_url }}
+        run: |
+          set -euo pipefail
+          # Upsert a git-branch-scoped env var (target=preview, gitBranch=this PR's ref).
+          # upsert=true makes re-runs idempotent. Values are encrypted by Vercel.
+          set_env() {
+            local proj="$1" key="$2" val="$3"
+            local resp code
+            resp=$(curl -s -w $'\n%{http_code}' -X POST \
+              "$VERCEL_API/v10/projects/$proj/env?upsert=true&teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg k "$key" --arg v "$val" --arg b "$BRANCH_REF" \
+                  '{key:$k,value:$v,type:"encrypted",target:["preview"],gitBranch:$b}')")
+            code=$(printf '%s' "$resp" | tail -n1)
+            case "$code" in 200|201) echo "  set $key on $proj";; *) echo "::error::set $key on $proj → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
+          }
+          for proj in "$APP_PROJECT" "$VIEW_PROJECT"; do
+            set_env "$proj" DATABASE_URL "$DATABASE_URL"
+            set_env "$proj" SCAN_QUEUE_DATABASE_URL "$DATABASE_URL"
+            set_env "$proj" R2_KEY_PREFIX "pr-$PR/"
+          done
+
+      - name: Redeploy previews so the isolated env takes effect
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          redeploy() {
+            local proj="$1" name="$2" resp code
+            resp=$(curl -s -w $'\n%{http_code}' -X POST \
+              "$VERCEL_API/v13/deployments?teamId=$VERCEL_TEAM&forceNew=1&skipAutoDetectionConfirmation=1" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg n "$name" --arg ref "$BRANCH_REF" --argjson rid "$GH_REPO_ID" \
+                  '{name:$n,project:$n,gitSource:{type:"github",repoId:$rid,ref:$ref}}')")
+            code=$(printf '%s' "$resp" | tail -n1)
+            case "$code" in 200|201) echo "  redeployed $name";; *) echo "::error::redeploy $name → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
+          }
+          redeploy "$APP_PROJECT" arp-app-prod
+          redeploy "$VIEW_PROJECT" arp-view-prod
+          echo "Preview PR #$PR isolated on Neon branch $NEON_BRANCH + R2 prefix pr-$PR/"
+
+  # ── Teardown: delete the branch, env vars, and R2 objects on PR close ─────────
+  teardown:
+    if: github.event.action == 'closed'
+    name: Tear down preview data plane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the per-PR Neon branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          for id in $(curl -sf "$NEON_API/projects/$NEON_PROJECT_ID/branches" \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              | jq -r --arg n "$NEON_BRANCH" '.branches[] | select(.name == $n) | .id'); do
+            curl -sf -X DELETE "$NEON_API/projects/$NEON_PROJECT_ID/branches/$id" \
+              -H "Authorization: Bearer $NEON_API_KEY" >/dev/null && echo "deleted Neon branch $id" \
+              || echo "::warning::failed to delete Neon branch $id — sweep manually"
+          done
+
+      - name: Remove the branch-scoped Vercel env vars
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          for proj in "$APP_PROJECT" "$VIEW_PROJECT"; do
+            ids=$(curl -sf "$VERCEL_API/v9/projects/$proj/env?teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              | jq -r --arg b "$BRANCH_REF" '.envs[] | select(.gitBranch == $b) | .id')
+            for id in $ids; do
+              curl -sf -X DELETE "$VERCEL_API/v9/projects/$proj/env/$id?teamId=$VERCEL_TEAM" \
+                -H "Authorization: Bearer $VERCEL_TOKEN" >/dev/null && echo "deleted env $id on $proj" \
+                || echo "::warning::failed to delete env $id on $proj"
+            done
+          done
+
+      - name: Delete the preview's R2 objects (pr-<N>/ prefix)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_APP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_APP_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # Tightly scoped: only ever deletes under the pr-<N>/ prefix, never prod keys.
+          aws s3 rm "s3://$R2_BUCKET/pr-$PR/" --recursive \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
+            && echo "deleted R2 objects under pr-$PR/" \
+            || echo "::warning::R2 cleanup under pr-$PR/ failed — sweep manually"

@@ -1192,3 +1192,14 @@ The 2026-06-15 viewer-404 incident slipped past CI because adapter tests were pu
 - **Packaging note:** adding the pglite peer forked `drizzle-orm` into a second pnpm peer-variant; a plain `pnpm install` re-deduped dependents so typecheck resolves one instance. The lockfile change is committed.
 
 Out of scope (per #52): the pg-boss-backed `ScanWorkQueue` (pg-boss internals against pglite — left to e2e). Worktree `chore/adapter-sql-test-harness`. ScanWorkQueue + a possible shared-migrated-template optimization for test speed are follow-ups.
+
+### 2026-06-15 — Preview data isolation (slice 2/2): per-PR Neon branch + Vercel env injection (#53)
+
+Slice 1 (PR #58) added the inert `R2_KEY_PREFIX` capability. This slice wires the actual isolation as a GitHub Actions workflow (`preview-isolation.yml`), per **ADR-0047**.
+
+- **On PR open/sync/reopen:** create-or-reuse a `preview-pr-<N>` Neon branch forked from prod head (data persists across pushes), fetch its pooled connection URI (masked), upsert git-branch-scoped Vercel env on both projects (`DATABASE_URL`, `SCAN_QUEUE_DATABASE_URL`, `R2_KEY_PREFIX=pr-<N>/`), then trigger a redeploy.
+- **On PR close:** delete the Neon branch, remove the branch-scoped Vercel env, and `aws s3 rm` the `pr-<N>/` R2 prefix (tightly scoped — never prod keys).
+- **Soft isolation** (operator choice, ADR-0047): prod env stays as the preview fallback; the workflow **fails loud** if branch creation / env injection fails, so a fallback-to-prod is surfaced not silent. Residual: a preview built before the workflow finishes uses prod for that one build until the redeploy.
+- **Secret:** reused the Terraform Vercel provider token as the `VERCEL_TOKEN` repo secret (team env-management scope).
+
+Validation is **on the PR itself** — the workflow runs on its own `pull_request` events; iterating the Vercel/Neon API calls via the live run logs. Worktrees: `feat/preview-isolation` (#58, slice 1) + `feat/preview-db-isolation` (slice 2). Merge #58 first so the `R2_KEY_PREFIX` consumer is present.
