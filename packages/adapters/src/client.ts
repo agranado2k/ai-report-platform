@@ -18,14 +18,25 @@ export type Db = NeonDatabase<typeof schema>;
  */
 export class DbContext {
   readonly base: Db;
-  private readonly pool: Pool;
+  // Set only on the URL-backed (production) path; undefined when a Db is injected.
+  private readonly pool?: Pool;
   // Per-async-context tx executor (NOT a shared mutable field) so concurrent
   // requests on a warm lambda never clobber each other's transaction.
   private readonly als = new AsyncLocalStorage<Db>();
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl });
-    this.base = drizzle(this.pool, { schema });
+  // Production builds the Neon Pool + drizzle from a connection string. Tests
+  // inject an already-built drizzle Db (e.g. pglite-backed) to exercise the real
+  // adapter SQL in-process — the query-builder + transaction surface the adapters
+  // use is identical across drivers.
+  constructor(databaseUrl: string);
+  constructor(injected: { readonly base: Db });
+  constructor(arg: string | { readonly base: Db }) {
+    if (typeof arg === "string") {
+      this.pool = new Pool({ connectionString: arg });
+      this.base = drizzle(this.pool, { schema });
+    } else {
+      this.base = arg.base;
+    }
   }
 
   /** The executor to run queries against — the open tx if inside run(), else base. */
@@ -43,7 +54,7 @@ export class DbContext {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await this.pool?.end();
   }
 }
 
