@@ -8,6 +8,13 @@
       "when": 1780584098892,
       "tag": "0000_condemned_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781536497354,
+      "tag": "0001_backfill_version_scan_status",
+      "breakpoints": true
     }
   ]
 }

@@ -21,8 +21,8 @@ import {
   type VersionManifest,
   versionId,
 } from "arp-domain";
-import { asc, eq } from "drizzle-orm";
-import type { DbContext } from "./client";
+import { asc, eq, sql } from "drizzle-orm";
+import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
 type VersionRow = typeof reportVersions.$inferSelect;
@@ -82,6 +82,18 @@ export function rowsToReport(report: ReportRow, versions: readonly VersionRow[])
   };
 }
 
+// scan_status is the only mutable version field post-insert (pending → verdict),
+// so a conflict must refresh it from the inserted row, not no-op.
+export function upsertVersions(db: Db, rows: (typeof reportVersions.$inferInsert)[]) {
+  return db
+    .insert(reportVersions)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: reportVersions.id,
+      set: { scanStatus: sql`excluded.scan_status` },
+    });
+}
+
 // ── Adapter ───────────────────────────────────────────────────────────────--
 
 export class DrizzleReportRepository implements ReportRepository {
@@ -127,10 +139,10 @@ export class DrizzleReportRepository implements ReportRepository {
             updatedAt: new Date(),
           },
         });
-      // Versions: insert any new ones; existing (reportId, versionNo) are no-ops.
+      // Versions: insert new ones; on conflict refresh the mutable scan_status.
       const rows = report.versions.map((v) => versionToRow(report.id, v));
       if (rows.length > 0) {
-        await db.insert(reportVersions).values(rows).onConflictDoNothing();
+        await upsertVersions(db, rows);
       }
       return ok(undefined);
     } catch (e) {

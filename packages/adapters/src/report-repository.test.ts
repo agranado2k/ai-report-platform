@@ -1,7 +1,16 @@
+import { Pool } from "@neondatabase/serverless";
 import type { reportVersions } from "arp-db/schema";
+import * as schema from "arp-db/schema";
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
+import { drizzle } from "drizzle-orm/neon-serverless";
 import { describe, expect, it } from "vitest";
-import { reportToRow, rowsToReport, rowToVersion, versionToRow } from "./report-repository";
+import {
+  reportToRow,
+  rowsToReport,
+  rowToVersion,
+  upsertVersions,
+  versionToRow,
+} from "./report-repository";
 
 const slug = (s: string) => {
   const r = makeSlug(s);
@@ -87,5 +96,28 @@ describe("report-repository mappers", () => {
     expect(back.slug).toBe("abcdefghij");
     expect(back.deletedAt).toBe(5);
     expect(back.versions).toEqual([]);
+  });
+});
+
+describe("upsertVersions — conflict clause persists scan_status (regression: viewer 404)", () => {
+  // Connectionless drizzle: the Neon Pool is lazy (no socket until a query), so
+  // .toSQL() renders the statement via the dialect without touching a DB.
+  const sqlDb = drizzle(new Pool({ connectionString: "postgresql://u:p@localhost:5432/t" }), {
+    schema,
+  });
+
+  it("emits ON CONFLICT DO UPDATE SET scan_status = excluded.scan_status (not DO NOTHING)", () => {
+    const [v0] = report.versions;
+    if (!v0) throw new Error("fixture has no version");
+    const row = versionToRow("rid", v0);
+    const { sql } = upsertVersions(sqlDb, [row]).toSQL();
+    const q = sql.toLowerCase();
+
+    expect(q).toContain("on conflict");
+    expect(q).toContain("do update set");
+    expect(q).toContain("scan_status");
+    expect(q).toContain("excluded");
+    // DO NOTHING would leave scan_status stale at 'pending' (the viewer-404 bug).
+    expect(q).not.toContain("do nothing");
   });
 });
