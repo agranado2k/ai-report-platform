@@ -9,6 +9,19 @@ import { makeSlug } from "arp-domain";
 import { viewHeaders } from "arp-headers/view";
 import { viewerDeps } from "../server/container.server";
 
+// Thrown error responses (404 / 410 / 451 / 500) still carry the ADR-013 view
+// header stack — notably HSTS — so even a first-ever request to view.<domain>
+// that resolves to an error still sets the HSTS max-age in the browser. The
+// bodies are all our own static strings (no untrusted content), so the strict
+// CSP is fine. noindex.
+function errorResponse(status: number, message: string): Response {
+  const headers = viewHeaders();
+  headers.set("content-type", "text/plain; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  headers.set("x-robots-tag", "noindex, nofollow");
+  return new Response(message, { status, headers });
+}
+
 // 200 "scanning…" holding page (ADR-0038 §2): a report exists but has no clean
 // live version yet. Our own static HTML, so the strict view CSP + a meta-refresh
 // (no script) are fine. noindex.
@@ -28,32 +41,34 @@ function scanningHoldingPage(): Response {
 }
 
 export async function loader({ params }: LoaderFunctionArgs) {
+  const { reports, blobs } = viewerDeps();
+
   const slug = makeSlug(params.slug ?? "");
   // Unknown/invalid slug is indistinguishable from blocked content → 404.
-  if (!slug.ok) throw new Response("Not found", { status: 404 });
+  if (!slug.ok) throw errorResponse(404, "Not found");
 
-  const outcome = await resolveViewableReport(slug.value, viewerDeps().reports);
-  if (!outcome.ok) throw new Response("Lookup failed", { status: 500 });
+  const outcome = await resolveViewableReport(slug.value, reports);
+  if (!outcome.ok) throw errorResponse(500, "Lookup failed");
   switch (outcome.value.kind) {
     case "deleted":
-      throw new Response("No longer available", { status: 410 });
+      throw errorResponse(410, "No longer available");
     case "scanning":
       return scanningHoldingPage();
     case "flagged":
-      throw new Response("Unavailable — flagged for review", { status: 451 });
+      throw errorResponse(451, "Unavailable — flagged for review");
     case "notfound":
-      throw new Response("Not found", { status: 404 });
+      throw errorResponse(404, "Not found");
   }
 
   // Clean live version → stream it from R2 under the viewer security stack.
   const { report, liveVersion } = outcome.value;
-  const blob = await viewerDeps().blobs.readObject(
+  const blob = await blobs.readObject(
     report.id,
     liveVersion.id,
     liveVersion.manifest.entryDocument,
   );
-  if (!blob.ok) throw new Response("Read failed", { status: 500 });
-  if (!blob.value) throw new Response("Not found", { status: 404 });
+  if (!blob.ok) throw errorResponse(500, "Read failed");
+  if (!blob.value) throw errorResponse(404, "Not found");
 
   const headers = viewHeaders();
   headers.set("content-type", blob.value.contentType);

@@ -34,6 +34,12 @@ export const serverSchema = {
   // Upstash rate-limiting (ADR-0011) — wired in Phase 1.5, so optional for now.
   UPSTASH_REDIS_REST_URL: z.url().optional(),
   UPSTASH_REDIS_REST_TOKEN: trimmedString.optional(),
+
+  // Canonical viewer origin, e.g. "https://view.example" (ADR-002 / ADR-0038).
+  // The upload API builds `view_url = ${VIEW_ORIGIN}/${slug}` from it. OPTIONAL:
+  // Terraform sets it only on the production target, so previews/dev fall back to
+  // the request origin (the cross-origin serve is then prod-only).
+  VIEW_ORIGIN: z.url().optional(),
 } as const;
 
 /**

@@ -1,11 +1,12 @@
 // Phase-1 upload UI — a minimal form that drives the real UploadReportUseCase
 // against Neon + R2 (composition root in ../server/container.server). Paste HTML
-// → it's stored as a report → view it at /r/<slug>. The production API is
-// POST /api/v1/reports (ADR-0037); this page is the manually-testable surface.
+// → it's stored as a report → view it at the canonical view.<domain>/<slug>. The
+// production API is POST /api/v1/reports (ADR-0037); this page is the
+// manually-testable surface.
 import { type ActionFunctionArgs, json, type MetaFunction } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { uploadReport } from "arp-application";
-import { DEMO_ACTOR, deps, ensureDevIdentity } from "../server/container.server";
+import { DEMO_ACTOR, deps, ensureDevIdentity, viewOrigin } from "../server/container.server";
 
 export const meta: MetaFunction = () => [{ title: "Upload a report — ai-report-platform" }];
 
@@ -29,8 +30,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // The version is committed as `pending`; the async scan drain (ADR-0045)
   // promotes it once it scans clean. The viewer shows the "scanning…" holding
-  // page at /r/<slug> until then — no synchronous promotion here anymore.
-  return json({ ok: true as const, slug, version, scanStatus, viewUrl: `/r/${slug}` });
+  // page until then — no synchronous promotion here anymore. The link points at
+  // the canonical view origin (ADR-002 / ADR-0038): view.<domain>/<slug>, via the
+  // composition root's viewOrigin() (request-origin fallback on previews/dev).
+  const viewUrl = `${viewOrigin(request)}/${slug}`;
+  return json({ ok: true as const, slug, version, scanStatus, viewUrl });
 }
 
 export default function Upload() {
