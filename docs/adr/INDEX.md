@@ -18,6 +18,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0044 | [Signed merge commits instead of rebase-merge + bot-merge](0044-merge-commit-strategy.md) | Accepted (2026-06-09) |
 | 0045 | [Async content-scan pipeline (pg-boss on Neon, Cloudflare cron)](0045-async-content-scan-pipeline.md) | Accepted (2026-06-11) |
 | 0046 | [Two-tier adapter testing — in-process pglite below the Neon e2e tier](0046-adapter-sql-test-tier.md) | Accepted (2026-06-15) |
+| 0047 | [Per-PR preview data isolation (soft) — ephemeral Neon branch + R2 key prefix](0047-preview-data-isolation.md) | Accepted (2026-06-15) |
 
 ## Backlog (ADRs 1–30 from the spec)
 
