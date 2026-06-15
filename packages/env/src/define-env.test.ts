@@ -54,6 +54,11 @@ describe("defineEnv", () => {
     });
   });
 
+  it("accepts an optional R2_KEY_PREFIX and leaves it undefined when unset", () => {
+    expect(defineEnv({ ...valid, R2_KEY_PREFIX: "pr-42/" }).R2_KEY_PREFIX).toBe("pr-42/");
+    expect(defineEnv(valid).R2_KEY_PREFIX).toBeUndefined();
+  });
+
   it("accepts an optional VIEW_ORIGIN URL (canonical viewer origin)", () => {
     const env = defineEnv({ ...valid, VIEW_ORIGIN: "https://view.example" });
     expect(env.VIEW_ORIGIN).toBe("https://view.example");

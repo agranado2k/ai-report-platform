@@ -27,6 +27,10 @@ export const serverSchema = {
   R2_ACCESS_KEY_ID: trimmedString,
   R2_SECRET_ACCESS_KEY: trimmedString,
   R2_BUCKET: trimmedString,
+  // Optional R2 key namespace (e.g. "pr-42/") that isolates a preview
+  // deployment's blobs within the shared bucket (preview-data-isolation). Unset
+  // in production, so prod keys stay at `reports/…`.
+  R2_KEY_PREFIX: trimmedString.optional(),
 
   // Clerk server key (ADR-0005). The publishable key is client-safe — see below.
   CLERK_SECRET_KEY: trimmedString,

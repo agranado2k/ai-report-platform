@@ -77,6 +77,7 @@ export function deps(): UploadReportDeps {
       bucket: env.R2_BUCKET,
       // R2's S3 endpoint is derived from the account id.
       endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      keyPrefix: env.R2_KEY_PREFIX,
     }),
     bundles: new HtmlBundleProcessor(),
     idempotency: new DrizzleIdempotencyStore(ctx),
