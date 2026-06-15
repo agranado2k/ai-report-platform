@@ -1179,3 +1179,16 @@ OpenAPI already documented `GET /{slug}` + `view_url` on `view.<domain>` (no cha
 - **Data** — migration `0001_backfill_version_scan_status.sql` reconciles existing stale rows from the authoritative `scan_jobs` verdict (`status='done'`), fixing clean/flagged/blocked alike. Idempotent. Applied via the migrate-db pipeline on merge.
 
 **Test-gap follow-up (tracked, not in this PR):** adapter SQL has no fast regression harness (ADR-0019 leaves it to e2e against real Neon, but the relevant e2e serve step can't run cross-origin on previews). Options: a pglite-backed repository integration test (needs a `DbContext` injection seam + a dev dependency), or wiring an e2e that hits the view origin. Verified this fix on the prod view origin post-deploy (upload → drain → `view.<apex>/<slug>` serves the content under the ADR-013 stack).
+
+### 2026-06-15 — Adapter-SQL integration test harness (pglite) — closes #52
+
+The 2026-06-15 viewer-404 incident slipped past CI because adapter tests were pure mappers (no DB) and the e2e serve check couldn't run cross-origin on previews — so SQL-semantics bugs (ON CONFLICT, transactions) had no fast regression coverage. This adds that tier.
+
+- **Engine:** `@electric-sql/pglite` (the real Postgres engine, in-process WASM) + `drizzle-orm/pglite`, a new **dev-dependency** in `packages/adapters`. Fast tier *below* the real-Neon e2e (which is unchanged).
+- **Seam:** `DbContext` now has an overloaded constructor — `new DbContext(url)` for prod (Neon Pool) and `new DbContext({ base })` for tests (an injected drizzle `Db`). The pglite db is cast to `Db` at the harness boundary only.
+- **Harness:** `packages/adapters/src/testing/pglite.ts` — `makeTestDb()` spins a fresh in-memory pglite, applies the committed `drizzle/*.sql` migrations (real DDL, incl. the `0001` backfill), and wraps it in a `DbContext`; `seedIdentity()` + `sampleReport()` build the FK prerequisites + a fixture aggregate.
+- **Coverage (16 new tests):** `DrizzleReportRepository` round-trips **incl. the exact regression** (insert pending → save clean verdict → re-read → assert `scan_status` persisted — verified to FAIL when `save()` is reverted to `ON CONFLICT DO NOTHING`), `DrizzleIdempotencyStore` (proceed/in_flight/replay/reuse-422), `DrizzleEventOutbox`, `DrizzleScanQueue` (enqueue/listQueued/markRunning/completeScan), and `DrizzleUnitOfWork` commit-last atomicity (commit-together + rollback-all).
+- **Test taxonomy → ADR-0046.** The two-tier decision (in-process pglite fast tier below the Neon e2e tier; pglite is the real Postgres engine, not a mock) is recorded as ADR-0046, which clarifies ADR-0019.
+- **Packaging note:** adding the pglite peer forked `drizzle-orm` into a second pnpm peer-variant; a plain `pnpm install` re-deduped dependents so typecheck resolves one instance. The lockfile change is committed.
+
+Out of scope (per #52): the pg-boss-backed `ScanWorkQueue` (pg-boss internals against pglite — left to e2e). Worktree `chore/adapter-sql-test-harness`. ScanWorkQueue + a possible shared-migrated-template optimization for test speed are follow-ups.

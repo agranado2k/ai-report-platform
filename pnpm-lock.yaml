@@ -201,7 +201,7 @@ importers:
         version: 1.0.20
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0)
+        version: 0.45.2(@electric-sql/pglite@0.5.2)(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0)
       nanoid:
         specifier: ^5.0.9
         version: 5.1.11
@@ -212,6 +212,9 @@ importers:
         specifier: ^11.0.3
         version: 11.1.1
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.2
+        version: 0.5.2
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -236,7 +239,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0)
+        version: 0.45.2(@electric-sql/pglite@0.5.2)(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0)
     devDependencies:
       drizzle-kit:
         specifier: ^0.31.10
@@ -592,6 +595,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/pglite@0.5.2':
+    resolution: {integrity: sha512-y6ySdFE7FQB7BkVaSNaPINgY7mXCyvi+3GQB5ySX9WGwgrdh31WXMP5RM40oAyYff47lIr7xdcW8UbCW5NHDmw==}
 
   '@emotion/hash@0.9.2':
     resolution: {integrity: sha512-MyqliTZGuOm3+5ZRSaaBGP3USLw6+EGykkwZns2EPC5g8jJ4z9OrdZY9apkl3+UP9+sdz76YYkwCKP5gh8iY3g==}
@@ -5452,6 +5458,8 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@electric-sql/pglite@0.5.2': {}
+
   '@emotion/hash@0.9.2': {}
 
   '@esbuild-kit/core-utils@3.3.2':
@@ -7046,8 +7054,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.22.4
 
-  drizzle-orm@0.45.2(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0):
+  drizzle-orm@0.45.2(@electric-sql/pglite@0.5.2)(@neondatabase/serverless@0.10.4)(@types/pg@8.11.6)(pg@8.21.0):
     optionalDependencies:
+      '@electric-sql/pglite': 0.5.2
       '@neondatabase/serverless': 0.10.4
       '@types/pg': 8.11.6
       pg: 8.21.0
