@@ -117,9 +117,7 @@ describe("upsertVersions — conflict clause persists scan_status (regression: v
     expect(q).toContain("do update set");
     expect(q).toContain("scan_status");
     expect(q).toContain("excluded");
-    // The old onConflictDoNothing() left scan_status stale at 'pending' forever,
-    // so the ADR-0038 gate (requires live version === clean) 404'd every promoted
-    // report. The conflict MUST refresh scan_status from the inserted row.
+    // DO NOTHING would leave scan_status stale at 'pending' (the viewer-404 bug).
     expect(q).not.toContain("do nothing");
   });
 });

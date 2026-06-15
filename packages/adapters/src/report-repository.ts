@@ -82,16 +82,8 @@ export function rowsToReport(report: ReportRow, versions: readonly VersionRow[])
   };
 }
 
-/**
- * Upsert version rows. The immutable fields (manifest, size, hash, uploader,
- * versionNo) never change after the row is first inserted at upload — but
- * `scan_status` DOES: it starts `pending` and the scan drain promotes it to a
- * terminal verdict (`clean`/`flagged`/`blocked`) via processScanResult → save().
- * So a conflict MUST update `scan_status` (from the inserted row), not no-op —
- * otherwise the cached verdict stays `pending` forever and the viewer gate
- * (which requires the live version to be `clean`, ADR-0038) 404s every promoted
- * report. Exported so the conflict clause is unit-testable without a live DB.
- */
+// scan_status is the only mutable version field post-insert (pending → verdict),
+// so a conflict must refresh it from the inserted row, not no-op.
 export function upsertVersions(db: Db, rows: (typeof reportVersions.$inferInsert)[]) {
   return db
     .insert(reportVersions)
@@ -147,8 +139,7 @@ export class DrizzleReportRepository implements ReportRepository {
             updatedAt: new Date(),
           },
         });
-      // Versions: insert new ones; on conflict, refresh the mutable scan_status
-      // (a re-save after the scan drain promotes pending → terminal verdict).
+      // Versions: insert new ones; on conflict refresh the mutable scan_status.
       const rows = report.versions.map((v) => versionToRow(report.id, v));
       if (rows.length > 0) {
         await upsertVersions(db, rows);
