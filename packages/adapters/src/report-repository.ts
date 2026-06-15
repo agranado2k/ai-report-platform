@@ -21,8 +21,8 @@ import {
   type VersionManifest,
   versionId,
 } from "arp-domain";
-import { asc, eq } from "drizzle-orm";
-import type { DbContext } from "./client";
+import { asc, eq, sql } from "drizzle-orm";
+import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
 type VersionRow = typeof reportVersions.$inferSelect;
@@ -82,6 +82,26 @@ export function rowsToReport(report: ReportRow, versions: readonly VersionRow[])
   };
 }
 
+/**
+ * Upsert version rows. The immutable fields (manifest, size, hash, uploader,
+ * versionNo) never change after the row is first inserted at upload — but
+ * `scan_status` DOES: it starts `pending` and the scan drain promotes it to a
+ * terminal verdict (`clean`/`flagged`/`blocked`) via processScanResult → save().
+ * So a conflict MUST update `scan_status` (from the inserted row), not no-op —
+ * otherwise the cached verdict stays `pending` forever and the viewer gate
+ * (which requires the live version to be `clean`, ADR-0038) 404s every promoted
+ * report. Exported so the conflict clause is unit-testable without a live DB.
+ */
+export function upsertVersions(db: Db, rows: (typeof reportVersions.$inferInsert)[]) {
+  return db
+    .insert(reportVersions)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: reportVersions.id,
+      set: { scanStatus: sql`excluded.scan_status` },
+    });
+}
+
 // ── Adapter ───────────────────────────────────────────────────────────────--
 
 export class DrizzleReportRepository implements ReportRepository {
@@ -127,10 +147,11 @@ export class DrizzleReportRepository implements ReportRepository {
             updatedAt: new Date(),
           },
         });
-      // Versions: insert any new ones; existing (reportId, versionNo) are no-ops.
+      // Versions: insert new ones; on conflict, refresh the mutable scan_status
+      // (a re-save after the scan drain promotes pending → terminal verdict).
       const rows = report.versions.map((v) => versionToRow(report.id, v));
       if (rows.length > 0) {
-        await db.insert(reportVersions).values(rows).onConflictDoNothing();
+        await upsertVersions(db, rows);
       }
       return ok(undefined);
     } catch (e) {
