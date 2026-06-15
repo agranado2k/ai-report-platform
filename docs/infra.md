@@ -129,6 +129,7 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |
 | `GEMINI_API_KEY` | for the Gemini PR-review workflow | shared (pass-through) |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | Vercel Protection Bypass for Automation secret | `e2e` (BDD smoke against the preview) |
+| `VERCEL_TOKEN` | Vercel API token (team env-management scope; reused from the TF provider token) | `preview-isolation` workflow (set per-PR branch env + redeploy) — ADR-0047 |
 
 > **Preview access is public** (`vercel_authentication = { deployment_type =
 > "none" }` in `modules/vercel-app`) — we gate report access via the viewer's
@@ -178,7 +179,10 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | --- | --- | --- |
 | `APEX_DOMAIN` | `example.com` | shared |
 | `OPERATOR_EMAIL` | `you@example.com` | shared |
-| `VERCEL_TEAM_ID` | `team_xxxx…` | staging, prod |
+| `VERCEL_TEAM_ID` | `agranado2ks-projects` (slug; works as the API `teamId`) | staging, prod, `preview-isolation` |
+| `VERCEL_APP_PROJECT_ID` | `prj_…` (arp-app-prod) | `preview-isolation` |
+| `VERCEL_VIEW_PROJECT_ID` | `prj_…` (arp-view-prod) | `preview-isolation` |
+| `GH_REPO_ID` | `1246699531` | `preview-isolation` (redeploy gitSource) |
 | `UPSTASH_EMAIL` | `you@example.com` | staging, prod |
 | `CLERK_PUBLISHABLE_KEY_STAGING` | `pk_test_…` | staging |
 | `CLERK_PUBLISHABLE_KEY_PROD` | `pk_live_…` | prod |
