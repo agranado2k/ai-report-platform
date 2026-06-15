@@ -14,11 +14,28 @@ export interface R2Config {
   readonly bucket: string;
   /** S3 endpoint, e.g. https://<account>.r2.cloudflarestorage.com */
   readonly endpoint: string;
+  /**
+   * Optional key namespace prepended to every object key (e.g. "pr-42/") so a
+   * preview deployment's blobs are isolated within the bucket. Unset in
+   * production — keys then start at `reports/…` unchanged.
+   */
+  readonly keyPrefix?: string;
 }
 
 /** Object key for a file within a version bundle (ADR-0037). */
 export function blobKey(reportId: ReportId, versionId: VersionId, path: string): string {
   return `reports/${reportId}/${versionId}/${path}`;
+}
+
+/**
+ * Prepend an optional key namespace so a preview deployment's objects live under
+ * `pr-<N>/…` instead of colliding with production keys. Empty/undefined leaves
+ * the key unchanged (production); leading/trailing slashes are normalized.
+ */
+export function withPrefix(prefix: string | undefined, key: string): string {
+  if (!prefix) return key;
+  const norm = prefix.replace(/^\/+/, "").replace(/\/+$/, "");
+  return norm ? `${norm}/${key}` : key;
 }
 
 export class R2BlobStore implements BlobStore {
@@ -44,13 +61,16 @@ export class R2BlobStore implements BlobStore {
   ): Promise<Result<void, AppError>> {
     try {
       for (const f of files) {
-        const res = await this.aws.fetch(this.url(blobKey(reportId, versionId, f.path)), {
-          method: "PUT",
-          // Uint8Array is a valid fetch body at runtime; the cast bridges TS
-          // 5.7's generic Uint8Array<ArrayBufferLike> vs BodyInit.
-          body: f.bytes as unknown as BodyInit,
-          headers: { "content-type": f.contentType },
-        });
+        const res = await this.aws.fetch(
+          this.url(withPrefix(this.cfg.keyPrefix, blobKey(reportId, versionId, f.path))),
+          {
+            method: "PUT",
+            // Uint8Array is a valid fetch body at runtime; the cast bridges TS
+            // 5.7's generic Uint8Array<ArrayBufferLike> vs BodyInit.
+            body: f.bytes as unknown as BodyInit,
+            headers: { "content-type": f.contentType },
+          },
+        );
         if (!res.ok) return r2err("putObject", res.status, await safeText(res));
       }
       return ok(undefined);
@@ -65,7 +85,9 @@ export class R2BlobStore implements BlobStore {
     path: string,
   ): Promise<Result<BlobFile | null, AppError>> {
     try {
-      const res = await this.aws.fetch(this.url(blobKey(reportId, versionId, path)));
+      const res = await this.aws.fetch(
+        this.url(withPrefix(this.cfg.keyPrefix, blobKey(reportId, versionId, path))),
+      );
       if (res.status === 404) return ok(null);
       if (!res.ok) return r2err("getObject", res.status, await safeText(res));
       const bytes = new Uint8Array(await res.arrayBuffer());
@@ -84,7 +106,7 @@ export class R2BlobStore implements BlobStore {
     versionId: VersionId,
   ): Promise<Result<void, AppError>> {
     try {
-      const prefix = `reports/${reportId}/${versionId}/`;
+      const prefix = withPrefix(this.cfg.keyPrefix, `reports/${reportId}/${versionId}/`);
       const listUrl = `${this.cfg.endpoint.replace(/\/$/, "")}/${this.cfg.bucket}?list-type=2&prefix=${encodeURIComponent(prefix)}`;
       const list = await this.aws.fetch(listUrl);
       if (!list.ok) return r2err("listObjects", list.status, await safeText(list));
