@@ -120,7 +120,7 @@ Indexes: `key_prefix`, `acting_user_id`, `last_used_at`.
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | |
 
-Indexes: `org_id`, `(org_id, parent_id, slug)` unique.
+Indexes: `org_id`, `(org_id, parent_id, slug)` unique, and `(org_id, slug) WHERE parent_id IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048).
 
 #### `folder_collaborators` — grants (Phase 2.5)
 | Column | Type | Notes |

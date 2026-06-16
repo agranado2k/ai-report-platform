@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "folders_org_root_slug_uniq" ON "folders" USING btree ("org_id","slug") WHERE "folders"."parent_id" is null;
