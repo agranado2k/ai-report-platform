@@ -28,6 +28,9 @@ describe("ClerkBackendOrgProvisioner", () => {
     const r = await new ClerkBackendOrgProvisioner(orgs).createPersonalOrg("user_abc", "w");
 
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.kind).toBe("Unexpected");
+    if (!r.ok) {
+      expect(r.error.kind).toBe("Unexpected");
+      expect(r.error.message).toContain("clerk.createOrganization"); // carries the cause
+    }
   });
 });

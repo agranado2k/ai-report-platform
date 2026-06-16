@@ -5,7 +5,7 @@
 // application's ClerkOrgProvisioner port.
 import { createClerkClient } from "@clerk/backend";
 import type { ClerkOrgProvisioner } from "arp-application";
-import { type AppError, ok, type Result } from "arp-domain";
+import { type AppError, err, ok, type Result } from "arp-domain";
 
 /** The slice of the Clerk backend API we depend on — narrow so tests can fake it. */
 export interface ClerkOrgApi {
@@ -23,18 +23,20 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
     return new ClerkBackendOrgProvisioner(createClerkClient({ secretKey }).organizations);
   }
 
+  // TODO(slice-1b): this always creates — concurrent first-requests for the same
+  // user could mint two Clerk orgs. Guard before wiring resolveUploadActor
+  // (per-user lock, or check Clerk for an existing personal org first).
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     try {
       const org = await this.orgs.createOrganization({ name, createdBy: clerkUserId });
       return ok(org.id);
     } catch (e) {
-      return {
-        ok: false,
-        error: {
-          kind: "Unexpected",
-          message: `clerk.createOrganization: ${e instanceof Error ? e.message : String(e)}`,
-        },
-      };
+      // TODO(slice-1b): map Clerk 4xx (name validation, 429 rate-limit) to typed
+      // AppErrors so they don't all surface as 500 (ADR-0040).
+      return err({
+        kind: "Unexpected",
+        message: `clerk.createOrganization: ${e instanceof Error ? e.message : String(e)}`,
+      });
     }
   }
 }
