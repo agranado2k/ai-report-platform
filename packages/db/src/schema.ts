@@ -114,6 +114,10 @@ export const folders = pgTable(
   (t) => [
     index("folders_org_id_idx").on(t.orgId),
     uniqueIndex("folders_org_parent_slug_uniq").on(t.orgId, t.parentId, t.slug),
+    // Guarantees one top-level (Root) folder per slug per Org: the NULLs-distinct
+    // base index above can't dedupe parent_id = NULL rows, so identity
+    // provisioning could otherwise create ghost Root folders (ADR-0048).
+    uniqueIndex("folders_org_root_slug_uniq").on(t.orgId, t.slug).where(sql`${t.parentId} is null`),
   ],
 );
 

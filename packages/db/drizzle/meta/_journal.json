@@ -15,6 +15,13 @@
       "when": 1781536497354,
       "tag": "0001_backfill_version_scan_status",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781637784489,
+      "tag": "0002_folders_root_unique",
+      "breakpoints": true
     }
   ]
 }
