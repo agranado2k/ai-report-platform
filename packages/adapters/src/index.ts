@@ -5,6 +5,7 @@
 // deterministic services. The composition root (the HTTP route) builds an
 // UploadReportDeps from these using env from defineEnv() (arp-env).
 export * from "./bundle-processor";
+export * from "./clerk-org-provisioner";
 export * from "./client";
 export * from "./event-outbox";
 export * from "./idempotency-store";

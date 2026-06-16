@@ -13,6 +13,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@clerk/backend": "^3.7.1",
     "@neondatabase/serverless": "^0.10.4",
     "arp-application": "workspace:*",
     "arp-db": "workspace:*",
