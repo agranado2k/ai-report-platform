@@ -1213,3 +1213,11 @@ This slice is the **provisioning foundation** — no Clerk wired yet, fully TDD'
 - **`DrizzleIdentityStore`** (`packages/adapters`) — find-or-create per entity against `users`/`orgs`/`folders` (idempotent; handles a `User` already in another org per the shared-pool model). 3 pglite integration tests (reusing the #52 harness): unmirrored→null, create→find round-trip, idempotent re-create.
 
 Inert until **slice 1b** wires it: `@clerk/remix` + sign-in/up + `resolveUploadActor`→session + the real Clerk `createOrganization` provisioner + drop `DEMO_ACTOR` + testing-token e2e + restricted-mode config. Worktree `feat/auth-identity-provisioning`. Tracked by issue #54.
+
+### 2026-06-16 — Auth #54: harden identity provisioning (deferred #60 review items)
+
+Addresses the 🔴/🟡 from the slice-1a (#60) review, before the slice-1b wiring drops `DEMO_ACTOR`:
+- **🔴 Root-folder dedup** — added a partial unique index `folders_org_root_slug_uniq` on `(org_id, slug) WHERE parent_id IS NULL` (migration `0002`). The base `(org_id, parent_id, slug)` index is NULLs-distinct so it couldn't dedupe top-level folders; provisioning could otherwise create ghost Root folders. A new pglite test proves the DB now rejects a second Root folder.
+- **🟡 Transaction** — `DrizzleIdentityStore.createPersonalIdentity` now runs the User/Org/Root-folder find-or-create inside one `DbContext.run` transaction (all-or-nothing; concurrency-safe via the unique-index upserts).
+
+Deferred to the slice-1b wiring PR (where the provisioning path goes live): collapsing `findByClerk` to fewer queries (negligible — one lookup per provision) and emitting a provisioning domain event (ties to the deferred webhook-sync layer, ADR-0048). Worktree `fix/harden-identity-provisioning`.
