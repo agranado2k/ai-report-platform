@@ -7,8 +7,11 @@ import {
   type AppError,
   type DomainEvent,
   err,
+  folderId as makeFolderId,
+  orgId as makeOrgId,
   reportId as makeReportId,
   makeSlug,
+  userId as makeUserId,
   versionId as makeVersionId,
   type OrgId,
   ok,
@@ -23,6 +26,7 @@ import type {
   BlobFile,
   BlobStore,
   BundleProcessor,
+  ClerkOrgProvisioner,
   Clock,
   EventOutbox,
   Hasher,
@@ -30,9 +34,11 @@ import type {
   IdempotencyKeyRef,
   IdempotencyRecord,
   IdempotencyStore,
+  IdentityStore,
   IdGenerator,
   PlanLimiter,
   ProcessedBundle,
+  ProvisionedIdentity,
   ReportRepository,
   ScanJobMessage,
   ScanQueue,
@@ -334,5 +340,48 @@ export class FakeHasher implements Hasher {
       h = Math.imul(h, 0x01000193);
     }
     return (h >>> 0).toString(16).padStart(8, "0");
+  }
+}
+
+/** Mirrors Clerk identities in a Map, keyed by `clerkUserId|clerkOrgId`. */
+export class InMemoryIdentityStore implements IdentityStore {
+  private readonly byClerk = new Map<string, ProvisionedIdentity>();
+  private seq = 0;
+
+  private key(clerkUserId: string, clerkOrgId: string): string {
+    return `${clerkUserId}|${clerkOrgId}`;
+  }
+
+  async findByClerk(
+    clerkUserId: string,
+    clerkOrgId: string,
+  ): Promise<Result<ProvisionedIdentity | null, AppError>> {
+    return ok(this.byClerk.get(this.key(clerkUserId, clerkOrgId)) ?? null);
+  }
+
+  async createPersonalIdentity(input: {
+    readonly clerkUserId: string;
+    readonly clerkOrgId: string;
+    readonly email: string;
+    readonly orgName: string;
+  }): Promise<Result<ProvisionedIdentity, AppError>> {
+    this.seq += 1;
+    const provisioned: ProvisionedIdentity = {
+      userId: makeUserId(`user-${this.seq}`),
+      orgId: makeOrgId(`org-${this.seq}`),
+      rootFolderId: makeFolderId(`folder-${this.seq}`),
+    };
+    this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
+    return ok(provisioned);
+  }
+}
+
+/** Fake Clerk org creator — returns a deterministic id and records its calls. */
+export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
+  readonly calls: { readonly clerkUserId: string; readonly name: string }[] = [];
+
+  async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
+    this.calls.push({ clerkUserId, name });
+    return ok(`clerk-org-${clerkUserId}`);
   }
 }

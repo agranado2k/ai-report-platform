@@ -10,6 +10,7 @@
 import type {
   AppError,
   DomainEvent,
+  FolderId,
   OrgId,
   Report,
   ReportId,
@@ -199,4 +200,49 @@ export interface UnitOfWork {
    * to a single transaction (the in-memory fake just runs the callback).
    */
   run<T>(work: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>>;
+}
+
+// ── Identity & Access (ADR-0048: Clerk JIT personal-org provisioning) ────────
+/** The authenticated principal as Clerk reports it, before mirroring into our DB. */
+export interface ClerkIdentity {
+  readonly clerkUserId: string;
+  /** The session's active Clerk org, or null when the user has none yet. */
+  readonly clerkOrgId: string | null;
+  readonly email: string;
+}
+
+/** Our mirrored Identity & Access trio: a User, their Org, and that Org's Root folder. */
+export interface ProvisionedIdentity {
+  readonly userId: UserId;
+  readonly orgId: OrgId;
+  readonly rootFolderId: FolderId;
+}
+
+/**
+ * Mirrors a Clerk identity into our `users`/`orgs`/`folders` (ADR-0048). The
+ * Drizzle adapter owns the SQL; the in-memory fake backs use-case tests.
+ */
+export interface IdentityStore {
+  /** The mirrored identity for a (Clerk user, Clerk org) pair, or null if not mirrored yet. */
+  findByClerk(
+    clerkUserId: string,
+    clerkOrgId: string,
+  ): Promise<Result<ProvisionedIdentity | null, AppError>>;
+  /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity. */
+  createPersonalIdentity(input: {
+    readonly clerkUserId: string;
+    readonly clerkOrgId: string;
+    readonly email: string;
+    readonly orgName: string;
+  }): Promise<Result<ProvisionedIdentity, AppError>>;
+}
+
+/**
+ * Creates a personal Clerk Organization when the session carries no active org
+ * (ADR-0048 — Clerk doesn't auto-create them). Real impl wraps the Clerk backend
+ * API (slice 1b); a fake backs the tests.
+ */
+export interface ClerkOrgProvisioner {
+  /** Create a personal org for the user; resolves to the new Clerk org id. */
+  createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>>;
 }
