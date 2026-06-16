@@ -1203,3 +1203,13 @@ Slice 1 (PR #58) added the inert `R2_KEY_PREFIX` capability. This slice wires th
 - **Secret:** reused the Terraform Vercel provider token as the `VERCEL_TOKEN` repo secret (team env-management scope).
 
 Validation is **on the PR itself** — the workflow runs on its own `pull_request` events; iterating the Vercel/Neon API calls via the live run logs. Worktrees: `feat/preview-isolation` (#58, slice 1) + `feat/preview-db-isolation` (slice 2). Merge #58 first so the `R2_KEY_PREFIX` consumer is present.
+
+### 2026-06-16 — Auth epic #54, slice 1a: identity provisioning foundation (ADR-0048)
+
+Kicked off the real-auth epic. The Clerk-integration design was settled via /grill-with-docs + Clerk-docs research and recorded in **ADR-0048** (refines ADR-005): personal `Org` = a real Clerk Organization (1:1, app-created JIT since Clerk doesn't auto-create), Clerk **testing tokens** for e2e, Clerk **restricted mode** for invite-only, webhooks deferred. Cost finding: Clerk bills per Monthly Retained Org (≥1 user) — free <100 active orgs, then ~$1/active-user/mo — documented with a tripwire to revisit (→ Clerk Personal Accounts) near 100 active orgs.
+
+This slice is the **provisioning foundation** — no Clerk wired yet, fully TDD'd:
+- **`provisionIdentity` use case** (`packages/application`) — resolves a `ClerkIdentity` → `UploadActor`: if the session has no active org, create a personal Clerk org (via the `ClerkOrgProvisioner` port), then find-or-create the mirrored `User` + `Org` + `Root folder` (via the `IdentityStore` port). Policy in the use case (ADR-0024); I/O behind ports. 4 in-memory tests (has-org / no-org-creates / idempotent / provisioner-failure).
+- **`DrizzleIdentityStore`** (`packages/adapters`) — find-or-create per entity against `users`/`orgs`/`folders` (idempotent; handles a `User` already in another org per the shared-pool model). 3 pglite integration tests (reusing the #52 harness): unmirrored→null, create→find round-trip, idempotent re-create.
+
+Inert until **slice 1b** wires it: `@clerk/remix` + sign-in/up + `resolveUploadActor`→session + the real Clerk `createOrganization` provisioner + drop `DEMO_ACTOR` + testing-token e2e + restricted-mode config. Worktree `feat/auth-identity-provisioning`. Tracked by issue #54.
