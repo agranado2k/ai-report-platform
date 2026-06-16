@@ -60,3 +60,4 @@ jobs:
             Commits violations, and any drift from docs/db-design.md / the glossary.
           claude_args: |
             --max-turns 25
+            --model claude-opus-4-8
