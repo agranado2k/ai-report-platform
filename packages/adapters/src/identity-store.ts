@@ -44,48 +44,55 @@ export class DrizzleIdentityStore implements IdentityStore {
     readonly orgName: string;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     try {
-      const db = this.ctx.current();
-      // User: find-or-create (may already exist from another org — shared pool).
-      await db
-        .insert(users)
-        .values({ id: uuidv7(), clerkUserId: input.clerkUserId, email: input.email })
-        .onConflictDoNothing();
-      const [u] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.clerkUserId, input.clerkUserId))
-        .limit(1);
-
-      // Org: find-or-create by clerk_org_id (Plan defaults to `free`).
-      await db
-        .insert(orgs)
-        .values({
-          id: uuidv7(),
-          clerkOrgId: input.clerkOrgId,
-          name: input.orgName,
-          planLimitsJson: {},
-        })
-        .onConflictDoNothing();
-      const [o] = await db
-        .select({ id: orgs.id })
-        .from(orgs)
-        .where(eq(orgs.clerkOrgId, input.clerkOrgId))
-        .limit(1);
-
-      if (!u || !o) return thrown("identity.create", new Error("user/org missing after upsert"));
-
-      // Root folder: find-or-create (parent_id NULL).
-      let root = await this.rootFolderId(o.id);
-      if (!root) {
+      // One transaction so the User/Org/Root-folder trio commits all-or-nothing.
+      // Concurrency-safe: each find-or-create is an upsert guarded by a unique
+      // index (clerk_user_id, clerk_org_id, and the partial Root-folder index),
+      // so a concurrent provision can't create duplicates (ADR-0048).
+      const provisioned = await this.ctx.run(async () => {
+        const db = this.ctx.current();
+        // User: find-or-create (may already exist from another org — shared pool).
         await db
-          .insert(folders)
-          .values({ id: uuidv7(), orgId: o.id, name: "Root", slug: "root", parentId: null })
+          .insert(users)
+          .values({ id: uuidv7(), clerkUserId: input.clerkUserId, email: input.email })
           .onConflictDoNothing();
-        root = await this.rootFolderId(o.id);
-      }
-      if (!root) return thrown("identity.create", new Error("root folder missing after insert"));
+        const [u] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.clerkUserId, input.clerkUserId))
+          .limit(1);
 
-      return ok({ userId: userId(u.id), orgId: orgId(o.id), rootFolderId: folderId(root) });
+        // Org: find-or-create by clerk_org_id (Plan defaults to `free`).
+        await db
+          .insert(orgs)
+          .values({
+            id: uuidv7(),
+            clerkOrgId: input.clerkOrgId,
+            name: input.orgName,
+            planLimitsJson: {},
+          })
+          .onConflictDoNothing();
+        const [o] = await db
+          .select({ id: orgs.id })
+          .from(orgs)
+          .where(eq(orgs.clerkOrgId, input.clerkOrgId))
+          .limit(1);
+
+        if (!u || !o) throw new Error("user/org missing after upsert");
+
+        // Root folder: find-or-create (parent_id NULL; partial-unique by org+slug).
+        let root = await this.rootFolderId(o.id);
+        if (!root) {
+          await db
+            .insert(folders)
+            .values({ id: uuidv7(), orgId: o.id, name: "Root", slug: "root", parentId: null })
+            .onConflictDoNothing();
+          root = await this.rootFolderId(o.id);
+        }
+        if (!root) throw new Error("root folder missing after insert");
+
+        return { userId: userId(u.id), orgId: orgId(o.id), rootFolderId: folderId(root) };
+      });
+      return ok(provisioned);
     } catch (e) {
       return thrown("identity.createPersonalIdentity", e);
     }
