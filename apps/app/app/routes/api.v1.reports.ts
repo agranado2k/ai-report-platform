@@ -8,9 +8,10 @@ import { type UploadActor, uploadReport } from "arp-application";
 import { err } from "arp-domain";
 import { type HttpResponse, uploadResultToHttp } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
-import { deps, ensureDevIdentity, viewOrigin } from "../server/container.server";
+import { deps, viewOrigin } from "../server/container.server";
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action(args: ActionFunctionArgs) {
+  const { request } = args;
   if (request.method !== "POST") {
     return toResponse({
       status: 405,
@@ -31,8 +32,10 @@ export async function action({ request }: ActionFunctionArgs) {
   // (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
   const opts = { viewBaseUrl: viewOrigin(request) };
 
-  // 1. Resolve the acting principal (Phase-1 dev identity; real auth later).
-  const actorResult = await resolveUploadActor(request);
+  // 1. Resolve the acting principal — a signed-in Clerk session is provisioned
+  //    into an org-scoped actor; unauthenticated falls back to the dev identity
+  //    (ADR-0048, additive). resolveUploadActor seeds its own FK targets.
+  const actorResult = await resolveUploadActor(args);
   if (!actorResult.ok) return toResponse(uploadResultToHttp(actorResult, opts));
   const actor = actorResult.value;
 
@@ -44,7 +47,6 @@ export async function action({ request }: ActionFunctionArgs) {
   //    `pending`; promotion happens asynchronously when the scan drain processes
   //    it (ADR-0045) — the 201 truthfully returns scan_status: pending, and the
   //    viewer shows the holding page until the drain promotes the clean version.
-  await ensureDevIdentity();
   const result = await uploadReport(deps(), commandResult.value);
 
   return toResponse(uploadResultToHttp(result, opts));

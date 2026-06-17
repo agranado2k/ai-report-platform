@@ -5,9 +5,11 @@
 import {
   AllowAllPlanLimiter,
   CleanStubScanner,
+  ClerkBackendOrgProvisioner,
   DbContext,
   DrizzleEventOutbox,
   DrizzleIdempotencyStore,
+  DrizzleIdentityStore,
   DrizzleReportRepository,
   DrizzleScanQueue,
   DrizzleUnitOfWork,
@@ -17,10 +19,14 @@ import {
   PgBossScanWorkQueue,
   R2BlobStore,
   Sha256Hasher,
-  SystemClock,
   UuidV7IdGenerator,
 } from "arp-adapters";
-import type { DrainScansDeps, UploadActor, UploadReportDeps } from "arp-application";
+import type {
+  DrainScansDeps,
+  ProvisionIdentityDeps,
+  UploadActor,
+  UploadReportDeps,
+} from "arp-application";
 import { folders, orgs, users } from "arp-db/schema";
 import { folderId, orgId, userId } from "arp-domain";
 import { defineEnv } from "arp-env";
@@ -90,6 +96,23 @@ export function deps(): UploadReportDeps {
     uow: new DrizzleUnitOfWork(ctx),
   };
   return _deps;
+}
+
+let _provisionDeps: ProvisionIdentityDeps | undefined;
+
+/**
+ * Deps for `provisionIdentity` (ADR-0048) — the IdentityStore mirror + the real
+ * Clerk org provisioner. Wired here in the composition root; `resolveUploadActor`
+ * uses them to turn a signed-in Clerk session into an org-scoped UploadActor.
+ */
+export function provisionDeps(): ProvisionIdentityDeps {
+  if (_provisionDeps) return _provisionDeps;
+  const env = defineEnv();
+  _provisionDeps = {
+    identities: new DrizzleIdentityStore(context()),
+    clerkOrgs: ClerkBackendOrgProvisioner.fromSecretKey(env.CLERK_SECRET_KEY),
+  };
+  return _provisionDeps;
 }
 
 /**
