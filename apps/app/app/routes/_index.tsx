@@ -1,22 +1,29 @@
 import { SignedIn, SignedOut, UserButton } from "@clerk/remix";
 import { json, type LoaderFunctionArgs, type MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
-import { getAuth } from "../server/auth.server";
+import { listReports } from "arp-application";
+import { resolveUploadActor } from "../server/auth.server";
+import { deps, viewOrigin } from "../server/container.server";
 
 export const meta: MetaFunction = () => [
-  { title: "ai-report-platform — dashboard" },
-  { name: "description", content: "Phase 1 dashboard." },
+  { title: "Your reports — ai-report-platform" },
+  { name: "description", content: "Dashboard: your reports." },
 ];
 
-// Server-confirmed auth state (ADR-0048): proves rootAuthLoader + the session
-// resolve on the server, not just in the client ClerkProvider.
+// The dashboard list (ADR-0036). The page is behind the root auth gate, so a
+// session is present; resolveUploadActor yields the internal org id (provisioning
+// the identity on first sight, idempotent — ADR-0048), then listReports projects
+// the org's reports newest-first.
 export async function loader(args: LoaderFunctionArgs) {
-  const { userId, orgId } = await getAuth(args);
-  return json({ userId, orgId });
+  const actor = await resolveUploadActor(args);
+  const viewBase = viewOrigin(args.request);
+  if (!actor.ok) return json({ reports: [], viewBase });
+  const listed = await listReports({ reports: deps().reports }, { orgId: actor.value.orgId });
+  return json({ reports: listed.ok ? listed.value : [], viewBase });
 }
 
 export default function Index() {
-  const { userId, orgId } = useLoaderData<typeof loader>();
+  const { reports, viewBase } = useLoaderData<typeof loader>();
   return (
     <main
       style={{
@@ -27,7 +34,7 @@ export default function Index() {
       }}
     >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>ai-report-platform</h1>
+        <h1>Your reports</h1>
         <SignedIn>
           <UserButton afterSignOutUrl="/" />
         </SignedIn>
@@ -36,28 +43,45 @@ export default function Index() {
         </SignedOut>
       </header>
 
-      <SignedIn>
-        <p>✓ Signed in.</p>
-        <ul>
-          <li>
-            Clerk user: <code>{userId}</code>
-          </li>
-          <li>
-            Active Clerk org: <code>{orgId ?? "— (none yet)"}</code>
-          </li>
+      <p>
+        <Link to="/upload">Upload a report →</Link>
+      </p>
+
+      {reports.length === 0 ? (
+        <p style={{ color: "#666" }}>
+          No reports yet. <Link to="/upload">Upload your first →</Link>
+        </p>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {reports.map((r) => (
+            <li
+              key={r.slug}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 0",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <span>
+                <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
+                <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>
+              </span>
+              <StatusBadge isPublished={r.isPublished} />
+            </li>
+          ))}
         </ul>
-        <p>
-          <Link to="/upload">Upload a report →</Link>
-        </p>
-      </SignedIn>
-      {/* Currently unreachable: the root auth gate (root.tsx) redirects anonymous
-          visitors to /sign-in before `/` renders. Kept as the fallback if `/` is
-          ever added to the public allowlist. */}
-      <SignedOut>
-        <p>
-          You're signed out. <Link to="/sign-in">Sign in</Link> to continue.
-        </p>
-      </SignedOut>
+      )}
     </main>
+  );
+}
+
+/** Published = a clean version is live; otherwise the report is still pending its scan. */
+function StatusBadge({ isPublished }: { isPublished: boolean }) {
+  return (
+    <span style={{ fontSize: 13, color: isPublished ? "#0a7" : "#999" }}>
+      {isPublished ? "published" : "pending"}
+    </span>
   );
 }
