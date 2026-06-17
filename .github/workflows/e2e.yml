@@ -80,6 +80,11 @@ jobs:
           # Enable "Protection Bypass for Automation" on both Vercel projects and
           # store the generated secret as this repo secret.
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # @auth scenario (ADR-0048): mint a session token for the seeded test
+          # user on the STAGING Clerk instance (previews use staging keys). Absent
+          # → the @auth scenario is grep-excluded (playwright.config.ts).
+          E2E_CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
+          E2E_TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
         run: pnpm e2e
 
       - name: Upload Playwright report
