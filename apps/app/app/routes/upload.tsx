@@ -22,7 +22,9 @@ export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) {
     if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
-    return json({ error: `${actor.error.kind}: ${actor.error.message}` }, { status: 400 });
+    // Any other actor-resolution failure (e.g. Clerk org provisioning) is a
+    // server-side problem — surface a generic 5xx, don't leak the kind/message.
+    return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
   }
 
   const result = await uploadReport(deps(), {
