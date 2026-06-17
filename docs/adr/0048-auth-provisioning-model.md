@@ -41,6 +41,7 @@ B. **Clerk Personal Accounts** (no org for solo users) — avoids MRO cost, but 
 - **Invite-only = Clerk restricted mode / email allowlist** on the staging + prod instances (auth-provider config, akin to the per-provider PAT exception in ADR-017).
 - **Webhooks deferred** — an optional ongoing-sync layer (email/membership/deletion) for later, not a creation mechanism.
 - **Per-env instances**: staging Clerk keys for previews/dev, prod keys for prod.
+- **Dashboard access = default-protect gate.** Every page on the app origin requires a signed-in session **except** an explicit public allowlist (`/sign-in`, `/sign-up`, `/health`); the viewer origin (`view.<domain>`) is separately public by ADR-0038. Implemented as a `rootAuthLoader` callback in `apps/app/app/root.tsx` that redirects anonymous document requests to `/sign-in` (prefix-matched allowlist, so Clerk path-routed sub-pages pass). Default-protect (allowlist exceptions) so new pages are gated automatically rather than opt-in. **Scope:** this is a *navigation* gate — Remix still executes sibling/child route loaders before the root redirect replaces the response, so any data-fetching loader/route remains responsible for its own authorization (e.g. `POST /api/v1/reports` returns 401 via `resolveUploadActor`; resource routes are outside the root gate entirely).
 
 ## Consequences
 
