@@ -537,7 +537,7 @@
 <div class="wrap">
 
   <header class="hero">
-    <p class="eyebrow">Technical Specification · v1 (rev 8)</p>
+    <p class="eyebrow">Technical Specification · v1 (rev 9)</p>
     <h1>HTML Report Hosting Platform</h1>
     <p class="subtitle">A SaaS platform where LLMs (or any client) push HTML reports to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version without breaking links. Specification is split into <strong>Part I — Product</strong> (what we're building and why) and <strong>Part II — Engineering</strong> (how we're building it, with strict practices and a tracked delivery pipeline).</p>
     <div class="meta">
@@ -1171,7 +1171,7 @@ export class UploadReportUseCase {
     When the agent calls update_report with the same slug and new HTML
     Then the response includes version 2
     And the view URL is unchanged
-    And /view/abc1234567?v=1 still serves the original HTML</code></pre>
+    And view.&lt;domain&gt;/abc1234567?v=1 still serves the original HTML</code></pre>
 
     <p>One <code>.feature</code> per use case keeps the <strong>business intent versioned in source</strong>. PRs that touch a use case must update its feature; CI fails if the feature file is missing or skipped.</p>
 
@@ -1338,10 +1338,10 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
         <tr><td>ci-workflows</td><td>Add <code>ci.yml</code>, <code>cd.yml</code>, <code>claude-review.yml</code>, <code>gemini-review.yml</code></td><td><span class="status-pill not-started">Not started</span></td><td>Required status checks wired</td></tr>
         <tr><td>vercel-projects</td><td>Provision two Vercel projects (<code>app</code>, <code>view</code>); link to GitHub repo; preview deploys on every PR</td><td><span class="status-pill not-started">Not started</span></td><td>Preview URLs commented on PRs</td></tr>
         <tr><td>neon-db</td><td>Provision Neon project; create <code>main</code> + per-PR branch automation</td><td><span class="status-pill not-started">Not started</span></td><td>Ephemeral DB per CI run</td></tr>
-        <tr><td>r2-buckets</td><td>Cloudflare R2: <code>reports-prod</code>, <code>reports-staging</code>, <code>reports-ci</code> (versioning on)</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env access keys in GitHub secrets</td></tr>
-        <tr><td>upstash-redis</td><td>Upstash Redis instances for prod/staging</td><td><span class="status-pill not-started">Not started</span></td><td>Rate-limit namespaces seeded</td></tr>
+        <tr><td>r2-buckets</td><td>Cloudflare R2: <code>reports-prod</code>, <code>reports-ci</code> (versioning on) &mdash; no persistent staging (ADR-031); previews namespace within <code>reports-prod</code> via <code>pr-&lt;N&gt;/</code> (ADR-0047)</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env access keys in GitHub secrets</td></tr>
+        <tr><td>upstash-redis</td><td>Upstash Redis instance for prod (per-PR limits use the <code>ci</code> namespace; no persistent staging, ADR-031)</td><td><span class="status-pill not-started">Not started</span></td><td>Rate-limit namespaces seeded</td></tr>
         <tr><td>cloudflare-zone</td><td>Cloudflare zone for <code>&lt;domain&gt;</code>; Terraform-managed records</td><td><span class="status-pill not-started">Not started</span></td><td>DNS-as-code from day 1</td></tr>
-        <tr><td>clerk-tenant</td><td>Clerk app w/ Organizations enabled; MFA enforcement for admins; <code>__Host-</code> cookie config</td><td><span class="status-pill not-started">Not started</span></td><td>Three envs: prod/staging/test</td></tr>
+        <tr><td>clerk-tenant</td><td>Clerk app w/ Organizations enabled; MFA enforcement for admins; <code>__Host-</code> cookie config</td><td><span class="status-pill not-started">Not started</span></td><td>Two instances: prod (live, <code>pk_live</code>) + staging (dev, <code>pk_test</code>, used by previews; ADR-0048)</td></tr>
         <tr><td>psl-submission</td><td>Open PR against publicsuffix/list to add <code>view.&lt;domain&gt;</code></td><td><span class="status-pill not-started">Not started</span></td><td>2-6 wk merge SLA; ship without waiting</td></tr>
         <tr><td>hsts-preload</td><td>Submit <code>&lt;domain&gt;</code> to hstspreload.org once stable</td><td><span class="status-pill not-started">Not started</span></td><td>Blocked on launch; irreversible</td></tr>
         <tr><td>github-secrets</td><td>Populate <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, Vercel/Neon/Cloudflare/R2/Upstash/Clerk tokens</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env scoped where possible</td></tr>
@@ -1353,7 +1353,7 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
       <thead><tr><th>Phase</th><th>Scope</th><th>Status</th><th>Notes</th></tr></thead>
       <tbody>
         <tr><td>Phase 0a</td><td>Accounts + Terraform state bootstrap (R2 <code>tf-state</code> bucket, <code>tf.sh</code> PG-lock wrapper)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 1-2 · gates all of Phase 0</td></tr>
-        <tr><td>Phase 0b</td><td>Terraform modules + applies (Vercel, Neon, R2, Cloudflare, Upstash, Clerk, GitHub, Resend)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 3-5 · applies <code>shared → staging → prod</code></td></tr>
+        <tr><td>Phase 0b</td><td>Terraform modules + applies (Vercel, Neon, R2, Cloudflare, Upstash, Clerk, GitHub, Resend)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 3-5 · applies <code>shared → prod</code> (no persistent staging, ADR-031)</td></tr>
         <tr><td>Phase 0c</td><td>Skeleton apps + CI/CD (Remix /health routes, full headers, edge MW stubs, GHA workflows, AI review)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 6-7</td></tr>
         <tr><td>Phase 0d</td><td>E2E harness — 13 infrastructure features green; use-case features written as <code>@pending</code></td><td><span class="status-pill not-started">Not started</span></td><td>Day 8-9 · gates Phase 1</td></tr>
         <tr><td>Phase 0e</td><td>Engineering practices wired (TDD hooks, BDD, FP lint, worktree skill, docs-check, Bruno generator)</td><td><span class="status-pill not-started">Not started</span></td><td>Day 10 · also gates Phase 1</td></tr>
@@ -1370,7 +1370,7 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
     <h3>Source control &amp; branching</h3>
     <ul>
       <li><strong>Repository:</strong> <code>github.com/agranado2k/&lt;repo&gt;</code> (public).</li>
-      <li><strong>Default branch:</strong> <code>main</code>. Protected. No direct pushes. Linear history.</li>
+      <li><strong>Default branch:</strong> <code>main</code>. Protected. No direct pushes. Signed <strong>merge commits</strong> (ADR-0044, supersedes ADR-025/0035); <strong>no</strong> linear-history requirement &mdash; merge bubbles are accepted.</li>
       <li><strong>Branch naming</strong> (enforced by CI regex check):
         <ul>
           <li><code>feat/&lt;slug&gt;</code> &mdash; new behavior</li>
@@ -1385,13 +1385,13 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
     </ul>
 
     <h3>Branch protection on <code>main</code></h3>
-    <p>Configured under <em>Settings &rarr; Branches &rarr; Branch protection rules</em>. The intent is "<strong>nothing reaches main without a PR, a human review by the repo owner, and a green pipeline</strong>."</p>
+    <p>Configured under <em>Settings &rarr; Branches &rarr; Branch protection rules</em>. The intent is "<strong>nothing reaches main without a PR and a green pipeline</strong>." Under the solo-developer policy (ADR-032) human approval is <strong>not</strong> required &mdash; the PR mechanism + CI status checks are the gate; the dual AI review (ADR-030) is advisory.</p>
     <ul>
       <li><strong>Require a pull request</strong> before merging.</li>
-      <li><strong>Require approvals: 1</strong>, from <code>CODEOWNERS</code> (the user). PR authors cannot approve their own PR.</li>
+      <li><strong>Require approvals: 0</strong> (solo-developer policy, ADR-032; flip back to 1 when a second developer joins). <code>CODEOWNERS</code> is informational.</li>
       <li><strong>Dismiss stale approvals</strong> when new commits are pushed (re-review every change).</li>
       <li><strong>Require status checks to pass</strong> before merging (see CI table below). Branches must be up to date with <code>main</code> before merging.</li>
-      <li><strong>Require linear history</strong> (squash-only merges &mdash; one commit per PR on main).</li>
+      <li><strong>Require signed commits.</strong> Merges use the GitHub web-flow "<strong>Create a merge commit</strong>" button, which signs the merge commit while preserving each PR commit's own signature (ADR-0044). The earlier squash-only / linear-history model and the <code>bot-merge</code> <code>/merge</code> workflow are retired.</li>
       <li><strong>Restrict who can push to matching branches</strong>: nobody (force everything through PRs, including the owner).</li>
       <li><strong>Disallow force pushes</strong> and <strong>disallow deletions</strong>.</li>
       <li><strong>Include administrators</strong> in the rules (so the owner can't accidentally bypass).</li>
@@ -2006,7 +2006,7 @@ POST /api/v1/reports
         <ul>
           <li>Every long-lived resource is provisioned via Terraform under <code>infra/terraform/</code>.</li>
           <li>Per-provider modules: <code>vercel-app</code>, <code>neon-project</code>, <code>r2</code>, <code>cloudflare-zone</code>, <code>upstash-redis</code>, <code>clerk-app</code>, <code>github-repo</code> (branch protection, secrets, CODEOWNERS), <code>resend-domain</code>.</li>
-          <li>Envs (<code>prod</code> / <code>staging</code> / <code>shared</code>) compose modules. <code>shared/</code> holds single-instance resources.</li>
+          <li>Envs (<code>prod</code> / <code>shared</code>) compose modules. <code>shared/</code> holds single-instance resources. No persistent <code>staging</code> env (ADR-031); per-PR ephemeral resources (Neon branch, R2 <code>pr-&lt;N&gt;/</code> prefix) are provisioned by the <code>preview-isolation</code> workflow, not Terraform (ADR-0047).</li>
           <li>After bootstrap, <strong>all infra changes go through a PR</strong>: CI runs <code>terraform plan</code>; CD runs <code>terraform apply</code> on merge &mdash; identical workflow to application code, identical review by CODEOWNERS + Claude + Gemini.</li>
           <li>Click-ops remains only for (1) per-provider PAT generation and (2) the bootstrap R2 bucket for Terraform state (chicken-and-egg).</li>
           <li><strong>Ephemeral per-PR Neon branches</strong> use the Neon API directly from CI &mdash; Terraform is too slow for ephemeral state. Prefix isolation handles R2 (<code>pr-&lt;N&gt;/</code>) and Upstash (<code>pr-&lt;N&gt;:</code>).</li>
@@ -2579,7 +2579,7 @@ POST /api/v1/reports
 
   <footer>
     <p>Source plan file: <code>~/.claude/plans/you-re-senior-product-engineer-cozy-stonebraker.md</code></p>
-    <p>Generated 2026-05-20, rev 8 (domain-language sync 2026-06-04) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agranado2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
+    <p>Generated 2026-05-20, rev 9 (decision reconcile 2026-06-17: ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical view.&lt;domain&gt;/&lt;slug&gt;) &middot; v1 specification, status: Approved &middot; Repo: <code>github.com/agranado2k/&lt;repo&gt;</code> &middot; Framework: Remix v2 on Vercel &middot; Architecture: Hexagonal + event-driven + FP &middot; Infra: Terraform on R2 + Postgres lock &middot; Delivery: Infrastructure-first (Phase 0a-0e) &middot; Practices: TDD · BDD · worktrees · docs-as-contract &middot; API: OpenAPI + Bruno &middot; CI/CD: GitHub Actions + dual AI review &middot; Security: P0 &middot; 30 ADRs, 21 threats, 13 infra + 31 feature tests</p>
   </footer>
 
 </div>

@@ -1,6 +1,6 @@
 # Claude Code instructions for this repository
 
-These instructions are binding for any Claude or LLM-driven agent working in this repo. They mirror the architectural decisions in `docs/spec.html` (rev 7, 30 ADRs).
+These instructions are binding for any Claude or LLM-driven agent working in this repo. They mirror the architectural decisions in `docs/spec.html` (rev 9; ADR-001–030 inline in the spec, ADR-0035–0048 in `docs/adr/`).
 
 ## At session start
 
