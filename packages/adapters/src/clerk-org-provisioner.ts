@@ -31,8 +31,7 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
     // adapt both behind the single narrow port.
     return new ClerkBackendOrgProvisioner({
       createOrganization: (params) => client.organizations.createOrganization(params),
-      getOrganizationMembershipList: (params) =>
-        client.users.getOrganizationMembershipList(params),
+      getOrganizationMembershipList: (params) => client.users.getOrganizationMembershipList(params),
     });
   }
 
