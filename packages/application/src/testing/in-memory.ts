@@ -40,6 +40,7 @@ import type {
   ProcessedBundle,
   ProvisionedIdentity,
   ReportRepository,
+  ReportSummary,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
@@ -59,6 +60,18 @@ export class InMemoryReportRepository implements ReportRepository {
 
   async findById(id: ReportId): Promise<Result<Report | null, AppError>> {
     return ok(this.byId.get(id) ?? null);
+  }
+
+  async listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
+    const summaries = [...this.byId.values()]
+      .filter((r) => r.orgId === orgId && r.deletedAt === null)
+      .reverse() // Map preserves insertion order; reverse → newest-first.
+      .map((r) => ({
+        slug: r.slug,
+        title: r.title,
+        isPublished: r.liveVersionId !== null,
+      }));
+    return ok(summaries);
   }
 
   async save(report: Report): Promise<Result<void, AppError>> {
