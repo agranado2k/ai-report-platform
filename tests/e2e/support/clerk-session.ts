@@ -1,8 +1,10 @@
 // Mint a real Clerk session JWT for the seeded staging test user via the Clerk
 // backend REST API (createSession → session token). The @auth e2e uses this to
 // exercise the authenticated upload path without a browser sign-in (ADR-0048) —
-// `POST /api/v1/reports` is a machine API, so a Bearer/cookie session token is
-// the natural fixture. Raw fetch keeps @clerk/backend out of the dependency tree.
+// `POST /api/v1/reports` is a machine API, so the token is sent as an
+// `Authorization: Bearer` header (the header path skips the dev-instance
+// dev-browser requirement that rejects a bare session cookie). Raw fetch keeps
+// @clerk/backend out of the dependency tree.
 //
 // The backend-minted session carries no active org (org selection is a FAPI
 // concern), so provisioning hits the JIT path — which is exactly why

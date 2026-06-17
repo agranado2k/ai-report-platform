@@ -14,9 +14,16 @@ let body: Record<string, unknown>;
 const MARKER = `arp-auth-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const HTML = `<!doctype html><html><body><h1>${MARKER}</h1></body></html>`;
 
-/** Clerk transports the session as the `__session` cookie; getAuth reads it SSR. */
-function sessionCookie(): Record<string, string> {
-  return { Cookie: `__session=${session.jwt}` };
+/**
+ * Send the session as a Bearer token, NOT the `__session` cookie. Staging is a
+ * Clerk DEVELOPMENT instance (pk_test): its cookie path requires a dev-browser
+ * token and rejects a bare backend-minted session ("dev-browser-missing"). The
+ * Authorization-header path (authenticateRequestWithTokenInHeader in
+ * @clerk/backend) verifies the session JWT networklessly with no dev-browser —
+ * which is exactly right for a machine/API test.
+ */
+function sessionAuthHeader(): Record<string, string> {
+  return { Authorization: `Bearer ${session.jwt}` };
 }
 
 Given("I am signed in as the seeded Clerk test user", async () => {
@@ -24,7 +31,7 @@ Given("I am signed in as the seeded Clerk test user", async () => {
 });
 
 When("I GET the dashboard with my session", async ({ request }) => {
-  const res = await request.get("/", { headers: sessionCookie() });
+  const res = await request.get("/", { headers: sessionAuthHeader() });
   expect(res.status(), "dashboard GET").toBe(200);
   dashboardHtml = await res.text();
 });
@@ -40,7 +47,7 @@ When(
   "I upload an HTML report file with my session to {string}",
   async ({ request }, path: string) => {
     response = await request.post(path, {
-      headers: sessionCookie(),
+      headers: sessionAuthHeader(),
       multipart: {
         file: { name: "report.html", mimeType: "text/html", buffer: Buffer.from(HTML, "utf8") },
       },

@@ -3,22 +3,32 @@
 // → it's stored as a report → view it at the canonical view.<domain>/<slug>. The
 // production API is POST /api/v1/reports (ADR-0037); this page is the
 // manually-testable surface.
-import { type ActionFunctionArgs, json, type MetaFunction } from "@remix-run/node";
+import { type ActionFunctionArgs, json, type MetaFunction, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { uploadReport } from "arp-application";
-import { DEMO_ACTOR, deps, ensureDevIdentity, viewOrigin } from "../server/container.server";
+import { resolveUploadActor } from "../server/auth.server";
+import { deps, viewOrigin } from "../server/container.server";
 
 export const meta: MetaFunction = () => [{ title: "Upload a report — ai-report-platform" }];
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action(args: ActionFunctionArgs) {
+  const { request } = args;
   const form = await request.formData();
   const html = String(form.get("html") ?? "");
   const title = String(form.get("title") ?? "").trim() || undefined;
   if (!html.trim()) return json({ error: "Paste some HTML to upload." }, { status: 400 });
 
-  await ensureDevIdentity();
+  // Require a signed-in session (ADR-0048); send anonymous visitors to sign-in.
+  const actor = await resolveUploadActor(args);
+  if (!actor.ok) {
+    if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
+    // Any other actor-resolution failure (e.g. Clerk org provisioning) is a
+    // server-side problem — surface a generic 5xx, don't leak the kind/message.
+    return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
+  }
+
   const result = await uploadReport(deps(), {
-    actor: DEMO_ACTOR,
+    actor: actor.value,
     upload: { filename: "index.html", bytes: new TextEncoder().encode(html) },
     title,
   });

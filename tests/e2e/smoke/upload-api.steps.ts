@@ -29,25 +29,7 @@ Then("the upload response status is {int}", async ({}, status: number) => {
   expect(response.status(), JSON.stringify(body)).toBe(status);
 });
 
-Then(
-  'the upload body has a "slug", a canonical "view_url", a "version" of {int}, and "scan_status" of {string}',
-  async ({}, version: number, scanStatus: string) => {
-    expect(typeof body.slug).toBe("string");
-    expect((body.slug as string).length).toBeGreaterThan(0);
-
-    // The canonical viewer URL is `<base>/<slug>` on the view origin (ADR-002 /
-    // ADR-0038) — the slug is the WHOLE path, no `/r/` prefix.
-    expect(typeof body.view_url).toBe("string");
-    const viewUrl = new URL(body.view_url as string);
-    expect(viewUrl.pathname).toBe(`/${body.slug}`);
-    expect(body.view_url as string).not.toContain("/r/");
-    // On prod the API pins VIEW_ORIGIN; previews fall back to the request origin,
-    // so we only assert the origin when the test env knows the canonical one.
-    if (process.env.VIEW_ORIGIN) {
-      expect(viewUrl.origin).toBe(new URL(process.env.VIEW_ORIGIN).origin);
-    }
-
-    expect(body.version).toBe(version);
-    expect(body.scan_status).toBe(scanStatus);
-  },
-);
+Then("the upload error code is {string}", async ({}, code: string) => {
+  // RFC-9457 problem+json — the actor seam rejects anonymous writes (ADR-0048).
+  expect(body.code, JSON.stringify(body)).toBe(code);
+});
