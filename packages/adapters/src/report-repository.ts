@@ -2,11 +2,12 @@
 // + `report_versions` tables (ADR-0020 repository pattern). Row<->domain
 // mapping is factored into pure functions so it can be unit-tested without a DB;
 // the actual queries are integration-tested against the Neon branch (ADR-0019).
-import type { ReportRepository } from "arp-application";
+import type { ReportRepository, ReportSummary } from "arp-application";
 import { reports, reportVersions } from "arp-db/schema";
 import {
   type AppError,
   folderId,
+  type OrgId,
   ok,
   orgId,
   type Report,
@@ -21,7 +22,7 @@ import {
   type VersionManifest,
   versionId,
 } from "arp-domain";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
@@ -105,6 +106,32 @@ export class DrizzleReportRepository implements ReportRepository {
 
   async findById(id: ReportId): Promise<Result<Report | null, AppError>> {
     return this.loadWhere(eq(reports.id, id));
+  }
+
+  async listByOrg(org: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
+    // Lean projection — no version rows/manifests loaded; newest reports first.
+    // `isPublished` is derived from the live (clean) version pointer.
+    try {
+      const db = this.ctx.current();
+      const rows = await db
+        .select({
+          slug: reports.slug,
+          title: reports.title,
+          liveVersionId: reports.liveVersionId,
+        })
+        .from(reports)
+        .where(and(eq(reports.orgId, org), isNull(reports.deletedAt)))
+        .orderBy(desc(reports.updatedAt));
+      return ok(
+        rows.map((r) => ({
+          slug: r.slug as Slug,
+          title: r.title,
+          isPublished: r.liveVersionId !== null,
+        })),
+      );
+    } catch (e) {
+      return err2("listReportsByOrg", e);
+    }
   }
 
   private async loadWhere(where: ReturnType<typeof eq>): Promise<Result<Report | null, AppError>> {
