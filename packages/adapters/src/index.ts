@@ -8,6 +8,7 @@ export * from "./bundle-processor";
 export * from "./clerk-org-provisioner";
 export * from "./client";
 export * from "./event-outbox";
+export * from "./folder-repository";
 export * from "./idempotency-store";
 export * from "./identity-store";
 export * from "./pg-boss";
