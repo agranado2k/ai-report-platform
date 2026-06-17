@@ -76,7 +76,7 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     expect(found.ok && found.value).toBeNull();
   });
 
-  it("listByOrg projects summaries — published flag, latest scan status, soft-deleted excluded", async () => {
+  it("listByOrg projects summaries — published flag + soft-deleted excluded", async () => {
     // r1: pending, not published.
     await repo.save(newReport());
     // r2: promoted to clean → published.
