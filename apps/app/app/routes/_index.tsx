@@ -46,9 +46,6 @@ export default function Index() {
             Active Clerk org: <code>{orgId ?? "— (none yet)"}</code>
           </li>
         </ul>
-        {/* Attribution note (ADR-0048): /upload still records the seeded
-            DEMO_ACTOR, not this signed-in user. resolveUploadActor is wired to
-            getAuth + provisionIdentity in the next slice (1b-ii). */}
         <p>
           <Link to="/upload">Upload a report →</Link>
         </p>

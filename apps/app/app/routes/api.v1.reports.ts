@@ -32,9 +32,9 @@ export async function action(args: ActionFunctionArgs) {
   // (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
   const opts = { viewBaseUrl: viewOrigin(request) };
 
-  // 1. Resolve the acting principal — a signed-in Clerk session is provisioned
-  //    into an org-scoped actor; unauthenticated falls back to the dev identity
-  //    (ADR-0048, additive). resolveUploadActor seeds its own FK targets.
+  // 1. Resolve the acting principal — requires a signed-in Clerk session
+  //    (ADR-0048); unauthenticated → 401. resolveUploadActor provisions the
+  //    user's identity (User + personal Org + Root folder) on first sight.
   const actorResult = await resolveUploadActor(args);
   if (!actorResult.ok) return toResponse(uploadResultToHttp(actorResult, opts));
   const actor = actorResult.value;
