@@ -64,9 +64,10 @@ export async function action(args: ActionFunctionArgs) {
   }
   const form = await args.request.formData();
   const name = String(form.get("name") ?? "");
-  const rawParent = String(form.get("parentId") ?? "").trim() || null;
+  const rawParent = String(form.get("parentId") ?? "").trim();
+  if (!rawParent) return json({ error: "Select a folder to create in." }, { status: 400 });
   // Client-supplied; createFolder validates the parent belongs to the actor's org.
-  const parentId = rawParent ? folderId(rawParent) : null;
+  const parentId = folderId(rawParent);
 
   const r = await createFolder(
     { folders: folderRepo(), ids: deps().ids },
@@ -79,7 +80,7 @@ export async function action(args: ActionFunctionArgs) {
       { status: r.error.kind === "ValidationError" ? 422 : 400 },
     );
   }
-  return redirect(parentId ? `/?folder=${parentId}` : "/");
+  return redirect(`/?folder=${parentId}`);
 }
 
 export default function Index() {
