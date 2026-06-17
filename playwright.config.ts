@@ -38,9 +38,11 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   // Run only smoke now; never run @wip (later-phase) scenarios once the product
-  // features are included. @auth needs the staging Clerk creds (E2E_CLERK_SECRET_KEY)
-  // to mint a session — grep it out when they're absent (e.g. a local `pnpm e2e`).
+  // features are included. @auth needs BOTH staging Clerk creds (the secret key to
+  // mint + the test user's email to look up) — grep it out unless both are present
+  // (e.g. a local `pnpm e2e`, or a half-configured env), so it skips rather than throws.
   grep: /@smoke/,
-  grepInvert: process.env.E2E_CLERK_SECRET_KEY ? /@wip/ : /@wip|@auth/,
+  grepInvert:
+    process.env.E2E_CLERK_SECRET_KEY && process.env.E2E_TEST_USER_EMAIL ? /@wip/ : /@wip|@auth/,
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });
