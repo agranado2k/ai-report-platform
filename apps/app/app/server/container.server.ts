@@ -8,6 +8,7 @@ import {
   ClerkBackendOrgProvisioner,
   DbContext,
   DrizzleEventOutbox,
+  DrizzleFolderRepository,
   DrizzleIdempotencyStore,
   DrizzleIdentityStore,
   DrizzleReportRepository,
@@ -75,6 +76,14 @@ export function deps(): UploadReportDeps {
     uow: new DrizzleUnitOfWork(ctx),
   };
   return _deps;
+}
+
+let _folders: DrizzleFolderRepository | undefined;
+
+/** The folder repository (Reports & Folders) — for the dashboard tree + createFolder. */
+export function folderRepo(): DrizzleFolderRepository {
+  if (!_folders) _folders = new DrizzleFolderRepository(context());
+  return _folders;
 }
 
 let _provisionDeps: ProvisionIdentityDeps | undefined;
