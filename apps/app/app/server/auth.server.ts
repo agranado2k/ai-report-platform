@@ -50,26 +50,36 @@ export async function resolveUploadActor(
 ): Promise<Result<UploadActor, AppError>> {
   const { userId, orgId, sessionClaims } = await getAuth(args);
 
-  const email = userId ? readEmailClaim(sessionClaims) : null;
-  if (!userId || !email) {
-    // Unauthenticated, or signed in before the email claim is configured: keep
-    // the FK targets valid and attribute to the dev identity.
-    await ensureDevIdentity();
-    return ok(DEMO_ACTOR);
+  if (userId) {
+    const email = readEmailClaim(sessionClaims);
+    if (email) {
+      return provisionIdentity(provisionDeps(), {
+        clerkUserId: userId,
+        clerkOrgId: orgId ?? null,
+        email,
+      });
+    }
+    // Signed in but no email claim → a misconfiguration (the custom session-token
+    // claim isn't set on this Clerk instance yet, ADR-0048), NOT normal anonymous
+    // traffic. Fall back to DEMO_ACTOR so uploads don't 500, but warn — otherwise
+    // authenticated reports land in the demo identity invisibly.
+    console.warn(
+      `resolveUploadActor: signed-in user ${userId} has no 'email' session claim; ` +
+        "attributing upload to DEMO_ACTOR. Add the email claim on the Clerk instance (ADR-0048).",
+    );
   }
 
-  return provisionIdentity(provisionDeps(), {
-    clerkUserId: userId,
-    clerkOrgId: orgId ?? null,
-    email,
-  });
+  // Unauthenticated (or the misconfiguration above): keep the FK targets valid
+  // and attribute to the dev identity.
+  await ensureDevIdentity();
+  return ok(DEMO_ACTOR);
 }
 
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */
 function readEmailClaim(claims: unknown): string | null {
   if (claims && typeof claims === "object" && "email" in claims) {
     const value = (claims as { email?: unknown }).email;
-    if (typeof value === "string" && value.includes("@")) return value;
+    if (typeof value === "string" && /^[^@\s]+@[^@\s]+$/.test(value)) return value;
   }
   return null;
 }
