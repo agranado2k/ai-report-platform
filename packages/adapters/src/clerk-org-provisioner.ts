@@ -37,11 +37,17 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
 
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     // Idempotency guard (ADR-0048): reuse the user's existing personal org rather
-    // than mint a duplicate on a repeated/concurrent first-provision — e.g. a
-    // backend-minted e2e session, or two racing first-uploads, both arrive with no
-    // active org. Pick the OLDEST org so the choice is stable across calls.
-    // NOTE: under the 1:1 personal-org model this IS the user's own org; revisit
-    // when ADR-009 cross-org folder grants let a user belong to others' orgs too.
+    // than mint a duplicate on a repeated/SEQUENTIAL first-provision — e.g. a
+    // backend-minted e2e session re-run, where each request arrives with no active
+    // org. This is check-then-act, so it does NOT close a truly concurrent race
+    // (two simultaneous first-uploads can both see an empty list and both create);
+    // the old TODO's per-user lock would, but the blast radius is one stray org
+    // and creation isn't on a hot concurrent path. Pick the OLDEST org for a
+    // stable choice across calls.
+    // NOTE: under the 1:1 personal-org model the user has a single membership, so
+    // page-1 results suffice and "oldest" is unambiguous; revisit both the paging
+    // and the heuristic when ADR-009 cross-org folder grants let a user belong to
+    // others' orgs too.
     try {
       const memberships = await this.orgs.getOrganizationMembershipList({ userId: clerkUserId });
       const oldest = [...(memberships.data ?? [])].sort(
