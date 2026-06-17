@@ -122,8 +122,8 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `VERCEL_API_TOKEN` | Vercel PAT | staging, prod, shared (pass-through) |
 | `UPSTASH_API_KEY` | Upstash management key | staging, prod |
 | `GH_REPO_ADMIN_TOKEN` | GitHub PAT (admin scope for the github_repo module) | shared |
-| `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | staging |
-| `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod |
+| `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | prod (preview target, ADR-0048) |
+| `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod (production target) |
 | `RESEND_API_KEY` | Resend send-only domain key | shared (pass-through) |
 | `RESEND_DNS_RECORDS_JSON` | JSON-encoded list from Resend dashboard | shared |
 | `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |
@@ -153,11 +153,18 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > bootstrap-PAT exception ADR-017 allows. They feed `var.r2_access_key_id` /
 > `var.r2_secret_access_key`, which the prod composition writes to the Vercel
 > app env as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The runtime data-plane
-> vars (`DATABASE_URL`, `CLERK_SECRET_KEY`, `PUBLIC_CLERK_PUBLISHABLE_KEY`,
-> `R2_*`) target **both `production` and `preview`** so PR previews can serve
-> upload→view; with no persistent staging (2026-06-02), previews share the prod
-> Neon DB + R2 bucket — fine pre-launch, revisit with per-PR Neon branches / R2
-> key prefixes once there's real data.
+> vars (`DATABASE_URL`, `R2_*`) target **both `production` and `preview`** so PR
+> previews can serve upload→view; with no persistent staging (2026-06-02),
+> previews share the prod Neon DB + R2 bucket — fine pre-launch, revisit with
+> per-PR Neon branches / R2 key prefixes once there's real data.
+>
+> **Clerk keys are split by target (ADR-0048).** `CLERK_SECRET_KEY` /
+> `PUBLIC_CLERK_PUBLISHABLE_KEY` carry the **live** instance keys on `production`
+> (`module.clerk`) and the **staging/test** instance keys on `preview`
+> (`module.clerk_staging`) — same env-var names, different values per target — so
+> a PR preview authenticates against the test Clerk instance and never the prod
+> user pool. The staging keys come from the `CLERK_*_STAGING` repo var/secret
+> wired into the `plan-prod` / `apply-prod` jobs as `TF_VAR_clerk_*_staging`.
 >
 > **Browser-exposed vars carry the `PUBLIC_` prefix.** The app's env contract
 > (`packages/env`, ADR-0043) routes client-safe vars through `@t3-oss/env-core`'s
@@ -184,8 +191,8 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `VERCEL_VIEW_PROJECT_ID` | `prj_…` (arp-view-prod) | `preview-isolation` |
 | `GH_REPO_ID` | `1246699531` | `preview-isolation` (redeploy gitSource) |
 | `UPSTASH_EMAIL` | `you@example.com` | staging, prod |
-| `CLERK_PUBLISHABLE_KEY_STAGING` | `pk_test_…` | staging |
-| `CLERK_PUBLISHABLE_KEY_PROD` | `pk_live_…` | prod |
+| `CLERK_PUBLISHABLE_KEY_STAGING` | `pk_test_…` | prod (preview target, ADR-0048) |
+| `CLERK_PUBLISHABLE_KEY_PROD` | `pk_live_…` | prod (production target) |
 
 ---
 

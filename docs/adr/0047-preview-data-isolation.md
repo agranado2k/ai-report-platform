@@ -42,4 +42,6 @@ Chosen: **option 1 (soft isolation)** (operator decision). A `preview-isolation`
 
 ## More information
 
-Implemented in `.github/workflows/preview-isolation.yml`; consumes the `R2_KEY_PREFIX` plumbing in `R2BlobStore` / the env contract. Tracked by GitHub issue #53. Clerk previews (a dev instance) are deferred to the real-auth track (#54).
+Implemented in `.github/workflows/preview-isolation.yml`; consumes the `R2_KEY_PREFIX` plumbing in `R2BlobStore` / the env contract. Tracked by GitHub issue #53.
+
+The Clerk dimension of preview isolation — previously deferred here to the real-auth track (#54) — is now resolved by **ADR-0048**: Vercel `preview` deploys are provisioned with the **staging/test** Clerk instance keys, while `production` keeps the live keys (split by Vercel `target` in `envs/prod/main.tf`). So a preview can never authenticate against the production Clerk user pool. This supersedes the "deferred" note above.

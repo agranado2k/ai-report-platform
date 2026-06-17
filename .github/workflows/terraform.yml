@@ -138,6 +138,10 @@ jobs:
     env:
       TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_PROD }}
       TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY_PROD }}
+      # Staging/test Clerk keys → Vercel preview deploys (ADR-0048). pk_test is
+      # publishable (a `var`); sk_test is secret.
+      TF_VAR_clerk_publishable_key_staging: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
+      TF_VAR_clerk_secret_key_staging: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
       TF_VAR_r2_access_key_id: ${{ secrets.R2_APP_ACCESS_KEY_ID }}
       TF_VAR_r2_secret_access_key: ${{ secrets.R2_APP_SECRET_ACCESS_KEY }}
       # Required so dflook's container can post the plan as a PR comment.
@@ -224,6 +228,10 @@ jobs:
     env:
       TF_VAR_clerk_publishable_key: ${{ vars.CLERK_PUBLISHABLE_KEY_PROD }}
       TF_VAR_clerk_secret_key: ${{ secrets.CLERK_SECRET_KEY_PROD }}
+      # Staging/test Clerk keys → Vercel preview deploys (ADR-0048). pk_test is
+      # publishable (a `var`); sk_test is secret.
+      TF_VAR_clerk_publishable_key_staging: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
+      TF_VAR_clerk_secret_key_staging: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
       TF_VAR_r2_access_key_id: ${{ secrets.R2_APP_ACCESS_KEY_ID }}
       TF_VAR_r2_secret_access_key: ${{ secrets.R2_APP_SECRET_ACCESS_KEY }}
     steps:

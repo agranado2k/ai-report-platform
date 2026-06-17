@@ -44,6 +44,15 @@ module "clerk" {
   secret_key      = var.clerk_secret_key
 }
 
+# Staging/test Clerk instance — its keys are wired to Vercel `preview` deploys
+# only (ADR-0048), so PR previews never authenticate against the prod instance.
+module "clerk_staging" {
+  source          = "../../modules/clerk-app"
+  env             = "staging"
+  publishable_key = var.clerk_publishable_key_staging
+  secret_key      = var.clerk_secret_key_staging
+}
+
 # Shared secret between the Cloudflare scan-cron Worker and the app's
 # /internal/scan-drain route (ADR-0045). Self-generated — no operator input.
 resource "random_password" "scan_drain_secret" {
@@ -89,13 +98,20 @@ locals {
     # arp-reports-prod (var.r2_*). Both omit `sensitive` → masked in Vercel
     # (module default), matching their sensitive=true TF vars.
     DATABASE_URL = { value = local.neon_uri, target = ["production", "preview"] }
-    # The app's env contract (packages/env, ADR-0043) exposes the Clerk
-    # publishable key to the browser, so it MUST carry the PUBLIC_ prefix that
-    # @t3-oss/env-core's clientPrefix enforces. Provisioning it as the bare
-    # CLERK_PUBLISHABLE_KEY left PUBLIC_CLERK_PUBLISHABLE_KEY undefined, so
-    # defineEnv() threw on every deps() route (/upload, /r/$slug → 500).
-    PUBLIC_CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production", "preview"], sensitive = false }
-    CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production", "preview"] }
+    # Clerk keys are split by Vercel target (ADR-0048): production deploys use
+    # the live Clerk instance; preview deploys use the staging/test instance, so
+    # a PR preview can never authenticate against the prod user pool or — once
+    # the JIT-provisioning slice lands — mint real production Orgs. The app reads
+    # the same names (PUBLIC_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY) regardless
+    # of target; only the value differs. The production entries keep their env-var
+    # map keys so existing Vercel resources update in place; the preview entries
+    # need distinct map keys + an explicit `key` (vercel-app falls back to the
+    # map key otherwise). The app's env contract (packages/env, ADR-0043) exposes
+    # the publishable key to the browser, hence the PUBLIC_ prefix + sensitive=false.
+    PUBLIC_CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production"], sensitive = false }
+    CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production"] }
+    clerk_pk_preview             = { key = "PUBLIC_CLERK_PUBLISHABLE_KEY", value = module.clerk_staging.publishable_key, target = ["preview"], sensitive = false }
+    clerk_sk_preview             = { key = "CLERK_SECRET_KEY", value = module.clerk_staging.secret_key, target = ["preview"] }
     R2_ACCOUNT_ID                = { value = var.cloudflare_account_id, target = ["production", "preview"], sensitive = false }
     R2_BUCKET                    = { value = "arp-reports-prod", target = ["production", "preview"], sensitive = false }
     # No R2_ENDPOINT: the app derives the S3 endpoint inline from R2_ACCOUNT_ID

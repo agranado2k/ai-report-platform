@@ -47,10 +47,12 @@ resource "vercel_project_environment_variable" "this" {
   for_each   = nonsensitive(var.environment_variables)
   project_id = vercel_project.this.id
   team_id    = var.team_id
-  key        = each.key
-  value      = each.value.value
-  target     = each.value.target # ["production"], ["preview"], or ["production", "preview"]
-  sensitive  = lookup(each.value, "sensitive", true)
+  # Vercel env-var name defaults to the map key; an explicit `key` lets two
+  # entries emit the same name on different targets (see variables.tf).
+  key       = coalesce(each.value.key, each.key)
+  value     = each.value.value
+  target    = each.value.target # ["production"], ["preview"], or ["production", "preview"]
+  sensitive = lookup(each.value, "sensitive", true)
 }
 
 resource "vercel_project_domain" "this" {
