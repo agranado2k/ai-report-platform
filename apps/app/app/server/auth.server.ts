@@ -1,17 +1,19 @@
 // Actor-resolution seam (server-only). The API route depends on this, NOT on a
-// concrete auth scheme — so Phase 1's fixed dev identity and the real API-key /
-// Clerk resolution (Phase 1.5+, ADR-0005) are interchangeable behind one port.
+// concrete auth scheme — so the unauthenticated Phase-1 dev identity and the real
+// Clerk-session resolution (ADR-0005 / ADR-0048) are interchangeable behind one
+// port.
 //
-// Contract: request → Result<UploadActor, AppError>. A missing/invalid credential
-// is Unauthenticated (401); a valid credential lacking the scope is
-// InsufficientScope (403). Phase 1 has no credentials yet, so we return the
-// seeded DEMO_ACTOR (which carries `reports:write`).
+// Contract: request args → Result<UploadActor, AppError>. Slice 1b-ii makes this
+// ADDITIVE: a signed-in Clerk session is provisioned into an org-scoped actor; an
+// unauthenticated request still falls back to the seeded DEMO_ACTOR so the smoke
+// + anonymous paths keep working. The flip (drop DEMO_ACTOR, require a session)
+// is a later slice.
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import type { UploadActor } from "arp-application";
-import { type AppError, err, ok, type Result } from "arp-domain";
+import { provisionIdentity, type UploadActor } from "arp-application";
+import { type AppError, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
-import { DEMO_ACTOR } from "./container.server";
+import { DEMO_ACTOR, ensureDevIdentity, provisionDeps } from "./container.server";
 
 /**
  * Server-side `getAuth` wrapper (ADR-0048). Clerk's `getAuth` re-authenticates
@@ -32,25 +34,42 @@ export function getAuth(args: LoaderFunctionArgs) {
   return clerkGetAuth(args, opts);
 }
 
-/** The scope POST /api/v1/reports requires (ADR-0039 / openapi `reports:write`). */
-const REQUIRED_SCOPE = "reports:write";
-
 /**
- * Resolve the acting principal for a write request. Phase 1: the fixed dev
- * identity. The signature is the seam — when API keys land, this parses the
- * `Authorization` header, looks up the key, and maps to its org/folder/scopes,
- * returning Unauthenticated / InsufficientScope without the route changing.
+ * Resolve the acting principal for a write request (ADR-0048).
+ *
+ * - Signed-in Clerk session → provision (or look up) the mirrored identity and
+ *   attribute the upload to that user's personal org (`reports:write` on it).
+ * - Unauthenticated → the seeded DEMO_ACTOR (additive fallback, see file header).
+ *
+ * The user's email rides on a custom Clerk session-token claim (ADR-0048 — the
+ * default claims omit it). Until that claim is configured on the instance we
+ * can't safely provision, so we fall back to DEMO_ACTOR rather than break uploads.
  */
 export async function resolveUploadActor(
-  _request: Request,
+  args: LoaderFunctionArgs,
 ): Promise<Result<UploadActor, AppError>> {
-  const actor = DEMO_ACTOR;
-  if (!actor.scopes.includes(REQUIRED_SCOPE)) {
-    return err({
-      kind: "InsufficientScope",
-      message: `missing required scope '${REQUIRED_SCOPE}'`,
-      scope: REQUIRED_SCOPE,
-    });
+  const { userId, orgId, sessionClaims } = await getAuth(args);
+
+  const email = userId ? readEmailClaim(sessionClaims) : null;
+  if (!userId || !email) {
+    // Unauthenticated, or signed in before the email claim is configured: keep
+    // the FK targets valid and attribute to the dev identity.
+    await ensureDevIdentity();
+    return ok(DEMO_ACTOR);
   }
-  return ok(actor);
+
+  return provisionIdentity(provisionDeps(), {
+    clerkUserId: userId,
+    clerkOrgId: orgId ?? null,
+    email,
+  });
+}
+
+/** Read the `email` custom claim off a Clerk session token, if present + plausible. */
+function readEmailClaim(claims: unknown): string | null {
+  if (claims && typeof claims === "object" && "email" in claims) {
+    const value = (claims as { email?: unknown }).email;
+    if (typeof value === "string" && value.includes("@")) return value;
+  }
+  return null;
 }
