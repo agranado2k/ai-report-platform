@@ -3,6 +3,7 @@
 export * from "./brand";
 export * from "./errors";
 export * from "./events";
+export * from "./folder";
 export * from "./pipe";
 export * from "./report";
 export * from "./report-version";
