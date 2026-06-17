@@ -83,7 +83,13 @@ export async function resolveActorForRead(
   const { userId, orgId } = await getAuth(args);
   if (!userId || !orgId) return null;
   const found = await provisionDeps().identities.findByClerk(userId, orgId);
-  return found.ok && found.value ? { orgId: found.value.orgId } : null;
+  if (!found.ok) {
+    // Infra failure (not "no session"): log so it doesn't masquerade as an empty
+    // dashboard. The page degrades to an empty list rather than erroring.
+    console.warn(`resolveActorForRead: findByClerk failed — ${found.error.message}`);
+    return null;
+  }
+  return found.value ? { orgId: found.value.orgId } : null;
 }
 
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */

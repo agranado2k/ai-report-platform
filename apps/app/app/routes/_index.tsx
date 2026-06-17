@@ -19,6 +19,7 @@ export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
   if (!actor) return json({ reports: [], viewBase });
   const listed = await listReports({ reports: deps().reports }, { orgId: actor.orgId });
+  if (!listed.ok) console.warn(`dashboard: listReports failed — ${listed.error.message}`);
   return json({ reports: listed.ok ? listed.value : [], viewBase });
 }
 
@@ -77,11 +78,15 @@ export default function Index() {
   );
 }
 
-/** Published = a clean version is live; otherwise the report is still pending its scan. */
+/**
+ * Published = a clean version is live; otherwise it's still being processed.
+ * "processing" (not "pending") avoids colliding with the `scan_status` "pending"
+ * vocabulary in the glossary — this badge reflects publish state, not scan state.
+ */
 function StatusBadge({ isPublished }: { isPublished: boolean }) {
   return (
     <span style={{ fontSize: 13, color: isPublished ? "#0a7" : "#999" }}>
-      {isPublished ? "published" : "pending"}
+      {isPublished ? "published" : "processing"}
     </span>
   );
 }
