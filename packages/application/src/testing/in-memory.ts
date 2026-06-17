@@ -7,6 +7,8 @@ import {
   type AppError,
   type DomainEvent,
   err,
+  type Folder,
+  type FolderId,
   folderId as makeFolderId,
   orgId as makeOrgId,
   reportId as makeReportId,
@@ -21,6 +23,7 @@ import {
   type Slug,
   type TerminalScanStatus,
   type VersionId,
+  validationError,
 } from "arp-domain";
 import type {
   BlobFile,
@@ -29,6 +32,7 @@ import type {
   ClerkOrgProvisioner,
   Clock,
   EventOutbox,
+  FolderRepository,
   Hasher,
   IdempotencyBegin,
   IdempotencyKeyRef,
@@ -48,6 +52,35 @@ import type {
   SlugFactory,
   UnitOfWork,
 } from "../ports";
+
+export class InMemoryFolderRepository implements FolderRepository {
+  private readonly byId = new Map<string, Folder>();
+
+  async listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>> {
+    return ok([...this.byId.values()].filter((f) => f.orgId === orgId && f.deletedAt === null));
+  }
+
+  async findById(id: FolderId): Promise<Result<Folder | null, AppError>> {
+    return ok(this.byId.get(id) ?? null);
+  }
+
+  async save(folder: Folder): Promise<Result<void, AppError>> {
+    // Mimic the DB sibling-slug uniqueness (folders_org_parent_slug_uniq).
+    const clash = [...this.byId.values()].some(
+      (f) =>
+        f.id !== folder.id &&
+        f.deletedAt === null &&
+        f.orgId === folder.orgId &&
+        f.parentId === folder.parentId &&
+        f.slug === folder.slug,
+    );
+    if (clash) {
+      return err(validationError(`a folder '${folder.slug}' already exists here`, "name"));
+    }
+    this.byId.set(folder.id, folder);
+    return ok(undefined);
+  }
+}
 
 export class InMemoryReportRepository implements ReportRepository {
   private readonly byId = new Map<string, Report>();
@@ -74,6 +107,7 @@ export class InMemoryReportRepository implements ReportRepository {
         slug: r.slug,
         title: r.title,
         isPublished: r.liveVersionId !== null,
+        folderId: r.folderId,
       }));
     return ok(summaries);
   }
@@ -263,6 +297,7 @@ export class FakePlanLimiter implements PlanLimiter {
 export class SequentialIdGenerator implements IdGenerator {
   private r = 0;
   private v = 0;
+  private f = 0;
   reportId(): ReportId {
     this.r += 1;
     return makeReportId(`r${this.r}`);
@@ -270,6 +305,10 @@ export class SequentialIdGenerator implements IdGenerator {
   versionId(): VersionId {
     this.v += 1;
     return makeVersionId(`v${this.v}`);
+  }
+  folderId(): FolderId {
+    this.f += 1;
+    return makeFolderId(`f${this.f}`);
   }
 }
 
