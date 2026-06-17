@@ -23,14 +23,21 @@ function isPublicPath(pathname: string): boolean {
 // explicitly. The secret key (CLERK_SECRET_KEY) matches Clerk's default env name.
 //
 // The callback is the app-wide auth gate: any non-public document route requires
-// a signed-in session, else we redirect to /sign-in.
+// a signed-in session, else we redirect to /sign-in (preserving the intended
+// destination via `redirect_url`, which Clerk's <SignIn> honours post-auth).
+//
+// SCOPE: this is a NAVIGATION gate, not a per-route authorization check. Remix
+// runs sibling/child loaders in parallel; the root redirect replaces the rendered
+// response but does not stop those loaders executing. So any data-fetching
+// loader/route must still authorize itself (ADR-0048) — e.g. POST /api/v1/reports
+// returns 401 via resolveUploadActor; resource routes are outside this gate.
 export const loader = (args: LoaderFunctionArgs) =>
   rootAuthLoader(
     args,
     ({ request }) => {
-      const { pathname } = new URL(request.url);
+      const { pathname, search } = new URL(request.url);
       if (!request.auth.userId && !isPublicPath(pathname)) {
-        return redirect("/sign-in");
+        return redirect(`/sign-in?redirect_url=${encodeURIComponent(pathname + search)}`);
       }
       return {};
     },

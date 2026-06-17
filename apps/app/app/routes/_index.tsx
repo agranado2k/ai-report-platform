@@ -50,6 +50,9 @@ export default function Index() {
           <Link to="/upload">Upload a report →</Link>
         </p>
       </SignedIn>
+      {/* Currently unreachable: the root auth gate (root.tsx) redirects anonymous
+          visitors to /sign-in before `/` renders. Kept as the fallback if `/` is
+          ever added to the public allowlist. */}
       <SignedOut>
         <p>
           You're signed out. <Link to="/sign-in">Sign in</Link> to continue.
