@@ -68,6 +68,24 @@ export async function resolveUploadActor(
   });
 }
 
+/**
+ * Resolve the acting principal for a READ (the dashboard list) WITHOUT the
+ * write-path side effects. Unlike `resolveUploadActor`, this never provisions:
+ * it looks up the already-mirrored identity (`findByClerk`) and returns its org
+ * scope, or `null` when there's no session / the user isn't mirrored yet (a
+ * brand-new user who hasn't uploaded — their list is simply empty). Keeps GET
+ * loaders safe/idempotent: no Clerk org or DB rows are created on a read.
+ * Provisioning stays on the write path (`resolveUploadActor`, first upload).
+ */
+export async function resolveActorForRead(
+  args: LoaderFunctionArgs,
+): Promise<Pick<UploadActor, "orgId"> | null> {
+  const { userId, orgId } = await getAuth(args);
+  if (!userId || !orgId) return null;
+  const found = await provisionDeps().identities.findByClerk(userId, orgId);
+  return found.ok && found.value ? { orgId: found.value.orgId } : null;
+}
+
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */
 function readEmailClaim(claims: unknown): string | null {
   if (claims && typeof claims === "object" && "email" in claims) {

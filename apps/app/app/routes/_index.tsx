@@ -2,7 +2,7 @@ import { SignedIn, SignedOut, UserButton } from "@clerk/remix";
 import { json, type LoaderFunctionArgs, type MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { listReports } from "arp-application";
-import { resolveUploadActor } from "../server/auth.server";
+import { resolveActorForRead } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
 
 export const meta: MetaFunction = () => [
@@ -11,14 +11,14 @@ export const meta: MetaFunction = () => [
 ];
 
 // The dashboard list (ADR-0036). The page is behind the root auth gate, so a
-// session is present; resolveUploadActor yields the internal org id (provisioning
-// the identity on first sight, idempotent — ADR-0048), then listReports projects
-// the org's reports newest-first.
+// session is present. resolveActorForRead resolves the internal org id WITHOUT
+// provisioning (a GET must not create Clerk orgs / DB rows) — a not-yet-mirrored
+// new user simply gets an empty list and is provisioned on their first upload.
 export async function loader(args: LoaderFunctionArgs) {
-  const actor = await resolveUploadActor(args);
   const viewBase = viewOrigin(args.request);
-  if (!actor.ok) return json({ reports: [], viewBase });
-  const listed = await listReports({ reports: deps().reports }, { orgId: actor.value.orgId });
+  const actor = await resolveActorForRead(args);
+  if (!actor) return json({ reports: [], viewBase });
+  const listed = await listReports({ reports: deps().reports }, { orgId: actor.orgId });
   return json({ reports: listed.ok ? listed.value : [], viewBase });
 }
 
