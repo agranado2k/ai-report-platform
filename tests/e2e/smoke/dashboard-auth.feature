@@ -15,3 +15,7 @@ Feature: Dashboard auth gate
   Scenario: The sign-in page itself is public
     When I request "/sign-in" without following redirects
     Then the gate status is 200
+
+  Scenario: A Clerk sub-path under the allowlist is public (prefix match)
+    When I request "/sign-in/sso-callback" without following redirects
+    Then the gate status is 200
