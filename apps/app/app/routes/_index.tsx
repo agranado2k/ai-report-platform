@@ -1,7 +1,7 @@
 import { SignedIn, SignedOut, UserButton } from "@clerk/remix";
-import { getAuth } from "@clerk/remix/ssr.server";
 import { json, type LoaderFunctionArgs, type MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
+import { getAuth } from "../server/auth.server";
 
 export const meta: MetaFunction = () => [
   { title: "ai-report-platform — dashboard" },
