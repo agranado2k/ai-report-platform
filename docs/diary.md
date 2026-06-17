@@ -4,26 +4,26 @@
 
 ---
 
-## Current state — 2026-06-02
+## Current state — 2026-06-17
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | Phase 0c.2 merged at `c04de5c` (PR #3 — shared `arp-headers` package + Edge MW stubs). PR #4 in flight on `feat/phase-0c-commit-conventions`: Conventional Commits enforcement + semantic-release pipeline + rebase-merge revision (ADR-033) + Vercel Corepack env-var Terraform codification. Sub-PRs remaining after #4: 0c.3 CI/CD workflows, 0c.4 AI review bots, 0c.5 re-tighten branch protection. |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main) · `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` (active worktree). Old 0b / 0c.1 / 0c.2 worktrees cleaned up. |
-| **Branch**             | `feat/phase-0c-commit-conventions` open against `main` (PR #4 — rebased on `c04de5c`) |
-| **Last commit on main**        | `c04de5c` — `Phase 0c.2: shared arp-headers + Edge MW stubs (#3)` |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete and enforced in prod.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045, dummy clean verdict) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, and optional #54 surface (org switcher / folder tree / invites). |
+| **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
+| **Last commit on main**| `c0452c8` — Merge PR #70 (app-wide dashboard auth gate). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
-| **Live infrastructure**| **shared + prod applied.** Cloudflare zone (DNS + zone settings), R2 buckets (`tf-state`, `arp-reports-prod`, `arp-reports-ci`), Neon project (single `main` branch post-ADR-031), Upstash Redis (global mode), Clerk app, Vercel projects (`arp-app-prod` + `arp-view-prod`, both green on PRs #2 and #3), GitHub repo with ADR-032 branch protection (0 required approvals, still squash-merge until PR #4 applies). `ENABLE_EXPERIMENTAL_COREPACK=1` set manually for both PR #2 and PR #3 preview branches; PR #4 codifies it in `envs/prod/main.tf` so every future branch inherits it. |
-| **Active worktrees**   | `feat/phase-0c-commit-conventions` at `~/PetProjects/ai-report-platform/worktree/phase-0c-commit-conventions/` |
-| **Spec status**        | **rev 8** (2026-06-04 domain-language sync — Domain-model + Events sections + schema cards aligned to the DDD docs) · ADRs 0035 + 0036 in `docs/adr/`, ADR-001–030 still inline in `docs/spec.html` · `docs/events.md` is now the canonical event registry · 13 infra + 31 feature verification tests · `docs/spec.html`. **⚠ This Current-state block is stale below this line** — it was frozen at 2026-06-02 (`c04de5c`) while `main` advanced to `6681a7c` (PRs #4–#10). Trust the dated entries; the block needs a full re-sync pass. |
+| **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.agranado.com` + `accounts.agranado.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.agranado.com**, session-gated) + `arp-view-prod` (**view.agranado.com**, public viewer), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.agranado.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.agranado.com`. |
+| **Active worktrees**   | `docs/sync-spec-diary` (this docs-sync PR, #56). |
+| **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
 
-- License — `README.md` says TBD. Pick before the repo goes public.
-- Final project name — `ai-report-platform` is the working title; user may rename before push.
-- Apex domain — `TF_VAR_apex_domain` is unset; required before Phase 0b's first `apply`.
-- PSL submission timing — open the PR against `publicsuffix/list` once the apex domain is finalized.
-- R2 bucket versioning — currently a `TODO` in `modules/r2/main.tf`. The cloudflare/cloudflare v4 provider doesn't yet expose versioning as a resource argument. Either wait for v5 or wrap with a `null_resource` + `curl` against the R2 API. Track for Phase 0c follow-up.
+- **`/` (dashboard landing) — gated or public?** Currently gated by the app-wide auth gate (anon → `/sign-in`); decide whether to allowlist `/` as a public signed-out landing. One-line change either way.
+- **Google social login on prod** — needs custom OAuth credentials (Google Cloud client_id/secret → Clerk), since prod (a live Clerk instance) doesn't get Clerk's shared dev credentials. Until then, email sign-in works; Google can be disabled. (clerk-js/dev-browser/preview-key gotchas already resolved — see the 2026-06-17 entries.)
+- License — `README.md` says TBD. Pick before any public launch.
+- Final project name — `ai-report-platform` is the working title.
+- PSL submission — open the PR against `publicsuffix/list` to add `view.agranado.com` (2-6 wk SLA; ship without waiting).
+- R2 bucket versioning — `TODO` in `modules/r2/main.tf` (cloudflare provider didn't expose versioning as a resource arg; revisit on a provider bump or wrap via the R2 API).
 
 ### Memory pointers for future-me
 
@@ -1254,3 +1254,14 @@ Known follow-up: `docs/api/openapi.yaml` still describes the `apiKey` (bearer, A
 ### 2026-06-17 — Auth #54: app-wide dashboard auth gate (default-protect)
 
 Operator decision: every page on the app origin must require a session **except** `/sign-in`, `/sign-up`, `/health` (and the separate, intentionally-public viewer `view.<domain>`, ADR-0038). Implemented as a **default-protect root-loader gate** (so new pages are protected automatically, not opt-in): `root.tsx`'s `rootAuthLoader` callback redirects to `/sign-in` when `request.auth.userId` is absent and the path isn't in `PUBLIC_PATHS` (`/sign-in`, `/sign-up`, `/health`, prefix-matched for Clerk's path-routed sub-pages). Returning a redirect `Response` from the callback is honored by `rootAuthLoader` (verified: it passes redirects through). Resource routes (`/health`, `/api/v1/reports`, `/internal/scan-drain`) don't render the root, so they're outside the gate and keep their own auth (401 / bearer secret) — `/health` is also allowlisted for clarity. `/` is now gated (was a public signed-out landing). e2e: new `@smoke` `dashboard-auth.feature` — anon `/upload` → 302 `/sign-in`, and `/sign-in` stays 200. The authenticated side is covered by `@auth`. Prod prerequisites resolved en route: Clerk custom-domain DNS verified + deployed (clerk-js now loads), Google social login needs prod custom OAuth creds (dev instances use Clerk's shared creds), and the prod instance Home URL → `app.agranado.com`. Worktree `feat/dashboard-auth-gate`. Tracked by issue #54.
+
+### 2026-06-17 — Prod auth bring-up gotchas + docs sync (#56)
+
+Bringing the merged auth stack live on prod surfaced a string of **dev-instance-vs-prod-instance** Clerk gaps (none were code bugs):
+1. **Blank `/sign-in`** — clerk-js wouldn't load from the prod custom Frontend API domain (`clerk.agranado.com` → Cloudflare error 1000) because the prod Clerk instance's custom domain wasn't verified/deployed. Our DNS was already correct (CNAMEs DNS-only, as code). Fixed by re-verifying + deploying the domain in the Clerk dashboard.
+2. **Google login → "Missing required parameter: client_id"** — prod (live) Clerk instances don't get Clerk's shared social-OAuth credentials (dev/staging do), so Google needs **custom OAuth creds** (Google Cloud client_id/secret → Clerk). Open until the operator adds them or disables Google; email sign-in works.
+3. **Post-login redirect to apex `agranado.com`** — the prod instance Home URL was the apex; set to `https://app.agranado.com`. (Our code sets no redirect, so the instance default governed.)
+
+Verified the gate live on prod: anon `GET /upload` → `302 /sign-in?redirect_url=%2Fupload`, `GET /sign-in` → `200`.
+
+**Docs sync (#56):** refreshed this "Current state" block to the present and reconciled `docs/spec.html` (now **rev 9**) with the reversed/landed decisions — ADR-031 (single Neon `main` branch, no persistent staging; dropped `reports-staging` / staging Redis / "three Clerk envs" / `shared → staging → prod`), ADR-0044 (signed merge commits + 0 required approvals, no linear history, no bot-merge — superseding ADR-025/0035), and the canonical `view.<domain>/<slug>` viewer path. `docs:check` stays green. Deferred (still backlog): extracting ADR-001–030 from `spec.html` into `docs/adr/` files. Worktree `docs/sync-spec-diary`.
