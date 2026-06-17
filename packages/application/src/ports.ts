@@ -21,10 +21,24 @@ import type {
   VersionId,
 } from "arp-domain";
 
+/**
+ * A lightweight read projection of a Report for list views (the dashboard).
+ * Deliberately NOT the full aggregate — listing must not load every version's
+ * manifest. `isPublished` = a clean version is live (vs still pending). A richer
+ * per-version status badge (e.g. flagged) is a follow-up.
+ */
+export interface ReportSummary {
+  readonly slug: Slug;
+  readonly title: string;
+  readonly isPublished: boolean;
+}
+
 // ── Reports & Folders persistence ─────────────────────────────────────────
 export interface ReportRepository {
   findBySlug(slug: Slug): Promise<Result<Report | null, AppError>>;
   findById(id: ReportId): Promise<Result<Report | null, AppError>>;
+  /** The org's non-deleted reports as summaries, newest first (dashboard list). */
+  listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>>;
   /** Persist the aggregate + any new versions (called inside a UnitOfWork). */
   save(report: Report): Promise<Result<void, AppError>>;
 }

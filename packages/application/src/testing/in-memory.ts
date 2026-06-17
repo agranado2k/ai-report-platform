@@ -40,6 +40,7 @@ import type {
   ProcessedBundle,
   ProvisionedIdentity,
   ReportRepository,
+  ReportSummary,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
@@ -59,6 +60,22 @@ export class InMemoryReportRepository implements ReportRepository {
 
   async findById(id: ReportId): Promise<Result<Report | null, AppError>> {
     return ok(this.byId.get(id) ?? null);
+  }
+
+  async listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
+    const summaries = [...this.byId.values()]
+      .filter((r) => r.orgId === orgId && r.deletedAt === null)
+      // Approximates the adapter's `ORDER BY updated_at DESC` via Map insertion
+      // order (reversed). NOTE: this does NOT model re-save reordering — the real
+      // adapter bumps updated_at on a re-upload, moving a report to the front; the
+      // fake keeps original insertion position. Tests must not rely on re-save order.
+      .reverse()
+      .map((r) => ({
+        slug: r.slug,
+        title: r.title,
+        isPublished: r.liveVersionId !== null,
+      }));
+    return ok(summaries);
   }
 
   async save(report: Report): Promise<Result<void, AppError>> {

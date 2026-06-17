@@ -29,21 +29,25 @@ describe("DrizzleReportRepository (pglite integration)", () => {
   });
   afterEach(() => tdb.close());
 
-  function newReport(): Report {
-    const slug = makeSlug(SLUG);
+  function makeReport(id: typeof RID, vid: typeof VID, slugStr: string, title: string): Report {
+    const slug = makeSlug(slugStr);
     if (!slug.ok) throw new Error("bad slug");
     return createReport({
-      id: RID,
+      id,
       orgId: ids.orgId,
       folderId: ids.folderId,
       slug: slug.value,
-      title: "Q3 metrics",
-      versionId: VID,
+      title,
+      versionId: vid,
       contentHash: "a".repeat(64),
       uploadedBy: ids.userId,
       manifest: { entryDocument: "index.html", files: ["index.html"] },
       sizeBytes: 11,
     }).report;
+  }
+
+  function newReport(): Report {
+    return makeReport(RID, VID, SLUG, "Q3 metrics");
   }
 
   it("round-trips a saved report by slug, with the version pending and no live version", async () => {
@@ -70,6 +74,37 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     const found = await repo.findBySlug(makeSlugOrThrow("zzzzzzzzzz"));
     expect(found.ok).toBe(true);
     expect(found.ok && found.value).toBeNull();
+  });
+
+  it("listByOrg projects summaries — published flag + soft-deleted excluded", async () => {
+    // r1: pending, not published.
+    await repo.save(newReport());
+    // r2: promoted to clean → published.
+    const r2 = makeReport(
+      reportId("00000000-0000-4000-8000-0000000000a2"),
+      versionId("00000000-0000-4000-8000-0000000000b2"),
+      "fghij67890",
+      "Second",
+    );
+    await repo.save(r2);
+    await repo.save(applyScanResult(r2, r2.versions[0]?.id ?? VID, "clean").report);
+    // r3: soft-deleted → excluded.
+    const r3 = makeReport(
+      reportId("00000000-0000-4000-8000-0000000000a3"),
+      versionId("00000000-0000-4000-8000-0000000000b3"),
+      "klmno13579",
+      "Deleted",
+    );
+    await repo.save({ ...r3, deletedAt: Date.now() });
+
+    const listed = await repo.listByOrg(ids.orgId);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+
+    const byTitle = new Map(listed.value.map((s) => [s.title, s]));
+    expect(byTitle.has("Deleted")).toBe(false); // soft-deleted excluded
+    expect(byTitle.get("Q3 metrics")).toMatchObject({ slug: SLUG, isPublished: false });
+    expect(byTitle.get("Second")).toMatchObject({ isPublished: true });
   });
 
   it("REGRESSION: re-saving after a clean verdict persists the version's scan_status", async () => {

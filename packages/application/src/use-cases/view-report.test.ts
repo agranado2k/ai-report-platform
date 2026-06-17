@@ -105,6 +105,9 @@ describe("resolveViewableReport (ADR-0038 viewer gate)", () => {
       async findById() {
         return err({ kind: "Unexpected", message: "db down" });
       },
+      async listByOrg() {
+        return err({ kind: "Unexpected", message: "db down" });
+      },
       async save() {
         return err({ kind: "Unexpected", message: "db down" });
       },
