@@ -43,6 +43,11 @@ variable "domains" {
 
 variable "environment_variables" {
   type = map(object({
+    # Vercel env-var name. Defaults to the map key. Set explicitly only when two
+    # map entries must emit the SAME env-var name on different targets — e.g.
+    # CLERK_SECRET_KEY carries the prod value on `production` and the staging
+    # value on `preview`, so each needs a distinct map key but the same `key`.
+    key       = optional(string)
     value     = string
     target    = list(string) # ["production"], ["preview"], or both
     sensitive = optional(bool, true)

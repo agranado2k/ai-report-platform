@@ -58,3 +58,17 @@ variable "clerk_secret_key" {
   description = "Production Clerk secret key (sk_live_…)."
   sensitive   = true
 }
+
+# Staging/test Clerk instance keys (ADR-0048). Provisioned onto Vercel `preview`
+# deploys ONLY, so a PR preview authenticates against the test Clerk instance and
+# can never mint real users/orgs in the production pool or touch live data.
+variable "clerk_publishable_key_staging" {
+  type        = string
+  description = "Staging Clerk publishable key (pk_test_…) — preview deploys only."
+}
+
+variable "clerk_secret_key_staging" {
+  type        = string
+  description = "Staging Clerk secret key (sk_test_…) — preview deploys only."
+  sensitive   = true
+}
