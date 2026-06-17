@@ -1,35 +1,100 @@
-import { SignedIn, SignedOut, UserButton } from "@clerk/remix";
-import { json, type LoaderFunctionArgs, type MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
-import { listReports } from "arp-application";
-import { resolveActorForRead } from "../server/auth.server";
-import { deps, viewOrigin } from "../server/container.server";
+import { SignedIn, UserButton } from "@clerk/remix";
+import {
+  type ActionFunctionArgs,
+  json,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+  redirect,
+} from "@remix-run/node";
+import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
+import { createFolder, listReports } from "arp-application";
+import { folderId } from "arp-domain";
+import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
+import { deps, folderRepo, viewOrigin } from "../server/container.server";
 
 export const meta: MetaFunction = () => [
   { title: "Your reports — ai-report-platform" },
-  { name: "description", content: "Dashboard: your reports." },
+  { name: "description", content: "Dashboard: your reports, organised in folders." },
 ];
 
-// The dashboard list (ADR-0036). The page is behind the root auth gate, so a
-// session is present. resolveActorForRead resolves the internal org id WITHOUT
-// provisioning (a GET must not create Clerk orgs / DB rows) — a not-yet-mirrored
-// new user simply gets an empty list and is provisioned on their first upload.
+/** Client-safe folder shape (no org id / timestamps). */
+interface FolderNode {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly name: string;
+}
+
+// Dashboard (ADR-0036, Reports & Folders): a folder tree + the selected folder's
+// reports. resolveActorForRead resolves the org WITHOUT provisioning (GETs stay
+// safe). `?folder=<id>` selects a folder; default is the org Root.
 export async function loader(args: LoaderFunctionArgs) {
   const viewBase = viewOrigin(args.request);
   const actor = await resolveActorForRead(args);
-  if (!actor) return json({ reports: [], viewBase });
-  const listed = await listReports({ reports: deps().reports }, { orgId: actor.orgId });
-  if (!listed.ok) console.warn(`dashboard: listReports failed — ${listed.error.message}`);
-  return json({ reports: listed.ok ? listed.value : [], viewBase });
+  if (!actor) return json({ folders: [] as FolderNode[], reports: [], selectedId: null, viewBase });
+
+  const [foldersR, reportsR] = await Promise.all([
+    folderRepo().listByOrg(actor.orgId),
+    listReports({ reports: deps().reports }, { orgId: actor.orgId }),
+  ]);
+  if (!foldersR.ok) console.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
+  if (!reportsR.ok) console.warn(`dashboard: listReports failed — ${reportsR.error.message}`);
+
+  const folders: FolderNode[] = (foldersR.ok ? foldersR.value : []).map((f) => ({
+    id: f.id,
+    parentId: f.parentId,
+    name: f.name,
+  }));
+  const reports = reportsR.ok ? reportsR.value : [];
+
+  const root = folders.find((f) => f.parentId === null) ?? null;
+  const requested = new URL(args.request.url).searchParams.get("folder");
+  const selectedId =
+    requested && folders.some((f) => f.id === requested) ? requested : (root?.id ?? null);
+
+  return json({ folders, reports, selectedId, viewBase });
+}
+
+// Create a folder (a write → provisioning resolver). The new folder nests under
+// the currently-selected folder (Root by default).
+export async function action(args: ActionFunctionArgs) {
+  const actor = await resolveUploadActor(args);
+  if (!actor.ok) {
+    if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
+    return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
+  }
+  const form = await args.request.formData();
+  const name = String(form.get("name") ?? "");
+  const rawParent = String(form.get("parentId") ?? "").trim();
+  if (!rawParent) return json({ error: "Select a folder to create in." }, { status: 400 });
+  // Client-supplied; createFolder validates the parent belongs to the actor's org.
+  const parentId = folderId(rawParent);
+
+  const r = await createFolder(
+    { folders: folderRepo(), ids: deps().ids },
+    { orgId: actor.value.orgId },
+    { parentId, name },
+  );
+  if (!r.ok) {
+    return json(
+      { error: r.error.message },
+      { status: r.error.kind === "ValidationError" ? 422 : 400 },
+    );
+  }
+  return redirect(`/?folder=${parentId}`);
 }
 
 export default function Index() {
-  const { reports, viewBase } = useLoaderData<typeof loader>();
+  const { folders, reports, selectedId, viewBase } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
+  const folderReports = reports.filter((r) => r.folderId === selectedId);
+  const root = folders.find((f) => f.parentId === null);
+
   return (
     <main
       style={{
         fontFamily: "system-ui, sans-serif",
-        maxWidth: 720,
+        maxWidth: 920,
         margin: "2rem auto",
         padding: "0 1rem",
       }}
@@ -39,42 +104,112 @@ export default function Index() {
         <SignedIn>
           <UserButton afterSignOutUrl="/" />
         </SignedIn>
-        <SignedOut>
-          <Link to="/sign-in">Sign in</Link>
-        </SignedOut>
       </header>
 
       <p>
         <Link to="/upload">Upload a report →</Link>
       </p>
 
-      {reports.length === 0 ? (
-        <p style={{ color: "#666" }}>
-          No reports yet. <Link to="/upload">Upload your first →</Link>
-        </p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {reports.map((r) => (
-            <li
-              key={r.slug}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 0",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              <span>
-                <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
-                <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>
-              </span>
-              <StatusBadge isPublished={r.isPublished} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        {/* Sidebar: folder tree */}
+        <nav style={{ width: 220, flexShrink: 0, borderRight: "1px solid #eee", paddingRight: 12 }}>
+          {root ? (
+            <FolderTree node={root} childrenOf={childrenOf} selectedId={selectedId} depth={0} />
+          ) : (
+            <p style={{ color: "#999", fontSize: 13 }}>No folders yet.</p>
+          )}
+        </nav>
+
+        {/* Contents: the selected folder's reports + new-folder form */}
+        <section style={{ flex: 1 }}>
+          {folderReports.length === 0 ? (
+            <p style={{ color: "#666" }}>This folder is empty.</p>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {folderReports.map((r) => (
+                <li
+                  key={r.slug}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "10px 0",
+                    borderBottom: "1px solid #eee",
+                  }}
+                >
+                  <span>
+                    <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
+                    <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>
+                  </span>
+                  <StatusBadge isPublished={r.isPublished} />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {selectedId ? (
+            <Form method="post" style={{ marginTop: 16 }}>
+              <input type="hidden" name="parentId" value={selectedId} />
+              <input
+                name="name"
+                placeholder="New folder name"
+                required
+                style={{ padding: 6, marginRight: 8 }}
+              />
+              <button type="submit" style={{ padding: "6px 12px" }}>
+                + New folder
+              </button>
+              {actionData && "error" in actionData && actionData.error ? (
+                <span style={{ color: "crimson", marginLeft: 8 }}>✗ {actionData.error}</span>
+              ) : null}
+            </Form>
+          ) : null}
+        </section>
+      </div>
     </main>
+  );
+}
+
+/** Recursively render a folder and its children as an indented, selectable tree. */
+function FolderTree({
+  node,
+  childrenOf,
+  selectedId,
+  depth,
+}: {
+  node: FolderNode;
+  childrenOf: (parentId: string | null) => FolderNode[];
+  selectedId: string | null;
+  depth: number;
+}) {
+  const selected = node.id === selectedId;
+  return (
+    <div>
+      <Link
+        to={`/?folder=${node.id}`}
+        style={{
+          display: "block",
+          padding: "4px 6px",
+          paddingLeft: 6 + depth * 14,
+          textDecoration: "none",
+          borderRadius: 4,
+          fontWeight: selected ? 600 : 400,
+          background: selected ? "#eef" : "transparent",
+          color: "#333",
+        }}
+      >
+        📁 {node.name}
+      </Link>
+      {childrenOf(node.id).map((child) => (
+        <FolderTree
+          key={child.id}
+          node={child}
+          childrenOf={childrenOf}
+          selectedId={selectedId}
+          depth={depth + 1}
+        />
+      ))}
+    </div>
   );
 }
 

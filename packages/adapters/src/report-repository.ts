@@ -118,6 +118,7 @@ export class DrizzleReportRepository implements ReportRepository {
           slug: reports.slug,
           title: reports.title,
           liveVersionId: reports.liveVersionId,
+          folderId: reports.folderId,
         })
         .from(reports)
         .where(and(eq(reports.orgId, org), isNull(reports.deletedAt)))
@@ -127,6 +128,7 @@ export class DrizzleReportRepository implements ReportRepository {
           slug: r.slug as Slug,
           title: r.title,
           isPublished: r.liveVersionId !== null,
+          folderId: folderId(r.folderId),
         })),
       );
     } catch (e) {

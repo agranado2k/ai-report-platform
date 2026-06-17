@@ -10,6 +10,7 @@
 import type {
   AppError,
   DomainEvent,
+  Folder,
   FolderId,
   OrgId,
   Report,
@@ -25,12 +26,14 @@ import type {
  * A lightweight read projection of a Report for list views (the dashboard).
  * Deliberately NOT the full aggregate — listing must not load every version's
  * manifest. `isPublished` = a clean version is live (vs still pending). A richer
- * per-version status badge (e.g. flagged) is a follow-up.
+ * per-version status badge (e.g. flagged) is a follow-up. `folderId` lets the UI
+ * group reports under their folder in the tree.
  */
 export interface ReportSummary {
   readonly slug: Slug;
   readonly title: string;
   readonly isPublished: boolean;
+  readonly folderId: FolderId;
 }
 
 // ── Reports & Folders persistence ─────────────────────────────────────────
@@ -41,6 +44,15 @@ export interface ReportRepository {
   listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>>;
   /** Persist the aggregate + any new versions (called inside a UnitOfWork). */
   save(report: Report): Promise<Result<void, AppError>>;
+}
+
+// The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
+// by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
+export interface FolderRepository {
+  /** All non-deleted folders for the org — the caller builds the tree. */
+  listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>>;
+  findById(id: FolderId): Promise<Result<Folder | null, AppError>>;
+  save(folder: Folder): Promise<Result<void, AppError>>;
 }
 
 // ── R2 blob storage (keys: reports/<reportId>/<versionId>/<path>, ADR-0037) ──
@@ -189,6 +201,7 @@ export interface PlanLimiter {
 export interface IdGenerator {
   reportId(): ReportId;
   versionId(): VersionId;
+  folderId(): FolderId;
 }
 
 export interface SlugFactory {
