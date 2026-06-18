@@ -47,6 +47,7 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 - **ScanWorkQueue** — the delivery port that hands queued `ReportVersion`s to the async scan worker (the drain) and tracks ack/retry; distinct from `ScanJob`/`scan_jobs`, which remain the source of truth for the cached `scan_status`. Implemented on pg-boss; swappable. Spec: ADR-0045.
 - **Abuse report** — a user-submitted complaint about a hosted `Report` (phishing, malware, CSAM, other). Aggregate root. Tracked with `status` and an action audit trail. Spec: ADR-012.
 - **Takedown** — the operator action that withdraws a `Report` from public serving. Emits `ReportTakenDown`; Reports & Folders soft-deletes the `Report` row (`deleted_at`) and the R2 keys are queued for purge after the appeal window. Spec: ADR-012.
+- **Delete (a Report)** — the **owner-initiated** removal of their own `Report` (vs operator **Takedown**, which is a moderation action). Same `deleted_at` soft-delete mechanism — the viewer then returns 410 and the bytes are retained for the purge window — but a self-service action within Reports & Folders. Unlike Takedown it currently emits no domain event (an intra-context operation with no cross-context consumer yet; cf. moving a report). Spec: ADR-0038.
 - **CSP report** — an inbound Content-Security-Policy violation report sent by viewer browsers to `/csp-report`. Used for policy drift detection. Spec: ADR-013.
 
 ## Shared kernel
