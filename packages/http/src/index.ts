@@ -1,3 +1,7 @@
-// arp-http — HTTP-adapter helpers (driving side). Currently the report-upload
-// response mapper (ADR-0040); request-parse helpers may join later.
+// arp-http — HTTP-adapter helpers (driving side): the pure response mappers that
+// turn use-case Results into wire responses (ADR-0040). Errors render via the
+// shared problem.ts mapper; request-parse helpers may join later.
+
+export * from "./list-response";
+export * from "./problem";
 export * from "./upload-response";
