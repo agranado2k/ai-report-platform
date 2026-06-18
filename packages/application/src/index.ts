@@ -4,10 +4,12 @@
 // exported from the `./testing` subpath.
 export * from "./ports";
 export * from "./use-cases/create-folder";
+export * from "./use-cases/delete-folder";
 export * from "./use-cases/drain-scans";
 export * from "./use-cases/list-reports";
 export * from "./use-cases/move-report";
 export * from "./use-cases/process-scan-result";
 export * from "./use-cases/provision-identity";
+export * from "./use-cases/rename-folder";
 export * from "./use-cases/upload-report";
 export * from "./use-cases/view-report";

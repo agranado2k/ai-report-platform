@@ -52,7 +52,11 @@ export interface FolderRepository {
   /** All non-deleted folders for the org — the caller builds the tree. */
   listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>>;
   findById(id: FolderId): Promise<Result<Folder | null, AppError>>;
+  /** Upsert by id — creates a folder, or updates name/slug/parent/deletedAt. */
   save(folder: Folder): Promise<Result<void, AppError>>;
+  /** Soft-delete a folder (sets deleted_at). The caller has already validated the
+   * folder exists, is in the actor's org, is not Root, and is empty (ADR-0036). */
+  softDelete(id: FolderId): Promise<Result<void, AppError>>;
 }
 
 // ── R2 blob storage (keys: reports/<reportId>/<versionId>/<path>, ADR-0037) ──
