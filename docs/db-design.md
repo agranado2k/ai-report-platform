@@ -140,7 +140,7 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 |---|---|---|
 | `id` | uuid PK | |
 | `org_id` | uuid FK → orgs | |
-| `folder_id` | uuid FK → folders | placement at create (ADR-0037) |
+| `folder_id` | uuid FK → folders | placement at create (ADR-0037); **mutable** — reassigned by the move-report operation (ADR-0036) |
 | `slug` | varchar(10) | immutable `nanoid(10)`; the public URL + capability (ADR-0038) |
 | `title` | text | |
 | `live_version_id` | uuid FK → report_versions NULL | the served version; flips on scan-clean (monotonic, ADR-0037 §8) |
