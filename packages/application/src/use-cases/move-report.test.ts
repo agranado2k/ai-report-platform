@@ -132,4 +132,38 @@ describe("moveReport use case", () => {
     );
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
+
+  it("rejects a soft-deleted target folder (NotFound)", async () => {
+    const { reports, folders } = await setup();
+    await reports.save(report(orgA, "eeeeeeeeee"));
+    const deleted = {
+      ...folder("00000000-0000-7000-8000-0000000000a3", orgA, "Deleted"),
+      deletedAt: 1,
+    };
+    await folders.save(deleted);
+
+    const r = await moveReport(
+      { reports, folders },
+      { orgId: orgA },
+      { slug: slug("eeeeeeeeee"), toFolderId: deleted.id },
+    );
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("preserves the report's versions on move", async () => {
+    const { reports, folders, targetA } = await setup();
+    await reports.save(report(orgA, "ffffffffff"));
+    const before = await reports.findBySlug(slug("ffffffffff"));
+    const beforeCount = before.ok && before.value ? before.value.versions.length : -1;
+
+    await moveReport(
+      { reports, folders },
+      { orgId: orgA },
+      { slug: slug("ffffffffff"), toFolderId: targetA.id },
+    );
+
+    const after = await reports.findBySlug(slug("ffffffffff"));
+    expect(after.ok && after.value?.folderId).toBe(targetA.id);
+    expect(after.ok && after.value?.versions.length).toBe(beforeCount);
+  });
 });
