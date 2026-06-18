@@ -149,6 +149,20 @@ describe("DrizzleReportRepository (pglite integration)", () => {
       expect(live?.scanStatus).toBe("clean");
     }
   });
+
+  it("softDelete sets deleted_at and excludes the report from listByOrg", async () => {
+    const created = newReport();
+    await repo.save(created);
+    const del = await repo.softDelete(created.id);
+    expect(del.ok).toBe(true);
+
+    const list = await repo.listByOrg(ids.orgId);
+    expect(list.ok && list.value.some((s) => s.slug === SLUG)).toBe(false);
+    // findBySlug still resolves it (no deleted_at filter) with deletedAt set — the
+    // viewer reads this to return 410 (ADR-0038).
+    const found = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    expect(found.ok && found.value?.deletedAt).not.toBeNull();
+  });
 });
 
 function makeSlugOrThrow(s: string) {
