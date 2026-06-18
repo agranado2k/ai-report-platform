@@ -154,3 +154,11 @@ export function applyScanResult(
     events: [published],
   };
 }
+
+/**
+ * Move the report into a different Folder. Pure transition — the use case
+ * validates that the target Folder belongs to the report's Org (ADR-0036).
+ */
+export function placeInFolder(report: Report, folderId: FolderId): Report {
+  return { ...report, folderId };
+}
