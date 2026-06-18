@@ -50,3 +50,14 @@ export function createFolder(p: CreateFolderParams): Result<Folder, AppError> {
   }
   return ok({ id: p.id, orgId: p.orgId, parentId: p.parentId, name, slug, deletedAt: null });
 }
+
+/** Rename a Folder (display name only; the slug stays stable so sibling-slug
+ * uniqueness and any folder references are unaffected). Pure transition. */
+export function renameFolder(folder: Folder, name: string): Result<Folder, AppError> {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return err(validationError("folder name is required", "name"));
+  if (trimmed.length > MAX_NAME) {
+    return err(validationError(`folder name too long (max ${MAX_NAME})`, "name"));
+  }
+  return ok({ ...folder, name: trimmed });
+}
