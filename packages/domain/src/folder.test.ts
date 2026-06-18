@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { folderId, orgId } from "./brand";
-import { createFolder, folderSlug } from "./folder";
+import { createFolder, folderSlug, renameFolder } from "./folder";
 
 const org = orgId("00000000-0000-7000-8000-0000000000a1");
 const parent = folderId("00000000-0000-7000-8000-0000000000f0");
@@ -44,5 +44,21 @@ describe("createFolder", () => {
 describe("folderSlug", () => {
   it("lowercases, hyphenates runs of non-alphanumerics, and trims hyphens", () => {
     expect(folderSlug("2024 — Q1 / Final!!")).toBe("2024-q1-final");
+  });
+});
+
+describe("renameFolder", () => {
+  const folder = { id, orgId: org, parentId: parent, name: "Old", slug: "old", deletedAt: null };
+
+  it("updates the display name and trims it, keeping the slug stable", () => {
+    const r = renameFolder(folder, "  New Name  ");
+    expect(r.ok && r.value.name).toBe("New Name");
+    expect(r.ok && r.value.slug).toBe("old"); // slug unchanged
+  });
+
+  it("rejects an empty name", () => {
+    const r = renameFolder(folder, "   ");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 });

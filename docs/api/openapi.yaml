@@ -151,6 +151,64 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/folders/{id}:
+    patch:
+      operationId: renameFolder
+      tags: [Folders]
+      summary: Rename a folder
+      description: >
+        Change a folder's display name (ADR-0036). The folder must belong to your
+        org. The folder's slug is left unchanged (stable identifier).
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The folder id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameFolderRequest' }
+      responses:
+        '200':
+          description: The renamed folder.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Folder' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteFolder
+      tags: [Folders]
+      summary: Delete a folder
+      description: >
+        Soft-delete a folder (ADR-0036). The folder must belong to your org. The
+        Root folder cannot be deleted, and a folder that still contains
+        subfolders or reports is rejected (422) — empty it first.
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The folder id.
+      responses:
+        '204':
+          description: Deleted (no content).
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/reports/{slug}/move:
     post:
       operationId: moveReport
@@ -329,6 +387,14 @@ components:
           type: string
           format: uuid
           description: Parent folder id (use the Root folder's id for a top-level folder).
+
+    RenameFolderRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The folder's new display name.
 
     MoveReportRequest:
       type: object

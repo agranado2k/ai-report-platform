@@ -80,6 +80,12 @@ export class InMemoryFolderRepository implements FolderRepository {
     this.byId.set(folder.id, folder);
     return ok(undefined);
   }
+
+  async softDelete(id: FolderId): Promise<Result<void, AppError>> {
+    const f = this.byId.get(id);
+    if (f) this.byId.set(id, { ...f, deletedAt: 1 });
+    return ok(undefined);
+  }
 }
 
 export class InMemoryReportRepository implements ReportRepository {

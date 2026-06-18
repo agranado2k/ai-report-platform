@@ -1,7 +1,12 @@
 import type { Folder, FolderId, Slug } from "arp-domain";
 import { err, folderId, ok, orgId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { createFolderToHttp, moveReportToHttp } from "./write-response";
+import {
+  createFolderToHttp,
+  deleteFolderToHttp,
+  moveReportToHttp,
+  renameFolderToHttp,
+} from "./write-response";
 
 const slug = (s: string): Slug => s as Slug;
 const F1 = "00000000-0000-7000-8000-000000000001";
@@ -48,6 +53,43 @@ describe("createFolderToHttp", () => {
   it("maps ValidationError to a 422 problem", () => {
     const res = createFolderToHttp(
       err({ kind: "ValidationError", message: "too deep", field: "parentId" }),
+    );
+    expect(res.status).toBe(422);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("renameFolderToHttp", () => {
+  it("maps ok to 200 with the renamed folder", () => {
+    const folder: Folder = {
+      id: folderId(F2),
+      orgId: orgId(O1),
+      parentId: folderId(F1),
+      name: "Renamed",
+      slug: "old-slug",
+      deletedAt: null,
+    };
+    const res = renameFolderToHttp(ok(folder));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: F2, name: "Renamed", slug: "old-slug", parent_id: F1 });
+  });
+
+  it("maps NotFound to a 404 problem", () => {
+    const res = renameFolderToHttp(err({ kind: "NotFound", message: "gone" }));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("deleteFolderToHttp", () => {
+  it("maps ok to 204 with no body", () => {
+    const res = deleteFolderToHttp(ok(undefined));
+    expect(res.status).toBe(204);
+    expect(res.body).toBeUndefined();
+  });
+
+  it("maps a non-empty-folder ValidationError to 422", () => {
+    const res = deleteFolderToHttp(
+      err({ kind: "ValidationError", message: "folder is not empty" }),
     );
     expect(res.status).toBe(422);
     expect(res.contentType).toBe("application/problem+json");

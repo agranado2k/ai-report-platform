@@ -113,11 +113,18 @@ export const folders = pgTable(
   },
   (t) => [
     index("folders_org_id_idx").on(t.orgId),
-    uniqueIndex("folders_org_parent_slug_uniq").on(t.orgId, t.parentId, t.slug),
+    // Sibling-slug uniqueness applies to LIVE folders only — a soft-deleted folder
+    // must not keep its slug slot, else recreating a same-named folder in the same
+    // parent fails with a misleading 23505 (ADR-0036, soft-delete = deleted_at IS NULL).
+    uniqueIndex("folders_org_parent_slug_uniq")
+      .on(t.orgId, t.parentId, t.slug)
+      .where(sql`${t.deletedAt} is null`),
     // Guarantees one top-level (Root) folder per slug per Org: the NULLs-distinct
     // base index above can't dedupe parent_id = NULL rows, so identity
     // provisioning could otherwise create ghost Root folders (ADR-0048).
-    uniqueIndex("folders_org_root_slug_uniq").on(t.orgId, t.slug).where(sql`${t.parentId} is null`),
+    uniqueIndex("folders_org_root_slug_uniq")
+      .on(t.orgId, t.slug)
+      .where(sql`${t.parentId} is null and ${t.deletedAt} is null`),
   ],
 );
 

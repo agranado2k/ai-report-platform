@@ -18,13 +18,25 @@ export function moveReportToHttp(
   };
 }
 
+/** The wire shape of a Folder (no org id). */
+function folderBody(f: Folder) {
+  return { id: f.id, name: f.name, slug: f.slug, parent_id: f.parentId };
+}
+
 /** POST /api/v1/folders — 201 with the created folder. */
 export function createFolderToHttp(result: Result<Folder, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  const f = result.value;
-  return {
-    status: 201,
-    contentType: "application/json",
-    body: { id: f.id, name: f.name, slug: f.slug, parent_id: f.parentId },
-  };
+  return { status: 201, contentType: "application/json", body: folderBody(result.value) };
+}
+
+/** PATCH /api/v1/folders/{id} — 200 with the renamed folder. */
+export function renameFolderToHttp(result: Result<Folder, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: folderBody(result.value) };
+}
+
+/** DELETE /api/v1/folders/{id} — 204 No Content on success. */
+export function deleteFolderToHttp(result: Result<void, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 204, contentType: "application/json", body: undefined };
 }

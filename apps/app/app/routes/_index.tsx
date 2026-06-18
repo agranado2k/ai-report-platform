@@ -7,7 +7,7 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { createFolder, listReports, moveReport } from "arp-application";
+import { createFolder, deleteFolder, listReports, moveReport, renameFolder } from "arp-application";
 import { folderId, makeSlug } from "arp-domain";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo, viewOrigin } from "../server/container.server";
@@ -82,6 +82,41 @@ export async function action(args: ActionFunctionArgs) {
     );
     if (!r.ok) return json({ error: r.error.message }, { status: 400 });
     return redirect(`/?folder=${rawTo}`);
+  }
+
+  if (intent === "rename-folder") {
+    const rawId = String(form.get("folderId") ?? "").trim();
+    const name = String(form.get("name") ?? "");
+    if (!rawId) return json({ error: "Invalid rename request." }, { status: 400 });
+    const r = await renameFolder(
+      { folders: folderRepo() },
+      { orgId: actor.value.orgId },
+      { folderId: folderId(rawId), name },
+    );
+    if (!r.ok) {
+      return json(
+        { error: r.error.message },
+        { status: r.error.kind === "ValidationError" ? 422 : 400 },
+      );
+    }
+    return redirect(`/?folder=${rawId}`);
+  }
+
+  if (intent === "delete-folder") {
+    const rawId = String(form.get("folderId") ?? "").trim();
+    if (!rawId) return json({ error: "Invalid delete request." }, { status: 400 });
+    const r = await deleteFolder(
+      { folders: folderRepo(), reports: deps().reports },
+      { orgId: actor.value.orgId },
+      { folderId: folderId(rawId) },
+    );
+    if (!r.ok) {
+      return json(
+        { error: r.error.message },
+        { status: r.error.kind === "ValidationError" ? 422 : 400 },
+      );
+    }
+    return redirect("/");
   }
 
   // new-folder (default): nest under the selected folder.
@@ -242,6 +277,38 @@ function FolderTree({
       >
         📁 {node.name}
       </Link>
+      {selected && node.parentId !== null ? (
+        <div
+          style={{
+            paddingLeft: 6 + depth * 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            margin: "2px 0 6px",
+          }}
+        >
+          <Form method="post" style={{ display: "flex", gap: 4 }}>
+            <input type="hidden" name="intent" value="rename-folder" />
+            <input type="hidden" name="folderId" value={node.id} />
+            <input
+              name="name"
+              defaultValue={node.name}
+              aria-label={`Rename ${node.name}`}
+              style={{ fontSize: 12, width: 110 }}
+            />
+            <button type="submit" style={{ fontSize: 12 }}>
+              Rename
+            </button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="intent" value="delete-folder" />
+            <input type="hidden" name="folderId" value={node.id} />
+            <button type="submit" style={{ fontSize: 12, color: "#b00" }}>
+              Delete (must be empty)
+            </button>
+          </Form>
+        </div>
+      ) : null}
       {childrenOf(node.id).map((child) => (
         <FolderTree
           key={child.id}
