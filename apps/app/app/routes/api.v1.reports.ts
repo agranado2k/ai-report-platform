@@ -3,12 +3,32 @@
 // body + Idempotency-Key → run the UploadReportUseCase → serialize via the pure
 // arp-http mapper. All policy lives in the application/domain; this file only
 // translates HTTP ⇆ use-case Result and never throws a bare error to the client.
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { type UploadActor, uploadReport } from "arp-application";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { listReports, type UploadActor, uploadReport } from "arp-application";
 import { err } from "arp-domain";
-import { type HttpResponse, uploadResultToHttp } from "arp-http";
-import { resolveUploadActor } from "../server/auth.server";
+import { errorToHttp, listReportsToHttp, uploadResultToHttp } from "arp-http";
+import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
+import { toResponse } from "../server/http.server";
+
+// GET /api/v1/reports — list the acting org's reports as lightweight summaries
+// (ADR-0036). resolveActorForRead resolves the org WITHOUT provisioning (GETs
+// stay safe); no session or no active org → 401. Unlike the HTML dashboard
+// loader (which renders an empty list for an unidentified caller), the API
+// surfaces an explicit Unauthenticated problem.
+export async function loader(args: LoaderFunctionArgs) {
+  const actor = await resolveActorForRead(args);
+  if (!actor) {
+    return toResponse(
+      errorToHttp({
+        kind: "Unauthenticated",
+        message: "a signed-in session with an active organization is required",
+      }),
+    );
+  }
+  const result = await listReports({ reports: deps().reports }, { orgId: actor.orgId });
+  return toResponse(listReportsToHttp(result));
+}
 
 export async function action(args: ActionFunctionArgs) {
   const { request } = args;
@@ -105,12 +125,4 @@ function strOrUndefined(v: FormDataEntryValue | string | null): string | undefin
   if (typeof v !== "string") return undefined;
   const t = v.trim();
   return t.length > 0 ? t : undefined;
-}
-
-/** Serialize the pure HttpResponse into a Remix/Fetch Response. */
-function toResponse(http: HttpResponse): Response {
-  return new Response(JSON.stringify(http.body), {
-    status: http.status,
-    headers: { "Content-Type": http.contentType, ...(http.headers ?? {}) },
-  });
 }
