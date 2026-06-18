@@ -1,6 +1,6 @@
 // Integration tests for DrizzleFolderRepository against real Postgres (pglite) —
 // exercises the actual SQL + the sibling-slug unique constraint mapping.
-import { createFolder, type Folder, folderId } from "arp-domain";
+import { createFolder, type Folder, folderId, renameFolder } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleFolderRepository } from "./folder-repository";
 import { makeTestDb, type SeededIdentity, seedIdentity, type TestDb } from "./testing/pglite";
@@ -47,5 +47,30 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
     expect(dup.ok).toBe(false);
     if (dup.ok) return;
     expect(dup.error.kind).toBe("ValidationError");
+  });
+
+  it("upserts: re-saving an existing id updates the name (rename)", async () => {
+    const f = build("00000000-0000-4000-8000-0000000000c5", "Before");
+    await repo.save(f);
+    const renamed = renameFolder(f, "After");
+    expect(renamed.ok).toBe(true);
+    if (!renamed.ok) return;
+    const resaved = await repo.save(renamed.value);
+    expect(resaved.ok).toBe(true);
+
+    const found = await repo.findById(f.id);
+    expect(found.ok && found.value?.name).toBe("After");
+  });
+
+  it("softDelete excludes the folder from listByOrg", async () => {
+    const f = build("00000000-0000-4000-8000-0000000000c6", "Temp");
+    await repo.save(f);
+    const del = await repo.softDelete(f.id);
+    expect(del.ok).toBe(true);
+
+    const list = await repo.listByOrg(ids.orgId);
+    expect(list.ok && list.value.some((x) => x.id === f.id)).toBe(false);
+    const found = await repo.findById(f.id);
+    expect(found.ok && found.value?.deletedAt).not.toBeNull();
   });
 });

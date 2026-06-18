@@ -71,20 +71,47 @@ export class DrizzleFolderRepository implements FolderRepository {
   async save(folder: Folder): Promise<Result<void, AppError>> {
     try {
       const db = this.ctx.current();
-      await db.insert(folders).values({
-        id: folder.id,
-        orgId: folder.orgId,
-        parentId: folder.parentId,
-        name: folder.name,
-        slug: folder.slug,
-        deletedAt: folder.deletedAt === null ? null : new Date(folder.deletedAt),
-      });
+      // Insert, or update the mutable fields on conflict by id (rename → name/slug,
+      // reparent → parentId, soft-delete → deletedAt). ADR-0036.
+      await db
+        .insert(folders)
+        .values({
+          id: folder.id,
+          orgId: folder.orgId,
+          parentId: folder.parentId,
+          name: folder.name,
+          slug: folder.slug,
+          deletedAt: folder.deletedAt === null ? null : new Date(folder.deletedAt),
+        })
+        .onConflictDoUpdate({
+          target: folders.id,
+          set: {
+            parentId: folder.parentId,
+            name: folder.name,
+            slug: folder.slug,
+            deletedAt: folder.deletedAt === null ? null : new Date(folder.deletedAt),
+            updatedAt: new Date(),
+          },
+        });
       return ok(undefined);
     } catch (e) {
       if (isUniqueViolation(e)) {
         return err(validationError(`a folder '${folder.slug}' already exists here`, "name"));
       }
       return errUnexpected("saveFolder", e);
+    }
+  }
+
+  async softDelete(id: FolderId): Promise<Result<void, AppError>> {
+    try {
+      const db = this.ctx.current();
+      await db
+        .update(folders)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(folders.id, id), isNull(folders.deletedAt)));
+      return ok(undefined);
+    } catch (e) {
+      return errUnexpected("softDeleteFolder", e);
     }
   }
 }
