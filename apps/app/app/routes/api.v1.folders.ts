@@ -4,11 +4,11 @@
 // mapper. The flat list carries parent_id so a client can rebuild the tree.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { createFolder } from "arp-application";
-import { folderId } from "arp-domain";
-import { createFolderToHttp, errorToHttp, listFoldersToHttp } from "arp-http";
+import { makeFolderId } from "arp-domain";
+import { createFolderToHttp, errorToHttp, listFoldersToHttp, parseJsonBody } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
-import { parseJsonBody, toResponse, unauthenticated } from "../server/http.server";
+import { toResponse, unauthenticated } from "../server/http.server";
 
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
@@ -30,20 +30,15 @@ export async function action(args: ActionFunctionArgs) {
   if (!body.ok) return toResponse(errorToHttp(body.error));
   const name = typeof body.value.name === "string" ? body.value.name : "";
   const rawParent = typeof body.value.parent_id === "string" ? body.value.parent_id.trim() : "";
-  if (!rawParent) {
-    return toResponse(
-      errorToHttp({
-        kind: "ValidationError",
-        message: "parent_id is required",
-        field: "parent_id",
-      }),
-    );
-  }
+  // Validate the UUID at the boundary → 422 (a bad value would otherwise throw in
+  // Postgres and surface as a 500). makeFolderId also rejects "" (required).
+  const parentId = makeFolderId(rawParent);
+  if (!parentId.ok) return toResponse(errorToHttp(parentId.error));
 
   const result = await createFolder(
     { folders: folderRepo(), ids: deps().ids },
     { orgId: actor.value.orgId },
-    { parentId: folderId(rawParent), name },
+    { parentId: parentId.value, name },
   );
   return toResponse(createFolderToHttp(result));
 }

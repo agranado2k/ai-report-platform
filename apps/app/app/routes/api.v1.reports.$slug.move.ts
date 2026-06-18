@@ -5,11 +5,11 @@
 // target folder both belong to the actor's org.
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { moveReport } from "arp-application";
-import { folderId, makeSlug } from "arp-domain";
-import { errorToHttp, moveReportToHttp } from "arp-http";
+import { makeFolderId, makeSlug } from "arp-domain";
+import { errorToHttp, moveReportToHttp, parseJsonBody } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
-import { parseJsonBody, toResponse } from "../server/http.server";
+import { toResponse } from "../server/http.server";
 
 export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
@@ -21,21 +21,15 @@ export async function action(args: ActionFunctionArgs) {
   const body = await parseJsonBody(args.request);
   if (!body.ok) return toResponse(errorToHttp(body.error));
   const rawTo = typeof body.value.folder_id === "string" ? body.value.folder_id.trim() : "";
-  if (!rawTo) {
-    return toResponse(
-      errorToHttp({
-        kind: "ValidationError",
-        message: "folder_id is required",
-        field: "folder_id",
-      }),
-    );
-  }
+  // Validate the UUID at the boundary → 422; a bad value must not reach the DB
+  // (a non-uuid throws there and surfaces as a 500). makeFolderId also rejects "".
+  const toFolderId = makeFolderId(rawTo);
+  if (!toFolderId.ok) return toResponse(errorToHttp(toFolderId.error));
 
-  const toFolderId = folderId(rawTo); // moveReport validates it's in the actor's org
   const result = await moveReport(
     { reports: deps().reports, folders: folderRepo() },
     { orgId: actor.value.orgId },
-    { slug: slug.value, toFolderId },
+    { slug: slug.value, toFolderId: toFolderId.value },
   );
-  return toResponse(moveReportToHttp(result, { slug: slug.value, folderId: toFolderId }));
+  return toResponse(moveReportToHttp(result, { slug: slug.value, folderId: toFolderId.value }));
 }
