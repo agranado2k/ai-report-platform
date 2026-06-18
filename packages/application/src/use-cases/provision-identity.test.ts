@@ -55,6 +55,9 @@ describe("provisionIdentity (ADR-0048 Clerk JIT personal-org)", () => {
       async createPersonalOrg(): Promise<Result<string, AppError>> {
         return err({ kind: "Unexpected", message: "clerk down" });
       },
+      async findPersonalOrg(): Promise<Result<string | null, AppError>> {
+        return err({ kind: "Unexpected", message: "clerk down" });
+      },
     };
     const r = await provisionIdentity(
       { identities: new InMemoryIdentityStore(), clerkOrgs: failingClerk },

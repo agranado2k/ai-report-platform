@@ -48,16 +48,11 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
     // page-1 results suffice and "oldest" is unambiguous; revisit both the paging
     // and the heuristic when ADR-009 cross-org folder grants let a user belong to
     // others' orgs too.
-    try {
-      const memberships = await this.orgs.getOrganizationMembershipList({ userId: clerkUserId });
-      const oldest = [...(memberships.data ?? [])].sort(
-        (a, b) => a.organization.createdAt - b.organization.createdAt,
-      )[0];
-      if (oldest) return ok(oldest.organization.id);
-    } catch {
-      // Lookup failed — favour availability over dedupe and fall through to create.
-      // A transient list failure shouldn't block the user from getting an org.
-    }
+    const existing = await this.findPersonalOrg(clerkUserId);
+    // ok + value → reuse it. On a lookup failure (err) favour availability over
+    // dedupe and fall through to create: a transient list failure shouldn't block
+    // the user from getting an org.
+    if (existing.ok && existing.value) return ok(existing.value);
 
     try {
       const org = await this.orgs.createOrganization({ name, createdBy: clerkUserId });
@@ -68,6 +63,25 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
       return err({
         kind: "Unexpected",
         message: `clerk.createOrganization: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }
+
+  async findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>> {
+    // Read-only resolution (ADR-0048): the org the write path would reuse, picked
+    // as the OLDEST membership for a stable choice. null when the user has none —
+    // never creates. A lookup failure is surfaced as Unexpected so the caller can
+    // log it (the read path then degrades to an empty list rather than guessing).
+    try {
+      const memberships = await this.orgs.getOrganizationMembershipList({ userId: clerkUserId });
+      const oldest = [...(memberships.data ?? [])].sort(
+        (a, b) => a.organization.createdAt - b.organization.createdAt,
+      )[0];
+      return ok(oldest ? oldest.organization.id : null);
+    } catch (e) {
+      return err({
+        kind: "Unexpected",
+        message: `clerk.getOrganizationMembershipList: ${e instanceof Error ? e.message : String(e)}`,
       });
     }
   }
