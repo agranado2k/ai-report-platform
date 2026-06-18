@@ -81,8 +81,25 @@ export async function resolveActorForRead(
   args: LoaderFunctionArgs,
 ): Promise<Pick<UploadActor, "orgId"> | null> {
   const { userId, orgId } = await getAuth(args);
-  if (!userId || !orgId) return null;
-  const found = await provisionDeps().identities.findByClerk(userId, orgId);
+  if (!userId) return null;
+
+  // The session may carry NO active org (a browser sign-in that never selected
+  // one, or a backend-minted token). The user still has a personal org — the one
+  // the write path provisioned on first upload (ADR-0048). Resolve it read-only
+  // so reads see the same org writes attribute to, WITHOUT provisioning on a GET.
+  const deps = provisionDeps();
+  let clerkOrgId = orgId ?? null;
+  if (!clerkOrgId) {
+    const personal = await deps.clerkOrgs.findPersonalOrg(userId);
+    if (!personal.ok) {
+      console.warn(`resolveActorForRead: findPersonalOrg failed — ${personal.error.message}`);
+      return null;
+    }
+    clerkOrgId = personal.value;
+  }
+  if (!clerkOrgId) return null; // signed in but no org yet (never uploaded) → empty
+
+  const found = await deps.identities.findByClerk(userId, clerkOrgId);
   if (!found.ok) {
     // Infra failure (not "no session"): log so it doesn't masquerade as an empty
     // dashboard. The page degrades to an empty list rather than erroring.
