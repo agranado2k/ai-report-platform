@@ -29,7 +29,12 @@ interface FolderNode {
 // safe). `?folder=<id>` selects a folder; default is the org Root.
 export async function loader(args: LoaderFunctionArgs) {
   const viewBase = viewOrigin(args.request);
-  const actor = await resolveActorForRead(args);
+  const actorR = await resolveActorForRead(args);
+  // The dashboard degrades to an empty list for both "no actor" and an infra
+  // failure (logged) — a rendered page beats a 500 here; the JSON API surfaces
+  // the distinction (401 vs 500) instead.
+  if (!actorR.ok) console.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
+  const actor = actorR.ok ? actorR.value : null;
   if (!actor) return json({ folders: [] as FolderNode[], reports: [], selectedId: null, viewBase });
 
   const [foldersR, reportsR] = await Promise.all([

@@ -6,18 +6,12 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { errorToHttp, listFoldersToHttp } from "arp-http";
 import { resolveActorForRead } from "../server/auth.server";
 import { folderRepo } from "../server/container.server";
-import { toResponse } from "../server/http.server";
+import { toResponse, unauthenticated } from "../server/http.server";
 
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
-  if (!actor) {
-    return toResponse(
-      errorToHttp({
-        kind: "Unauthenticated",
-        message: "a signed-in session with an active organization is required",
-      }),
-    );
-  }
-  const result = await folderRepo().listByOrg(actor.orgId);
+  if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
+  if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
+  const result = await folderRepo().listByOrg(actor.value.orgId);
   return toResponse(listFoldersToHttp(result));
 }

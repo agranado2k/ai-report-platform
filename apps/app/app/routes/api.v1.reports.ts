@@ -9,7 +9,7 @@ import { err } from "arp-domain";
 import { errorToHttp, listReportsToHttp, uploadResultToHttp } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
-import { toResponse } from "../server/http.server";
+import { toResponse, unauthenticated } from "../server/http.server";
 
 // GET /api/v1/reports — list the acting org's reports as lightweight summaries
 // (ADR-0036). resolveActorForRead resolves the org WITHOUT provisioning (GETs
@@ -18,15 +18,9 @@ import { toResponse } from "../server/http.server";
 // surfaces an explicit Unauthenticated problem.
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
-  if (!actor) {
-    return toResponse(
-      errorToHttp({
-        kind: "Unauthenticated",
-        message: "a signed-in session with an active organization is required",
-      }),
-    );
-  }
-  const result = await listReports({ reports: deps().reports }, { orgId: actor.orgId });
+  if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
+  if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
+  const result = await listReports({ reports: deps().reports }, { orgId: actor.value.orgId });
   return toResponse(listReportsToHttp(result));
 }
 

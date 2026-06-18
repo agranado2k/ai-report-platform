@@ -9,7 +9,7 @@
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { provisionIdentity, type UploadActor } from "arp-application";
-import { type AppError, err, type Result } from "arp-domain";
+import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { provisionDeps } from "./container.server";
 
@@ -79,9 +79,9 @@ export async function resolveUploadActor(
  */
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
-): Promise<Pick<UploadActor, "orgId"> | null> {
+): Promise<Result<Pick<UploadActor, "orgId"> | null, AppError>> {
   const { userId, orgId } = await getAuth(args);
-  if (!userId) return null;
+  if (!userId) return ok(null); // no session → genuinely unauthenticated
 
   // The session may carry NO active org (a browser sign-in that never selected
   // one, or a backend-minted token). The user still has a personal org — the one
@@ -91,22 +91,15 @@ export async function resolveActorForRead(
   let clerkOrgId = orgId ?? null;
   if (!clerkOrgId) {
     const personal = await deps.clerkOrgs.findPersonalOrg(userId);
-    if (!personal.ok) {
-      console.warn(`resolveActorForRead: findPersonalOrg failed — ${personal.error.message}`);
-      return null;
-    }
+    if (!personal.ok) return personal; // infra failure (Clerk outage) → propagate (→ 500)
     clerkOrgId = personal.value;
   }
-  if (!clerkOrgId) return null; // signed in but no org yet (never uploaded) → empty
+  if (!clerkOrgId) return ok(null); // signed in but no org yet (never uploaded) → empty
 
   const found = await deps.identities.findByClerk(userId, clerkOrgId);
-  if (!found.ok) {
-    // Infra failure (not "no session"): log so it doesn't masquerade as an empty
-    // dashboard. The page degrades to an empty list rather than erroring.
-    console.warn(`resolveActorForRead: findByClerk failed — ${found.error.message}`);
-    return null;
-  }
-  return found.value ? { orgId: found.value.orgId } : null;
+  if (!found.ok) return found; // infra failure (DB outage) → propagate (→ 500)
+  // ok(null) = no actor (unauthenticated/empty); ok({orgId}) = resolved.
+  return ok(found.value ? { orgId: found.value.orgId } : null);
 }
 
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */
