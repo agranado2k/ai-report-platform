@@ -123,6 +123,12 @@ export class InMemoryReportRepository implements ReportRepository {
     this.slugToId.set(report.slug, report.id);
     return ok(undefined);
   }
+
+  async softDelete(id: ReportId): Promise<Result<void, AppError>> {
+    const r = this.byId.get(id);
+    if (r) this.byId.set(id, { ...r, deletedAt: 1 });
+    return ok(undefined);
+  }
 }
 
 const blobKey = (reportId: ReportId, versionId: VersionId, path: string) =>
