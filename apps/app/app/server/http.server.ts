@@ -5,6 +5,11 @@
 import { errorToHttp, type HttpResponse } from "arp-http";
 
 export function toResponse(http: HttpResponse): Response {
+  // 204 No Content carries no body (and no Content-Type) — a JSON string there
+  // would be an invalid response.
+  if (http.status === 204) {
+    return new Response(null, { status: 204, headers: { ...(http.headers ?? {}) } });
+  }
   return new Response(JSON.stringify(http.body), {
     status: http.status,
     headers: { "Content-Type": http.contentType, ...(http.headers ?? {}) },
