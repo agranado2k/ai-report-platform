@@ -122,6 +122,69 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createFolder
+      tags: [Folders]
+      summary: Create a folder
+      description: >
+        Create a folder under `parent_id` in the acting org (ADR-0036). The
+        parent must exist and belong to your org; folders nest at most 8 levels
+        deep. To create a top-level folder, pass the Root folder's id as
+        `parent_id` (every folder lives under Root).
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateFolderRequest' }
+      responses:
+        '201':
+          description: The created folder.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Folder' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/move:
+    post:
+      operationId: moveReport
+      tags: [Reports]
+      summary: Move a report to a different folder
+      description: >
+        Reassign the report identified by `slug` to the folder `folder_id`
+        (ADR-0036). Both the report and the target folder must belong to your
+        org. The slug and the report's versions are unchanged.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoveReportRequest' }
+      responses:
+        '200':
+          description: The report's new placement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoveResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /{slug}:
     get:
@@ -254,6 +317,37 @@ components:
           type: [string, 'null']
           format: uuid
           description: Parent folder id; null for the org Root folder.
+
+    CreateFolderRequest:
+      type: object
+      required: [name, parent_id]
+      properties:
+        name:
+          type: string
+          description: Display name for the new folder.
+        parent_id:
+          type: string
+          format: uuid
+          description: Parent folder id (use the Root folder's id for a top-level folder).
+
+    MoveReportRequest:
+      type: object
+      required: [folder_id]
+      properties:
+        folder_id:
+          type: string
+          format: uuid
+          description: Target folder id; must belong to your org.
+
+    MoveResult:
+      type: object
+      required: [slug, folder_id]
+      properties:
+        slug: { type: string, description: The moved report's slug (unchanged). }
+        folder_id:
+          type: string
+          format: uuid
+          description: The folder the report now lives in.
 
     Problem:
       description: RFC 9457 Problem Details (ADR-0040).
