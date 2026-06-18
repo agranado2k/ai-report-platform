@@ -3,13 +3,17 @@
 // and where the 2026-06-15 viewer-404 bug lived (ON CONFLICT dropping scan_status).
 import {
   applyScanResult,
+  createFolder,
   createReport,
+  folderId,
   makeSlug,
+  placeInFolder,
   type Report,
   reportId,
   versionId,
 } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DrizzleFolderRepository } from "./folder-repository";
 import { DrizzleReportRepository } from "./report-repository";
 import { makeTestDb, type SeededIdentity, seedIdentity, type TestDb } from "./testing/pglite";
 
@@ -105,6 +109,27 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     expect(byTitle.has("Deleted")).toBe(false); // soft-deleted excluded
     expect(byTitle.get("Q3 metrics")).toMatchObject({ slug: SLUG, isPublished: false });
     expect(byTitle.get("Second")).toMatchObject({ isPublished: true });
+  });
+
+  it("persists a moved report's new folder_id on re-save (moveReport)", async () => {
+    await repo.save(newReport()); // created in Root (ids.folderId)
+
+    const folders = new DrizzleFolderRepository(tdb.ctx);
+    const target = createFolder({
+      id: folderId("00000000-0000-4000-8000-0000000000d1"),
+      orgId: ids.orgId,
+      parentId: ids.folderId,
+      name: "Target",
+    });
+    if (!target.ok) throw new Error("bad folder");
+    await folders.save(target.value);
+
+    const loaded = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    if (!loaded.ok || !loaded.value) throw new Error("load failed");
+    await repo.save(placeInFolder(loaded.value, target.value.id));
+
+    const after = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    expect(after.ok && after.value?.folderId).toBe(target.value.id);
   });
 
   it("REGRESSION: re-saving after a clean verdict persists the version's scan_status", async () => {

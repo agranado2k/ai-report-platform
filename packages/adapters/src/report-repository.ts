@@ -164,6 +164,9 @@ export class DrizzleReportRepository implements ReportRepository {
           set: {
             liveVersionId: report.liveVersionId,
             title: report.title,
+            // folder_id is mutable post-create (moveReport, ADR-0036). A re-upload
+            // saves the aggregate's existing folder, so this is a no-op there.
+            folderId: report.folderId,
             deletedAt: report.deletedAt === null ? null : new Date(report.deletedAt),
             updatedAt: new Date(),
           },

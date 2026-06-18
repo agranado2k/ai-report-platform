@@ -7,8 +7,8 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { createFolder, listReports } from "arp-application";
-import { folderId } from "arp-domain";
+import { createFolder, listReports, moveReport } from "arp-application";
+import { folderId, makeSlug } from "arp-domain";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo, viewOrigin } from "../server/container.server";
 
@@ -54,8 +54,9 @@ export async function loader(args: LoaderFunctionArgs) {
   return json({ folders, reports, selectedId, viewBase });
 }
 
-// Create a folder (a write → provisioning resolver). The new folder nests under
-// the currently-selected folder (Root by default).
+// Folder writes (provisioning resolver). intent=move → reassign a report's
+// folder; otherwise create a folder under the selected one. The use cases
+// validate org ownership of the report/parent/target.
 export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) {
@@ -63,11 +64,26 @@ export async function action(args: ActionFunctionArgs) {
     return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
   }
   const form = await args.request.formData();
+  const intent = String(form.get("intent") ?? "new-folder");
+
+  if (intent === "move") {
+    const slug = makeSlug(String(form.get("slug") ?? ""));
+    const rawTo = String(form.get("toFolderId") ?? "").trim();
+    if (!slug.ok || !rawTo) return json({ error: "Invalid move request." }, { status: 400 });
+    const r = await moveReport(
+      { reports: deps().reports, folders: folderRepo() },
+      { orgId: actor.value.orgId },
+      { slug: slug.value, toFolderId: folderId(rawTo) },
+    );
+    if (!r.ok) return json({ error: r.error.message }, { status: 400 });
+    return redirect(`/?folder=${rawTo}`);
+  }
+
+  // new-folder (default): nest under the selected folder.
   const name = String(form.get("name") ?? "");
   const rawParent = String(form.get("parentId") ?? "").trim();
   if (!rawParent) return json({ error: "Select a folder to create in." }, { status: 400 });
-  // Client-supplied; createFolder validates the parent belongs to the actor's org.
-  const parentId = folderId(rawParent);
+  const parentId = folderId(rawParent); // createFolder validates it's in the actor's org
 
   const r = await createFolder(
     { folders: folderRepo(), ids: deps().ids },
@@ -141,7 +157,28 @@ export default function Index() {
                     <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
                     <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>
                   </span>
-                  <StatusBadge isPublished={r.isPublished} />
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <StatusBadge isPublished={r.isPublished} />
+                    <Form method="post" style={{ display: "inline" }}>
+                      <input type="hidden" name="intent" value="move" />
+                      <input type="hidden" name="slug" value={r.slug} />
+                      <select
+                        name="toFolderId"
+                        defaultValue={r.folderId}
+                        aria-label={`Move ${r.title} to folder`}
+                        style={{ fontSize: 12 }}
+                      >
+                        {folders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="submit" style={{ fontSize: 12, marginLeft: 4 }}>
+                        Move
+                      </button>
+                    </Form>
+                  </span>
                 </li>
               ))}
             </ul>
