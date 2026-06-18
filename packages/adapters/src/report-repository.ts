@@ -181,6 +181,19 @@ export class DrizzleReportRepository implements ReportRepository {
       return err2("saveReport", e);
     }
   }
+
+  async softDelete(id: ReportId): Promise<Result<void, AppError>> {
+    try {
+      const db = this.ctx.current();
+      await db
+        .update(reports)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(reports.id, id), isNull(reports.deletedAt)));
+      return ok(undefined);
+    } catch (e) {
+      return err2("softDeleteReport", e);
+    }
+  }
 }
 
 function err2(op: string, e: unknown): Result<never, AppError> {

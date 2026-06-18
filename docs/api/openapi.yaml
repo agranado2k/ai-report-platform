@@ -244,6 +244,63 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/reports/{slug}:
+    patch:
+      operationId: renameReport
+      tags: [Reports]
+      summary: Rename a report
+      description: >
+        Change a report's display title (ADR-0038). The report must belong to
+        your org. The slug is permanent and unaffected.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameReportRequest' }
+      responses:
+        '200':
+          description: The renamed report (summary shape).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportSummary' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteReport
+      tags: [Reports]
+      summary: Delete a report
+      description: >
+        Soft-delete a report (ADR-0038). The report must belong to your org. The
+        viewer then returns 410 Gone; the slug + bytes are retained for the
+        appeal/purge window.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      responses:
+        '204':
+          description: Deleted (no content).
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /{slug}:
     get:
       operationId: viewReport
@@ -395,6 +452,14 @@ components:
         name:
           type: string
           description: The folder's new display name.
+
+    RenameReportRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: The report's new display title.
 
     MoveReportRequest:
       type: object

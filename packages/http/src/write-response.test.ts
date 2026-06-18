@@ -1,11 +1,13 @@
-import type { Folder, FolderId, Slug } from "arp-domain";
-import { err, folderId, ok, orgId } from "arp-domain";
+import type { Folder, FolderId, Report, Slug } from "arp-domain";
+import { err, folderId, ok, orgId, reportId, versionId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
   createFolderToHttp,
   deleteFolderToHttp,
+  deleteReportToHttp,
   moveReportToHttp,
   renameFolderToHttp,
+  renameReportToHttp,
 } from "./write-response";
 
 const slug = (s: string): Slug => s as Slug;
@@ -93,5 +95,49 @@ describe("deleteFolderToHttp", () => {
     );
     expect(res.status).toBe(422);
     expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("renameReportToHttp", () => {
+  const report: Report = {
+    id: reportId("00000000-0000-7000-8000-0000000000r1"),
+    orgId: orgId(O1),
+    folderId: folderId(F1),
+    slug: "aaaaaaaaaa" as Slug,
+    title: "Renamed",
+    liveVersionId: versionId("00000000-0000-7000-8000-0000000000v1"),
+    versions: [],
+    deletedAt: null,
+  };
+
+  it("maps ok to 200 with the report summary (no org id)", () => {
+    const res = renameReportToHttp(ok(report));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      slug: "aaaaaaaaaa",
+      title: "Renamed",
+      is_published: true,
+      folder_id: F1,
+    });
+    expect(JSON.stringify(res.body)).not.toContain(O1);
+  });
+
+  it("maps ValidationError to a 422 problem", () => {
+    const res = renameReportToHttp(err({ kind: "ValidationError", message: "title required" }));
+    expect(res.status).toBe(422);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("deleteReportToHttp", () => {
+  it("maps ok to 204 with no body", () => {
+    const res = deleteReportToHttp(ok(undefined));
+    expect(res.status).toBe(204);
+    expect(res.body).toBeUndefined();
+  });
+
+  it("maps NotFound to a 404 problem", () => {
+    const res = deleteReportToHttp(err({ kind: "NotFound", message: "gone" }));
+    expect(res.status).toBe(404);
   });
 });

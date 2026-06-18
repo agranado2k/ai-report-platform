@@ -111,6 +111,9 @@ describe("resolveViewableReport (ADR-0038 viewer gate)", () => {
       async save() {
         return err({ kind: "Unexpected", message: "db down" });
       },
+      async softDelete() {
+        return err({ kind: "Unexpected", message: "db down" });
+      },
     };
     const slug = makeSlug(SLUG);
     if (!slug.ok) throw new Error("test slug invalid");

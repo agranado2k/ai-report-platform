@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { folderId, orgId, reportId, userId, versionId } from "./brand";
-import { addVersion, applyScanResult, createReport, type Report } from "./report";
+import { addVersion, applyScanResult, createReport, type Report, renameReport } from "./report";
 import { makeSlug, type Slug } from "./slug";
 
 const slug = (): Slug => {
@@ -148,5 +148,20 @@ describe("applyScanResult — promotion (ADR-0037 §8)", () => {
     const { report, events } = applyScanResult(r, versionId("v1"), "clean");
     expect(report.liveVersionId).toBe("v2");
     expect(events).toEqual([]);
+  });
+});
+
+describe("renameReport", () => {
+  it("updates the title (trimmed) and leaves the slug unchanged", () => {
+    const report = newReport();
+    const r = renameReport(report, "  New Title  ");
+    expect(r.ok && r.value.title).toBe("New Title");
+    expect(r.ok && r.value.slug).toBe(report.slug);
+  });
+
+  it("rejects an empty title with a ValidationError", () => {
+    const r = renameReport(newReport(), "   ");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 });

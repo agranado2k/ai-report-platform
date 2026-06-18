@@ -4,7 +4,7 @@
 
 import type { FolderId, OrgId, ReportId, UserId, VersionId } from "./brand";
 import type { AppError } from "./errors";
-import { notFound } from "./errors";
+import { notFound, validationError } from "./errors";
 import type { DomainEvent, ReportPublished, ReportVersionUploaded } from "./events";
 import type { ReportVersion, VersionManifest } from "./report-version";
 import type { Result } from "./result";
@@ -161,4 +161,17 @@ export function applyScanResult(
  */
 export function placeInFolder(report: Report, folderId: FolderId): Report {
   return { ...report, folderId };
+}
+
+const MAX_TITLE = 200;
+
+/** Rename the report (its display title). Pure transition; the slug is permanent
+ * and unaffected (ADR-0038). The use case validates org ownership. */
+export function renameReport(report: Report, title: string): Result<Report, AppError> {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) return err(validationError("report title is required", "title"));
+  if (trimmed.length > MAX_TITLE) {
+    return err(validationError(`report title too long (max ${MAX_TITLE})`, "title"));
+  }
+  return ok({ ...report, title: trimmed });
 }

@@ -7,7 +7,15 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { createFolder, deleteFolder, listReports, moveReport, renameFolder } from "arp-application";
+import {
+  createFolder,
+  deleteFolder,
+  deleteReport,
+  listReports,
+  moveReport,
+  renameFolder,
+  renameReport,
+} from "arp-application";
 import { folderId, makeSlug } from "arp-domain";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo, viewOrigin } from "../server/container.server";
@@ -82,6 +90,43 @@ export async function action(args: ActionFunctionArgs) {
     );
     if (!r.ok) return json({ error: r.error.message }, { status: 400 });
     return redirect(`/?folder=${rawTo}`);
+  }
+
+  if (intent === "rename-report") {
+    const slug = makeSlug(String(form.get("slug") ?? ""));
+    const title = String(form.get("title") ?? "");
+    const folder = String(form.get("folder") ?? "").trim();
+    if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
+    const r = await renameReport(
+      { reports: deps().reports },
+      { orgId: actor.value.orgId },
+      { slug: slug.value, title },
+    );
+    if (!r.ok) {
+      return json(
+        { error: r.error.message },
+        { status: r.error.kind === "ValidationError" ? 422 : 400 },
+      );
+    }
+    return redirect(folder ? `/?folder=${folder}` : "/");
+  }
+
+  if (intent === "delete-report") {
+    const slug = makeSlug(String(form.get("slug") ?? ""));
+    const folder = String(form.get("folder") ?? "").trim();
+    if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
+    const r = await deleteReport(
+      { reports: deps().reports },
+      { orgId: actor.value.orgId },
+      { slug: slug.value },
+    );
+    if (!r.ok) {
+      return json(
+        { error: r.error.message },
+        { status: r.error.kind === "ValidationError" ? 422 : 400 },
+      );
+    }
+    return redirect(folder ? `/?folder=${folder}` : "/");
   }
 
   if (intent === "rename-folder") {
@@ -216,6 +261,28 @@ export default function Index() {
                       </select>
                       <button type="submit" style={{ fontSize: 12, marginLeft: 4 }}>
                         Move
+                      </button>
+                    </Form>
+                    <Form method="post" style={{ display: "inline", marginLeft: 4 }}>
+                      <input type="hidden" name="intent" value="rename-report" />
+                      <input type="hidden" name="slug" value={r.slug} />
+                      <input type="hidden" name="folder" value={r.folderId} />
+                      <input
+                        name="title"
+                        defaultValue={r.title}
+                        aria-label={`Rename ${r.title}`}
+                        style={{ fontSize: 12, width: 120 }}
+                      />
+                      <button type="submit" style={{ fontSize: 12, marginLeft: 4 }}>
+                        Rename
+                      </button>
+                    </Form>
+                    <Form method="post" style={{ display: "inline", marginLeft: 4 }}>
+                      <input type="hidden" name="intent" value="delete-report" />
+                      <input type="hidden" name="slug" value={r.slug} />
+                      <input type="hidden" name="folder" value={r.folderId} />
+                      <button type="submit" style={{ fontSize: 12, color: "#b00" }}>
+                        Delete
                       </button>
                     </Form>
                   </span>

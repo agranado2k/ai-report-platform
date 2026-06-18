@@ -2,7 +2,7 @@
 // folders and create a folder. Pure — turn the use-case Result into a success
 // JSON body or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { AppError, Folder, FolderId, Result, Slug } from "arp-domain";
+import type { AppError, Folder, FolderId, Report, Result, Slug } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 
 /** POST /api/v1/reports/{slug}/move — 200 echoing the report's new placement. */
@@ -16,6 +16,28 @@ export function moveReportToHttp(
     contentType: "application/json",
     body: { slug: placement.slug, folder_id: placement.folderId },
   };
+}
+
+/** PATCH /api/v1/reports/{slug} — 200 with the renamed report (summary shape). */
+export function renameReportToHttp(result: Result<Report, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const r = result.value;
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: {
+      slug: r.slug,
+      title: r.title,
+      is_published: r.liveVersionId !== null,
+      folder_id: r.folderId,
+    },
+  };
+}
+
+/** DELETE /api/v1/reports/{slug} — 204 No Content on success. */
+export function deleteReportToHttp(result: Result<void, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 204, contentType: "application/json", body: undefined };
 }
 
 /** The wire shape of a Folder (no org id). */
