@@ -73,4 +73,17 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
     const found = await repo.findById(f.id);
     expect(found.ok && found.value?.deletedAt).not.toBeNull();
   });
+
+  it("allows recreating a same-named folder after the original is soft-deleted", async () => {
+    const original = build("00000000-0000-4000-8000-0000000000c7", "Quarterly");
+    await repo.save(original);
+    await repo.softDelete(original.id);
+    // New folder, same name (→ same slug), same parent — the partial unique index
+    // (WHERE deleted_at IS NULL) must let this through, not raise a 23505.
+    const recreated = await repo.save(build("00000000-0000-4000-8000-0000000000c8", "Quarterly"));
+    expect(recreated.ok).toBe(true);
+
+    const list = await repo.listByOrg(ids.orgId);
+    expect(list.ok && list.value.filter((f) => f.slug === "quarterly").length).toBe(1);
+  });
 });

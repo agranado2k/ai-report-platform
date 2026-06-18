@@ -22,6 +22,13 @@
       "when": 1781637784489,
       "tag": "0002_folders_root_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781809197198,
+      "tag": "0003_folders_slug_uniq_exclude_deleted",
+      "breakpoints": true
     }
   ]
 }
