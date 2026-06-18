@@ -435,9 +435,15 @@ export class InMemoryIdentityStore implements IdentityStore {
 /** Fake Clerk org creator — returns a deterministic id and records its calls. */
 export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
   readonly calls: { readonly clerkUserId: string; readonly name: string }[] = [];
+  /** When set, findPersonalOrg resolves to this org id; null means "no org yet". */
+  personalOrgId: string | null = null;
 
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     this.calls.push({ clerkUserId, name });
     return ok(`clerk-org-${clerkUserId}`);
+  }
+
+  async findPersonalOrg(_clerkUserId: string): Promise<Result<string | null, AppError>> {
+    return ok(this.personalOrgId);
   }
 }

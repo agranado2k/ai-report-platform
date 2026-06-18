@@ -272,4 +272,11 @@ export interface IdentityStore {
 export interface ClerkOrgProvisioner {
   /** Create a personal org for the user; resolves to the new Clerk org id. */
   createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>>;
+  /**
+   * Resolve the user's existing personal org WITHOUT creating one (read path,
+   * ADR-0048): the org the write path would reuse, or null if the user has none.
+   * Lets reads see the same org writes attribute to even when the session carries
+   * no active org (e.g. a browser sign-in that never selected one).
+   */
+  findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>>;
 }

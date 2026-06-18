@@ -102,4 +102,51 @@ describe("ClerkBackendOrgProvisioner", () => {
     expect(r.ok && r.value).toBe("org_fallback");
     expect(created).toBe(1);
   });
+
+  describe("findPersonalOrg (read-only resolution)", () => {
+    it("resolves to null when the user belongs to no org (never creates)", async () => {
+      let created = 0;
+      const api = fakeApi({
+        async createOrganization() {
+          created += 1;
+          return { id: "org_should_not_be_created" };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findPersonalOrg("user_abc");
+
+      expect(r.ok && r.value).toBe(null);
+      expect(created).toBe(0); // read-only — must not mint an org
+    });
+
+    it("resolves to the user's OLDEST org id (stable choice)", async () => {
+      const api = fakeApi({
+        async getOrganizationMembershipList() {
+          return {
+            data: [
+              { organization: { id: "org_newer", createdAt: 3000 } },
+              { organization: { id: "org_oldest", createdAt: 1000 } },
+            ],
+          };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findPersonalOrg("user_abc");
+
+      expect(r.ok && r.value).toBe("org_oldest");
+    });
+
+    it("maps a membership-lookup failure to an Unexpected AppError", async () => {
+      const api = fakeApi({
+        async getOrganizationMembershipList() {
+          throw new Error("clerk list 500");
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findPersonalOrg("user_abc");
+
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.kind).toBe("Unexpected");
+    });
+  });
 });
