@@ -36,12 +36,30 @@ export interface ReportSummary {
   readonly folderId: FolderId;
 }
 
+/** A paged, optionally-filtered query over an org's reports (dashboard search). */
+export interface ReportSearchQuery {
+  /** Case-insensitive substring matched against title + slug. Omitted = no filter. */
+  readonly query?: string;
+  /** Restrict to one folder. Omitted = org-wide (across all folders). */
+  readonly folderId?: FolderId;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/** One page of report summaries plus the total matching the query (for paging). */
+export interface ReportPage {
+  readonly items: readonly ReportSummary[];
+  readonly total: number;
+}
+
 // ── Reports & Folders persistence ─────────────────────────────────────────
 export interface ReportRepository {
   findBySlug(slug: Slug): Promise<Result<Report | null, AppError>>;
   findById(id: ReportId): Promise<Result<Report | null, AppError>>;
   /** The org's non-deleted reports as summaries, newest first (dashboard list). */
   listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>>;
+  /** Paged + filtered org-wide search (newest first), backed by (org_id, updated_at). */
+  searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>>;
   /** Persist the aggregate + any new versions (called inside a UnitOfWork). */
   save(report: Report): Promise<Result<void, AppError>>;
   /** Soft-delete a report (sets deleted_at → the viewer returns 410, ADR-0038).
