@@ -12,18 +12,6 @@ function summaryBody(r: ReportSummary) {
   return { slug: r.slug, title: r.title, is_published: r.isPublished, folder_id: r.folderId };
 }
 
-/** GET /api/v1/reports — the org's reports as lightweight summaries. */
-export function listReportsToHttp(
-  result: Result<readonly ReportSummary[], AppError>,
-): HttpResponse {
-  if (!result.ok) return errorToHttp(result.error);
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: { reports: result.value.map(summaryBody) },
-  };
-}
-
 /** A page of report summaries (searchReports use case) → the paged GET /api/v1/reports body. */
 export interface ReportPageView {
   readonly items: readonly ReportSummary[];
