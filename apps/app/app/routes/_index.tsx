@@ -17,6 +17,19 @@ import {
   searchReports,
 } from "arp-application";
 import { folderId, makeSlug } from "arp-domain";
+import {
+  AppHeader,
+  Button,
+  buttonClass,
+  cx,
+  EmptyState,
+  type FolderNode,
+  FolderTree,
+  Input,
+  PageShell,
+  Select,
+  StatusBadge,
+} from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo, viewOrigin } from "../server/container.server";
 
@@ -24,13 +37,6 @@ export const meta: MetaFunction = () => [
   { title: "Your reports — ai-report-platform" },
   { name: "description", content: "Dashboard: your reports, organised in folders." },
 ];
-
-/** Client-safe folder shape (no org id / timestamps). */
-interface FolderNode {
-  readonly id: string;
-  readonly parentId: string | null;
-  readonly name: string;
-}
 
 const PAGE_SIZE = 20;
 
@@ -241,62 +247,55 @@ export default function Index() {
   };
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        maxWidth: 920,
-        margin: "2rem auto",
-        padding: "0 1rem",
-      }}
-    >
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>Your reports</h1>
-        <SignedIn>
-          <UserButton afterSignOutUrl="/" />
-        </SignedIn>
-      </header>
-
-      <p>
-        <Link to="/upload">Upload a report →</Link>
-      </p>
+    <PageShell>
+      <AppHeader
+        title="Your reports"
+        actions={
+          <>
+            <Link to="/upload" className={buttonClass("primary")}>
+              Upload a report
+            </Link>
+            <SignedIn>
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
+          </>
+        }
+      />
 
       {/* Search (GET) — org-wide; preserves the folder filter when set. */}
-      <Form method="get" style={{ margin: "8px 0 16px" }}>
-        <input
+      <Form method="get" className="mb-6 flex items-center gap-2">
+        <Input
           name="q"
           defaultValue={q}
           placeholder="Search reports by title or slug…"
           aria-label="Search reports"
-          style={{ padding: 6, width: 280 }}
+          className="w-full max-w-sm"
         />
         {selectedFolderId ? <input type="hidden" name="folder" value={selectedFolderId} /> : null}
-        <button type="submit" style={{ padding: "6px 12px", marginLeft: 6 }}>
+        <Button type="submit" variant="secondary">
           Search
-        </button>
+        </Button>
         {q ? (
           <Link
             to={selectedFolderId ? `/?folder=${selectedFolderId}` : "/"}
-            style={{ marginLeft: 8, fontSize: 13 }}
+            className="text-sm text-muted hover:text-fg"
           >
             Clear
           </Link>
         ) : null}
       </Form>
 
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+      <div className="flex items-start gap-6">
         {/* Sidebar: folder tree (clicking a folder filters the list). */}
-        <nav style={{ width: 220, flexShrink: 0, borderRight: "1px solid #eee", paddingRight: 12 }}>
+        <nav className="w-56 shrink-0 border-r border-border pr-3">
           <Link
             to="/"
-            style={{
-              display: "block",
-              padding: "4px 6px",
-              borderRadius: 4,
-              textDecoration: "none",
-              color: "#333",
-              fontWeight: selectedFolderId ? 400 : 600,
-              background: selectedFolderId ? "transparent" : "#eef",
-            }}
+            className={cx(
+              "block rounded-control py-1 pl-2 pr-2 text-sm no-underline transition-colors",
+              selectedFolderId
+                ? "text-fg hover:bg-surface-raised"
+                : "bg-brand/10 font-semibold text-brand",
+            )}
           >
             All reports
           </Link>
@@ -308,78 +307,93 @@ export default function Index() {
               depth={0}
             />
           ) : (
-            <p style={{ color: "#999", fontSize: 13 }}>No folders yet.</p>
+            <p className="px-2 py-1 text-sm text-subtle">No folders yet.</p>
           )}
         </nav>
 
         {/* Contents: the paged report list + pagination + new-folder form. */}
-        <section style={{ flex: 1 }}>
-          <p style={{ color: "#666", margin: "0 0 8px" }}>
-            <strong>{scopeLabel}</strong>
+        <section className="min-w-0 flex-1">
+          <p className="mb-3 text-sm text-muted">
+            <span className="font-medium text-fg">{scopeLabel}</span>
             {q ? ` · matching “${q}”` : ""} · {total} report{total === 1 ? "" : "s"}
           </p>
           {items.length === 0 ? (
-            <p style={{ color: "#666" }}>{q ? "No matching reports." : "No reports here yet."}</p>
+            <EmptyState
+              icon="🗂️"
+              title={q ? "No matching reports" : "No reports here yet"}
+              description={
+                q
+                  ? "Try a different search term or clear the filter."
+                  : "Upload a report to get started."
+              }
+              action={
+                q ? undefined : (
+                  <Link to="/upload" className={buttonClass("primary")}>
+                    Upload a report
+                  </Link>
+                )
+              }
+            />
           ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <ul className="divide-y divide-border">
               {items.map((r) => (
-                <li
-                  key={r.slug}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "10px 0",
-                    borderBottom: "1px solid #eee",
-                  }}
-                >
-                  <span>
-                    <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
-                    <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>{" "}
-                    <span style={{ fontSize: 11, color: "#888" }}>📁 {folderName(r.folderId)}</span>
+                <li key={r.slug} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <span className="min-w-0">
+                    <a
+                      href={`${viewBase}/${r.slug}`}
+                      className="font-medium text-fg hover:text-brand"
+                    >
+                      {r.title}
+                    </a>{" "}
+                    <code className="font-mono text-xs text-subtle">{r.slug}</code>{" "}
+                    <span className="text-xs text-subtle">
+                      <span aria-hidden="true">📁</span> {folderName(r.folderId)}
+                    </span>
                   </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge isPublished={r.isPublished} />
-                    <Form method="post" style={{ display: "inline" }}>
+                    <Form method="post" className="flex items-center gap-1">
                       <input type="hidden" name="intent" value="move" />
                       <input type="hidden" name="slug" value={r.slug} />
-                      <select
+                      <Select
                         name="toFolderId"
                         defaultValue={r.folderId}
                         aria-label={`Move ${r.title} to folder`}
-                        style={{ fontSize: 12 }}
+                        size="sm"
+                        className="text-xs"
                       >
                         {folders.map((f) => (
                           <option key={f.id} value={f.id}>
                             {f.name}
                           </option>
                         ))}
-                      </select>
-                      <button type="submit" style={{ fontSize: 12, marginLeft: 4 }}>
+                      </Select>
+                      <Button type="submit" size="sm">
                         Move
-                      </button>
+                      </Button>
                     </Form>
-                    <Form method="post" style={{ display: "inline", marginLeft: 4 }}>
+                    <Form method="post" className="flex items-center gap-1">
                       <input type="hidden" name="intent" value="rename-report" />
                       <input type="hidden" name="slug" value={r.slug} />
                       <input type="hidden" name="folder" value={r.folderId} />
-                      <input
+                      <Input
                         name="title"
                         defaultValue={r.title}
                         aria-label={`Rename ${r.title}`}
-                        style={{ fontSize: 12, width: 120 }}
+                        size="sm"
+                        className="w-32 text-xs"
                       />
-                      <button type="submit" style={{ fontSize: 12, marginLeft: 4 }}>
+                      <Button type="submit" size="sm">
                         Rename
-                      </button>
+                      </Button>
                     </Form>
-                    <Form method="post" style={{ display: "inline", marginLeft: 4 }}>
+                    <Form method="post">
                       <input type="hidden" name="intent" value="delete-report" />
                       <input type="hidden" name="slug" value={r.slug} />
                       <input type="hidden" name="folder" value={r.folderId} />
-                      <button type="submit" style={{ fontSize: 12, color: "#b00" }}>
+                      <Button type="submit" size="sm" variant="danger">
                         Delete
-                      </button>
+                      </Button>
                     </Form>
                   </span>
                 </li>
@@ -388,132 +402,48 @@ export default function Index() {
           )}
 
           {totalPages > 1 ? (
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12 }}>
+            <div className="mt-4 flex items-center gap-3 text-sm">
               {page > 1 ? (
-                <Link to={pageHref(page - 1)}>← Prev</Link>
+                <Link to={pageHref(page - 1)} className="text-brand hover:text-brand-hover">
+                  ← Prev
+                </Link>
               ) : (
-                <span style={{ color: "#ccc" }}>← Prev</span>
+                <span className="text-subtle">← Prev</span>
               )}
-              <span style={{ fontSize: 13, color: "#666" }}>
+              <span className="text-muted">
                 Page {page} of {totalPages}
               </span>
               {page < totalPages ? (
-                <Link to={pageHref(page + 1)}>Next →</Link>
+                <Link to={pageHref(page + 1)} className="text-brand hover:text-brand-hover">
+                  Next →
+                </Link>
               ) : (
-                <span style={{ color: "#ccc" }}>Next →</span>
+                <span className="text-subtle">Next →</span>
               )}
             </div>
           ) : null}
 
           {createParent ? (
-            <Form method="post" style={{ marginTop: 16 }}>
+            <Form method="post" className="mt-6 flex items-center gap-2">
               <input type="hidden" name="parentId" value={createParent} />
-              <input
+              <Input
                 name="name"
                 placeholder={
                   selectedFolderId ? `New folder in ${scopeLabel}` : "New folder (in Root)"
                 }
                 required
-                style={{ padding: 6, marginRight: 8 }}
+                className="w-64"
               />
-              <button type="submit" style={{ padding: "6px 12px" }}>
+              <Button type="submit" variant="secondary">
                 + New folder
-              </button>
+              </Button>
               {actionData && "error" in actionData && actionData.error ? (
-                <span style={{ color: "crimson", marginLeft: 8 }}>✗ {actionData.error}</span>
+                <span className="text-sm text-danger">✗ {actionData.error}</span>
               ) : null}
             </Form>
           ) : null}
         </section>
       </div>
-    </main>
-  );
-}
-
-/** Recursively render a folder and its children as an indented, selectable tree. */
-function FolderTree({
-  node,
-  childrenOf,
-  selectedId,
-  depth,
-}: {
-  node: FolderNode;
-  childrenOf: (parentId: string | null) => FolderNode[];
-  selectedId: string | null;
-  depth: number;
-}) {
-  const selected = node.id === selectedId;
-  return (
-    <div>
-      <Link
-        to={`/?folder=${node.id}`}
-        style={{
-          display: "block",
-          padding: "4px 6px",
-          paddingLeft: 6 + depth * 14,
-          textDecoration: "none",
-          borderRadius: 4,
-          fontWeight: selected ? 600 : 400,
-          background: selected ? "#eef" : "transparent",
-          color: "#333",
-        }}
-      >
-        📁 {node.name}
-      </Link>
-      {selected && node.parentId !== null ? (
-        <div
-          style={{
-            paddingLeft: 6 + depth * 14,
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            margin: "2px 0 6px",
-          }}
-        >
-          <Form method="post" style={{ display: "flex", gap: 4 }}>
-            <input type="hidden" name="intent" value="rename-folder" />
-            <input type="hidden" name="folderId" value={node.id} />
-            <input
-              name="name"
-              defaultValue={node.name}
-              aria-label={`Rename ${node.name}`}
-              style={{ fontSize: 12, width: 110 }}
-            />
-            <button type="submit" style={{ fontSize: 12 }}>
-              Rename
-            </button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="intent" value="delete-folder" />
-            <input type="hidden" name="folderId" value={node.id} />
-            <button type="submit" style={{ fontSize: 12, color: "#b00" }}>
-              Delete (must be empty)
-            </button>
-          </Form>
-        </div>
-      ) : null}
-      {childrenOf(node.id).map((child) => (
-        <FolderTree
-          key={child.id}
-          node={child}
-          childrenOf={childrenOf}
-          selectedId={selectedId}
-          depth={depth + 1}
-        />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Published = a clean version is live; otherwise it's still being processed.
- * "processing" (not "pending") avoids colliding with the `scan_status` "pending"
- * vocabulary in the glossary — this badge reflects publish state, not scan state.
- */
-function StatusBadge({ isPublished }: { isPublished: boolean }) {
-  return (
-    <span style={{ fontSize: 13, color: isPublished ? "#0a7" : "#999" }}>
-      {isPublished ? "published" : "processing"}
-    </span>
+    </PageShell>
   );
 }
