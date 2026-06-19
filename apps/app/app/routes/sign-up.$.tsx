@@ -4,7 +4,7 @@ import { SignUp } from "@clerk/remix";
 // Restricted mode (ADR-0048), self-serve sign-up is invitation-only.
 export default function SignUpPage() {
   return (
-    <main style={{ display: "flex", justifyContent: "center", padding: "3rem 1rem" }}>
+    <main className="grid min-h-dvh place-items-center bg-bg px-4 py-12">
       <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
     </main>
   );
