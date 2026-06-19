@@ -1284,3 +1284,14 @@ Open follow-ups: **#80** (`ReportDeleted` event — deferred until an audit/purg
 ## 2026-06-19 — App design system foundation (ADR-0050)
 
 Began a visual redesign of `apps/app` (was 100% inline styles). PR1 lands the **foundation**: **Tailwind v4** via `@tailwindcss/vite` (devDep, static CSS — CSP-safe), **CSS-first `@theme` design tokens** in `app/styles/theme.css` (the single re-theme point; light-first, dark-ready via `@theme inline` + `@custom-variant dark`), **self-hosted Inter + JetBrains Mono** woff2 (`public/fonts/`, required by `font-src 'self'`), a thin app-local **component layer** (`app/components/`: Button/Input/Card/Badge/PageShell/AppHeader/EmptyState + `cx`), **Clerk `appearance` theming**, and a root **ErrorBoundary/404**. Biome needed `css.parser.tailwindDirectives` to accept the v4 at-rules. Worktree `feat/design-system-foundation`. Decisions in **ADR-0050**. Next: restyle the dashboard (PR2), then upload + auth + error states (PR3). Out of scope: marketing landing page, dark activation, app-wide CSP (#65).
+
+---
+
+## 2026-06-19 — Visual redesign complete (upload + auth restyled)
+
+Finished the app redesign (ADR-0050). PR2 restyled the dashboard; this PR (PR3,
+`feat/restyle-upload-auth`) restyles the **upload page** (PageShell + Card +
+Input/Textarea/Button) and centres the **Clerk sign-in/sign-up** cards (themed via
+the `appearance` API on ClerkApp). All app screens now use the design-system
+components + tokens — no inline styles remain. Behavior unchanged (upload action,
+Clerk routing). Out of scope still: marketing landing page, dark activation, app-wide CSP (#65).

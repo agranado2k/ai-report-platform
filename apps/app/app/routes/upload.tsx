@@ -4,8 +4,9 @@
 // production API is POST /api/v1/reports (ADR-0037); this page is the
 // manually-testable surface.
 import { type ActionFunctionArgs, json, type MetaFunction, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { uploadReport } from "arp-application";
+import { AppHeader, Button, buttonClass, Card, Input, PageShell, Textarea } from "../components";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
 
@@ -52,45 +53,49 @@ export default function Upload() {
   const nav = useNavigation();
   const busy = nav.state !== "idle";
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        maxWidth: 760,
-        margin: "2rem auto",
-        padding: "0 1rem",
-      }}
-    >
-      <h1>Upload a report</h1>
-      <p>Paste an HTML document; it's stored in R2 + Neon and served back at its slug.</p>
-      <Form method="post">
-        <p>
-          <input
-            name="title"
-            placeholder="Title (optional)"
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-        </p>
-        <p>
-          <textarea
+    <PageShell className="max-w-3xl">
+      <AppHeader
+        title="Upload a report"
+        actions={
+          <Link to="/" className={buttonClass("secondary")}>
+            ← Back to reports
+          </Link>
+        }
+      />
+      <p className="mb-6 text-sm text-muted">
+        Paste an HTML document; it's stored and served back at its own URL.
+      </p>
+      <Card className="p-6">
+        <Form method="post" className="flex flex-col gap-4">
+          <Input name="title" placeholder="Title (optional)" aria-label="Report title" />
+          <Textarea
             name="html"
             rows={12}
+            aria-label="Report HTML"
             defaultValue={"<h1>Hello from ai-report-platform</h1>\n<p>It works.</p>"}
-            style={{ width: "100%", fontFamily: "monospace", padding: 8, boxSizing: "border-box" }}
+            className="font-mono"
           />
-        </p>
-        <button type="submit" disabled={busy} style={{ padding: "8px 16px" }}>
-          {busy ? "Uploading…" : "Upload"}
-        </button>
-      </Form>
+          <div>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Uploading…" : "Upload"}
+            </Button>
+          </div>
+        </Form>
+      </Card>
       {data && "error" in data && data.error ? (
-        <p style={{ color: "crimson" }}>✗ {data.error}</p>
+        <Card className="mt-4 p-4 text-sm text-danger" role="alert">
+          ✗ {data.error}
+        </Card>
       ) : null}
       {data && "ok" in data && data.ok ? (
-        <p style={{ color: "green" }}>
-          ✓ Uploaded as <code>{data.slug}</code> (v{data.version}, scan: {data.scanStatus}) —{" "}
-          <a href={data.viewUrl}>view it →</a>
-        </p>
+        <Card className="mt-4 p-4 text-sm text-fg" role="status" aria-live="polite">
+          ✓ Uploaded as <code className="font-mono text-xs">{data.slug}</code> (v{data.version},
+          scan: {data.scanStatus}) —{" "}
+          <a href={data.viewUrl} className="text-brand hover:text-brand-hover">
+            view it →
+          </a>
+        </Card>
       ) : null}
-    </main>
+    </PageShell>
   );
 }
