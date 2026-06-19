@@ -2,7 +2,7 @@ import type { ReportSummary } from "arp-application";
 import type { Folder, Slug } from "arp-domain";
 import { err, folderId, ok, orgId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { listFoldersToHttp, listReportsToHttp } from "./list-response";
+import { listFoldersToHttp, listReportsToHttp, searchReportsToHttp } from "./list-response";
 
 const slug = (s: string): Slug => s as Slug;
 
@@ -84,3 +84,31 @@ describe("listFoldersToHttp", () => {
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
+
+describe("searchReportsToHttp", () => {
+  it("maps a page to 200 with reports + paging metadata", () => {
+    const res = searchReportsToHttp(
+      ok({
+        items: [
+          { slug: slug("aaaaaaaaaa"), title: "First", isPublished: true, folderId: folderId(F1) },
+        ],
+        total: 42,
+        page: 2,
+        pageSize: 20,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      reports: [{ slug: "aaaaaaaaaa", title: "First", is_published: true, folder_id: F1 }],
+      page: 2,
+      page_size: 20,
+      total: 42,
+    });
+  });
+
+  it("maps an error to a problem response", () => {
+    const res = searchReportsToHttp(err({ kind: "Unexpected", message: "boom" }));
+    expect(res.status).toBe(500);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});

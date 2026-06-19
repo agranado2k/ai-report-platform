@@ -26,23 +26,46 @@ paths:
     get:
       operationId: listReports
       tags: [Reports]
-      summary: List the acting org's reports
+      summary: List the acting org's reports (paged + searchable)
       description: >
         Returns the signed-in org's reports as lightweight summaries (slug,
         title, publish state, folder placement) — the read projection behind the
-        dashboard (ADR-0036). Org-scoped: a caller only ever sees their own org's
-        reports. A session with no active organization → 401 (the API surfaces an
-        explicit Problem rather than an empty list).
+        dashboard (ADR-0036), newest first. **Paged**: the response carries
+        `page`, `page_size`, and `total`. Org-scoped: a caller only ever sees its
+        own org's reports. A session with no active organization → 401 (the API
+        surfaces an explicit Problem rather than an empty list).
       security:
         - apiKey: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: Case-insensitive substring matched against title + slug (literal, not a pattern).
+        - name: folder_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Restrict to one folder. A malformed (non-UUID) value → 422.
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: 1-based page number.
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: Page size (clamped to 1..100).
       responses:
         '200':
-          description: The org's reports (possibly an empty array).
+          description: One page of the org's reports (possibly empty) plus paging metadata.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReportList' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       operationId: uploadReport
@@ -386,12 +409,22 @@ components:
           description: Owner dashboard URL on app.<domain>.
 
     ReportList:
+      description: One page of report summaries plus paging metadata.
       type: object
-      required: [reports]
+      required: [reports, page, page_size, total]
       properties:
         reports:
           type: array
           items: { $ref: '#/components/schemas/ReportSummary' }
+        page:
+          type: integer
+          description: 1-based page number of this response.
+        page_size:
+          type: integer
+          description: Number of items per page.
+        total:
+          type: integer
+          description: Total reports matching the query (across all pages).
 
     ReportSummary:
       description: Lightweight read projection of a Report for list views (ADR-0036).
