@@ -1278,3 +1278,9 @@ Shipped the user-facing **reports & folders management** surface end-to-end, plu
 - **Dashboard search + pagination** (this entry's worktree `feat/dashboard-search`): org-wide, newest-first, paged + title/slug search (`searchReports` use case + `ReportRepository.searchByOrg`, backed by `reports_org_updated_idx`); folder sidebar becomes a filter, folder shown per row.
 
 Open follow-ups: **#80** (`ReportDeleted` event — deferred until an audit/purge consumer lands); per-PR e2e BDD for the new use cases (docs:check passes without them, consistent with prior slices).
+
+---
+
+## 2026-06-19 — App design system foundation (ADR-0050)
+
+Began a visual redesign of `apps/app` (was 100% inline styles). PR1 lands the **foundation**: **Tailwind v4** via `@tailwindcss/vite` (devDep, static CSS — CSP-safe), **CSS-first `@theme` design tokens** in `app/styles/theme.css` (the single re-theme point; light-first, dark-ready via `@theme inline` + `@custom-variant dark`), **self-hosted Inter + JetBrains Mono** woff2 (`public/fonts/`, required by `font-src 'self'`), a thin app-local **component layer** (`app/components/`: Button/Input/Card/Badge/PageShell/AppHeader/EmptyState + `cx`), **Clerk `appearance` theming**, and a root **ErrorBoundary/404**. Biome needed `css.parser.tailwindDirectives` to accept the v4 at-rules. Worktree `feat/design-system-foundation`. Decisions in **ADR-0050**. Next: restyle the dashboard (PR2), then upload + auth + error states (PR3). Out of scope: marketing landing page, dark activation, app-wide CSP (#65).
