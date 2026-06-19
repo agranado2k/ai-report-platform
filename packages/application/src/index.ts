@@ -3,6 +3,7 @@
 // later slices (1e/1f). In-memory fakes for unit-testing the use cases are
 // exported from the `./testing` subpath.
 export * from "./ports";
+export * from "./use-cases/authenticate-api-key";
 export * from "./use-cases/create-folder";
 export * from "./use-cases/delete-folder";
 export * from "./use-cases/delete-report";

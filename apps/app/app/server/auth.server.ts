@@ -8,10 +8,23 @@
 // additive fallback are gone — this is the flip.
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { provisionIdentity, type UploadActor } from "arp-application";
+import { authenticateApiKey, provisionIdentity, type UploadActor } from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
-import { provisionDeps } from "./container.server";
+import { apiKeyStore, provisionDeps } from "./container.server";
+
+/**
+ * Extract an `arp_` API-key secret from `Authorization: Bearer …` (ADR-0008), or
+ * null when the header is absent or carries something else (a Clerk session JWT
+ * also rides this header — those start `eyJ…`, ours start `arp_`, so the prefix
+ * cleanly routes the request to the API-key path vs the Clerk-session path).
+ */
+function apiKeyToken(args: LoaderFunctionArgs): string | null {
+  const header = args.request.headers.get("authorization");
+  if (!header) return null;
+  const match = /^Bearer\s+(arp_[A-Za-z0-9_-]+)$/.exec(header.trim());
+  return match?.[1] ?? null;
+}
 
 /**
  * Server-side `getAuth` wrapper (ADR-0048). Clerk's `getAuth` re-authenticates
@@ -46,6 +59,19 @@ export function getAuth(args: LoaderFunctionArgs) {
 export async function resolveUploadActor(
   args: LoaderFunctionArgs,
 ): Promise<Result<UploadActor, AppError>> {
+  // API-key path first (ADR-0008): a Bearer `arp_…` resolves to an org-scoped
+  // actor without a Clerk session. A present-but-unmatched key is `Unauthenticated`
+  // (→ 401), NOT a fall-through to the session path.
+  const token = apiKeyToken(args);
+  if (token) {
+    const resolved = await authenticateApiKey({ apiKeys: apiKeyStore() }, token);
+    if (!resolved.ok) return resolved;
+    if (!resolved.value) {
+      return err({ kind: "Unauthenticated", message: "invalid or revoked API key" });
+    }
+    return ok(resolved.value);
+  }
+
   const { userId, orgId, sessionClaims } = await getAuth(args);
 
   if (!userId) {
@@ -80,6 +106,15 @@ export async function resolveUploadActor(
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
 ): Promise<Result<Pick<UploadActor, "orgId"> | null, AppError>> {
+  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the org scope. An
+  // unmatched key reads as `null` (empty list), consistent with no-session reads.
+  const token = apiKeyToken(args);
+  if (token) {
+    const resolved = await authenticateApiKey({ apiKeys: apiKeyStore() }, token);
+    if (!resolved.ok) return resolved;
+    return ok(resolved.value ? { orgId: resolved.value.orgId } : null);
+  }
+
   const { userId, orgId } = await getAuth(args);
   if (!userId) return ok(null); // no session → genuinely unauthenticated
 

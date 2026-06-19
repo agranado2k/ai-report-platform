@@ -305,3 +305,54 @@ export interface ClerkOrgProvisioner {
    */
   findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>>;
 }
+
+// ── API keys (ADR-0008 / ADR-0016) — programmatic auth alongside Clerk sessions ─
+/**
+ * The principal an `arp_` API key resolves to — the same fields the auth seam
+ * needs to build an UploadActor. `rootFolderId` is the issuing org's Root folder
+ * (the Phase-1 default upload target, ADR-0048); `scopes` come from the key row
+ * (ADR-0016), NOT hardcoded like the session path's `reports:write`.
+ */
+export interface ApiKeyPrincipal {
+  readonly userId: UserId;
+  readonly orgId: OrgId;
+  readonly rootFolderId: FolderId;
+  readonly scopes: readonly string[];
+}
+
+/** A non-secret view of an issued key, for the management UI. Never carries the secret/hash. */
+export interface ApiKeySummary {
+  readonly id: string;
+  readonly name: string;
+  readonly scopes: readonly string[];
+  /** The non-secret lookup prefix (e.g. `arp_xxxxxxxx`). */
+  readonly keyPrefix: string;
+  /** Epoch ms. */
+  readonly createdAt: number;
+  readonly lastUsedAt: number | null;
+  readonly revokedAt: number | null;
+}
+
+/**
+ * Issues + verifies `arp_` API keys (ADR-0008). The Drizzle adapter owns the SQL
+ * + crypto; the seam (`auth.server.ts`) depends only on this port, so API keys
+ * and Clerk sessions stay interchangeable behind one resolution contract.
+ */
+export interface ApiKeyStore {
+  /**
+   * Resolve a presented token to its principal, or null when no LIVE (non-revoked)
+   * key matches. Bumps `last_used_at` on a hit. The hash compare is constant-time.
+   */
+  verify(token: string): Promise<Result<ApiKeyPrincipal | null, AppError>>;
+  /** Mint a key for (user, org); returns the one-time secret plus its summary. */
+  create(input: {
+    readonly actingUserId: UserId;
+    readonly issuedInOrgId: OrgId;
+    readonly name: string;
+    readonly scopes: readonly string[];
+  }): Promise<Result<{ readonly token: string; readonly summary: ApiKeySummary }, AppError>>;
+  /** List a user's issued keys, newest first (management UI). */
+  listForUser(actingUserId: UserId): Promise<Result<readonly ApiKeySummary[], AppError>>;
+  /** Revoke a key the user owns (idempotent: re-revoking is a no-op). */
+  revoke(id: string, actingUserId: UserId): Promise<Result<void, AppError>>;
+}
