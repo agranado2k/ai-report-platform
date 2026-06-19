@@ -83,10 +83,12 @@ export default function Upload() {
         </Form>
       </Card>
       {data && "error" in data && data.error ? (
-        <p className="mt-4 text-sm text-danger">✗ {data.error}</p>
+        <Card className="mt-4 p-4 text-sm text-danger" role="alert">
+          ✗ {data.error}
+        </Card>
       ) : null}
       {data && "ok" in data && data.ok ? (
-        <Card className="mt-4 p-4 text-sm text-fg">
+        <Card className="mt-4 p-4 text-sm text-fg" role="status" aria-live="polite">
           ✓ Uploaded as <code className="font-mono text-xs">{data.slug}</code> (v{data.version},
           scan: {data.scanStatus}) —{" "}
           <a href={data.viewUrl} className="text-brand hover:text-brand-hover">
