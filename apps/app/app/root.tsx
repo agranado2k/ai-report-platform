@@ -129,6 +129,8 @@ export function ErrorBoundary() {
 // appearance API. Values mirror the design tokens (theme.css) — Clerk computes
 // shades from the literal hex, and CSS-var resolution inside its injected styles
 // is unreliable, so we duplicate the hexes here intentionally.
+// TODO(dark): these literals don't follow `.dark` — swap appearance (or use a
+// Clerk dark baseTheme) when the dark theme toggle lands.
 const clerkAppearance = {
   variables: {
     colorPrimary: "#5e6ad2",
