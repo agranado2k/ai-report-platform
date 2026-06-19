@@ -346,7 +346,9 @@ export default function Index() {
                       {r.title}
                     </a>{" "}
                     <code className="font-mono text-xs text-subtle">{r.slug}</code>{" "}
-                    <span className="text-xs text-subtle">📁 {folderName(r.folderId)}</span>
+                    <span className="text-xs text-subtle">
+                      <span aria-hidden="true">📁</span> {folderName(r.folderId)}
+                    </span>
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge isPublished={r.isPublished} />
@@ -357,7 +359,8 @@ export default function Index() {
                         name="toFolderId"
                         defaultValue={r.folderId}
                         aria-label={`Move ${r.title} to folder`}
-                        className="h-7 text-xs"
+                        size="sm"
+                        className="text-xs"
                       >
                         {folders.map((f) => (
                           <option key={f.id} value={f.id}>
@@ -377,7 +380,8 @@ export default function Index() {
                         name="title"
                         defaultValue={r.title}
                         aria-label={`Rename ${r.title}`}
-                        className="h-7 w-32 text-xs"
+                        size="sm"
+                        className="w-32 text-xs"
                       />
                       <Button type="submit" size="sm">
                         Rename

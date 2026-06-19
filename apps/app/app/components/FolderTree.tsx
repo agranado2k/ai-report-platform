@@ -50,7 +50,7 @@ export function FolderTree({
           selected ? "bg-brand/10 font-semibold text-brand" : "text-fg hover:bg-surface-raised",
         )}
       >
-        📁 {node.name}
+        <span aria-hidden="true">📁</span> {node.name}
       </Link>
       {selected && node.parentId !== null ? (
         <div className={cx("my-1 flex flex-col gap-1.5", pad)}>
@@ -61,7 +61,8 @@ export function FolderTree({
               name="name"
               defaultValue={node.name}
               aria-label={`Rename ${node.name}`}
-              className="h-7 w-28 text-xs"
+              size="sm"
+              className="w-28 text-xs"
             />
             <Button type="submit" size="sm">
               Rename
