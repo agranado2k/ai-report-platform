@@ -1,45 +1,9 @@
-import type { ReportSummary } from "arp-application";
 import type { Folder, Slug } from "arp-domain";
 import { err, folderId, ok, orgId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { listFoldersToHttp, listReportsToHttp } from "./list-response";
+import { listFoldersToHttp, searchReportsToHttp } from "./list-response";
 
 const slug = (s: string): Slug => s as Slug;
-
-describe("listReportsToHttp", () => {
-  it("maps an ok list to a 200 JSON body with snake_case fields", () => {
-    const summaries: ReportSummary[] = [
-      { slug: slug("aaaaaaaaaa"), title: "First", isPublished: true, folderId: folderId(F1) },
-      { slug: slug("bbbbbbbbbb"), title: "Second", isPublished: false, folderId: folderId(F1) },
-    ];
-    const res = listReportsToHttp(ok(summaries));
-
-    expect(res.status).toBe(200);
-    expect(res.contentType).toBe("application/json");
-    expect(res.body).toEqual({
-      reports: [
-        { slug: "aaaaaaaaaa", title: "First", is_published: true, folder_id: F1 },
-        { slug: "bbbbbbbbbb", title: "Second", is_published: false, folder_id: F1 },
-      ],
-    });
-  });
-
-  it("maps an empty list to a 200 with an empty array", () => {
-    const res = listReportsToHttp(ok([]));
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ reports: [] });
-  });
-
-  it("maps an Unexpected error to a 500 problem with a redacted detail", () => {
-    const res = listReportsToHttp(err({ kind: "Unexpected", message: "raw driver text" }));
-    expect(res.status).toBe(500);
-    expect(res.contentType).toBe("application/problem+json");
-    expect(res.body).toMatchObject({
-      code: "internal_error",
-      detail: "An unexpected error occurred.",
-    });
-  });
-});
 
 describe("listFoldersToHttp", () => {
   it("maps folders to a 200 JSON body, exposing no org id", () => {
@@ -84,3 +48,31 @@ describe("listFoldersToHttp", () => {
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
+
+describe("searchReportsToHttp", () => {
+  it("maps a page to 200 with reports + paging metadata", () => {
+    const res = searchReportsToHttp(
+      ok({
+        items: [
+          { slug: slug("aaaaaaaaaa"), title: "First", isPublished: true, folderId: folderId(F1) },
+        ],
+        total: 42,
+        page: 2,
+        pageSize: 20,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      reports: [{ slug: "aaaaaaaaaa", title: "First", is_published: true, folder_id: F1 }],
+      page: 2,
+      page_size: 20,
+      total: 42,
+    });
+  });
+
+  it("maps an error to a problem response", () => {
+    const res = searchReportsToHttp(err({ kind: "Unexpected", message: "boom" }));
+    expect(res.status).toBe(500);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});

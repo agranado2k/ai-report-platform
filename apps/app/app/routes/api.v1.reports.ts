@@ -4,24 +4,47 @@
 // arp-http mapper. All policy lives in the application/domain; this file only
 // translates HTTP ⇆ use-case Result and never throws a bare error to the client.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { listReports, type UploadActor, uploadReport } from "arp-application";
-import { err } from "arp-domain";
-import { errorToHttp, listReportsToHttp, uploadResultToHttp } from "arp-http";
+import { searchReports, type UploadActor, uploadReport } from "arp-application";
+import { err, type FolderId, makeFolderId } from "arp-domain";
+import { errorToHttp, searchReportsToHttp, uploadResultToHttp } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
 import { toResponse, unauthenticated } from "../server/http.server";
 
-// GET /api/v1/reports — list the acting org's reports as lightweight summaries
-// (ADR-0036). resolveActorForRead resolves the org WITHOUT provisioning (GETs
-// stay safe); no session or no active org → 401. Unlike the HTML dashboard
-// loader (which renders an empty list for an unidentified caller), the API
-// surfaces an explicit Unauthenticated problem.
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+// GET /api/v1/reports — the acting org's reports, newest-first, **paged + searchable**
+// (ADR-0036). Query params: `q` (title/slug substring), `folder_id` (filter),
+// `page` (1-based), `page_size` (1..100, default 20). resolveActorForRead resolves
+// the org WITHOUT provisioning (GETs stay safe); no session / no active org → 401.
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
   if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
   if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
-  const result = await listReports({ reports: deps().reports }, { orgId: actor.value.orgId });
-  return toResponse(listReportsToHttp(result));
+
+  const url = new URL(args.request.url);
+  const query = url.searchParams.get("q")?.trim() || undefined;
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  const rawPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "", 10);
+  const pageSize = Number.isFinite(rawPageSize)
+    ? Math.min(MAX_PAGE_SIZE, Math.max(1, rawPageSize))
+    : DEFAULT_PAGE_SIZE;
+
+  let folderId: FolderId | undefined;
+  const rawFolder = url.searchParams.get("folder_id")?.trim();
+  if (rawFolder) {
+    const parsed = makeFolderId(rawFolder);
+    if (!parsed.ok) return toResponse(errorToHttp(parsed.error)); // malformed uuid → 422
+    folderId = parsed.value;
+  }
+
+  const result = await searchReports(
+    { reports: deps().reports },
+    { orgId: actor.value.orgId },
+    { query, folderId, page, pageSize },
+  );
+  return toResponse(searchReportsToHttp(result));
 }
 
 export async function action(args: ActionFunctionArgs) {
