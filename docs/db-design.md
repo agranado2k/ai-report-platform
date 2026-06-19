@@ -147,7 +147,7 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | takedown → soft delete |
 
-Indexes: `slug` unique, `(org_id, folder_id)`, `deleted_at` partial.
+Indexes: `slug` unique, `(org_id, folder_id)`, `(org_id, updated_at DESC) WHERE deleted_at IS NULL` (serves the dashboard's org-wide, newest-first paged listing/search — `searchByOrg`), `deleted_at` partial.
 The `reports.live_version_id ↔ report_versions.report_id` cycle is broken by
 making `live_version_id` nullable and set after the first version commits.
 

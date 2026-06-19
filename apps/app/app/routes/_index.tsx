@@ -11,10 +11,10 @@ import {
   createFolder,
   deleteFolder,
   deleteReport,
-  listReports,
   moveReport,
   renameFolder,
   renameReport,
+  searchReports,
 } from "arp-application";
 import { folderId, makeSlug } from "arp-domain";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
@@ -32,39 +32,74 @@ interface FolderNode {
   readonly name: string;
 }
 
-// Dashboard (ADR-0036, Reports & Folders): a folder tree + the selected folder's
-// reports. resolveActorForRead resolves the org WITHOUT provisioning (GETs stay
-// safe). `?folder=<id>` selects a folder; default is the org Root.
+const PAGE_SIZE = 20;
+
+// Dashboard (ADR-0036, Reports & Folders): an org-wide, newest-first, paged +
+// searchable report list with a folder sidebar. resolveActorForRead resolves the
+// org WITHOUT provisioning (GETs stay safe). Query params: `?q=` (title/slug
+// search), `?folder=<id>` (filter to one folder), `?page=` (1-based).
 export async function loader(args: LoaderFunctionArgs) {
   const viewBase = viewOrigin(args.request);
+  const url = new URL(args.request.url);
+  const q = url.searchParams.get("q")?.trim() ?? "";
+  const requestedFolder = url.searchParams.get("folder") ?? "";
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+
   const actorR = await resolveActorForRead(args);
   // The dashboard degrades to an empty list for both "no actor" and an infra
   // failure (logged) — a rendered page beats a 500 here; the JSON API surfaces
   // the distinction (401 vs 500) instead.
   if (!actorR.ok) console.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
   const actor = actorR.ok ? actorR.value : null;
-  if (!actor) return json({ folders: [] as FolderNode[], reports: [], selectedId: null, viewBase });
+  const empty = {
+    folders: [] as FolderNode[],
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: PAGE_SIZE,
+    q,
+    selectedFolderId: null,
+    rootId: null,
+    viewBase,
+  };
+  if (!actor) return json(empty);
 
-  const [foldersR, reportsR] = await Promise.all([
-    folderRepo().listByOrg(actor.orgId),
-    listReports({ reports: deps().reports }, { orgId: actor.orgId }),
-  ]);
+  const foldersR = await folderRepo().listByOrg(actor.orgId);
   if (!foldersR.ok) console.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  if (!reportsR.ok) console.warn(`dashboard: listReports failed — ${reportsR.error.message}`);
-
   const folders: FolderNode[] = (foldersR.ok ? foldersR.value : []).map((f) => ({
     id: f.id,
     parentId: f.parentId,
     name: f.name,
   }));
-  const reports = reportsR.ok ? reportsR.value : [];
-
   const root = folders.find((f) => f.parentId === null) ?? null;
-  const requested = new URL(args.request.url).searchParams.get("folder");
-  const selectedId =
-    requested && folders.some((f) => f.id === requested) ? requested : (root?.id ?? null);
+  // Only honor a folder filter that exists in the org.
+  const selectedFolderId =
+    requestedFolder && folders.some((f) => f.id === requestedFolder) ? requestedFolder : null;
 
-  return json({ folders, reports, selectedId, viewBase });
+  const searchR = await searchReports(
+    { reports: deps().reports },
+    { orgId: actor.orgId },
+    {
+      query: q || undefined,
+      folderId: selectedFolderId ? folderId(selectedFolderId) : undefined,
+      page,
+      pageSize: PAGE_SIZE,
+    },
+  );
+  if (!searchR.ok) console.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
+  const result = searchR.ok ? searchR.value : { items: [], total: 0, page: 1, pageSize: PAGE_SIZE };
+
+  return json({
+    folders,
+    items: result.items,
+    total: result.total,
+    page: result.page,
+    pageSize: result.pageSize,
+    q,
+    selectedFolderId,
+    rootId: root?.id ?? null,
+    viewBase,
+  });
 }
 
 // Folder writes (provisioning resolver). intent=move → reassign a report's
@@ -185,11 +220,25 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function Index() {
-  const { folders, reports, selectedId, viewBase } = useLoaderData<typeof loader>();
+  const { folders, items, total, page, pageSize, q, selectedFolderId, rootId, viewBase } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
-  const folderReports = reports.filter((r) => r.folderId === selectedId);
   const root = folders.find((f) => f.parentId === null);
+  const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const createParent = selectedFolderId ?? rootId;
+  const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
+
+  // Page links preserve the active search + folder filter.
+  const pageHref = (p: number) => {
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    if (selectedFolderId) sp.set("folder", selectedFolderId);
+    if (p > 1) sp.set("page", String(p));
+    const s = sp.toString();
+    return s ? `/?${s}` : "/";
+  };
 
   return (
     <main
@@ -211,23 +260,69 @@ export default function Index() {
         <Link to="/upload">Upload a report →</Link>
       </p>
 
+      {/* Search (GET) — org-wide; preserves the folder filter when set. */}
+      <Form method="get" style={{ margin: "8px 0 16px" }}>
+        <input
+          name="q"
+          defaultValue={q}
+          placeholder="Search reports by title or slug…"
+          aria-label="Search reports"
+          style={{ padding: 6, width: 280 }}
+        />
+        {selectedFolderId ? <input type="hidden" name="folder" value={selectedFolderId} /> : null}
+        <button type="submit" style={{ padding: "6px 12px", marginLeft: 6 }}>
+          Search
+        </button>
+        {q ? (
+          <Link
+            to={selectedFolderId ? `/?folder=${selectedFolderId}` : "/"}
+            style={{ marginLeft: 8, fontSize: 13 }}
+          >
+            Clear
+          </Link>
+        ) : null}
+      </Form>
+
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        {/* Sidebar: folder tree */}
+        {/* Sidebar: folder tree (clicking a folder filters the list). */}
         <nav style={{ width: 220, flexShrink: 0, borderRight: "1px solid #eee", paddingRight: 12 }}>
+          <Link
+            to="/"
+            style={{
+              display: "block",
+              padding: "4px 6px",
+              borderRadius: 4,
+              textDecoration: "none",
+              color: "#333",
+              fontWeight: selectedFolderId ? 400 : 600,
+              background: selectedFolderId ? "transparent" : "#eef",
+            }}
+          >
+            All reports
+          </Link>
           {root ? (
-            <FolderTree node={root} childrenOf={childrenOf} selectedId={selectedId} depth={0} />
+            <FolderTree
+              node={root}
+              childrenOf={childrenOf}
+              selectedId={selectedFolderId}
+              depth={0}
+            />
           ) : (
             <p style={{ color: "#999", fontSize: 13 }}>No folders yet.</p>
           )}
         </nav>
 
-        {/* Contents: the selected folder's reports + new-folder form */}
+        {/* Contents: the paged report list + pagination + new-folder form. */}
         <section style={{ flex: 1 }}>
-          {folderReports.length === 0 ? (
-            <p style={{ color: "#666" }}>This folder is empty.</p>
+          <p style={{ color: "#666", margin: "0 0 8px" }}>
+            <strong>{scopeLabel}</strong>
+            {q ? ` · matching “${q}”` : ""} · {total} report{total === 1 ? "" : "s"}
+          </p>
+          {items.length === 0 ? (
+            <p style={{ color: "#666" }}>{q ? "No matching reports." : "No reports here yet."}</p>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {folderReports.map((r) => (
+              {items.map((r) => (
                 <li
                   key={r.slug}
                   style={{
@@ -240,7 +335,8 @@ export default function Index() {
                 >
                   <span>
                     <a href={`${viewBase}/${r.slug}`}>{r.title}</a>{" "}
-                    <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>
+                    <code style={{ fontSize: 12, color: "#999" }}>{r.slug}</code>{" "}
+                    <span style={{ fontSize: 11, color: "#888" }}>📁 {folderName(r.folderId)}</span>
                   </span>
                   <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <StatusBadge isPublished={r.isPublished} />
@@ -291,12 +387,32 @@ export default function Index() {
             </ul>
           )}
 
-          {selectedId ? (
+          {totalPages > 1 ? (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12 }}>
+              {page > 1 ? (
+                <Link to={pageHref(page - 1)}>← Prev</Link>
+              ) : (
+                <span style={{ color: "#ccc" }}>← Prev</span>
+              )}
+              <span style={{ fontSize: 13, color: "#666" }}>
+                Page {page} of {totalPages}
+              </span>
+              {page < totalPages ? (
+                <Link to={pageHref(page + 1)}>Next →</Link>
+              ) : (
+                <span style={{ color: "#ccc" }}>Next →</span>
+              )}
+            </div>
+          ) : null}
+
+          {createParent ? (
             <Form method="post" style={{ marginTop: 16 }}>
-              <input type="hidden" name="parentId" value={selectedId} />
+              <input type="hidden" name="parentId" value={createParent} />
               <input
                 name="name"
-                placeholder="New folder name"
+                placeholder={
+                  selectedFolderId ? `New folder in ${scopeLabel}` : "New folder (in Root)"
+                }
                 required
                 style={{ padding: 6, marginRight: 8 }}
               />

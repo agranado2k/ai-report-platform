@@ -43,7 +43,9 @@ import type {
   PlanLimiter,
   ProcessedBundle,
   ProvisionedIdentity,
+  ReportPage,
   ReportRepository,
+  ReportSearchQuery,
   ReportSummary,
   ScanJobMessage,
   ScanQueue,
@@ -116,6 +118,26 @@ export class InMemoryReportRepository implements ReportRepository {
         folderId: r.folderId,
       }));
     return ok(summaries);
+  }
+
+  async searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
+    const needle = q.query?.trim().toLowerCase();
+    const all = [...this.byId.values()]
+      .filter((r) => r.orgId === orgId && r.deletedAt === null)
+      .filter((r) => (q.folderId ? r.folderId === q.folderId : true))
+      .filter((r) =>
+        needle
+          ? r.title.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle)
+          : true,
+      )
+      .reverse(); // newest-first (insertion-order proxy; see listByOrg note)
+    const items = all.slice(q.offset, q.offset + q.limit).map((r) => ({
+      slug: r.slug,
+      title: r.title,
+      isPublished: r.liveVersionId !== null,
+      folderId: r.folderId,
+    }));
+    return ok({ items, total: all.length });
   }
 
   async save(report: Report): Promise<Result<void, AppError>> {

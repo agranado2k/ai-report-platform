@@ -29,6 +29,13 @@
       "when": 1781809197198,
       "tag": "0003_folders_slug_uniq_exclude_deleted",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781882024952,
+      "tag": "0004_reports_org_updated_idx",
+      "breakpoints": true
     }
   ]
 }

@@ -163,6 +163,83 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     const found = await repo.findBySlug(makeSlugOrThrow(SLUG));
     expect(found.ok && found.value?.deletedAt).not.toBeNull();
   });
+
+  it("searchByOrg pages, counts, and filters by title", async () => {
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000d1"),
+        versionId("00000000-0000-4000-8000-0000000000e1"),
+        "rpt0000001",
+        "Quarterly revenue",
+      ),
+    );
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000d2"),
+        versionId("00000000-0000-4000-8000-0000000000e2"),
+        "rpt0000002",
+        "Annual summary",
+      ),
+    );
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000d3"),
+        versionId("00000000-0000-4000-8000-0000000000e3"),
+        "rpt0000003",
+        "Quarterly costs",
+      ),
+    );
+
+    // page 1 of size 2 → 2 items, total 3
+    const page1 = await repo.searchByOrg(ids.orgId, { limit: 2, offset: 0 });
+    expect(page1.ok && page1.value.items.length).toBe(2);
+    expect(page1.ok && page1.value.total).toBe(3);
+
+    // page 2 → the remaining 1
+    const page2 = await repo.searchByOrg(ids.orgId, { limit: 2, offset: 2 });
+    expect(page2.ok && page2.value.items.length).toBe(1);
+
+    // title substring (case-insensitive) → 2 "Quarterly" matches
+    const q = await repo.searchByOrg(ids.orgId, { query: "quarter", limit: 10, offset: 0 });
+    expect(q.ok && q.value.total).toBe(2);
+  });
+
+  it("searchByOrg excludes soft-deleted reports", async () => {
+    const r = makeReport(
+      reportId("00000000-0000-4000-8000-0000000000d9"),
+      versionId("00000000-0000-4000-8000-0000000000e9"),
+      "rpt0000009",
+      "Doomed",
+    );
+    await repo.save(r);
+    await repo.softDelete(r.id);
+    const res = await repo.searchByOrg(ids.orgId, { query: "Doomed", limit: 10, offset: 0 });
+    expect(res.ok && res.value.total).toBe(0);
+  });
+
+  it("searchByOrg matches LIKE metacharacters literally (no wildcard injection)", async () => {
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000da"),
+        versionId("00000000-0000-4000-8000-0000000000ea"),
+        "rpt000000a",
+        "100% complete",
+      ),
+    );
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000db"),
+        versionId("00000000-0000-4000-8000-0000000000eb"),
+        "rpt000000b",
+        "1000 reports",
+      ),
+    );
+
+    // "100%" must match only the literal "100% complete", not "1000 reports".
+    const res = await repo.searchByOrg(ids.orgId, { query: "100%", limit: 10, offset: 0 });
+    expect(res.ok && res.value.total).toBe(1);
+    expect(res.ok && res.value.items[0]?.title).toBe("100% complete");
+  });
 });
 
 function makeSlugOrThrow(s: string) {
