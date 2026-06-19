@@ -1295,3 +1295,39 @@ Input/Textarea/Button) and centres the **Clerk sign-in/sign-up** cards (themed v
 the `appearance` API on ClerkApp). All app screens now use the design-system
 components + tokens — no inline styles remain. Behavior unchanged (upload action,
 Clerk routing). Out of scope still: marketing landing page, dark activation, app-wide CSP (#65).
+
+---
+
+## 2026-06-19 — API-key authentication for `/api/v1` (ADR-0008/0016 extracted)
+
+First PR of the **AI Report MCP** epic (operator-approved plan; remote HTTP MCP on
+Express, thin client over `/api/v1` per ADR-003, with API-key + Clerk-OAuth auth).
+This PR ships the **foundation the MCP needs**: programmatic API-key auth on
+`/api/v1`, alongside Clerk sessions. Worktree `feat/api-key-auth`.
+
+What landed:
+- **`arp_live_`/`arp_test_` keys**, 256-bit random, **HMAC-SHA-256 keyed by a server
+  pepper** (`ApiKeyService`, `packages/adapters/src/services/api-key.ts`). Only the
+  HMAC is stored; secret shown once. Fail-closed when no pepper is configured.
+- **`DrizzleApiKeyRepository`** (the long-modeled `api_keys` table) behind a new
+  **`ApiKeyStore`** application port — prefix lookup → constant-time compare →
+  reject revoked → bump `last_used_at`; mint/list/revoke for the UI. pglite-tested.
+- **`authenticateApiKey`** use case maps a verified key → the same `UploadActor` a
+  session yields (org Root folder as the write default, scopes from the key row).
+- **Auth seam** (`auth.server.ts`): a Bearer `arp_…` resolves the actor first, else
+  falls back to the Clerk session — routes unchanged (Actor contract preserved).
+- **`settings.api-keys`** management UI (mint/list/revoke, one-time secret).
+- **Infra (CI/CD-applied on merge):** two self-generated `random_password` peppers
+  (live for prod, test for previews → a preview key can't verify in prod) + the
+  `API_KEY_ENV` label, in `infra/terraform/envs/prod/main.tf`.
+
+**ADRs:** extracted **ADR-0008** (amends the spec: HMAC-SHA-256+pepper not argon2id,
+`arp_live_/arp_test_` not `rk_live_*` — rationale: keys are high-entropy random, so
+a slow password hash buys nothing and would tax every request) and **ADR-0016**
+(scope vocabulary; anomaly detection deferred) into `docs/adr/` — the first two of
+the ADR-001–030 backlog to be extracted. Decision log: **own `api_keys` table** over
+Clerk's GA managed keys (local verification, no per-request network/billing);
+spec's argon2id/`rk_` amended with operator sign-off.
+
+233 unit/integration tests green; typecheck + biome + docs:check clean. Next in the
+epic: the Express MCP server scaffold + read tools (PR2).

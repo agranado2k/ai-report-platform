@@ -6,6 +6,8 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 
 | # | Title | Status |
 |---|---|---|
+| 0008 | [Hashed, prefixed, user-scoped API keys](0008-api-key-authentication.md) | Accepted (2026-06-19) — extracted from spec; amends hashing/prefix |
+| 0016 | [API-key scopes (+ anomaly detection, deferred)](0016-api-key-scopes.md) | Accepted (2026-06-19) — extracted from spec |
 | 0035 | [Bot-merge workflow for signed-commits + rebase-merge](0035-bot-merge-workflow.md) | Superseded by 0044 (2026-06-09) |
 | 0036 | [Adopt Domain-Driven Design principles](0036-domain-driven-design.md) | Accepted (2026-06-04) |
 | 0037 | [Report upload & versioning pipeline](0037-report-upload-versioning-pipeline.md) | Accepted (2026-06-04) |
@@ -25,7 +27,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 
 ## Backlog (ADRs 1–30 from the spec)
 
-The 30 foundational ADRs (ADR-001 through ADR-030) live inside `docs/spec.html` (rev 7) and have not yet been extracted into individual files in this directory. Tracked as a housekeeping follow-up.
+The 30 foundational ADRs (ADR-001 through ADR-030) live inside `docs/spec.html` (rev 7) and have not yet been extracted into individual files in this directory. Tracked as a housekeeping follow-up. **Extracted so far** (on first implementation): ADR-0008, ADR-0016 (both 2026-06-19) — now standalone files in the table above; ADR-0008 also amends the spec's original hashing/prefix scheme.
 
 ## Decisions recorded in the development diary (not ADRs)
 
