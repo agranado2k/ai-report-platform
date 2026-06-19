@@ -153,6 +153,11 @@ export const reports = pgTable(
   (t) => [
     uniqueIndex("reports_slug_uniq").on(t.slug),
     index("reports_org_folder_idx").on(t.orgId, t.folderId),
+    // Serves the dashboard's org-wide, newest-first paged listing/search
+    // (searchByOrg): ORDER BY updated_at DESC over an org's live reports.
+    index("reports_org_updated_idx")
+      .on(t.orgId, t.updatedAt.desc())
+      .where(sql`${t.deletedAt} is null`),
     // Partial: only soft-deleted rows (purge job lookup), per db-design.md.
     index("reports_deleted_at_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
   ],

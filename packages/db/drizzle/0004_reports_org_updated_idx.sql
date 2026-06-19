@@ -1,0 +1,1 @@
+CREATE INDEX "reports_org_updated_idx" ON "reports" USING btree ("org_id","updated_at" DESC NULLS LAST) WHERE "reports"."deleted_at" is null;

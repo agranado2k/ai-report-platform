@@ -2,7 +2,12 @@
 // + `report_versions` tables (ADR-0020 repository pattern). Row<->domain
 // mapping is factored into pure functions so it can be unit-tested without a DB;
 // the actual queries are integration-tested against the Neon branch (ADR-0019).
-import type { ReportRepository, ReportSummary } from "arp-application";
+import type {
+  ReportPage,
+  ReportRepository,
+  ReportSearchQuery,
+  ReportSummary,
+} from "arp-application";
 import { reports, reportVersions } from "arp-db/schema";
 import {
   type AppError,
@@ -22,7 +27,7 @@ import {
   type VersionManifest,
   versionId,
 } from "arp-domain";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
@@ -133,6 +138,51 @@ export class DrizzleReportRepository implements ReportRepository {
       );
     } catch (e) {
       return err2("listReportsByOrg", e);
+    }
+  }
+
+  async searchByOrg(org: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
+    // Org-scoped, newest-first, paged. Optional folder filter + title/slug
+    // substring search. Ordering is served by the (org_id, updated_at) index.
+    try {
+      const db = this.ctx.current();
+      const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];
+      if (q.folderId) filters.push(eq(reports.folderId, q.folderId));
+      const needle = q.query?.trim();
+      if (needle) {
+        const like = `%${needle}%`;
+        const match = or(ilike(reports.title, like), ilike(reports.slug, like));
+        if (match) filters.push(match);
+      }
+      const where = and(...filters);
+
+      const [rows, totals] = await Promise.all([
+        db
+          .select({
+            slug: reports.slug,
+            title: reports.title,
+            liveVersionId: reports.liveVersionId,
+            folderId: reports.folderId,
+          })
+          .from(reports)
+          .where(where)
+          .orderBy(desc(reports.updatedAt))
+          .limit(q.limit)
+          .offset(q.offset),
+        db.select({ n: count() }).from(reports).where(where),
+      ]);
+
+      return ok({
+        items: rows.map((r) => ({
+          slug: r.slug as Slug,
+          title: r.title,
+          isPublished: r.liveVersionId !== null,
+          folderId: folderId(r.folderId),
+        })),
+        total: Number(totals[0]?.n ?? 0),
+      });
+    } catch (e) {
+      return err2("searchReportsByOrg", e);
     }
   }
 
