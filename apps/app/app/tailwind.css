@@ -1,0 +1,6 @@
+/* Tailwind v4 entry for the app origin. Static, compiled CSS served from 'self'
+ * (CSP-safe). Design tokens live in styles/theme.css (the single source of
+ * truth); fonts are self-hosted (CSP font-src 'self'). */
+@import "tailwindcss";
+@import "./styles/fonts.css";
+@import "./styles/theme.css";
