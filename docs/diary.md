@@ -1265,3 +1265,16 @@ Bringing the merged auth stack live on prod surfaced a string of **dev-instance-
 Verified the gate live on prod: anon `GET /upload` → `302 /sign-in?redirect_url=%2Fupload`, `GET /sign-in` → `200`.
 
 **Docs sync (#56):** refreshed this "Current state" block to the present and reconciled `docs/spec.html` (now **rev 9**) with the reversed/landed decisions — ADR-031 (single Neon `main` branch, no persistent staging; dropped `reports-staging` / staging Redis / "three Clerk envs" / `shared → staging → prod`), ADR-0044 (signed merge commits + 0 required approvals, no linear history, no bot-merge — superseding ADR-025/0035), and the canonical `view.<domain>/<slug>` viewer path. `docs:check` stays green. Deferred (still backlog): extracting ADR-001–030 from `spec.html` into `docs/adr/` files. Worktree `docs/sync-spec-diary`.
+
+---
+
+## 2026-06-19 — Content management feature run + Clerk hygiene (ADR-0049)
+
+Shipped the user-facing **reports & folders management** surface end-to-end, plus the auth/data fix that unblocked it and a config-hygiene ADR.
+
+- **Dashboard + read/write API for reports & folders** (#72–#79): list reports; folders (create/move/rename/delete, block-if-non-empty); per-report move/rename/delete; all via the dashboard UI **and** `/api/v1/reports` + `/api/v1/folders` (list/move + PATCH/DELETE). Pure `arp-http` mappers + RFC-9457 errors throughout. Migrations: `0003` (partial folder slug-uniqueness, excludes soft-deleted), `0004` (`reports_org_updated_idx`).
+- **Auth/data fix**: the empty-dashboard incident — `resolveActorForRead` required an active org and the operator's reports were stranded under a **dev-instance** identity after prod moved to the **live** Clerk instance. Fixed `resolveActorForRead` to resolve the personal org read-only (#75) and re-keyed the mirror rows to the live identity. See ADR-0049 + memory `clerk-prod-instance-split`.
+- **ADR-0049** (#81): documents the Clerk dev/prod instance separation (prod→live, preview/e2e→dev), the single source of truth (GitHub Actions `CLERK_*_PROD`/`*_STAGING` wired by `envs/prod/main.tf`), the orphaning incident, and hygiene invariants. **#76 closed** (no migration was needed; architecture was already correct).
+- **Dashboard search + pagination** (this entry's worktree `feat/dashboard-search`): org-wide, newest-first, paged + title/slug search (`searchReports` use case + `ReportRepository.searchByOrg`, backed by `reports_org_updated_idx`); folder sidebar becomes a filter, folder shown per row.
+
+Open follow-ups: **#80** (`ReportDeleted` event — deferred until an audit/purge consumer lands); per-PR e2e BDD for the new use cases (docs:check passes without them, consistent with prior slices).
