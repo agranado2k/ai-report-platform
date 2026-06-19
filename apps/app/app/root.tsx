@@ -1,8 +1,34 @@
 import { ClerkApp } from "@clerk/remix";
 import { rootAuthLoader } from "@clerk/remix/ssr.server";
-import { type LoaderFunctionArgs, redirect } from "@remix-run/node";
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
+import { type LinksFunction, type LoaderFunctionArgs, redirect } from "@remix-run/node";
+import {
+  isRouteErrorResponse,
+  Link,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useRouteError,
+} from "@remix-run/react";
 import { defineEnv } from "arp-env";
+import { buttonClass } from "./components/Button";
+import { EmptyState } from "./components/EmptyState";
+import { PageShell } from "./components/PageShell";
+import stylesheet from "./tailwind.css?url";
+
+// The compiled Tailwind stylesheet (static, served from 'self' — CSP-safe) +
+// preloaded self-hosted fonts (font-src 'self'; no remote CDN).
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: stylesheet },
+  {
+    rel: "preload",
+    href: "/fonts/inter-variable.woff2",
+    as: "font",
+    type: "font/woff2",
+    crossOrigin: "anonymous",
+  },
+];
 
 // Document routes that do NOT require a session — everything else on the app
 // origin is gated (default-protect, ADR-0048). The resource routes (/health,
@@ -66,6 +92,56 @@ function App() {
   return <Outlet />;
 }
 
+// Root error boundary — also Remix's app-wide 404 (unmatched routes render here).
+// Renders inside Layout, so the document chrome + stylesheet apply. Never leaks an
+// error message (mirrors the upload route's 500 hygiene).
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const routeError = isRouteErrorResponse(error) ? error : null;
+  const is404 = routeError?.status === 404;
+  const title = is404
+    ? "Page not found"
+    : routeError
+      ? `${routeError.status} ${routeError.statusText}`
+      : "Something went wrong";
+  const description = is404
+    ? "The page you're looking for doesn't exist or has moved."
+    : "An unexpected error occurred. Please try again.";
+  return (
+    <PageShell>
+      <div className="grid min-h-[60vh] place-items-center">
+        <EmptyState
+          icon="🧭"
+          title={title}
+          description={description}
+          action={
+            <Link to="/" className={buttonClass("primary")}>
+              Back to your reports
+            </Link>
+          }
+        />
+      </div>
+    </PageShell>
+  );
+}
+
+// Clerk renders its own DOM (SignIn / SignUp / UserButton); we theme it via the
+// appearance API. Values mirror the design tokens (theme.css) — Clerk computes
+// shades from the literal hex, and CSS-var resolution inside its injected styles
+// is unreliable, so we duplicate the hexes here intentionally.
+const clerkAppearance = {
+  variables: {
+    colorPrimary: "#5e6ad2",
+    colorText: "#171717",
+    colorTextSecondary: "#62666d",
+    colorBackground: "#ffffff",
+    colorInputBackground: "#ffffff",
+    colorInputText: "#171717",
+    fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif',
+    borderRadius: "8px",
+  },
+};
+
 // ClerkApp wraps the app in <ClerkProvider>, reading the publishable key from the
 // rootAuthLoader state injected above.
-export default ClerkApp(App);
+export default ClerkApp(App, { appearance: clerkAppearance });
