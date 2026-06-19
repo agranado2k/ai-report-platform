@@ -216,6 +216,30 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     const res = await repo.searchByOrg(ids.orgId, { query: "Doomed", limit: 10, offset: 0 });
     expect(res.ok && res.value.total).toBe(0);
   });
+
+  it("searchByOrg matches LIKE metacharacters literally (no wildcard injection)", async () => {
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000da"),
+        versionId("00000000-0000-4000-8000-0000000000ea"),
+        "rpt000000a",
+        "100% complete",
+      ),
+    );
+    await repo.save(
+      makeReport(
+        reportId("00000000-0000-4000-8000-0000000000db"),
+        versionId("00000000-0000-4000-8000-0000000000eb"),
+        "rpt000000b",
+        "1000 reports",
+      ),
+    );
+
+    // "100%" must match only the literal "100% complete", not "1000 reports".
+    const res = await repo.searchByOrg(ids.orgId, { query: "100%", limit: 10, offset: 0 });
+    expect(res.ok && res.value.total).toBe(1);
+    expect(res.ok && res.value.items[0]?.title).toBe("100% complete");
+  });
 });
 
 function makeSlugOrThrow(s: string) {

@@ -150,7 +150,12 @@ export class DrizzleReportRepository implements ReportRepository {
       if (q.folderId) filters.push(eq(reports.folderId, q.folderId));
       const needle = q.query?.trim();
       if (needle) {
-        const like = `%${needle}%`;
+        // Escape LIKE metacharacters so the query is matched as a literal substring
+        // (Postgres ILIKE's default escape is `\`). Without this, `%`/`_`/`\` keep
+        // their wildcard meaning and the adapter would diverge from the in-memory
+        // fake's literal `.includes()`.
+        const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+        const like = `%${escaped}%`;
         const match = or(ilike(reports.title, like), ilike(reports.slug, like));
         if (match) filters.push(match);
       }
