@@ -4,5 +4,7 @@ export { Button, type ButtonSize, type ButtonVariant, buttonClass } from "./Butt
 export { Card } from "./Card";
 export { cx } from "./cx";
 export { EmptyState } from "./EmptyState";
+export { type FolderNode, FolderTree } from "./FolderTree";
 export { Input, Select, Textarea } from "./Input";
 export { PageShell } from "./PageShell";
+export { StatusBadge } from "./StatusBadge";
