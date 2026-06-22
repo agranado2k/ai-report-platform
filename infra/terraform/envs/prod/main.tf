@@ -60,6 +60,20 @@ resource "random_password" "scan_drain_secret" {
   special = false
 }
 
+# Server-side HMAC pepper for `arp_` API keys (ADR-0008). Self-generated, never
+# operator input. Distinct per environment so a preview-minted `arp_test_` key
+# can't verify against production even while previews share the prod DB (see the
+# data-isolation follow-up below): the stored HMAC is keyed by a different pepper.
+resource "random_password" "api_key_pepper" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "api_key_pepper_preview" {
+  length  = 64
+  special = false
+}
+
 module "scan_cron" {
   source            = "../../modules/scan-cron"
   account_id        = var.cloudflare_account_id
@@ -124,6 +138,17 @@ locals {
     # Worker presents to POST /internal/scan-drain. On `preview` too, so the e2e
     # can drive the drain deterministically (CF cron only targets prod).
     SCAN_DRAIN_SECRET = { value = random_password.scan_drain_secret.result, target = ["production", "preview"] }
+
+    # API-key auth (ADR-0008). HMAC pepper + environment label, split by target
+    # like the Clerk keys above: production mints/verifies `arp_live_…` keys with
+    # the live pepper; previews use a separate pepper + `arp_test_…` label, so a
+    # preview key never verifies in prod. The app fails CLOSED if the pepper is
+    # absent (packages/env optional + ApiKeyService), so this is the only thing
+    # standing between "API keys disabled" and "enabled" in deployed envs.
+    API_KEY_PEPPER         = { value = random_password.api_key_pepper.result, target = ["production"] }
+    api_key_pepper_preview = { key = "API_KEY_PEPPER", value = random_password.api_key_pepper_preview.result, target = ["preview"] }
+    API_KEY_ENV            = { value = "live", target = ["production"], sensitive = false }
+    api_key_env_preview    = { key = "API_KEY_ENV", value = "test", target = ["preview"], sensitive = false }
   }
 }
 

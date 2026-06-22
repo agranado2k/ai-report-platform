@@ -226,6 +226,18 @@ The async content-scan pipeline runs on infrastructure you already have, plus on
 
 ---
 
+## API-key authentication (ADR-0008)
+
+`/api/v1` accepts long-lived `arp_` API keys (for the MCP server, scripts, agents) alongside Clerk sessions. The only infra is two self-generated secrets:
+
+- **Secret: `API_KEY_PEPPER`** — a self-generated `random_password` (no operator input) used to **HMAC** the keys, so a DB-only leak can't verify guesses. **Distinct per environment**: production gets `random_password.api_key_pepper` (`arp_live_…` keys via `API_KEY_ENV=live`); previews get a separate `random_password.api_key_pepper_preview` (`arp_test_…` via `API_KEY_ENV=test`). Different peppers mean a preview-minted key can't verify in prod even while previews still share the prod Neon DB.
+- **Fail-closed**: `API_KEY_PEPPER` is **optional** in the env contract (`packages/env`). With it unset the `ApiKeyService` mints nothing and every verification returns `false`, so the `arp_` Bearer path is simply inert until Terraform provisions the secret — Clerk-session auth is unaffected. No app boot dependency.
+- **Rotation (ops runbook):** rotating `API_KEY_PEPPER` invalidates **all** existing keys in that environment (their stored HMACs no longer match). To rotate, taint the `random_password.api_key_pepper` resource and `apply-prod`; then re-mint keys from **Settings → API keys**. Do this on suspected pepper compromise.
+
+**Verify after apply:** at `https://app.<apex>/settings/api-keys`, create a key → the secret is shown once → `curl -H "Authorization: Bearer arp_live_…" https://app.<apex>/api/v1/reports` returns `200` (and `401` after you revoke it).
+
+---
+
 ## Common issues
 
 ### Stuck advisory lock

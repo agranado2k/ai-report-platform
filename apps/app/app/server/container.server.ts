@@ -4,9 +4,11 @@
 // this is the ONLY place the concrete adapters are assembled.
 import {
   AllowAllPlanLimiter,
+  ApiKeyService,
   CleanStubScanner,
   ClerkBackendOrgProvisioner,
   DbContext,
+  DrizzleApiKeyRepository,
   DrizzleEventOutbox,
   DrizzleFolderRepository,
   DrizzleIdempotencyStore,
@@ -84,6 +86,22 @@ let _folders: DrizzleFolderRepository | undefined;
 export function folderRepo(): DrizzleFolderRepository {
   if (!_folders) _folders = new DrizzleFolderRepository(context());
   return _folders;
+}
+
+let _apiKeys: DrizzleApiKeyRepository | undefined;
+
+/**
+ * The API-key store (Identity & Access, ADR-0008) — backs the `arp_` Bearer path
+ * in the auth seam (`resolveUploadActor`/`resolveActorForRead`) alongside Clerk
+ * sessions. Memoized per warm lambda like `folderRepo()`.
+ */
+export function apiKeyStore(): DrizzleApiKeyRepository {
+  if (!_apiKeys) {
+    const env = defineEnv();
+    const keys = new ApiKeyService({ pepper: env.API_KEY_PEPPER ?? "", label: env.API_KEY_ENV });
+    _apiKeys = new DrizzleApiKeyRepository(context(), keys);
+  }
+  return _apiKeys;
 }
 
 let _provisionDeps: ProvisionIdentityDeps | undefined;

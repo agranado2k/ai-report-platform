@@ -35,6 +35,18 @@ export const serverSchema = {
   // Clerk server key (ADR-0005). The publishable key is client-safe — see below.
   CLERK_SECRET_KEY: trimmedString,
 
+  // API-key auth (ADR-0008). Server-side HMAC pepper used to hash `arp_` keys, so
+  // a DB-only leak can't verify guesses. OPTIONAL at the env layer (Terraform
+  // provisions it independently of the code deploy, so the app boots without it):
+  // the ApiKeyService fails CLOSED when it's unset — minting throws and every key
+  // verification returns false, so the `arp_` Bearer path is simply inert until
+  // the secret lands. Clerk-session auth is unaffected.
+  API_KEY_PEPPER: trimmedString.optional(),
+  // Environment label stamped into minted keys (`arp_live_…` vs `arp_test_…`).
+  // Terraform sets `live` on prod, `test` on previews/dev. Defaults to `test` so a
+  // misconfigured env never mints a `live`-looking key.
+  API_KEY_ENV: z.enum(["live", "test"]).default("test"),
+
   // Upstash rate-limiting (ADR-0011) — wired in Phase 1.5, so optional for now.
   UPSTASH_REDIS_REST_URL: z.url().optional(),
   UPSTASH_REDIS_REST_TOKEN: trimmedString.optional(),
