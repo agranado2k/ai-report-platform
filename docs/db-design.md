@@ -100,7 +100,7 @@ Indexes: `clerk_user_id` unique, `email`.
 | `name` | text | |
 | `scopes` | jsonb | OAuth-style scope set |
 | `key_prefix` | varchar(12) | plaintext, shown in UI |
-| `key_hash` | text | argon2id |
+| `key_hash` | text | HMAC-SHA-256 + server pepper (ADR-0008) |
 | `last_used_at` | timestamptz NULL | |
 | `revoked_at` | timestamptz NULL | soft delete |
 | `created_at` | timestamptz | |
