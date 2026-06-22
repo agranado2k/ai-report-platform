@@ -1331,3 +1331,32 @@ spec's argon2id/`rk_` amended with operator sign-off.
 
 233 unit/integration tests green; typecheck + biome + docs:check clean. Next in the
 epic: the Express MCP server scaffold + read tools (PR2).
+
+---
+
+## 2026-06-22 — MCP server: Express scaffold + read tools (ADR-0051)
+
+Second PR of the MCP epic (after #87's API-key auth). Stood up **`apps/mcp`** — a
+remote, **stateless Streamable-HTTP** MCP server on **Express** (`@modelcontextprotocol/sdk`
+≥1.26, fresh `McpServer` + transport per request), deployed as a **Vercel Node
+serverless function** (`api/index.ts` exports the Express app; `vercel.json`
+rewrites all paths to it; no framework preset). Worktree `feat/mcp-server-read-tools`.
+
+A **thin HTTP client over `/api/v1`** (ADR-003, the in-process option rejected):
+`ApiClient` forwards the caller's `Authorization` (an `arp_` key) to the API and
+maps RFC-9457 problems → `isError` tool results. Ships the read tools
+**`reports_search`** + **`folders_list`** (domain-prefixed, read-only annotations,
+paginated). Write tools + the Clerk-OAuth resource-server layer come next.
+
+The REST-client + tool-mapping logic is **unit-tested** (`apps/mcp/src/**`, added to
+the root vitest include — unusual for an app here, justified because the logic is
+pure). Infra (CI/CD on merge): `module "vercel_mcp"` (`apps/mcp`, `mcp.<apex>`,
+minimal env — only `APP_ORIGIN`; it holds none of the app's secrets) + a `mcp`
+CNAME in the shared zone. **ADR-0051** records it all, incl. the deliberate
+API-key-passthrough deviation from the MCP spec's token-passthrough rule (accepted
+for a single-vendor setup; the OAuth path will be spec-clean).
+
+Verified facts (2026 docs): MCP spec rev **2025-11-25**; Streamable HTTP current
+(HTTP+SSE deprecated since 2025-03-26); SDK 1.29.0 resolved (peer `zod ^3.25||^4.0`,
+links our zod 4); Vercel Node runs a default-exported Express app. Active worktree:
+`feat/mcp-server-read-tools`.

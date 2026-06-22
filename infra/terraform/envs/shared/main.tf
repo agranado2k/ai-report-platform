@@ -19,6 +19,7 @@ locals {
   app_view_records = [
     { name = "app", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production dashboard" },
     { name = "view", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production viewer" },
+    { name = "mcp", type = "CNAME", value = local.vercel_target, proxied = false, comment = "production MCP server (ADR-0051)" },
   ]
 
   # Clerk production instance: Account Portal + Frontend API custom domains, plus

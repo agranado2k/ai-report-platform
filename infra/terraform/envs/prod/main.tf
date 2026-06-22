@@ -171,3 +171,28 @@ module "vercel_view" {
   domains               = ["view.${local.apex}"]
   environment_variables = local.shared_env
 }
+
+# The MCP server (ADR-0051) — a thin Express HTTP client over /api/v1. No
+# framework preset (`framework = null`), so Vercel's zero-config builds the
+# `apps/mcp/api/` serverless function; vercel.json rewrites every path to it.
+# It holds NONE of the app's secrets (no DB/R2/Clerk/pepper): callers present
+# their own `arp_` API key and the server forwards it to the API (ADR-003), so
+# its only config is APP_ORIGIN. APP_ORIGIN points at the prod API on both
+# targets (previews already share prod data, pre-launch).
+locals {
+  mcp_env = {
+    ENABLE_EXPERIMENTAL_COREPACK = { value = "1", target = ["production", "preview", "development"], sensitive = false }
+    APP_ORIGIN                   = { value = "https://app.${local.apex}", target = ["production", "preview"], sensitive = false }
+  }
+}
+
+module "vercel_mcp" {
+  source                = "../../modules/vercel-app"
+  name                  = "arp-mcp-prod"
+  team_id               = var.vercel_team_id
+  framework             = null
+  github_repo           = local.repo
+  root_directory        = "apps/mcp"
+  domains               = ["mcp.${local.apex}"]
+  environment_variables = local.mcp_env
+}
