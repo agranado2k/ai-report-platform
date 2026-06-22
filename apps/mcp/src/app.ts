@@ -12,6 +12,15 @@ import { buildMcpServer } from "./server";
 export function createApp() {
   const env = loadEnv();
   const app = express();
+
+  // Baseline hardening for the JSON endpoints (defence-in-depth — these emit only
+  // JSON, no HTML/cookies, so this is lighter than the viewer's ADR-013 stack):
+  // don't sniff content types, and don't cache API responses.
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
   app.use(express.json());
 
   app.get("/health", (_req, res) => {
