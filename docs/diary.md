@@ -4,15 +4,15 @@
 
 ---
 
-## Current state — 2026-06-17
+## Current state — 2026-06-22
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete and enforced in prod.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045, dummy clean verdict) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, and optional #54 surface (org switcher / folder tree / invites). |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.agranado.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
 | **Last commit on main**| `c0452c8` — Merge PR #70 (app-wide dashboard auth gate). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
-| **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.agranado.com` + `accounts.agranado.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.agranado.com**, session-gated) + `arp-view-prod` (**view.agranado.com**, public viewer), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.agranado.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.agranado.com`. |
+| **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.agranado.com` + `accounts.agranado.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.agranado.com**, session-gated) + `arp-view-prod` (**view.agranado.com**, public viewer) + `arp-mcp-prod` (**mcp.agranado.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.agranado.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.agranado.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
 | **Active worktrees**   | `docs/sync-spec-diary` (this docs-sync PR, #56). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
@@ -1476,3 +1476,35 @@ unit tests + full typecheck green. Worktree `fix/api-accept-oauth-token`; supers
 session-token-out half of `feat/mcp-oauth`. Still owed once merged + redeployed: confirm
 the live Inspector OAuth round-trip; the deferred completers (MCP usage docs, `reports_get`,
 spec.html reconcile).
+
+### 2026-06-22 — MCP OAuth confirmed live + the completers PR (`feat/mcp-completers`)
+
+After #92 merged + redeployed, OAuth works **end-to-end**: the operator added the custom
+connector in Claude Desktop → Clerk browser login → connected, and ran live tool calls
+(listed + bulk-deleted 37 reports). Both front doors (`arp_` key + OAuth) verified in prod.
+Two operator gotchas were the live blockers, both fixed: **DCR had to be enabled on the
+LIVE Clerk instance** (only dev had it → AS metadata lacked `registration_endpoint`), and
+the **Vercel env-ordering race** (apply-prod sets the Clerk keys ~100s after the merge's
+build → needs a redeploy; subsequent merges self-resolve it).
+
+The completers PR closes the epic's loose ends:
+- **`reports_get`** — the read tool the original plan listed but PR #88 never shipped. Needed
+  a new `GET /api/v1/reports/{slug}` (there was no single-report JSON endpoint): an 8-line
+  `getReport` use case (load by slug → org authz → return; mirrors `renameReport` minus the
+  write), `getReportToHttp` (summary shape, shared helper with rename), the GET loader on
+  `api.v1.reports.$slug.ts` (read actor, no provisioning), the openapi op, and the
+  `ApiClient.getReport` + `reports_get` MCP tool (READ_ONLY).
+- **MCP usage docs** — `docs/mcp-usage.md` (connect via OAuth connector or API-key/mcp-remote;
+  the 10-tool table).
+- **Security posture** — researched + recorded in ADR-0051: **audience binding is deliberately
+  NOT enforced** (Clerk's OAuth-token `aud` is undocumented — introspection exposes `client_id`,
+  no `aud`; enforcing `audience` would likely reject every token and break the flow);
+  `authorizedParties` is inapplicable under DCR. Follow-up: decode a real token's `aud`, enforce
+  iff it equals the resource. Also memoized the per-request `createClerkClient` (warm-instance).
+- **spec.html** — reviewed; its MCP content (Journey 2: LLM → MCP server → API) is product
+  vision now realized + consistent with ADR-0051, so no change needed.
+
+**Deferred (logged):** the **dev/preview Clerk OAuth app + DCR** (preview OAuth; not blocking
+prod) and **un-`@wip` `upload-report-via-mcp.feature`** (a real MCP BDD e2e still needs a
+key-minting harness against the deployed `mcp.<apex>`; the logic is unit-covered meanwhile).
+273 unit tests + typecheck + docs:check green. Worktree `feat/mcp-completers`.
