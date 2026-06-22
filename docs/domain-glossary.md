@@ -57,8 +57,10 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 
 Terms used identically across all three contexts.
 
-- **UserId** — branded type for `User` identifiers. Originates in Clerk; mirrored on `users.id`.
-- **OrgId** — branded type for `Org` identifiers. Originates in Clerk; mirrored on `orgs.id`.
+- **UserId** — branded type for **our** `User` identifier: the `users.id` UUIDv7 PK. Exposed on the wire (when exposed) as a `user_…` **External Id** (ADR-0052). This is NOT the Clerk id — that is a separate field/type, `ClerkUserId`.
+- **OrgId** — branded type for **our** `Org` identifier: the `orgs.id` UUIDv7 PK. Exposed as an `org_…` External Id (ADR-0052). NOT the Clerk id (`ClerkOrgId`).
+- **ClerkUserId / ClerkOrgId** — branded types for the **third-party Clerk** identifiers, persisted in the separate `users.clerk_user_id` / `orgs.clerk_org_id` columns (unique). Used only to map a Clerk session / OAuth token to our mirrored `User` / `Org` (`findByClerk`, `findPersonalOrg`); **never serialized** on the API/MCP wire (ADR-0052). Any future vendor id follows the same `<provider><Entity>Id` field-and-type pattern.
+- **External Id** — the public, prefixed form an internal entity id takes on the API/MCP wire: `<prefix>_<base62(uuidv7)>` (e.g. `folder_3QmK9v…`, `report_7Kp…`). A *reversible codec over the uuid PK* (no separate column); the branded value object's `make*Id` / `toWire` decode/encode it (ADR-0052). Self-describing + mistype-proof. Distinct from a `Slug` (a capability / possession-token, not an addressing id).
 - **Timestamp** — UTC `Date` (millisecond precision). All persisted timestamps are stored as Postgres `timestamptz`.
 
 ## Domain events
