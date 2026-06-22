@@ -252,11 +252,11 @@ A third Vercel project, `arp-mcp-prod` (`apps/mcp`), serves the remote MCP serve
 OAuth lets interactive clients (Claude Desktop) connect with a browser login instead of a pasted API key. There is **no Terraform resource for Clerk OAuth applications**, so this is dashboard click-ops (an ADR-017 exception, like the per-provider PATs). Do it on **both** the **dev** (preview) and **live** (prod) Clerk instances:
 
 1. Clerk Dashboard → **OAuth Applications** → create one for the MCP server.
-2. Enable **Dynamic Client Registration** (so MCP clients self-register; note this forces the consent screen on).
+2. Enable **Dynamic Client Registration** (so MCP clients self-register; note this forces the consent screen on). **This MUST be on for the *live* instance, not just dev** — without it, Clerk's AS metadata (`clerk.<apex>/.well-known/oauth-authorization-server`) advertises **no `registration_endpoint`**, and clients fail with *"couldn't register with the sign-in service."* Verify with `curl -s clerk.<apex>/.well-known/oauth-authorization-server | grep registration_endpoint`.
 3. Scopes: `email`, `profile`. Resource / canonical URI: `https://mcp.<apex>/mcp` (prod) / your preview MCP URL (dev).
-4. Allowed redirect handling must cover `http://localhost:6274/oauth/callback` (the MCP Inspector) and any real client callbacks.
+4. Redirect URIs are self-registered by DCR clients — don't hardcode the MCP URL. For Inspector testing, allow `http://localhost:6274/oauth/callback` if the form requires one.
 
-**Verify OAuth after setup:** `npx @modelcontextprotocol/inspector`, connect to `https://mcp.<apex>/mcp` (Streamable HTTP) with **no** token → it should 401 + discover Clerk via `/.well-known/oauth-protected-resource/mcp` → complete the browser auth-code flow → then `tools/list` + a tool call succeed (the MCP mints a session token to reach `/api/v1`).
+**Verify OAuth after setup:** `npx @modelcontextprotocol/inspector`, connect to `https://mcp.<apex>/mcp` (Streamable HTTP) with **no** token → it should 401 + discover Clerk via `/.well-known/oauth-protected-resource/mcp` → complete the browser auth-code flow → then `tools/list` + a tool call succeed. The MCP verifies the OAuth token and **forwards it** to `/api/v1`, which re-verifies it (`acceptsToken: "oauth_token"`) — it does NOT mint a session token (Clerk's create-session API is testing-only / unavailable on a production instance; see ADR-0051's amendment).
 
 **Verify after apply:** `curl https://mcp.<apex>/health` → `{"status":"ok"}`; then point the MCP Inspector at `https://mcp.<apex>/mcp` (Streamable HTTP) with `Authorization: Bearer arp_live_…` and list/call tools:
 `npx @modelcontextprotocol/inspector --cli https://mcp.<apex>/mcp --transport http --header "Authorization: Bearer arp_live_…" --method tools/list`.

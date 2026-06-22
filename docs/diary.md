@@ -1439,3 +1439,40 @@ the Inspector's OAuth mode. Steps in `docs/infra.md`. The live OAuth flow is the
 one thing not exercised by CI (needs the Clerk app + a browser). Active worktree:
 `feat/mcp-oauth`. Deferred completers (own PR): MCP usage docs, `reports_get`,
 spec.html MCP-section reconcile.
+
+### 2026-06-22 — MCP OAuth downstream fix: session-token-out was impossible on prod → forward the OAuth token (`fix/api-accept-oauth-token`)
+
+PR #91's OAuth merged, but the live browser flow failed end-to-end. Debugged with the
+operator in real time:
+1. *"Couldn't register with the sign-in service"* → **DCR was disabled on the LIVE
+   Clerk instance** (only dev had it). Clerk's AS metadata advertised no
+   `registration_endpoint`. Operator enabled it on live → DCR then worked.
+2. After DCR, the OAuth handshake completed ("account authorized") but the MCP
+   returned **502** on every call. Root cause: the session-token-out design
+   (`POST /v1/sessions` → `…/tokens`, copied from the e2e recipe) hits an endpoint
+   Clerk documents as **"intended only for use in testing, and is not available for
+   production instances."** It worked on the dev instance, 502'd on live. Clerk
+   documents **no** server-side session-JWT mint for production.
+
+**Fix (Clerk's own recommended pattern):** stop minting a session token; **verify the
+OAuth token directly at `/api/v1`** and have the MCP forward it.
+- `apps/mcp`: `resolveDownstreamAuthorization`'s OAuth branch now verifies (resource-
+  server gate) then **forwards the same token**; dropped `mintSessionToken` + the
+  per-user token cache + the 502 path. (34 mcp tests; supertest integration suite
+  covers dual-mode auth.)
+- `apps/app`: the actor seam (`resolveUploadActor`/`resolveActorForRead`) gains a third
+  branch — a forwarded Clerk **OAuth token**, verified via `@clerk/backend`
+  `authenticateRequest({ acceptsToken: "oauth_token" })` (added `@clerk/backend ^2.33`;
+  the bundled `@clerk/remix@4` ships backend 1.x which lacks `acceptsToken`). Email comes
+  from `users.getUser` (not on the OAuth machine-auth object), org from `findPersonalOrg`,
+  then the existing `provisionIdentity`. No `audience` enforced, so the MCP-bound token
+  re-verifies at our API (Clerk's supported multi-backend pattern). Seam is boundary glue
+  verified live, like `verifyOAuthUser`; `provisionIdentity` stays unit-covered.
+
+This makes the OAuth path a **single-vendor token forward**, same posture as the `arp_`
+key path — recorded as an amendment to ADR-0051 (the spec-deviation note now covers both
+front doors). No schema/Terraform/env change (`/api/v1` already had the Clerk keys). 267
+unit tests + full typecheck green. Worktree `fix/api-accept-oauth-token`; supersedes the
+session-token-out half of `feat/mcp-oauth`. Still owed once merged + redeployed: confirm
+the live Inspector OAuth round-trip; the deferred completers (MCP usage docs, `reports_get`,
+spec.html reconcile).
