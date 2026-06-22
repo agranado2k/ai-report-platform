@@ -43,6 +43,22 @@ describe("ApiClient", () => {
     expect(calls[0]?.headers.authorization).toBe("Bearer arp_live_x");
   });
 
+  it("getReport GETs /api/v1/reports/{slug} (slug encoded) and returns the summary", async () => {
+    const { fn, calls } = stub(json({ slug: "ab/cd", title: "T", is_published: true }));
+    const client = new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+    const r = await client.getReport("ab/cd");
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.title).toBe("T");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/ab%2Fcd");
+    expect(calls[0]?.method).toBe("GET");
+  });
+
   it("listFolders GETs /api/v1/folders and omits the auth header when none is set", async () => {
     const { fn, calls } = stub(json({ folders: [] }));
     const client = new ApiClient({

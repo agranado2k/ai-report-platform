@@ -1,15 +1,41 @@
-// PATCH /api/v1/reports/{slug} — rename a report (title).
+// GET    /api/v1/reports/{slug} — fetch one report (summary), org-scoped.
+// PATCH  /api/v1/reports/{slug} — rename a report (title).
 // DELETE /api/v1/reports/{slug} — soft-delete a report (viewer then 410).
-// Thin transport adapter (ADR-0038): resolve the actor (write path → provisions)
-// → validate the slug → dispatch on method → run the use case → serialize via
+// Thin transport adapter (ADR-0038): resolve the actor (read path → no provision;
+// write path → provisions) → validate the slug → run the use case → serialize via
 // the pure arp-http mappers. The use cases own org-ownership authz.
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { deleteReport, renameReport } from "arp-application";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { deleteReport, getReport, renameReport } from "arp-application";
 import { makeSlug } from "arp-domain";
-import { deleteReportToHttp, errorToHttp, parseJsonBody, renameReportToHttp } from "arp-http";
-import { resolveUploadActor } from "../server/auth.server";
+import {
+  deleteReportToHttp,
+  errorToHttp,
+  getReportToHttp,
+  parseJsonBody,
+  renameReportToHttp,
+} from "arp-http";
+import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps } from "../server/container.server";
-import { toResponse } from "../server/http.server";
+import { toResponse, unauthenticated } from "../server/http.server";
+
+// GET — read a single report by slug, scoped to the acting org. resolveActorForRead
+// resolves the org WITHOUT provisioning (GETs stay safe); no session / no org → 401.
+// A report outside the actor's org reads as NotAllowed (the use case owns authz).
+export async function loader(args: LoaderFunctionArgs) {
+  const actor = await resolveActorForRead(args);
+  if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
+  if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
+
+  const slug = makeSlug(String(args.params.slug ?? ""));
+  if (!slug.ok) return toResponse(errorToHttp(slug.error));
+
+  const result = await getReport(
+    { reports: deps().reports },
+    { orgId: actor.value.orgId },
+    { slug: slug.value },
+  );
+  return toResponse(getReportToHttp(result));
+}
 
 export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);

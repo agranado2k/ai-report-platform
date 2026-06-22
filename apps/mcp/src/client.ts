@@ -61,6 +61,11 @@ export class ApiClient {
     return this.get<ReportPage>(`/api/v1/reports${query ? `?${query}` : ""}`);
   }
 
+  /** Fetch a single report by slug (summary shape); 404 → problem. */
+  getReport(slug: string): Promise<ApiResult<Record<string, unknown>>> {
+    return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}`);
+  }
+
   listFolders(): Promise<ApiResult<FolderList>> {
     return this.get<FolderList>("/api/v1/folders");
   }

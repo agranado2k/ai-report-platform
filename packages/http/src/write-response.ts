@@ -18,20 +18,26 @@ export function moveReportToHttp(
   };
 }
 
+/** The wire shape of a Report (summary; no org id) — shared by rename + get. */
+function reportSummaryBody(r: Report) {
+  return {
+    slug: r.slug,
+    title: r.title,
+    is_published: r.liveVersionId !== null,
+    folder_id: r.folderId,
+  };
+}
+
 /** PATCH /api/v1/reports/{slug} — 200 with the renamed report (summary shape). */
 export function renameReportToHttp(result: Result<Report, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  const r = result.value;
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: {
-      slug: r.slug,
-      title: r.title,
-      is_published: r.liveVersionId !== null,
-      folder_id: r.folderId,
-    },
-  };
+  return { status: 200, contentType: "application/json", body: reportSummaryBody(result.value) };
+}
+
+/** GET /api/v1/reports/{slug} — 200 with the report (summary shape), or a problem. */
+export function getReportToHttp(result: Result<Report, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: reportSummaryBody(result.value) };
 }
 
 /** DELETE /api/v1/reports/{slug} — 204 No Content on success. */
