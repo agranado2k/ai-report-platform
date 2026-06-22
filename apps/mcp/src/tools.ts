@@ -101,6 +101,22 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_get",
+    {
+      title: "Get a report",
+      description:
+        "Fetch a single report by its slug — returns slug, title, is_published, and folder_id. " +
+        "Read-only. Use it to confirm a report exists / check its current title or folder before " +
+        "an update, move, or delete. A slug that isn't yours (or doesn't exist) returns not-found.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug (e.g. from reports_search)."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => toToolResult(await client.getReport(args.slug)),
+  );
+
+  server.registerTool(
     "folders_list",
     {
       title: "List folders",
