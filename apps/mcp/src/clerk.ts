@@ -1,43 +1,13 @@
 // Clerk-specific OAuth glue for the MCP resource server (ADR-0051, PR 4):
-//   - mintSessionToken: exchange an OAuth-verified user for a short-lived Clerk
-//     session token (a JWT `/api/v1` already accepts) — so we never forward the
-//     inbound OAuth token (MCP spec: no token passthrough). Mirrors the backend
-//     recipe in tests/e2e/support/clerk-session.ts.
-//   - verifyOAuthUser: validate an inbound Clerk OAuth access token → user id.
+//   - verifyOAuthUser: validate an inbound Clerk OAuth access token → user id. The
+//     verified token is then forwarded as-is to `/api/v1` (which re-verifies it) —
+//     we do NOT exchange it for a Clerk session token, because Clerk's create-session
+//     Backend API is testing-only / unavailable on a production instance (ADR-0051
+//     amendment). Forwarding the same token to our own API is Clerk's supported
+//     multi-backend pattern, mirroring the `arp_` key single-vendor forward.
 //   - protectedResourceMetadata / clerkAuthServerOrigin: the RFC 9728 document
 //     pointing MCP clients at Clerk as the authorization server.
 import { createClerkClient } from "@clerk/backend";
-
-const CLERK_API = "https://api.clerk.com/v1";
-
-export interface ClerkConfig {
-  readonly secretKey: string;
-  /** Injectable for tests; defaults to the global fetch. */
-  readonly fetch?: typeof fetch;
-}
-
-export async function mintSessionToken(userId: string, cfg: ClerkConfig): Promise<string> {
-  const f = cfg.fetch ?? fetch;
-  const headers = {
-    Authorization: `Bearer ${cfg.secretKey}`,
-    "Content-Type": "application/x-www-form-urlencoded",
-  };
-  const sessionRes = await f(`${CLERK_API}/sessions`, {
-    method: "POST",
-    headers,
-    body: new URLSearchParams({ user_id: userId }),
-  });
-  if (!sessionRes.ok) throw new Error(`clerk createSession failed: ${sessionRes.status}`);
-  const sessionId = ((await sessionRes.json()) as { id: string }).id;
-
-  const tokenRes = await f(`${CLERK_API}/sessions/${sessionId}/tokens`, {
-    method: "POST",
-    headers,
-    body: new URLSearchParams({ expires_in_seconds: "600" }),
-  });
-  if (!tokenRes.ok) throw new Error(`clerk session token failed: ${tokenRes.status}`);
-  return ((await tokenRes.json()) as { jwt: string }).jwt;
-}
 
 /**
  * Derive the Clerk authorization-server origin from a publishable key. A Clerk pk

@@ -2,36 +2,31 @@
 // a fresh McpServer + transport per POST /mcp (SDK >=1.26 forbids reuse), bound
 // to an ApiClient whose downstream credential is RESOLVED per request (ADR-0051
 // PR 4): an `arp_` API key is forwarded as-is (headless, ADR-0008); a Clerk OAuth
-// access token is verified and exchanged for a short-lived Clerk session token
-// (never forwarded — no token passthrough). Bundled by esbuild + deployed as a
-// Vercel Node serverless function via `api/index.mjs`; runnable via `src/local.ts`.
+// access token is verified here (resource-server gate) then forwarded as-is to
+// `/api/v1`, which re-verifies it (ADR-0051 amendment — Clerk has no production
+// server-side session mint, so we forward the same token instead). Bundled by
+// esbuild + deployed as a Vercel Node serverless function via `api/index.mjs`.
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { resolveDownstreamAuthorization } from "./auth";
-import { mintSessionToken, protectedResourceMetadata, verifyOAuthUser } from "./clerk";
+import { protectedResourceMetadata, verifyOAuthUser } from "./clerk";
 import { ApiClient } from "./client";
 import { loadEnv, type McpEnv } from "./env";
 import { buildMcpServer } from "./server";
 
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp";
-/** Reuse a minted session token for a user until shortly before it expires (the
- *  token is minted with a 600s lifetime) — avoids creating a fresh Clerk session
- *  on every interactive request (PR #91 review finding #3). Warm-instance scoped. */
-const TOKEN_TTL_MS = 540_000;
 
 /**
  * The OAuth dependencies the server needs when the Clerk-OAuth path is enabled.
  * Built from env for production (`buildClerkOAuth`); injected directly in tests so
- * the resource-server paths (metadata, 401/`WWW-Authenticate`, token cache, 502)
- * are exercisable without touching Clerk or the network.
+ * the resource-server paths (metadata, 401/`WWW-Authenticate`, dual-mode auth) are
+ * exercisable without touching Clerk or the network.
  */
 export interface OAuthDeps {
   /** Clerk publishable key — derives the auth-server origin for the RFC-9728 doc. */
   readonly publishableKey: string;
   /** Verify an inbound Authorization as a Clerk OAuth token → user id (or null). */
   readonly verifyUser: (authorization: string, resourceUrl: string) => Promise<string | null>;
-  /** Mint a short-lived Clerk session token for a verified user. */
-  readonly mintSessionToken: (userId: string) => Promise<string>;
 }
 
 /** Wire the real Clerk-backed OAuth deps from env, or null when keys are unset (fail-closed). */
@@ -43,7 +38,6 @@ function buildClerkOAuth(env: McpEnv): OAuthDeps | null {
     publishableKey,
     verifyUser: (authorization, resourceUrl) =>
       verifyOAuthUser(authorization, { secretKey, publishableKey }, resourceUrl),
-    mintSessionToken: (userId) => mintSessionToken(userId, { secretKey }),
   };
 }
 
@@ -72,21 +66,6 @@ export function createApp(injectedOAuth?: OAuthDeps) {
   // only in local dev / previews where no stable origin is set.
   const originOf = (req: express.Request) => env.MCP_ORIGIN ?? `https://${req.header("host")}`;
 
-  // Per-user session-token cache (warm-instance scoped) to curb Clerk session churn.
-  const tokenCache = new Map<string, { token: string; expiresAt: number }>();
-  const mintCached = async (userId: string): Promise<string> => {
-    if (!oauth) throw new Error("OAuth is not configured on this MCP server");
-    const now = Date.now();
-    const hit = tokenCache.get(userId);
-    if (hit && hit.expiresAt > now) return hit.token;
-    // Prune expired entries on miss so the map stays bounded on a long-lived
-    // warm instance (PR #91 re-review nit).
-    for (const [key, value] of tokenCache) if (value.expiresAt <= now) tokenCache.delete(key);
-    const token = await oauth.mintSessionToken(userId);
-    tokenCache.set(userId, { token, expiresAt: now + TOKEN_TTL_MS });
-    return token;
-  };
-
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
@@ -104,18 +83,12 @@ export function createApp(injectedOAuth?: OAuthDeps) {
     const origin = originOf(req);
     const resourceUrl = `${origin}/mcp`;
 
-    let authorization: string | null;
-    try {
-      authorization = await resolveDownstreamAuthorization(req.header("authorization") ?? null, {
+    const authorization = await resolveDownstreamAuthorization(
+      req.header("authorization") ?? null,
+      {
         verifyOAuthUser: oauth ? (h) => oauth.verifyUser(h, resourceUrl) : async () => null,
-        mintSessionToken: mintCached,
-      });
-    } catch {
-      // A verified user whose session-token mint failed (Clerk hiccup/rate-limit)
-      // — surface a clean 502 rather than leaking a default 500 (review finding #4).
-      res.status(502).json({ error: "auth backend unavailable; retry shortly" });
-      return;
-    }
+      },
+    );
 
     if (!authorization) {
       // Resource-server 401: advertise where to discover the auth server (RFC 9728)

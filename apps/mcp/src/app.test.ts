@@ -1,5 +1,5 @@
 import request from "supertest";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createApp, type OAuthDeps } from "./app";
 
 // pk = pk_(test|live)_ + base64(frontendApiHost + "$")
@@ -55,7 +55,6 @@ describe("createApp — OAuth enabled (injected deps)", () => {
     createApp({
       publishableKey: PK,
       verifyUser: async (auth) => (auth.includes("good") ? "user_1" : null),
-      mintSessionToken: async (u) => `jwt-${u}`,
       ...over,
     });
 
@@ -75,7 +74,7 @@ describe("createApp — OAuth enabled (injected deps)", () => {
     );
   });
 
-  it("valid OAuth token → verify + mint session token → 200 tools/list", async () => {
+  it("valid OAuth token → verify → forward it → 200 tools/list", async () => {
     const res = await postMcp(make(), "Bearer good-oauth").send(toolsList);
     expect(res.status).toBe(200);
   });
@@ -83,23 +82,5 @@ describe("createApp — OAuth enabled (injected deps)", () => {
   it("invalid OAuth token → 401", async () => {
     const res = await postMcp(make(), "Bearer bad-oauth").send(toolsList);
     expect(res.status).toBe(401);
-  });
-
-  it("session-mint failure → clean 502 (not a bare 500)", async () => {
-    const app = make({
-      mintSessionToken: async () => {
-        throw new Error("clerk unavailable");
-      },
-    });
-    const res = await postMcp(app, "Bearer good-oauth").send(toolsList);
-    expect(res.status).toBe(502);
-  });
-
-  it("caches the minted token per user — mints once across repeated requests", async () => {
-    const mint = vi.fn(async (u: string) => `jwt-${u}`);
-    const app = make({ mintSessionToken: mint });
-    await postMcp(app, "Bearer good-oauth").send(toolsList);
-    await postMcp(app, "Bearer good-oauth").send(toolsList);
-    expect(mint).toHaveBeenCalledTimes(1);
   });
 });
