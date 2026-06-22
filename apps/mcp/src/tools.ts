@@ -19,7 +19,10 @@ const READ_ONLY = {
 
 export function okResult(data: unknown): CallToolResult {
   const content = [{ type: "text" as const, text: JSON.stringify(data, null, 2) }];
-  return typeof data === "object" && data !== null
+  // structuredContent is an object map per the MCP spec — only attach it for a
+  // plain object (not an array, not a primitive); the text channel always carries
+  // the full payload regardless.
+  return typeof data === "object" && data !== null && !Array.isArray(data)
     ? { content, structuredContent: data as Record<string, unknown> }
     : { content };
 }
@@ -44,14 +47,19 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Search reports",
       description:
-        "Search your reports by title/slug text. Returns a paginated list (slug, title, " +
-        "folder, view URL, scan status). Read-only — use it to find a report before you " +
-        "update, move, or delete it. Omit `q` to list everything.",
+        "Search your reports by title/slug text. Returns a paginated list; each item has " +
+        "slug, title, is_published, and folder_id. Read-only — use it to find a report " +
+        "before you update, move, or delete it. Omit `q` to list everything.",
       inputSchema: {
         q: z.string().optional().describe("Free-text match on title/slug. Omit to list all."),
         folder_id: z.string().optional().describe("Restrict results to this folder id."),
         page: z.number().int().positive().optional().describe("1-based page number (default 1)."),
-        page_size: z.number().int().min(1).max(100).optional().describe("Items per page, max 100."),
+        page_size: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Items per page (default 20). The API clamps very large values."),
       },
       annotations: READ_ONLY,
     },

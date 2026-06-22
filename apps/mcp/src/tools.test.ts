@@ -17,6 +17,10 @@ describe("tool result mapping", () => {
     expect(r.structuredContent).toBeUndefined();
   });
 
+  it("okResult omits structuredContent for an array payload (it's an object map, not a list)", () => {
+    expect(okResult([1, 2, 3]).structuredContent).toBeUndefined();
+  });
+
   it("problemResult flags isError and renders status/code/detail", () => {
     const r = problemResult({
       title: "Unauthorized",
