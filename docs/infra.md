@@ -238,6 +238,20 @@ The async content-scan pipeline runs on infrastructure you already have, plus on
 
 ---
 
+## MCP server (ADR-0051)
+
+A third Vercel project, `arp-mcp-prod` (`apps/mcp`), serves the remote MCP server at `mcp.<apex>` — a thin Express HTTP client over `/api/v1`.
+
+- **No framework preset** (`module "vercel_mcp"` passes `framework = null`): Vercel's zero-config builds the `apps/mcp/api/` serverless function, and `apps/mcp/vercel.json` rewrites every path to it. Same `vercel-app` module + corepack install command as the other two projects.
+- **DNS:** a `mcp` CNAME → `cname.vercel-dns.com` in the shared `cloudflare-zone` records (alongside `app`/`view`), DNS-only.
+- **Env: minimal — it holds NONE of the app's secrets.** Only `APP_ORIGIN` (= `https://app.<apex>`, prod + preview) and `ENABLE_EXPERIMENTAL_COREPACK`. Callers present their own `arp_` API key (ADR-0008), which the server forwards to the API — so the MCP project never needs DB/R2/Clerk/pepper credentials.
+- **Apply split:** the Vercel project lands in `apply-prod`; the `mcp` DNS record in `apply-shared` — both on merge, like `app`/`view`.
+
+**Verify after apply:** `curl https://mcp.<apex>/health` → `{"status":"ok"}`; then point the MCP Inspector at `https://mcp.<apex>/mcp` (Streamable HTTP) with `Authorization: Bearer arp_live_…` and list/call tools:
+`npx @modelcontextprotocol/inspector --cli https://mcp.<apex>/mcp --transport http --header "Authorization: Bearer arp_live_…" --method tools/list`.
+
+---
+
 ## Common issues
 
 ### Stuck advisory lock
