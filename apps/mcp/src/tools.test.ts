@@ -21,6 +21,13 @@ describe("tool result mapping", () => {
     expect(okResult([1, 2, 3]).structuredContent).toBeUndefined();
   });
 
+  it("okResult renders a friendly ack for a 204/no-content (undefined) result", () => {
+    const r = okResult(undefined);
+    expect(r.isError).toBeUndefined();
+    expect((r.content[0] as { text: string }).text).toContain("OK");
+    expect(r.structuredContent).toBeUndefined();
+  });
+
   it("problemResult flags isError and renders status/code/detail", () => {
     const r = problemResult({
       title: "Unauthorized",

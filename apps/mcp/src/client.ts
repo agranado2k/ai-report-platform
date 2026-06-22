@@ -65,14 +65,82 @@ export class ApiClient {
     return this.get<FolderList>("/api/v1/folders");
   }
 
-  private async get<T>(path: string): Promise<ApiResult<T>> {
+  /** Create a report, or re-upload a new version of `updateSlug` (multipart, ADR-0037). */
+  uploadReport(params: {
+    readonly html: string;
+    readonly updateSlug?: string;
+    readonly folderPath?: string;
+  }): Promise<ApiResult<unknown>> {
+    const form = new FormData();
+    // `file` is the only required part; the API derives the Idempotency-Key from
+    // the content when the header is absent (ADR-0039), giving content-dedup for
+    // free — so we deliberately don't send one.
+    form.append("file", new File([params.html], "index.html", { type: "text/html" }));
+    if (params.updateSlug) form.append("update_slug", params.updateSlug);
+    if (params.folderPath) form.append("folder_path", params.folderPath);
+    return this.request<unknown>("POST", "/api/v1/reports", { form });
+  }
+
+  renameReport(slug: string, title: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("PATCH", `/api/v1/reports/${encodeURIComponent(slug)}`, {
+      json: { title },
+    });
+  }
+
+  moveReport(slug: string, folderId: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("POST", `/api/v1/reports/${encodeURIComponent(slug)}/move`, {
+      json: { folder_id: folderId },
+    });
+  }
+
+  deleteReport(slug: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("DELETE", `/api/v1/reports/${encodeURIComponent(slug)}`);
+  }
+
+  createFolder(params: {
+    readonly name: string;
+    readonly parentId: string;
+  }): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("POST", "/api/v1/folders", {
+      json: { name: params.name, parent_id: params.parentId },
+    });
+  }
+
+  renameFolder(id: string, name: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("PATCH", `/api/v1/folders/${encodeURIComponent(id)}`, {
+      json: { name },
+    });
+  }
+
+  deleteFolder(id: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("DELETE", `/api/v1/folders/${encodeURIComponent(id)}`);
+  }
+
+  private get<T>(path: string): Promise<ApiResult<T>> {
+    return this.request<T>("GET", path);
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: { readonly json?: unknown; readonly form?: FormData },
+  ): Promise<ApiResult<T>> {
     const doFetch = this.cfg.fetch ?? fetch;
     const headers: Record<string, string> = { accept: "application/json" };
     if (this.cfg.authorization) headers.authorization = this.cfg.authorization;
 
+    let payload: BodyInit | undefined;
+    if (body?.json !== undefined) {
+      headers["content-type"] = "application/json";
+      payload = JSON.stringify(body.json);
+    } else if (body?.form) {
+      // Do NOT set content-type — fetch adds multipart/form-data + the boundary.
+      payload = body.form;
+    }
+
     let res: Response;
     try {
-      res = await doFetch(`${this.cfg.baseUrl}${path}`, { headers });
+      res = await doFetch(`${this.cfg.baseUrl}${path}`, { method, headers, body: payload });
     } catch (e) {
       return {
         ok: false,
@@ -83,6 +151,8 @@ export class ApiClient {
   }
 
   private async parse<T>(res: Response): Promise<ApiResult<T>> {
+    // 204 No Content (e.g. DELETE) has no body to parse.
+    if (res.status === 204) return { ok: true, data: undefined as T };
     if (res.ok) return { ok: true, data: (await res.json()) as T };
 
     // Try to read the API's RFC-9457 body; fall back to a synthetic problem.

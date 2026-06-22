@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { ApiClient } from "./client";
 
+interface Call {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: BodyInit | null | undefined;
+}
+
 /** A `fetch` stub that records calls and returns a canned Response. */
 function stub(response: Response) {
-  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const calls: Call[] = [];
   const fn = (async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), headers: (init?.headers ?? {}) as Record<string, string> });
+    calls.push({
+      url: String(url),
+      method: init?.method ?? "GET",
+      headers: (init?.headers ?? {}) as Record<string, string>,
+      body: init?.body,
+    });
     return response;
   }) as unknown as typeof fetch;
   return { fn, calls };
@@ -86,5 +98,94 @@ describe("ApiClient", () => {
 
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.problem.status).toBe(502);
+  });
+});
+
+describe("ApiClient writes", () => {
+  const client = (fn: typeof fetch) =>
+    new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+  it("uploadReport POSTs multipart to /api/v1/reports and returns the result", async () => {
+    const { fn, calls } = stub(json({ slug: "abc12345", view_url: "https://view/abc12345" }, 201));
+    const r = await client(fn).uploadReport({ html: "<h1>hi</h1>" });
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.data as { slug: string }).slug).toBe("abc12345");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports");
+    expect(calls[0]?.body).toBeInstanceOf(FormData);
+    // multipart: fetch sets the content-type+boundary itself — we must NOT set it.
+    expect(calls[0]?.headers["content-type"]).toBeUndefined();
+    const form = calls[0]?.body as FormData;
+    expect(form.get("file")).toBeInstanceOf(File);
+  });
+
+  it("uploadReport passes update_slug / folder_path when given", async () => {
+    const { fn, calls } = stub(json({ slug: "abc12345" }, 201));
+    await client(fn).uploadReport({ html: "x", updateSlug: "abc12345", folderPath: "/q3" });
+    const form = calls[0]?.body as FormData;
+    expect(form.get("update_slug")).toBe("abc12345");
+    expect(form.get("folder_path")).toBe("/q3");
+  });
+
+  it("renameReport PATCHes the slug with a JSON title", async () => {
+    const { fn, calls } = stub(json({ slug: "abc", title: "New" }));
+    await client(fn).renameReport("abc", "New");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc");
+    expect(calls[0]?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ title: "New" });
+  });
+
+  it("moveReport POSTs {folder_id} to the move sub-resource", async () => {
+    const { fn, calls } = stub(json({ slug: "abc" }));
+    await client(fn).moveReport("abc", "fldr-1");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc/move");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ folder_id: "fldr-1" });
+  });
+
+  it("deleteReport DELETEs and treats 204 as success with no body", async () => {
+    const { fn, calls } = stub(new Response(null, { status: 204 }));
+    const r = await client(fn).deleteReport("abc");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toBeUndefined();
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc");
+  });
+
+  it("createFolder POSTs {name, parent_id} to /api/v1/folders", async () => {
+    const { fn, calls } = stub(json({ id: "f2", name: "Q3" }, 201));
+    await client(fn).createFolder({ name: "Q3", parentId: "root" });
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ name: "Q3", parent_id: "root" });
+  });
+
+  it("renameFolder PATCHes the folder id with {name}", async () => {
+    const { fn, calls } = stub(json({ id: "f2", name: "Q4" }));
+    await client(fn).renameFolder("f2", "Q4");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ name: "Q4" });
+  });
+
+  it("deleteFolder DELETEs the folder id (204 → success)", async () => {
+    const { fn, calls } = stub(new Response(null, { status: 204 }));
+    const r = await client(fn).deleteFolder("f2");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2");
+  });
+
+  it("surfaces an RFC-9457 problem on a failed write", async () => {
+    const { fn } = stub(json({ title: "Not Found", status: 404, code: "not_found" }, 404));
+    const r = await client(fn).renameReport("missing", "x");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem.code).toBe("not_found");
   });
 });
