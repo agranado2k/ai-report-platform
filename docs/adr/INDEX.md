@@ -24,6 +24,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0048 | [Auth provisioning & integration model (Clerk JIT personal-org)](0048-auth-provisioning-model.md) | Accepted (2026-06-16) |
 | 0049 | [Clerk dev/prod instance separation & the data-orphaning incident](0049-clerk-instance-hygiene.md) | Accepted (2026-06-18) |
 | 0050 | [App design system — Tailwind v4 + CSS-first design tokens](0050-app-design-system-tailwind-v4-tokens.md) | Accepted (2026-06-19) |
+| 0051 | [Remote MCP server — stateless Streamable HTTP, thin client over /api/v1](0051-mcp-server.md) | Accepted (2026-06-22) — refines ADR-003 |
 
 ## Backlog (ADRs 1–30 from the spec)
 
