@@ -17,6 +17,11 @@ const schema = z.object({
   // the MCP's first secret; keep it scoped to OAuth.
   CLERK_SECRET_KEY: z.string().trim().min(1).optional(),
   PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().trim().min(1).optional(),
+  // Canonical public origin of THIS MCP server, e.g. https://mcp.agranado.com.
+  // Used as the fixed OAuth resource identifier (RFC 9728 metadata + the token
+  // audience we verify against) instead of the client-controlled Host header.
+  // Optional: in local dev / previews (no stable origin) we fall back to Host.
+  MCP_ORIGIN: z.url().optional(),
 });
 
 export type McpEnv = z.infer<typeof schema>;
@@ -27,5 +32,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): McpEnv {
     PORT: source.PORT,
     CLERK_SECRET_KEY: source.CLERK_SECRET_KEY,
     PUBLIC_CLERK_PUBLISHABLE_KEY: source.PUBLIC_CLERK_PUBLISHABLE_KEY,
+    MCP_ORIGIN: source.MCP_ORIGIN,
   });
 }

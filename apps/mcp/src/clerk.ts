@@ -77,13 +77,17 @@ export interface OAuthVerifyConfig {
 export async function verifyOAuthUser(
   authorization: string,
   cfg: OAuthVerifyConfig,
+  resourceUrl: string,
 ): Promise<string | null> {
   try {
     const clerk = createClerkClient({
       secretKey: cfg.secretKey,
       publishableKey: cfg.publishableKey,
     });
-    const request = new Request("https://mcp.invalid/mcp", { headers: { authorization } });
+    // Build the Request against the REAL resource URL so any resource/audience
+    // (RFC 8707) check validates against this server's canonical identity rather
+    // than a sentinel host (PR #91 review finding #1).
+    const request = new Request(resourceUrl, { headers: { authorization } });
     const state = await clerk.authenticateRequest(request, { acceptsToken: "oauth_token" });
     const auth = state.toAuth();
     if (auth && "userId" in auth && typeof auth.userId === "string") return auth.userId;

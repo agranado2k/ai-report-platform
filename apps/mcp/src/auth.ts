@@ -22,7 +22,8 @@ export async function resolveDownstreamAuthorization(
 ): Promise<string | null> {
   if (!authorization) return null;
   // Headless API-key path — forward the arp_ key as-is (its audience is the API).
-  if (/^Bearer\s+arp_/.test(authorization)) return authorization;
+  // Scheme is case-insensitive per HTTP (a `bearer arp_…` must still match).
+  if (/^Bearer\s+arp_/i.test(authorization)) return authorization;
   // Interactive OAuth path — verify, then mint a separate session token.
   const userId = await deps.verifyOAuthUser(authorization);
   if (!userId) return null;

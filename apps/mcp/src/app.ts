@@ -14,6 +14,10 @@ import { loadEnv } from "./env";
 import { buildMcpServer } from "./server";
 
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp";
+/** Reuse a minted session token for a user until shortly before it expires (the
+ *  token is minted with a 600s lifetime) — avoids creating a fresh Clerk session
+ *  on every interactive request (PR #91 review finding #3). Warm-instance scoped. */
+const TOKEN_TTL_MS = 540_000;
 
 export function createApp() {
   const env = loadEnv();
@@ -36,6 +40,21 @@ export function createApp() {
       ? { secretKey: env.CLERK_SECRET_KEY, publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY }
       : null;
 
+  // Canonical OAuth resource identifier — a CONFIGURED origin, never the
+  // client-controlled Host header (PR #91 review finding #2). Falls back to Host
+  // only in local dev / previews where no stable origin is set.
+  const originOf = (req: express.Request) => env.MCP_ORIGIN ?? `https://${req.header("host")}`;
+
+  // Per-user session-token cache (warm-instance scoped) to curb Clerk session churn.
+  const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+  const mintCached = async (userId: string, secretKey: string): Promise<string> => {
+    const hit = tokenCache.get(userId);
+    if (hit && hit.expiresAt > Date.now()) return hit.token;
+    const token = await mintSessionToken(userId, { secretKey });
+    tokenCache.set(userId, { token, expiresAt: Date.now() + TOKEN_TTL_MS });
+    return token;
+  };
+
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
@@ -44,24 +63,30 @@ export function createApp() {
   // the authorization server. Only served when OAuth is configured.
   if (oauth) {
     app.get(PROTECTED_RESOURCE_METADATA_PATH, (req, res) => {
-      res.json(
-        protectedResourceMetadata(`https://${req.header("host")}/mcp`, oauth.publishableKey),
-      );
+      res.json(protectedResourceMetadata(`${originOf(req)}/mcp`, oauth.publishableKey));
     });
   }
 
   app.post("/mcp", async (req, res) => {
-    const authorization = await resolveDownstreamAuthorization(
-      req.header("authorization") ?? null,
-      {
-        verifyOAuthUser: oauth ? (h) => verifyOAuthUser(h, oauth) : async () => null,
+    const origin = originOf(req);
+    const resourceUrl = `${origin}/mcp`;
+
+    let authorization: string | null;
+    try {
+      authorization = await resolveDownstreamAuthorization(req.header("authorization") ?? null, {
+        verifyOAuthUser: oauth ? (h) => verifyOAuthUser(h, oauth, resourceUrl) : async () => null,
         mintSessionToken: oauth
-          ? (userId) => mintSessionToken(userId, { secretKey: oauth.secretKey })
+          ? (userId) => mintCached(userId, oauth.secretKey)
           : async () => {
               throw new Error("OAuth is not configured on this MCP server");
             },
-      },
-    );
+      });
+    } catch {
+      // A verified user whose session-token mint failed (Clerk hiccup/rate-limit)
+      // — surface a clean 502 rather than leaking a default 500 (review finding #4).
+      res.status(502).json({ error: "auth backend unavailable; retry shortly" });
+      return;
+    }
 
     if (!authorization) {
       // Resource-server 401: advertise where to discover the auth server (RFC 9728)
@@ -70,7 +95,7 @@ export function createApp() {
       if (oauth) {
         res.setHeader(
           "WWW-Authenticate",
-          `Bearer resource_metadata="https://${req.header("host")}${PROTECTED_RESOURCE_METADATA_PATH}"`,
+          `Bearer resource_metadata="${origin}${PROTECTED_RESOURCE_METADATA_PATH}"`,
         );
       }
       res.status(401).json({ error: "unauthorized: present an API key or authenticate via OAuth" });

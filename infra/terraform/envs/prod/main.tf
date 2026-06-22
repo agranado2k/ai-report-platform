@@ -186,6 +186,9 @@ locals {
   mcp_env = {
     ENABLE_EXPERIMENTAL_COREPACK = { value = "1", target = ["production", "preview", "development"], sensitive = false }
     APP_ORIGIN                   = { value = "https://app.${local.apex}", target = ["production", "preview"], sensitive = false }
+    # Canonical OAuth resource identifier for the MCP (fixed, not the Host header).
+    # Production only; previews have no stable origin and fall back to Host.
+    MCP_ORIGIN                   = { value = "https://mcp.${local.apex}", target = ["production"], sensitive = false }
     PUBLIC_CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production"], sensitive = false }
     CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production"] }
     mcp_clerk_pk_preview         = { key = "PUBLIC_CLERK_PUBLISHABLE_KEY", value = module.clerk_staging.publishable_key, target = ["preview"], sensitive = false }
