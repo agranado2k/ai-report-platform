@@ -12,7 +12,7 @@ import {
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { AppHeader, Button, buttonClass, Card, Input, PageShell } from "../components";
-import { resolveUploadActor } from "../server/auth.server";
+import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { apiKeyStore } from "../server/container.server";
 
 export const meta: MetaFunction = () => [{ title: "API keys — ai-report-platform" }];
@@ -20,11 +20,12 @@ export const meta: MetaFunction = () => [{ title: "API keys — ai-report-platfo
 const GENERIC_500 = "Couldn't verify your account. Please try again.";
 
 export async function loader(args: LoaderFunctionArgs) {
-  const actor = await resolveUploadActor(args);
-  if (!actor.ok) {
-    if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
-    throw json({ error: GENERIC_500 }, { status: 500 });
-  }
+  // Read path — never provisions (the app-wide gate already redirects anon
+  // document requests to sign-in). A signed-in user with no mirror yet simply
+  // has no keys; provisioning happens on the first mint (the POST below).
+  const actor = await resolveActorForRead(args);
+  if (!actor.ok) throw json({ error: GENERIC_500 }, { status: 500 });
+  if (!actor.value) return json({ keys: [] });
   const keys = await apiKeyStore().listForUser(actor.value.userId);
   if (!keys.ok) throw json({ error: "Couldn't load your API keys." }, { status: 500 });
   return json({ keys: keys.value });

@@ -95,24 +95,29 @@ export async function resolveUploadActor(
 }
 
 /**
- * Resolve the acting principal for a READ (the dashboard list) WITHOUT the
- * write-path side effects. Unlike `resolveUploadActor`, this never provisions:
- * it looks up the already-mirrored identity (`findByClerk`) and returns its org
- * scope, or `null` when there's no session / the user isn't mirrored yet (a
- * brand-new user who hasn't uploaded — their list is simply empty). Keeps GET
- * loaders safe/idempotent: no Clerk org or DB rows are created on a read.
- * Provisioning stays on the write path (`resolveUploadActor`, first upload).
+ * Resolve the acting principal for a READ (the dashboard list, the API-keys
+ * settings page) WITHOUT the write-path side effects. Unlike `resolveUploadActor`,
+ * this never provisions: it looks up the already-mirrored identity (`findByClerk`)
+ * and returns its `userId`/`orgId`, or `null` when there's no session / the user
+ * isn't mirrored yet (a brand-new user who hasn't uploaded — their list is simply
+ * empty). Keeps GET loaders safe/idempotent: no Clerk org or DB rows are created on
+ * a read. Provisioning stays on the write path (`resolveUploadActor`, first upload
+ * or first API-key mint). `userId` is exposed (not just `orgId`) so read loaders
+ * that key off the acting user — e.g. listing that user's API keys — needn't take
+ * the provisioning write path just to learn who's asking.
  */
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
-): Promise<Result<Pick<UploadActor, "orgId"> | null, AppError>> {
-  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the org scope. An
+): Promise<Result<Pick<UploadActor, "userId" | "orgId"> | null, AppError>> {
+  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the principal. An
   // unmatched key reads as `null` (empty list), consistent with no-session reads.
   const token = apiKeyToken(args);
   if (token) {
     const resolved = await authenticateApiKey({ apiKeys: apiKeyStore() }, token);
     if (!resolved.ok) return resolved;
-    return ok(resolved.value ? { orgId: resolved.value.orgId } : null);
+    return ok(
+      resolved.value ? { userId: resolved.value.userId, orgId: resolved.value.orgId } : null,
+    );
   }
 
   const { userId, orgId } = await getAuth(args);
@@ -133,8 +138,8 @@ export async function resolveActorForRead(
 
   const found = await deps.identities.findByClerk(userId, clerkOrgId);
   if (!found.ok) return found; // infra failure (DB outage) → propagate (→ 500)
-  // ok(null) = no actor (unauthenticated/empty); ok({orgId}) = resolved.
-  return ok(found.value ? { orgId: found.value.orgId } : null);
+  // ok(null) = no actor (unauthenticated/empty); ok({userId,orgId}) = resolved.
+  return ok(found.value ? { userId: found.value.userId, orgId: found.value.orgId } : null);
 }
 
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */
