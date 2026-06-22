@@ -24,11 +24,16 @@ import type { ApiKeyService } from "./services/api-key";
 
 type ApiKeyRow = typeof apiKeys.$inferSelect;
 
+/** Defensive read of the `scopes` jsonb column: keep only string entries, else empty. */
+function asScopes(raw: unknown): readonly string[] {
+  return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string") : [];
+}
+
 function rowToSummary(row: ApiKeyRow): ApiKeySummary {
   return {
     id: row.id,
     name: row.name,
-    scopes: row.scopes as readonly string[],
+    scopes: asScopes(row.scopes),
     keyPrefix: row.keyPrefix,
     createdAt: row.createdAt.getTime(),
     lastUsedAt: row.lastUsedAt ? row.lastUsedAt.getTime() : null,
@@ -57,16 +62,27 @@ export class DrizzleApiKeyRepository implements ApiKeyStore {
       if (!match) return ok(null);
 
       const root = await this.rootFolderId(match.issuedInOrgId);
-      if (!root) return ok(null); // org has no Root folder → can't form a write actor
+      if (!root) {
+        // A matched key whose org has no Root folder is a server-side invariant
+        // violation (every org gets one at provisioning, ADR-0048), NOT an invalid
+        // key — surface Unexpected (→ 500) so it's diagnosable, not a silent 401.
+        return thrown("apiKey.verify", new Error(`org ${match.issuedInOrgId} has no Root folder`));
+      }
 
-      // Best-effort usage stamp — never block auth on the update.
-      await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, match.id));
+      // Best-effort usage stamp: a failed UPDATE must NOT fail an otherwise-valid
+      // auth (it sits inside the outer try, which would turn it into a 500), so
+      // swallow its errors — `last_used_at` is advisory.
+      try {
+        await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, match.id));
+      } catch {
+        // ignore
+      }
 
       return ok({
         userId: userId(match.actingUserId),
         orgId: orgId(match.issuedInOrgId),
         rootFolderId: folderId(root),
-        scopes: match.scopes as readonly string[],
+        scopes: asScopes(match.scopes),
       });
     } catch (e) {
       return thrown("apiKey.verify", e);
