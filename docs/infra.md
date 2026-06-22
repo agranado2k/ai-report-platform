@@ -244,8 +244,19 @@ A third Vercel project, `arp-mcp-prod` (`apps/mcp`), serves the remote MCP serve
 
 - **No framework preset** (`module "vercel_mcp"` passes `framework = null`): Vercel's zero-config builds the `apps/mcp/api/` serverless function, and `apps/mcp/vercel.json` rewrites every path to it. Same `vercel-app` module + corepack install command as the other two projects.
 - **DNS:** a `mcp` CNAME → `cname.vercel-dns.com` in the shared `cloudflare-zone` records (alongside `app`/`view`), DNS-only.
-- **Env: minimal — it holds NONE of the app's secrets.** Only `APP_ORIGIN` (= `https://app.<apex>`, prod + preview) and `ENABLE_EXPERIMENTAL_COREPACK`. Callers present their own `arp_` API key (ADR-0008), which the server forwards to the API — so the MCP project never needs DB/R2/Clerk/pepper credentials.
+- **Env:** `APP_ORIGIN` (= `https://app.<apex>`, prod + preview) + `ENABLE_EXPERIMENTAL_COREPACK`. Headless callers present their own `arp_` API key (ADR-0008) which the server forwards — that path needs no other secret. **OAuth (ADR-0051 PR 4)** adds the MCP's only secret: `CLERK_SECRET_KEY` + `PUBLIC_CLERK_PUBLISHABLE_KEY`, split prod=live / preview=dev instance (same modules as the app). Fail-closed: unset ⇒ OAuth path off, `arp_` still works.
 - **Apply split:** the Vercel project lands in `apply-prod`; the `mcp` DNS record in `apply-shared` — both on merge, like `app`/`view`.
+
+### MCP OAuth — operator setup (one-time, per Clerk instance; ADR-0051 PR 4)
+
+OAuth lets interactive clients (Claude Desktop) connect with a browser login instead of a pasted API key. There is **no Terraform resource for Clerk OAuth applications**, so this is dashboard click-ops (an ADR-017 exception, like the per-provider PATs). Do it on **both** the **dev** (preview) and **live** (prod) Clerk instances:
+
+1. Clerk Dashboard → **OAuth Applications** → create one for the MCP server.
+2. Enable **Dynamic Client Registration** (so MCP clients self-register; note this forces the consent screen on).
+3. Scopes: `email`, `profile`. Resource / canonical URI: `https://mcp.<apex>/mcp` (prod) / your preview MCP URL (dev).
+4. Allowed redirect handling must cover `http://localhost:6274/oauth/callback` (the MCP Inspector) and any real client callbacks.
+
+**Verify OAuth after setup:** `npx @modelcontextprotocol/inspector`, connect to `https://mcp.<apex>/mcp` (Streamable HTTP) with **no** token → it should 401 + discover Clerk via `/.well-known/oauth-protected-resource/mcp` → complete the browser auth-code flow → then `tools/list` + a tool call succeed (the MCP mints a session token to reach `/api/v1`).
 
 **Verify after apply:** `curl https://mcp.<apex>/health` → `{"status":"ok"}`; then point the MCP Inspector at `https://mcp.<apex>/mcp` (Streamable HTTP) with `Authorization: Bearer arp_live_…` and list/call tools:
 `npx @modelcontextprotocol/inspector --cli https://mcp.<apex>/mcp --transport http --header "Authorization: Bearer arp_live_…" --method tools/list`.
