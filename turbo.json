@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["build/**", ".vercel/output/**"],
+      "outputs": ["build/**", "dist/**", ".vercel/output/**"],
       "inputs": ["$TURBO_DEFAULT$", "!**/*.md"]
     },
     "dev": {
