@@ -10,7 +10,7 @@ import express from "express";
 import { resolveDownstreamAuthorization } from "./auth";
 import { mintSessionToken, protectedResourceMetadata, verifyOAuthUser } from "./clerk";
 import { ApiClient } from "./client";
-import { loadEnv } from "./env";
+import { loadEnv, type McpEnv } from "./env";
 import { buildMcpServer } from "./server";
 
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp";
@@ -19,13 +19,42 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/
  *  on every interactive request (PR #91 review finding #3). Warm-instance scoped. */
 const TOKEN_TTL_MS = 540_000;
 
-export function createApp() {
+/**
+ * The OAuth dependencies the server needs when the Clerk-OAuth path is enabled.
+ * Built from env for production (`buildClerkOAuth`); injected directly in tests so
+ * the resource-server paths (metadata, 401/`WWW-Authenticate`, token cache, 502)
+ * are exercisable without touching Clerk or the network.
+ */
+export interface OAuthDeps {
+  /** Clerk publishable key — derives the auth-server origin for the RFC-9728 doc. */
+  readonly publishableKey: string;
+  /** Verify an inbound Authorization as a Clerk OAuth token → user id (or null). */
+  readonly verifyUser: (authorization: string, resourceUrl: string) => Promise<string | null>;
+  /** Mint a short-lived Clerk session token for a verified user. */
+  readonly mintSessionToken: (userId: string) => Promise<string>;
+}
+
+/** Wire the real Clerk-backed OAuth deps from env, or null when keys are unset (fail-closed). */
+function buildClerkOAuth(env: McpEnv): OAuthDeps | null {
+  const secretKey = env.CLERK_SECRET_KEY;
+  const publishableKey = env.PUBLIC_CLERK_PUBLISHABLE_KEY;
+  if (!secretKey || !publishableKey) return null;
+  return {
+    publishableKey,
+    verifyUser: (authorization, resourceUrl) =>
+      verifyOAuthUser(authorization, { secretKey, publishableKey }, resourceUrl),
+    mintSessionToken: (userId) => mintSessionToken(userId, { secretKey }),
+  };
+}
+
+export function createApp(injectedOAuth?: OAuthDeps) {
   const env = loadEnv();
   const app = express();
 
   // Baseline hardening for the JSON endpoints (defence-in-depth — these emit only
   // JSON, no HTML/cookies, so this is lighter than the viewer's ADR-013 stack):
-  // don't sniff content types, and don't cache API responses.
+  // don't sniff content types, and don't cache API responses by default (the
+  // public metadata doc opts back into caching below).
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
@@ -34,11 +63,9 @@ export function createApp() {
   app.use(express.json());
 
   // OAuth 2.1 is enabled only when Clerk keys are configured (fail-closed): without
-  // them the OAuth path stays off and only the `arp_` API-key path works.
-  const oauth =
-    env.CLERK_SECRET_KEY && env.PUBLIC_CLERK_PUBLISHABLE_KEY
-      ? { secretKey: env.CLERK_SECRET_KEY, publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY }
-      : null;
+  // them the OAuth path stays off and only the `arp_` API-key path works. Tests
+  // inject `injectedOAuth` to enable it with fakes.
+  const oauth = injectedOAuth ?? buildClerkOAuth(env);
 
   // Canonical OAuth resource identifier — a CONFIGURED origin, never the
   // client-controlled Host header (PR #91 review finding #2). Falls back to Host
@@ -47,14 +74,15 @@ export function createApp() {
 
   // Per-user session-token cache (warm-instance scoped) to curb Clerk session churn.
   const tokenCache = new Map<string, { token: string; expiresAt: number }>();
-  const mintCached = async (userId: string, secretKey: string): Promise<string> => {
+  const mintCached = async (userId: string): Promise<string> => {
+    if (!oauth) throw new Error("OAuth is not configured on this MCP server");
     const now = Date.now();
     const hit = tokenCache.get(userId);
     if (hit && hit.expiresAt > now) return hit.token;
     // Prune expired entries on miss so the map stays bounded on a long-lived
     // warm instance (PR #91 re-review nit).
     for (const [key, value] of tokenCache) if (value.expiresAt <= now) tokenCache.delete(key);
-    const token = await mintSessionToken(userId, { secretKey });
+    const token = await oauth.mintSessionToken(userId);
     tokenCache.set(userId, { token, expiresAt: now + TOKEN_TTL_MS });
     return token;
   };
@@ -63,10 +91,11 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
-  // RFC 9728 protected-resource metadata — public; points MCP clients at Clerk as
-  // the authorization server. Only served when OAuth is configured.
+  // RFC 9728 protected-resource metadata — public + cacheable; points MCP clients
+  // at Clerk as the authorization server. Only served when OAuth is configured.
   if (oauth) {
     app.get(PROTECTED_RESOURCE_METADATA_PATH, (req, res) => {
+      res.setHeader("Cache-Control", "public, max-age=300"); // override the global no-store
       res.json(protectedResourceMetadata(`${originOf(req)}/mcp`, oauth.publishableKey));
     });
   }
@@ -78,12 +107,8 @@ export function createApp() {
     let authorization: string | null;
     try {
       authorization = await resolveDownstreamAuthorization(req.header("authorization") ?? null, {
-        verifyOAuthUser: oauth ? (h) => verifyOAuthUser(h, oauth, resourceUrl) : async () => null,
-        mintSessionToken: oauth
-          ? (userId) => mintCached(userId, oauth.secretKey)
-          : async () => {
-              throw new Error("OAuth is not configured on this MCP server");
-            },
+        verifyOAuthUser: oauth ? (h) => oauth.verifyUser(h, resourceUrl) : async () => null,
+        mintSessionToken: mintCached,
       });
     } catch {
       // A verified user whose session-token mint failed (Clerk hiccup/rate-limit)
