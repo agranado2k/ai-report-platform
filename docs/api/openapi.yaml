@@ -273,9 +273,8 @@ paths:
       tags: [Reports]
       summary: Get a report
       description: >
-        Fetch a single report by slug (ADR-0038), scoped to your org. Returns the
-        same summary shape as the list endpoint. A report outside your org is
-        indistinguishable from a missing one (404).
+        Fetch a single report by slug (ADR-0038). The report must belong to your
+        org. Returns the same summary shape as the list endpoint.
       security:
         - apiKey: []
       parameters:
