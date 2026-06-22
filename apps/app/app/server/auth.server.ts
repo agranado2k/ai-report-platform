@@ -49,13 +49,18 @@ export function getAuth(args: LoaderFunctionArgs) {
   return clerkGetAuth(args, opts);
 }
 
-/** A Clerk Backend SDK client from the validated env (needs v2 for `acceptsToken`). */
+/** A Clerk Backend SDK client from the validated env (needs v2 for `acceptsToken`).
+ *  Memoized per warm lambda — the client is stateless config, so one instance is
+ *  reused across requests instead of rebuilt each call. */
+let _clerk: ReturnType<typeof createClerkClient> | undefined;
 function clerkBackend() {
+  if (_clerk) return _clerk;
   const env = defineEnv();
-  return createClerkClient({
+  _clerk = createClerkClient({
     secretKey: env.CLERK_SECRET_KEY,
     publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY,
   });
+  return _clerk;
 }
 
 /**
