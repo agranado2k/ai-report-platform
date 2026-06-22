@@ -49,38 +49,63 @@ export function getAuth(args: LoaderFunctionArgs) {
   return clerkGetAuth(args, opts);
 }
 
+/** A Clerk Backend SDK client from the validated env (needs v2 for `acceptsToken`). */
+function clerkBackend() {
+  const env = defineEnv();
+  return createClerkClient({
+    secretKey: env.CLERK_SECRET_KEY,
+    publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY,
+  });
+}
+
 /**
  * Verify the request's `Authorization` as a Clerk **OAuth access token** (the MCP
- * server forwards it — ADR-0051 amendment) → the subject user id + their primary
- * email, or null. Boundary glue over `@clerk/backend` (needs v2 for `acceptsToken`),
- * fail-closed (any error → null). We pass no `audience`, so the token's RFC-8707
- * resource binding to the MCP isn't rejected here — verifying the same token at our
- * own API is Clerk's supported multi-backend pattern. The email isn't on the OAuth
- * machine-auth object, so we fetch the user for it (needed only to provision a
- * brand-new identity on a first write). Verified live, like the MCP's verifyOAuthUser.
+ * server forwards it — ADR-0051 amendment) → the subject user id, or null. Boundary
+ * glue over `@clerk/backend`; fail-closed — an invalid/missing token returns null
+ * (→ 401). The catch wraps ONLY the verification (an auth *decision*), so a Clerk
+ * outage doesn't masquerade as a client 401. We pass no `audience`, so the token's
+ * RFC-8707 binding to the MCP resource isn't rejected here — verifying the same
+ * token at our own API is Clerk's supported multi-backend pattern.
  */
-async function resolveOAuthUser(
-  args: LoaderFunctionArgs,
-): Promise<{ userId: string; email: string | null } | null> {
+async function resolveOAuthUserId(args: LoaderFunctionArgs): Promise<string | null> {
   if (!args.request.headers.get("authorization")) return null;
   try {
-    const env = defineEnv();
-    const clerk = createClerkClient({
-      secretKey: env.CLERK_SECRET_KEY,
-      publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY,
+    const state = await clerkBackend().authenticateRequest(args.request, {
+      acceptsToken: "oauth_token",
     });
-    const state = await clerk.authenticateRequest(args.request, { acceptsToken: "oauth_token" });
     const auth = state.toAuth();
-    if (!auth || !("userId" in auth) || typeof auth.userId !== "string") return null;
-    const userId = auth.userId;
-    const user = await clerk.users.getUser(userId);
-    const primary =
-      user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ??
-      user.emailAddresses[0];
-    return { userId, email: primary?.emailAddress ?? null };
+    return auth && "userId" in auth && typeof auth.userId === "string" ? auth.userId : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch the user's primary email — needed ONLY on the write/provision path (a first
+ * upload mirrors the identity, ADR-0048); it isn't on the OAuth machine-auth object.
+ * A Clerk outage here is infra (`Unexpected` → 500), NOT a client auth failure —
+ * deliberately distinct from the verification's fail-closed 401. No email on the
+ * account → `Unauthenticated` (we can't provision without one).
+ */
+async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>> {
+  let email: string | undefined;
+  try {
+    const user = await clerkBackend().users.getUser(userId);
+    const primary =
+      user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ??
+      user.emailAddresses[0];
+    email = primary?.emailAddress;
+  } catch {
+    // Clerk unreachable — infra, not a client auth failure (distinct from the 401).
+    return err({ kind: "Unexpected", message: `failed to fetch Clerk user ${userId}` });
+  }
+  if (!email) {
+    return err({
+      kind: "Unauthenticated",
+      message: "OAuth identity has no primary email; cannot provision",
+    });
+  }
+  return ok(email);
 }
 
 /**
@@ -125,21 +150,18 @@ export async function resolveUploadActor(
 
   // Forwarded Clerk OAuth token path (ADR-0051 amendment). No active org rides an
   // OAuth token, so attribute to the user's personal org (created on first write).
-  const oauth = await resolveOAuthUser(args);
-  if (oauth) {
-    if (!oauth.email) {
-      return err({
-        kind: "Unauthenticated",
-        message: "OAuth identity has no primary email; cannot provision",
-      });
-    }
+  // Email is fetched only here (the write path) — reads don't pay that round-trip.
+  const oauthUserId = await resolveOAuthUserId(args);
+  if (oauthUserId) {
+    const email = await fetchOAuthEmail(oauthUserId);
+    if (!email.ok) return email; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
     const deps = provisionDeps();
-    const personal = await deps.clerkOrgs.findPersonalOrg(oauth.userId);
+    const personal = await deps.clerkOrgs.findPersonalOrg(oauthUserId);
     if (!personal.ok) return personal; // Clerk outage → propagate (→ 500)
     return provisionIdentity(deps, {
-      clerkUserId: oauth.userId,
+      clerkUserId: oauthUserId,
       clerkOrgId: personal.value,
-      email: oauth.email,
+      email: email.value,
     });
   }
 
@@ -177,9 +199,9 @@ export async function resolveActorForRead(
   if (userId) return lookupMirroredActor(userId, orgId ?? null);
 
   // Forwarded Clerk OAuth token (ADR-0051 amendment) — read-only lookup of the
-  // already-mirrored identity in the user's personal org, no provisioning.
-  const oauth = await resolveOAuthUser(args);
-  if (oauth) return lookupMirroredActor(oauth.userId, null);
+  // already-mirrored identity. Verify only (no email round-trip on a read).
+  const oauthUserId = await resolveOAuthUserId(args);
+  if (oauthUserId) return lookupMirroredActor(oauthUserId, null);
 
   return ok(null); // no credential → genuinely unauthenticated
 }
