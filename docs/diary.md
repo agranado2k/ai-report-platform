@@ -1405,3 +1405,37 @@ extensionless (matching the bundled rest of the repo). `dist/**` added to Turbo'
 build outputs so cache hits restore it. Reproduced the failure locally with Node's
 ESM loader and verified the bundled entry loads (`default export is function`).
 Worktree `fix/mcp-esm-imports`. ADR-0051 updated with the build-bundling rationale.
+
+---
+
+## 2026-06-22 — MCP OAuth 2.1 resource-server layer (ADR-0051 PR 4)
+
+Final functional slice of the MCP epic. `apps/mcp` is now an **OAuth 2.1 resource
+server** so interactive clients (Claude Desktop) can authenticate via Clerk browser
+login instead of a pasted API key. Worktree `feat/mcp-oauth`.
+
+Design (settled by a research spike): the spec forbids forwarding the inbound OAuth
+token to `/api/v1`, so it's **OAuth-in → session-token-out** — verify the Clerk
+OAuth access token (`@clerk/backend` `authenticateRequest({acceptsToken:"oauth_token"})`),
+then mint a short-lived Clerk **session** token for that user (the e2e
+`mintTestSession` recipe) and forward THAT. `/api/v1`'s existing session path
+accepts it → **no API change, no API-key minting, no schema change** (chosen over
+the spike's API-key-out: simpler, no key-sprawl). `@clerk/mcp-tools` proved
+unnecessary — the RFC-9728 protected-resource metadata is derived from the
+publishable key and verification is a thin `@clerk/backend` wrapper.
+
+`/mcp` is now dual-mode: a `Bearer arp_…` key forwards as-is (headless, unchanged);
+otherwise verify OAuth → mint session token; no credential → 401 + `WWW-Authenticate`
+(discovery). Pure logic unit-tested (credential branching + the session minter +
+the pk→auth-server-origin derivation); 260 tests green. The MCP gains its **first
+secret** (`CLERK_SECRET_KEY`, split prod-live/preview-dev), fail-closed (unset ⇒
+OAuth off). `@clerk/backend ^2.33` added (the `acceptsToken` machine-auth API needs
+≥2.x).
+
+**Operator handoff (can't be Terraformed — dashboard click-ops, ADR-017 exception):**
+create a Clerk **OAuth application** on the dev + live instances, enable Dynamic
+Client Registration, set scopes + the `mcp.<apex>/mcp` resource; then verify with
+the Inspector's OAuth mode. Steps in `docs/infra.md`. The live OAuth flow is the
+one thing not exercised by CI (needs the Clerk app + a browser). Active worktree:
+`feat/mcp-oauth`. Deferred completers (own PR): MCP usage docs, `reports_get`,
+spec.html MCP-section reconcile.

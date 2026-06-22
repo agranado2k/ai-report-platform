@@ -10,6 +10,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@clerk/backend": "^2.33.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "express": "^5.1.0",
     "zod": "^4.4.3"
@@ -17,7 +18,9 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.0",
     "esbuild": "^0.21.5",
+    "supertest": "^7.0.0",
     "typescript": "^5.6.3"
   },
   "engines": {

@@ -175,14 +175,24 @@ module "vercel_view" {
 # The MCP server (ADR-0051) — a thin Express HTTP client over /api/v1. No
 # framework preset (`framework = null`), so Vercel's zero-config builds the
 # `apps/mcp/api/` serverless function; vercel.json rewrites every path to it.
-# It holds NONE of the app's secrets (no DB/R2/Clerk/pepper): callers present
-# their own `arp_` API key and the server forwards it to the API (ADR-003), so
-# its only config is APP_ORIGIN. APP_ORIGIN points at the prod API on both
-# targets (previews already share prod data, pre-launch).
+# Callers present their own `arp_` API key which the server forwards (ADR-003).
+# APP_ORIGIN points at the prod API on both targets (previews share prod data,
+# pre-launch). The Clerk keys (ADR-0051 PR 4) enable the OAuth path: the MCP
+# verifies inbound OAuth tokens + mints a short-lived session token to call
+# /api/v1 — split by target like the app (prod = live instance, preview = dev),
+# so OAuth resolves against the same Clerk instance /api/v1 trusts. This is the
+# MCP's only secret; without it the OAuth path stays off + only `arp_` works.
 locals {
   mcp_env = {
     ENABLE_EXPERIMENTAL_COREPACK = { value = "1", target = ["production", "preview", "development"], sensitive = false }
     APP_ORIGIN                   = { value = "https://app.${local.apex}", target = ["production", "preview"], sensitive = false }
+    # Canonical OAuth resource identifier for the MCP (fixed, not the Host header).
+    # Production only; previews have no stable origin and fall back to Host.
+    MCP_ORIGIN                   = { value = "https://mcp.${local.apex}", target = ["production"], sensitive = false }
+    PUBLIC_CLERK_PUBLISHABLE_KEY = { value = module.clerk.publishable_key, target = ["production"], sensitive = false }
+    CLERK_SECRET_KEY             = { value = module.clerk.secret_key, target = ["production"] }
+    mcp_clerk_pk_preview         = { key = "PUBLIC_CLERK_PUBLISHABLE_KEY", value = module.clerk_staging.publishable_key, target = ["preview"], sensitive = false }
+    mcp_clerk_sk_preview         = { key = "CLERK_SECRET_KEY", value = module.clerk_staging.secret_key, target = ["preview"] }
   }
 }
 
