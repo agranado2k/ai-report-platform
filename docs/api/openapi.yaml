@@ -268,6 +268,32 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/reports/{slug}:
+    get:
+      operationId: getReport
+      tags: [Reports]
+      summary: Get a report
+      description: >
+        Fetch a single report by slug (ADR-0038), scoped to your org. Returns the
+        same summary shape as the list endpoint. A report outside your org is
+        indistinguishable from a missing one (404).
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      responses:
+        '200':
+          description: The report (summary shape).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportSummary' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     patch:
       operationId: renameReport
       tags: [Reports]

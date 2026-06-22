@@ -8,6 +8,7 @@ export * from "./use-cases/create-folder";
 export * from "./use-cases/delete-folder";
 export * from "./use-cases/delete-report";
 export * from "./use-cases/drain-scans";
+export * from "./use-cases/get-report";
 export * from "./use-cases/move-report";
 export * from "./use-cases/process-scan-result";
 export * from "./use-cases/provision-identity";

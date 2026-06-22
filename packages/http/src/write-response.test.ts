@@ -5,6 +5,7 @@ import {
   createFolderToHttp,
   deleteFolderToHttp,
   deleteReportToHttp,
+  getReportToHttp,
   moveReportToHttp,
   renameFolderToHttp,
   renameReportToHttp,
@@ -125,6 +126,37 @@ describe("renameReportToHttp", () => {
   it("maps ValidationError to a 422 problem", () => {
     const res = renameReportToHttp(err({ kind: "ValidationError", message: "title required" }));
     expect(res.status).toBe(422);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("getReportToHttp", () => {
+  const report: Report = {
+    id: reportId("00000000-0000-7000-8000-0000000000r1"),
+    orgId: orgId(O1),
+    folderId: folderId(F1),
+    slug: "aaaaaaaaaa" as Slug,
+    title: "A Title",
+    liveVersionId: versionId("00000000-0000-7000-8000-0000000000v1"),
+    versions: [],
+    deletedAt: null,
+  };
+
+  it("maps ok to 200 with the report summary (no org id)", () => {
+    const res = getReportToHttp(ok(report));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      slug: "aaaaaaaaaa",
+      title: "A Title",
+      is_published: true,
+      folder_id: F1,
+    });
+    expect(JSON.stringify(res.body)).not.toContain(O1);
+  });
+
+  it("maps NotFound to a 404 problem", () => {
+    const res = getReportToHttp(err({ kind: "NotFound", message: "report not found" }));
+    expect(res.status).toBe(404);
     expect(res.contentType).toBe("application/problem+json");
   });
 });
