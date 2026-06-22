@@ -9,10 +9,23 @@ const schema = z.object({
   APP_ORIGIN: z.url(),
   /** Local dev port (ignored on Vercel, which routes via the serverless function). */
   PORT: z.coerce.number().int().positive().default(8787),
+  // OAuth 2.1 resource-server credentials (ADR-0051, PR 4). Clerk is the auth
+  // server; the MCP needs its secret to (a) verify inbound OAuth access tokens
+  // and (b) mint a short-lived session token for the verified user to call
+  // `/api/v1`. OPTIONAL + fail-closed: with these unset, the OAuth path is simply
+  // disabled (returns 401) — the `arp_` API-key passthrough still works. This is
+  // the MCP's first secret; keep it scoped to OAuth.
+  CLERK_SECRET_KEY: z.string().trim().min(1).optional(),
+  PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().trim().min(1).optional(),
 });
 
 export type McpEnv = z.infer<typeof schema>;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): McpEnv {
-  return schema.parse({ APP_ORIGIN: source.APP_ORIGIN, PORT: source.PORT });
+  return schema.parse({
+    APP_ORIGIN: source.APP_ORIGIN,
+    PORT: source.PORT,
+    CLERK_SECRET_KEY: source.CLERK_SECRET_KEY,
+    PUBLIC_CLERK_PUBLISHABLE_KEY: source.PUBLIC_CLERK_PUBLISHABLE_KEY,
+  });
 }
