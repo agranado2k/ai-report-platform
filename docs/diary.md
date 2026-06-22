@@ -1385,3 +1385,23 @@ real MCP e2e needs the deployed `mcp.<apex>` + a minted API key in the test env
 slice once the server is live, rather than a half-built harness here. The
 tool/mapping logic is fully unit-covered in the meantime. Active worktree:
 `feat/mcp-write-tools`.
+
+---
+
+## 2026-06-22 — Fix: bundle the MCP function at build time (ESM ERR_MODULE_NOT_FOUND)
+
+After #89 merged, `mcp.agranado.com` deployed but every function invocation
+500'd with `ERR_MODULE_NOT_FOUND`. Root cause: `apps/mcp` is `type: module`, so
+`@vercel/node` runs it as native ESM (no bundling) and Node's resolver rejects
+the extensionless relative imports (`./client`, `../src/app`, …). The static
+`public/` landing served fine (200); only the function crashed.
+
+Fix — resolve modules at **build time** rather than patching `.js` extensions
+onto TypeScript source (operator's call: "we're using TypeScript, solve it at
+build time"). `apps/mcp` now has an **esbuild** build: `src/index.ts` (+ all
+relative imports, inlined; deps external) → `dist/server.mjs`; a committed
+`api/index.mjs` shim re-exports that bundle as the Vercel function. Source stays
+extensionless (matching the bundled rest of the repo). `dist/**` added to Turbo's
+build outputs so cache hits restore it. Reproduced the failure locally with Node's
+ESM loader and verified the bundled entry loads (`default export is function`).
+Worktree `fix/mcp-esm-imports`. ADR-0051 updated with the build-bundling rationale.

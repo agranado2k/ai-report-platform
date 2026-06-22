@@ -1,8 +1,8 @@
 // Express app for the remote MCP server (ADR-0051). Stateless Streamable HTTP:
 // a fresh McpServer + transport per POST /mcp (SDK >=1.26 forbids reuse), bound
 // to an ApiClient that forwards the request's `Authorization` to `/api/v1`
-// (ADR-003, ADR-0008). Deployed as a Vercel Node serverless function via
-// `api/index.ts`; runnable locally via `src/local.ts`.
+// (ADR-003, ADR-0008). Bundled by esbuild + deployed as a Vercel Node serverless
+// function via `api/index.mjs`; runnable locally via `src/local.ts`.
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { ApiClient } from "./client";
