@@ -43,7 +43,9 @@ We want the convention fixed **before** sharing/ACL adds user/org/grant ids to t
    | `user_` | User (when exposed — sharing) | `users.id` |
    | `version_` | ReportVersion | `report_versions.id` |
    | `key_` | ApiKey | `api_keys.id` |
-   | `grant_` | Folder access grant (sharing/ACL) | `acl_grants.id` |
+   | `grant_` | `Collaborator` — a folder access grant | `folder_collaborators.id` |
+
+   The `grant_` row applies to the **existing `folder_collaborators` table** (glossary term **`Collaborator`**) — it does NOT introduce a new `acl_grants` table. Whether sharing/ACL keeps that table/term or renames it is the sharing/ACL ADR's call (ADR-0036 "one name per concept"); this ADR only reserves the `grant_` prefix for whatever that row ends up being.
 
 2. **The codec lives in the branded value objects.** `make<Entity>Id(s)` *decodes* `prefix_base62` → the internal uuid (validates the prefix; a wrong prefix or a bare uuid → `ValidationError`); a `toWire(id)` *encodes* uuid → the prefixed string. The domain stays uuid internally — the codec is purely the parse/serialize boundary. The branded types stop cross-entity mixups at **compile** time; the prefix stops them at **runtime**.
 
@@ -64,7 +66,10 @@ We want the convention fixed **before** sharing/ACL adds user/org/grant ids to t
 
 ## Implementation notes (a follow-up PR — NOT this ADR)
 
-- `packages/domain`: the base62⇄uuid codec + prefix table; `make*Id`/`toWire` per entity; `ClerkUserId`/`ClerkOrgId` brands + constructors.
+- **Fixed-width base62 (round-trip safety).** Naive base62 of the 128-bit integer drops leading-zero bytes → variable-length, ambiguous decode. The codec MUST left-pad to a canonical fixed width (22 chars for 128 bits) so `make*Id(toWire(id)) === id` holds — including a uuid with leading zero bytes (`00000000-…`). Assert this round-trip in a test.
+- **Report handle detection is structural, not `startsWith("report_")`.** nanoid's alphabet includes `_`/`-`, so a 10-char slug *could* begin with `report_`. Discriminate by shape: a valid external id is `report_` + 22 base62 chars (len 29) vs a slug of exactly 10 — not the prefix alone.
+- **ADR-024 applies** (the codec lands in `packages/domain`): vanilla TS + the existing `Result<T,E>`, no new FP libs, `readonly` throughout, decode failures as `ValidationError` (not exceptions).
+- `packages/domain`: the base62⇄uuid codec + prefix table; `make*Id`/`toWire` per entity; `ClerkUserId`/`ClerkOrgId` brands + constructors (these names must appear in code to satisfy the glossary's "introduce a term where it's first used" rule).
 - `packages/http` + `apps/app/app/routes/api.v1.*`: encode outputs, decode inputs, dual-resolve the report handle.
 - `apps/mcp`: tool input/output (prefixed folder ids; `reports_*` accept `report_` id or slug).
 - `docs/api/openapi.yaml`: replace `{ type: string, format: uuid }` id fields with the prefixed pattern + examples.
