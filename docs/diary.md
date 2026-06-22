@@ -1360,3 +1360,28 @@ Verified facts (2026 docs): MCP spec rev **2025-11-25**; Streamable HTTP current
 (HTTP+SSE deprecated since 2025-03-26); SDK 1.29.0 resolved (peer `zod ^3.25||^4.0`,
 links our zod 4); Vercel Node runs a default-exported Express app. Active worktree:
 `feat/mcp-server-read-tools`.
+
+---
+
+## 2026-06-22 — MCP write tools (upload/update/move/delete + folder CRUD)
+
+Third PR of the MCP epic. Added the **write tools** to `apps/mcp` so an agent can
+now manage reports end-to-end over MCP: `reports_upload` (multipart create /
+re-upload — no Idempotency-Key sent, the API derives one from content per
+ADR-0039), `reports_update` (rename), `reports_move`, `reports_delete`, and folder
+CRUD `folders_create` / `folders_rename` / `folders_delete`. Worktree
+`feat/mcp-write-tools`.
+
+Mechanics: extended `ApiClient` with a shared `request()` helper (JSON vs
+multipart bodies; 204 → ok-with-no-body for DELETE), and `registerWriteTools`
+with deliberate annotations (CREATE / MUTATE / DESTROY — deletes carry
+`destructiveHint`). RFC-9457 errors still map to `isError` results, so e.g. a
+non-empty `folders_delete` surfaces the API's block as a readable tool error.
+All exercised by unit tests (13 client + 6 tool-mapping = 19 in `apps/mcp/src`).
+
+**Deferred:** un-`@wip`-ing `tests/e2e/features/upload-report-via-mcp.feature`. A
+real MCP e2e needs the deployed `mcp.<apex>` + a minted API key in the test env
+(an MCP-client + key-minting harness that doesn't exist yet) — better as its own
+slice once the server is live, rather than a half-built harness here. The
+tool/mapping logic is fully unit-covered in the meantime. Active worktree:
+`feat/mcp-write-tools`.
