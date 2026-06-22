@@ -48,10 +48,14 @@ export function createApp() {
   // Per-user session-token cache (warm-instance scoped) to curb Clerk session churn.
   const tokenCache = new Map<string, { token: string; expiresAt: number }>();
   const mintCached = async (userId: string, secretKey: string): Promise<string> => {
+    const now = Date.now();
     const hit = tokenCache.get(userId);
-    if (hit && hit.expiresAt > Date.now()) return hit.token;
+    if (hit && hit.expiresAt > now) return hit.token;
+    // Prune expired entries on miss so the map stays bounded on a long-lived
+    // warm instance (PR #91 re-review nit).
+    for (const [key, value] of tokenCache) if (value.expiresAt <= now) tokenCache.delete(key);
     const token = await mintSessionToken(userId, { secretKey });
-    tokenCache.set(userId, { token, expiresAt: Date.now() + TOKEN_TTL_MS });
+    tokenCache.set(userId, { token, expiresAt: now + TOKEN_TTL_MS });
     return token;
   };
 

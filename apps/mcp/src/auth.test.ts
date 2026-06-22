@@ -14,6 +14,16 @@ describe("resolveDownstreamAuthorization", () => {
     expect(mintSessionToken).not.toHaveBeenCalled();
   });
 
+  it("matches the Bearer scheme case-insensitively for the arp_ path", async () => {
+    const verifyOAuthUser = vi.fn();
+    const out = await resolveDownstreamAuthorization("bearer arp_live_abc", {
+      verifyOAuthUser,
+      mintSessionToken: vi.fn(),
+    });
+    expect(out).toBe("bearer arp_live_abc");
+    expect(verifyOAuthUser).not.toHaveBeenCalled();
+  });
+
   it("OAuth token → verify → mint a session token, and forwards THAT (never the OAuth token)", async () => {
     const out = await resolveDownstreamAuthorization("Bearer eyJ_oauth_token", {
       verifyOAuthUser: async () => "user_123",
