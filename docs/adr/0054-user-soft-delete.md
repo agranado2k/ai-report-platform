@@ -26,7 +26,7 @@
 
 1. **Trigger** — a Clerk `user.deleted` **webhook** (`POST /webhooks/clerk`), verified with `@clerk/backend`'s `verifyWebhook` against `CLERK_WEBHOOK_SIGNING_SECRET` (Standard Webhooks / Svix scheme). **No new dependency.** This *un-defers* the ADR-0048 webhook decision, scoped to `user.deleted` for now. The route **fails closed**: no secret → `503` (inert), bad signature → `400`.
 2. **Soft-delete** — stamp `users.deleted_at` (mirrors `reports`/`folders`); a partial `WHERE deleted_at IS NOT NULL` index serves the purge job.
-3. **Read-filtering** — `IdentityStore.findByClerk` excludes soft-deleted users → a deleted user resolves to **no actor** (the session path 401s; the API-key path fails because its keys are revoked).
+3. **Read-filtering** — `IdentityStore.findByClerk` excludes soft-deleted users → a deleted user resolves to **no actor**. On the session path that means the seam then attempts to provision and hits the resurrection block (decision 4) → `NotAllowed` (**403**); the API-key path fails because the user's keys were revoked.
 4. **Terminal** — `createPersonalIdentity` **refuses to resurrect** a soft-deleted user; a re-auth with the same Clerk identity stays blocked. Restoring is an explicit, out-of-band action (future).
 5. **Cascade** — revoke **all** the user's API keys (`ApiKeyStore.revokeAllForUser`). The org + its reports stay live (org-owned — a user soft-delete does not orphan reports).
 6. **Idempotent** — replays / unknown ids are no-ops (`softDeleteByClerkId` returns null → no cascade), so Clerk's at-least-once retries are safe.
