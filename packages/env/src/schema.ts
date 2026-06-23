@@ -35,6 +35,13 @@ export const serverSchema = {
   // Clerk server key (ADR-0005). The publishable key is client-safe — see below.
   CLERK_SECRET_KEY: trimmedString,
 
+  // Clerk webhook signing secret (ADR-0054) — verifies inbound `user.deleted` events
+  // (Standard Webhooks / Svix scheme, via @clerk/backend's verifyWebhook). OPTIONAL at
+  // the env layer like API_KEY_PEPPER: Terraform/Clerk provision it out-of-band, so the
+  // app boots without it. The webhook route fails CLOSED when it's unset (503), so the
+  // endpoint is simply inert until the secret + Clerk endpoint are configured.
+  CLERK_WEBHOOK_SIGNING_SECRET: trimmedString.optional(),
+
   // API-key auth (ADR-0008). Server-side HMAC pepper used to hash `arp_` keys, so
   // a DB-only leak can't verify guesses. OPTIONAL at the env layer (Terraform
   // provisions it independently of the code deploy, so the app boots without it):

@@ -24,7 +24,12 @@ import {
   Sha256Hasher,
   UuidV7IdGenerator,
 } from "arp-adapters";
-import type { DrainScansDeps, ProvisionIdentityDeps, UploadReportDeps } from "arp-application";
+import type {
+  DrainScansDeps,
+  HandleUserDeletedDeps,
+  ProvisionIdentityDeps,
+  UploadReportDeps,
+} from "arp-application";
 import { defineEnv } from "arp-env";
 
 let _ctx: DbContext | undefined;
@@ -119,6 +124,14 @@ export function provisionDeps(): ProvisionIdentityDeps {
     clerkOrgs: ClerkBackendOrgProvisioner.fromSecretKey(env.CLERK_SECRET_KEY),
   };
   return _provisionDeps;
+}
+
+/**
+ * Deps for the Clerk `user.deleted` webhook handler (ADR-0054): the IdentityStore
+ * (soft-delete) + the ApiKeyStore (revoke cascade).
+ */
+export function userWebhookDeps(): HandleUserDeletedDeps {
+  return { identities: new DrizzleIdentityStore(context()), apiKeys: apiKeyStore() };
 }
 
 /**
