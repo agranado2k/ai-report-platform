@@ -45,31 +45,47 @@ async function seed(n: number) {
   return reports;
 }
 
-describe("searchReports use case", () => {
-  it("returns the requested page and the total", async () => {
+describe("searchReports use case (cursor pagination, ADR-0053)", () => {
+  it("returns the first page newest-created-first, with has_more", async () => {
     const reports = await seed(25);
-    const r = await searchReports({ reports }, { orgId: orgA }, { page: 1, pageSize: 10 });
+    const r = await searchReports({ reports }, { orgId: orgA }, { limit: 10 });
     expect(r.ok && r.value.items.length).toBe(10);
-    expect(r.ok && r.value.total).toBe(25);
-    expect(r.ok && r.value.page).toBe(1);
+    expect(r.ok && r.value.hasMore).toBe(true);
+    // id DESC = newest-created first → Report 24 leads (highest id suffix)
+    expect(r.ok && r.value.items[0]?.title).toBe("Report 24");
   });
 
-  it("returns the last partial page", async () => {
+  it("pages forward with starting_after until has_more is false, no overlap", async () => {
     const reports = await seed(25);
-    const r = await searchReports({ reports }, { orgId: orgA }, { page: 3, pageSize: 10 });
-    expect(r.ok && r.value.items.length).toBe(5);
+    const seen = new Set<string>();
+    let cursor: ReturnType<typeof reportId> | undefined;
+    let pages = 0;
+    for (;;) {
+      const r = await searchReports(
+        { reports },
+        { orgId: orgA },
+        { limit: 10, startingAfter: cursor },
+      );
+      if (!r.ok) throw new Error("search failed");
+      for (const it of r.value.items) {
+        expect(seen.has(it.id)).toBe(false); // no overlap across pages
+        seen.add(it.id);
+      }
+      pages++;
+      if (!r.value.hasMore) break;
+      cursor = r.value.items[r.value.items.length - 1]?.id;
+    }
+    expect(seen.size).toBe(25); // every report, exactly once
+    expect(pages).toBe(3); // 10 + 10 + 5
   });
 
   it("filters by a case-insensitive title query", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(rep("aaaaaaaaaa", "Quarterly revenue"));
     await reports.save(rep("bbbbbbbbbb", "Annual summary"));
-    const r = await searchReports(
-      { reports },
-      { orgId: orgA },
-      { query: "QUARTER", page: 1, pageSize: 10 },
-    );
-    expect(r.ok && r.value.total).toBe(1);
+    const r = await searchReports({ reports }, { orgId: orgA }, { query: "QUARTER", limit: 10 });
+    expect(r.ok && r.value.items.length).toBe(1);
+    expect(r.ok && r.value.hasMore).toBe(false);
     expect(r.ok && r.value.items[0]?.title).toBe("Quarterly revenue");
   });
 
@@ -77,19 +93,16 @@ describe("searchReports use case", () => {
     const reports = new InMemoryReportRepository();
     await reports.save(rep("aaaaaaaaaa", "In F1", F1));
     await reports.save(rep("bbbbbbbbbb", "In F2", F2));
-    const r = await searchReports(
-      { reports },
-      { orgId: orgA },
-      { folderId: F2, page: 1, pageSize: 10 },
-    );
-    expect(r.ok && r.value.total).toBe(1);
+    const r = await searchReports({ reports }, { orgId: orgA }, { folderId: F2, limit: 10 });
+    expect(r.ok && r.value.items.length).toBe(1);
     expect(r.ok && r.value.items[0]?.folderId).toBe(F2);
   });
 
-  it("clamps a page below 1 to page 1", async () => {
+  it("clamps the limit (default 20; over-max returns all when small)", async () => {
     const reports = await seed(3);
-    const r = await searchReports({ reports }, { orgId: orgA }, { page: 0, pageSize: 10 });
-    expect(r.ok && r.value.page).toBe(1);
-    expect(r.ok && r.value.items.length).toBe(3);
+    const def = await searchReports({ reports }, { orgId: orgA }, {}); // no limit → default
+    expect(def.ok && def.value.items.length).toBe(3);
+    const big = await searchReports({ reports }, { orgId: orgA }, { limit: 100_000 });
+    expect(big.ok && big.value.items.length).toBe(3); // clamped to ≤100, all 3 fit
   });
 });

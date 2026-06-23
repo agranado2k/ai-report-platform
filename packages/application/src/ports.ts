@@ -40,20 +40,32 @@ export interface ReportSummary {
 }
 
 /** A paged, optionally-filtered query over an org's reports (dashboard search). */
-export interface ReportSearchQuery {
+/** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC
+ *  (newest-created first). `startingAfter`/`endingBefore` are exclusive id bounds. */
+export interface CursorParams<Id> {
+  readonly limit: number;
+  readonly startingAfter?: Id;
+  readonly endingBefore?: Id;
+}
+
+export interface ReportSearchQuery extends CursorParams<ReportId> {
   /** Case-insensitive substring matched against title + slug. Omitted = no filter. */
   readonly query?: string;
   /** Restrict to one folder. Omitted = org-wide (across all folders). */
   readonly folderId?: FolderId;
-  readonly limit: number;
-  readonly offset: number;
 }
 
+/** Cursor-paginated query over an org's folder tree (ADR-0053). */
+export type FolderListQuery = CursorParams<FolderId>;
+
 /** One page of report summaries plus the total matching the query (for paging). */
-export interface ReportPage {
-  readonly items: readonly ReportSummary[];
-  readonly total: number;
+/** A cursor-paginated slice (ADR-0053): the page items + whether more follow. */
+export interface CursorPage<T> {
+  readonly items: readonly T[];
+  readonly hasMore: boolean;
 }
+export type ReportPage = CursorPage<ReportSummary>;
+export type FolderPage = CursorPage<Folder>;
 
 // ── Reports & Folders persistence ─────────────────────────────────────────
 export interface ReportRepository {
@@ -75,6 +87,8 @@ export interface ReportRepository {
 export interface FolderRepository {
   /** All non-deleted folders for the org — the caller builds the tree. */
   listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>>;
+  /** Cursor-paginated non-deleted folders (ADR-0053), keyset on id DESC. */
+  searchByOrg(orgId: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>>;
   findById(id: FolderId): Promise<Result<Folder | null, AppError>>;
   /** Upsert by id — creates a folder, or updates name/slug/parent/deletedAt. */
   save(folder: Folder): Promise<Result<void, AppError>>;
