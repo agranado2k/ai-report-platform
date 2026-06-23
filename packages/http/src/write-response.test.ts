@@ -1,5 +1,14 @@
 import type { Folder, FolderId, Report, Slug } from "arp-domain";
-import { err, folderId, ok, orgId, reportId, versionId } from "arp-domain";
+import {
+  err,
+  folderId,
+  folderIdToWire,
+  ok,
+  orgId,
+  reportId,
+  reportIdToWire,
+  versionId,
+} from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
   createFolderToHttp,
@@ -15,6 +24,9 @@ const slug = (s: string): Slug => s as Slug;
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
+const R1 = "00000000-0000-7000-8000-0000000000c1";
+const wireF1 = folderIdToWire(folderId(F1));
+const wireF2 = folderIdToWire(folderId(F2));
 
 describe("moveReportToHttp", () => {
   it("maps ok to 200 echoing the new placement (snake_case)", () => {
@@ -24,7 +36,7 @@ describe("moveReportToHttp", () => {
     });
     expect(res.status).toBe(200);
     expect(res.contentType).toBe("application/json");
-    expect(res.body).toEqual({ slug: "aaaaaaaaaa", folder_id: F2 });
+    expect(res.body).toEqual({ slug: "aaaaaaaaaa", folder_id: wireF2 });
   });
 
   it("maps NotFound to a 404 problem", () => {
@@ -49,7 +61,7 @@ describe("createFolderToHttp", () => {
     };
     const res = createFolderToHttp(ok(folder));
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({ id: F2, name: "Q1", slug: "q1", parent_id: F1 });
+    expect(res.body).toEqual({ id: wireF2, name: "Q1", slug: "q1", parent_id: wireF1 });
     expect(JSON.stringify(res.body)).not.toContain(O1);
   });
 
@@ -74,7 +86,7 @@ describe("renameFolderToHttp", () => {
     };
     const res = renameFolderToHttp(ok(folder));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ id: F2, name: "Renamed", slug: "old-slug", parent_id: F1 });
+    expect(res.body).toEqual({ id: wireF2, name: "Renamed", slug: "old-slug", parent_id: wireF1 });
   });
 
   it("maps NotFound to a 404 problem", () => {
@@ -101,7 +113,7 @@ describe("deleteFolderToHttp", () => {
 
 describe("renameReportToHttp", () => {
   const report: Report = {
-    id: reportId("00000000-0000-7000-8000-0000000000r1"),
+    id: reportId(R1),
     orgId: orgId(O1),
     folderId: folderId(F1),
     slug: "aaaaaaaaaa" as Slug,
@@ -115,10 +127,11 @@ describe("renameReportToHttp", () => {
     const res = renameReportToHttp(ok(report));
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
+      id: reportIdToWire(reportId(R1)),
       slug: "aaaaaaaaaa",
       title: "Renamed",
       is_published: true,
-      folder_id: F1,
+      folder_id: wireF1,
     });
     expect(JSON.stringify(res.body)).not.toContain(O1);
   });
@@ -132,7 +145,7 @@ describe("renameReportToHttp", () => {
 
 describe("getReportToHttp", () => {
   const report: Report = {
-    id: reportId("00000000-0000-7000-8000-0000000000r1"),
+    id: reportId(R1),
     orgId: orgId(O1),
     folderId: folderId(F1),
     slug: "aaaaaaaaaa" as Slug,
@@ -146,10 +159,11 @@ describe("getReportToHttp", () => {
     const res = getReportToHttp(ok(report));
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
+      id: reportIdToWire(reportId(R1)),
       slug: "aaaaaaaaaa",
       title: "A Title",
       is_published: true,
-      folder_id: F1,
+      folder_id: wireF1,
     });
     expect(JSON.stringify(res.body)).not.toContain(O1);
   });

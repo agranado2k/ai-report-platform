@@ -5,11 +5,19 @@
 
 import type { ReportSummary } from "arp-application";
 import type { AppError, Folder, Result } from "arp-domain";
+import { folderIdToWire, reportIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 
-/** The wire shape of a ReportSummary (snake_case; internal org id never serialized). */
+/** The wire shape of a ReportSummary — External Ids prefixed (ADR-0052), snake_case,
+ *  internal org id never serialized. Both `id` (report_…) and `slug` are returned. */
 function summaryBody(r: ReportSummary) {
-  return { slug: r.slug, title: r.title, is_published: r.isPublished, folder_id: r.folderId };
+  return {
+    id: reportIdToWire(r.id),
+    slug: r.slug,
+    title: r.title,
+    is_published: r.isPublished,
+    folder_id: folderIdToWire(r.folderId),
+  };
 }
 
 /** A page of report summaries (searchReports use case) → the paged GET /api/v1/reports body. */
@@ -41,10 +49,10 @@ export function listFoldersToHttp(result: Result<readonly Folder[], AppError>): 
       // org_id and deletedAt are internal — the wire shape is id + name + slug
       // + parent_id (the tree link). The repository already excludes soft-deleted.
       folders: result.value.map((f) => ({
-        id: f.id,
+        id: folderIdToWire(f.id),
         name: f.name,
         slug: f.slug,
-        parent_id: f.parentId,
+        parent_id: f.parentId ? folderIdToWire(f.parentId) : null,
       })),
     },
   };

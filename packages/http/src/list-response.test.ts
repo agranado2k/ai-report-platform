@@ -1,12 +1,16 @@
 import type { Folder, Slug } from "arp-domain";
-import { err, folderId, ok, orgId } from "arp-domain";
+import { err, folderId, folderIdToWire, ok, orgId, reportId, reportIdToWire } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { listFoldersToHttp, searchReportsToHttp } from "./list-response";
 
 const slug = (s: string): Slug => s as Slug;
+const F1 = "00000000-0000-7000-8000-000000000001";
+const F2 = "00000000-0000-7000-8000-000000000002";
+const O1 = "00000000-0000-7000-8000-0000000000aa";
+const R1 = "00000000-0000-7000-8000-0000000000c1";
 
 describe("listFoldersToHttp", () => {
-  it("maps folders to a 200 JSON body, exposing no org id", () => {
+  it("maps folders to a 200 JSON body with prefixed External Ids, no org id", () => {
     const folders: Folder[] = [
       {
         id: folderId(F1),
@@ -30,12 +34,20 @@ describe("listFoldersToHttp", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       folders: [
-        { id: F1, name: "Root", slug: "root", parent_id: null },
-        { id: F2, name: "Q1", slug: "q1", parent_id: F1 },
+        { id: folderIdToWire(folderId(F1)), name: "Root", slug: "root", parent_id: null },
+        {
+          id: folderIdToWire(folderId(F2)),
+          name: "Q1",
+          slug: "q1",
+          parent_id: folderIdToWire(folderId(F1)),
+        },
       ],
     });
-    // never leak the internal org id over the wire
-    expect(JSON.stringify(res.body)).not.toContain(O1);
+    // never leak the internal org id OR a bare uuid over the wire
+    const wire = JSON.stringify(res.body);
+    expect(wire).not.toContain(O1);
+    expect(wire).not.toContain(F1); // the bare uuid must not appear — only folder_…
+    expect(wire).toContain("folder_");
   });
 
   it("maps an error to a problem response", () => {
@@ -45,16 +57,18 @@ describe("listFoldersToHttp", () => {
   });
 });
 
-const F1 = "00000000-0000-7000-8000-000000000001";
-const F2 = "00000000-0000-7000-8000-000000000002";
-const O1 = "00000000-0000-7000-8000-0000000000aa";
-
 describe("searchReportsToHttp", () => {
-  it("maps a page to 200 with reports + paging metadata", () => {
+  it("maps a page to 200 with prefixed report + folder ids + paging metadata", () => {
     const res = searchReportsToHttp(
       ok({
         items: [
-          { slug: slug("aaaaaaaaaa"), title: "First", isPublished: true, folderId: folderId(F1) },
+          {
+            id: reportId(R1),
+            slug: slug("aaaaaaaaaa"),
+            title: "First",
+            isPublished: true,
+            folderId: folderId(F1),
+          },
         ],
         total: 42,
         page: 2,
@@ -63,7 +77,15 @@ describe("searchReportsToHttp", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      reports: [{ slug: "aaaaaaaaaa", title: "First", is_published: true, folder_id: F1 }],
+      reports: [
+        {
+          id: reportIdToWire(reportId(R1)),
+          slug: "aaaaaaaaaa",
+          title: "First",
+          is_published: true,
+          folder_id: folderIdToWire(folderId(F1)),
+        },
+      ],
       page: 2,
       page_size: 20,
       total: 42,

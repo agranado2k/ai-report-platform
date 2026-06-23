@@ -30,6 +30,7 @@ import type {
  * group reports under their folder in the tree.
  */
 export interface ReportSummary {
+  readonly id: ReportId;
   readonly slug: Slug;
   readonly title: string;
   readonly isPublished: boolean;
