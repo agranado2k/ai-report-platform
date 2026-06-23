@@ -515,11 +515,12 @@ export class InMemoryIdentityStore implements IdentityStore {
   }
 
   async softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>> {
-    if (this.deleted.has(clerkUserId)) return ok(null); // already deleted — no-op
-    // Find any mirrored entry for this Clerk user (the user pool is org-agnostic).
+    // Resolve the user by Clerk id REGARDLESS of prior delete state, so a retried
+    // webhook still drives the (idempotent) cascade (self-healing, ADR-0054). The
+    // stamp itself is idempotent; null only when no user row exists.
     const entry = [...this.byClerk.entries()].find(([k]) => k.startsWith(`${clerkUserId}|`));
     if (!entry) return ok(null); // unknown id — no-op
-    this.deleted.add(clerkUserId);
+    this.deleted.add(clerkUserId); // idempotent — preserves the original deletion
     return ok(entry[1].userId);
   }
 }
@@ -528,6 +529,8 @@ export class InMemoryIdentityStore implements IdentityStore {
  *  to exercise the revoke / cascade paths in use-case tests. */
 export class InMemoryApiKeyStore implements ApiKeyStore {
   private seq = 0;
+  /** Test toggle: when true, revokeAllForUser fails (simulate a partial-cascade failure). */
+  failRevokeAllForUser = false;
   readonly keys: {
     id: string;
     actingUserId: UserId;
@@ -608,6 +611,9 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
   }
 
   async revokeAllForUser(actingUserId: UserId): Promise<Result<number, AppError>> {
+    if (this.failRevokeAllForUser) {
+      return err({ kind: "Unexpected", message: "simulated revoke failure" });
+    }
     let n = 0;
     for (const k of this.keys) {
       if (k.actingUserId === actingUserId && k.revokedAt === null) {

@@ -15,7 +15,7 @@ import {
   type UserId,
   userId,
 } from "arp-domain";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbContext } from "./client";
 
@@ -123,11 +123,14 @@ export class DrizzleIdentityStore implements IdentityStore {
   async softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>> {
     try {
       // Stamp deleted_at on the LIVE user only (idempotent: a replay updates 0 rows).
+      // Resolve + stamp regardless of prior delete state, so a retried webhook still
+      // drives the (idempotent) cascade (self-healing, ADR-0054). COALESCE preserves
+      // the original deleted_at; RETURNING gives the id to cascade on. null = no row.
       const [row] = await this.ctx
         .current()
         .update(users)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(users.clerkUserId, clerkUserId), isNull(users.deletedAt)))
+        .set({ deletedAt: sql`coalesce(${users.deletedAt}, now())` })
+        .where(eq(users.clerkUserId, clerkUserId))
         .returning({ id: users.id });
       return ok(row ? userId(row.id) : null);
     } catch (e) {

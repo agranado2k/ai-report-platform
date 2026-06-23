@@ -112,14 +112,20 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(found.ok && found.value).toBeNull(); // soft-deleted → no actor
   });
 
-  it("softDeleteByClerkId is a no-op for an unknown or already-deleted user (idempotent)", async () => {
+  it("softDeleteByClerkId returns null for an unknown user", async () => {
     const unknown = await store.softDeleteByClerkId("clerk_user_ghost");
     expect(unknown.ok && unknown.value).toBeNull();
+  });
 
-    await mirror();
-    await store.softDeleteByClerkId(CU);
+  it("softDeleteByClerkId re-resolves an already-deleted user (self-healing retry)", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    const first = await store.softDeleteByClerkId(CU);
+    expect(first.ok && first.value).toBe(created.value.userId);
+    // A replay still returns the same userId so a retried webhook can re-run the cascade
+    // (the deleted_at timestamp is preserved by COALESCE, not overwritten).
     const again = await store.softDeleteByClerkId(CU);
-    expect(again.ok && again.value).toBeNull();
+    expect(again.ok && again.value).toBe(created.value.userId);
   });
 
   it("createPersonalIdentity refuses to resurrect a soft-deleted user — deletion is terminal", async () => {
