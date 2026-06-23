@@ -3,7 +3,7 @@ import { type AppError, err, ok, reportId, reportIdToWire } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { uploadResultToHttp } from "./upload-response";
 
-const OPTS = { viewBaseUrl: "https://view.example" };
+const OPTS = { viewBaseUrl: "https://view.example", livemode: true };
 
 const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => ({
   result: { slug: "abcde12345", version: 1, scanStatus: "clean", ...over },
@@ -12,16 +12,18 @@ const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => 
 
 describe("uploadResultToHttp — success", () => {
   it("maps a fresh upload to 201 JSON with the canonical view URL + Location", () => {
-    const res = uploadResultToHttp(ok(outcome()), { viewBaseUrl: "https://view.example" });
+    const res = uploadResultToHttp(ok(outcome()), OPTS);
 
     expect(res.status).toBe(201);
     expect(res.contentType).toBe("application/json");
     expect(res.body).toEqual({
+      object: "report",
       slug: "abcde12345",
       // Canonical viewer URL: view.<domain>/<slug>, no /r/ prefix (ADR-002 / ADR-0038).
       view_url: "https://view.example/abcde12345",
       version: 1,
       scan_status: "clean",
+      livemode: true,
     });
     expect(res.headers?.Location).toBe("https://view.example/abcde12345");
   });

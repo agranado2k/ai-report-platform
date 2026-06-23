@@ -1,46 +1,44 @@
-// HTTP response mappers for the write API (ADR-0040): move a report between
-// folders and create a folder. Pure — turn the use-case Result into a success
-// JSON body or an application/problem+json error. snake_case on the wire; the
+// HTTP response mappers for the write API (ADR-0040, ADR-0053). Pure — turn the
+// use-case Result into the resource body (Stripe-style `object` + `livemode` +
+// prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { AppError, Folder, FolderId, Report, Result, Slug } from "arp-domain";
-import { folderIdToWire, reportIdToWire } from "arp-domain";
+import type { AppError, Folder, Report, Result } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
+import { folderBody, reportBody, type WireContext } from "./resource";
 
-/** POST /api/v1/reports/{slug}/move — 200 echoing the report's new placement. */
-export function moveReportToHttp(
-  result: Result<void, AppError>,
-  placement: { readonly slug: Slug; readonly folderId: FolderId },
+/** A Report aggregate → the `report` resource body (summary shape). */
+function reportResource(r: Report, ctx: WireContext) {
+  return reportBody(
+    {
+      id: r.id,
+      slug: r.slug,
+      title: r.title,
+      isPublished: r.liveVersionId !== null,
+      folderId: r.folderId,
+    },
+    ctx,
+  );
+}
+
+/** POST /api/v1/reports/{slug}/move — 200 with the moved report resource. */
+export function moveReportToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+}
+
+/** PATCH /api/v1/reports/{slug} — 200 with the renamed report resource. */
+export function renameReportToHttp(
+  result: Result<Report, AppError>,
+  ctx: WireContext,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: { slug: placement.slug, folder_id: folderIdToWire(placement.folderId) },
-  };
+  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
 }
 
-/** The wire shape of a Report (summary; no org id) — shared by rename + get. Both
- *  the `report_…` id and the capability `slug` are returned (ADR-0052). */
-function reportSummaryBody(r: Report) {
-  return {
-    id: reportIdToWire(r.id),
-    slug: r.slug,
-    title: r.title,
-    is_published: r.liveVersionId !== null,
-    folder_id: folderIdToWire(r.folderId),
-  };
-}
-
-/** PATCH /api/v1/reports/{slug} — 200 with the renamed report (summary shape). */
-export function renameReportToHttp(result: Result<Report, AppError>): HttpResponse {
+/** GET /api/v1/reports/{slug} — 200 with the report resource, or a problem. */
+export function getReportToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportSummaryBody(result.value) };
-}
-
-/** GET /api/v1/reports/{slug} — 200 with the report (summary shape), or a problem. */
-export function getReportToHttp(result: Result<Report, AppError>): HttpResponse {
-  if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportSummaryBody(result.value) };
+  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
 }
 
 /** DELETE /api/v1/reports/{slug} — 204 No Content on success. */
@@ -49,26 +47,22 @@ export function deleteReportToHttp(result: Result<void, AppError>): HttpResponse
   return { status: 204, contentType: "application/json", body: undefined };
 }
 
-/** The wire shape of a Folder (no org id) — External Ids prefixed (ADR-0052). */
-function folderBody(f: Folder) {
-  return {
-    id: folderIdToWire(f.id),
-    name: f.name,
-    slug: f.slug,
-    parent_id: f.parentId ? folderIdToWire(f.parentId) : null,
-  };
+/** POST /api/v1/folders — 201 with the created folder resource. */
+export function createFolderToHttp(
+  result: Result<Folder, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 201, contentType: "application/json", body: folderBody(result.value, ctx) };
 }
 
-/** POST /api/v1/folders — 201 with the created folder. */
-export function createFolderToHttp(result: Result<Folder, AppError>): HttpResponse {
+/** PATCH /api/v1/folders/{id} — 200 with the renamed folder resource. */
+export function renameFolderToHttp(
+  result: Result<Folder, AppError>,
+  ctx: WireContext,
+): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 201, contentType: "application/json", body: folderBody(result.value) };
-}
-
-/** PATCH /api/v1/folders/{id} — 200 with the renamed folder. */
-export function renameFolderToHttp(result: Result<Folder, AppError>): HttpResponse {
-  if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: folderBody(result.value) };
+  return { status: 200, contentType: "application/json", body: folderBody(result.value, ctx) };
 }
 
 /** DELETE /api/v1/folders/{id} — 204 No Content on success. */

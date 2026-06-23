@@ -1,16 +1,18 @@
+import type { FolderPage, ReportPage } from "arp-application";
 import type { Folder, Slug } from "arp-domain";
 import { err, folderId, folderIdToWire, ok, orgId, reportId, reportIdToWire } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { listFoldersToHttp, searchReportsToHttp } from "./list-response";
 
+const CTX = { livemode: true };
 const slug = (s: string): Slug => s as Slug;
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
 const R1 = "00000000-0000-7000-8000-0000000000c1";
 
-describe("listFoldersToHttp", () => {
-  it("maps folders to a 200 JSON body with prefixed External Ids, no org id", () => {
+describe("listFoldersToHttp (Stripe list envelope, ADR-0053)", () => {
+  it("maps a folder page to {object:list, data, has_more} with folder resources", () => {
     const folders: Folder[] = [
       {
         id: folderId(F1),
@@ -29,71 +31,96 @@ describe("listFoldersToHttp", () => {
         deletedAt: null,
       },
     ];
-    const res = listFoldersToHttp(ok(folders));
+    const page: FolderPage = { items: folders, hasMore: true };
+    const res = listFoldersToHttp(ok(page), CTX);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      folders: [
-        { id: folderIdToWire(folderId(F1)), name: "Root", slug: "root", parent_id: null },
+      object: "list",
+      has_more: true,
+      data: [
         {
+          object: "folder",
+          id: folderIdToWire(folderId(F1)),
+          name: "Root",
+          slug: "root",
+          parent_id: null,
+          livemode: true,
+        },
+        {
+          object: "folder",
           id: folderIdToWire(folderId(F2)),
           name: "Q1",
           slug: "q1",
           parent_id: folderIdToWire(folderId(F1)),
+          livemode: true,
         },
       ],
     });
-    // never leak the internal org id OR a bare uuid over the wire
     const wire = JSON.stringify(res.body);
-    expect(wire).not.toContain(O1);
-    expect(wire).not.toContain(F1); // the bare uuid must not appear — only folder_…
-    expect(wire).toContain("folder_");
+    expect(wire).not.toContain(O1); // never leak the internal org id
+    expect(wire).not.toContain(F1); // bare uuid never appears — only folder_…
   });
 
   it("maps an error to a problem response", () => {
-    const res = listFoldersToHttp(err({ kind: "NotAllowed", message: "nope" }));
+    const res = listFoldersToHttp(err({ kind: "NotAllowed", message: "nope" }), CTX);
     expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
   });
 });
 
-describe("searchReportsToHttp", () => {
-  it("maps a page to 200 with prefixed report + folder ids + paging metadata", () => {
-    const res = searchReportsToHttp(
-      ok({
-        items: [
-          {
-            id: reportId(R1),
-            slug: slug("aaaaaaaaaa"),
-            title: "First",
-            isPublished: true,
-            folderId: folderId(F1),
-          },
-        ],
-        total: 42,
-        page: 2,
-        pageSize: 20,
-      }),
-    );
+describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
+  it("maps a report page to {object:list, data, has_more} with report resources", () => {
+    const page: ReportPage = {
+      items: [
+        {
+          id: reportId(R1),
+          slug: slug("aaaaaaaaaa"),
+          title: "First",
+          isPublished: true,
+          folderId: folderId(F1),
+        },
+      ],
+      hasMore: false,
+    };
+    const res = searchReportsToHttp(ok(page), CTX);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      reports: [
+      object: "list",
+      has_more: false,
+      data: [
         {
+          object: "report",
           id: reportIdToWire(reportId(R1)),
           slug: "aaaaaaaaaa",
           title: "First",
           is_published: true,
           folder_id: folderIdToWire(folderId(F1)),
+          livemode: true,
         },
       ],
-      page: 2,
-      page_size: 20,
-      total: 42,
     });
   });
 
+  it("stamps livemode:false when the context says so", () => {
+    const page: ReportPage = {
+      items: [
+        {
+          id: reportId(R1),
+          slug: slug("aaaaaaaaaa"),
+          title: "x",
+          isPublished: false,
+          folderId: folderId(F1),
+        },
+      ],
+      hasMore: false,
+    };
+    const res = searchReportsToHttp(ok(page), { livemode: false });
+    expect((res.body as { data: { livemode: boolean }[] }).data[0]?.livemode).toBe(false);
+  });
+
   it("maps an error to a problem response", () => {
-    const res = searchReportsToHttp(err({ kind: "Unexpected", message: "boom" }));
+    const res = searchReportsToHttp(err({ kind: "Unexpected", message: "boom" }), CTX);
     expect(res.status).toBe(500);
     expect(res.contentType).toBe("application/problem+json");
   });

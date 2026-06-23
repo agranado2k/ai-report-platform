@@ -12,6 +12,7 @@ import {
   type OrgId,
   ok,
   placeInFolder,
+  type Report,
   type Result,
   type Slug,
 } from "arp-domain";
@@ -35,7 +36,7 @@ export async function moveReport(
   deps: MoveReportDeps,
   actor: MoveReportActor,
   input: MoveReportInput,
-): Promise<Result<void, AppError>> {
+): Promise<Result<Report, AppError>> {
   const found = await deps.reports.findBySlug(input.slug);
   if (!found.ok) return found;
   if (!found.value || found.value.deletedAt !== null) return err(notFound("report not found"));
@@ -50,5 +51,8 @@ export async function moveReport(
     return err(notAllowed("target folder is not in your org"));
   }
 
-  return deps.reports.save(placeInFolder(found.value, input.toFolderId));
+  const moved = placeInFolder(found.value, input.toFolderId);
+  const saved = await deps.reports.save(moved);
+  if (!saved.ok) return saved;
+  return ok(moved); // the moved report → the resource the API returns (ADR-0053)
 }

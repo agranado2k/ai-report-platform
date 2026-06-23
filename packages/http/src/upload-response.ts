@@ -17,6 +17,8 @@ export interface UploadResponseOptions {
    * `/r/` prefix on the app origin.
    */
   readonly viewBaseUrl: string;
+  /** Stamped onto the `report` resource (ADR-0053). */
+  readonly livemode: boolean;
 }
 
 export function uploadResultToHttp(
@@ -30,14 +32,16 @@ export function uploadResultToHttp(
     return {
       status: 201,
       contentType: "application/json",
-      // Return the report_ External Id alongside the slug (ADR-0052 §4) so the
-      // caller has the API addressing id for the report it just created.
+      // The created `report` resource (ADR-0053): object + livemode + the report_
+      // External Id (ADR-0052 §4) alongside the slug + view_url + scan status.
       body: {
+        object: "report" as const,
         ...(reportId ? { id: reportIdToWire(reportId) } : {}),
         slug,
         view_url: viewUrl,
         version,
         scan_status: scanStatus,
+        livemode: opts.livemode,
       },
       headers: { Location: viewUrl },
     };
