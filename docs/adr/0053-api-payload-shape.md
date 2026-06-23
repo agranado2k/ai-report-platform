@@ -37,7 +37,7 @@ The `/api/v1` wire had two slices decided by ADR — **errors** (ADR-0040, RFC 9
 - **Trade-offs**:
   - **Breaking wire change** — list shapes, pagination params, and resource fields all change. Landed **atomically** (we own the clients — the MCP + the dashboard), like ADR-0052. No deprecation window.
   - **Creation-desc ordering** — keyset on id means a re-upload no longer reorders the list; cursor lists drop `total` (no count).
-  - **No DB migration** — keyset uses the existing id PK; `ending_before` fetches ASC then reverses.
+  - **One index-only migration (no data change)** — the keyset query needs a `(org_id, id DESC) WHERE deleted_at IS NULL` partial index on `reports` + `folders` to stay O(page); migration `0005`. `ending_before` fetches ASC then reverses.
   - The server-rendered **dashboard** moved from page-number pagination to Prev/Next report-id cursors.
 
 ## More information

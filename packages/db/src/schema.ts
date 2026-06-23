@@ -113,6 +113,9 @@ export const folders = pgTable(
   },
   (t) => [
     index("folders_org_id_idx").on(t.orgId),
+    // Serves the cursor-paginated folder list (searchByOrg, ADR-0053): keyset on
+    // (org_id, id DESC) over live folders.
+    index("folders_org_id_keyset_idx").on(t.orgId, t.id.desc()).where(sql`${t.deletedAt} is null`),
     // Sibling-slug uniqueness applies to LIVE folders only — a soft-deleted folder
     // must not keep its slug slot, else recreating a same-named folder in the same
     // parent fails with a misleading 23505 (ADR-0036, soft-delete = deleted_at IS NULL).
@@ -153,8 +156,11 @@ export const reports = pgTable(
   (t) => [
     uniqueIndex("reports_slug_uniq").on(t.slug),
     index("reports_org_folder_idx").on(t.orgId, t.folderId),
-    // Serves the dashboard's org-wide, newest-first paged listing/search
-    // (searchByOrg): ORDER BY updated_at DESC over an org's live reports.
+    // Serves the cursor-paginated org-wide listing/search (searchByOrg, ADR-0053):
+    // keyset on (org_id, id DESC) over live reports — id < cursor ORDER BY id DESC
+    // stays O(page). Supersedes the updated_at ordering for search.
+    index("reports_org_id_keyset_idx").on(t.orgId, t.id.desc()).where(sql`${t.deletedAt} is null`),
+    // Retained: still serves any updated_at-ordered access (audit / recents).
     index("reports_org_updated_idx")
       .on(t.orgId, t.updatedAt.desc())
       .where(sql`${t.deletedAt} is null`),
