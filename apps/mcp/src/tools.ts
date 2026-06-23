@@ -73,19 +73,21 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Search reports",
       description:
-        "Search your reports by title/slug text. Returns a paginated list; each item has " +
-        "slug, title, is_published, and folder_id. Read-only — use it to find a report " +
-        "before you update, move, or delete it. Omit `q` to list everything.",
+        "Search your reports by title/slug text. Returns a cursor-paginated list " +
+        "({object:'list', data, has_more}); each item has id (report_…), slug, title, " +
+        "is_published, folder_id. Read-only. Page with starting_after; omit `q` to list all.",
       inputSchema: {
         q: z.string().optional().describe("Free-text match on title/slug. Omit to list all."),
         folder_id: z.string().optional().describe("Restrict to this folder_ id."),
-        page: z.number().int().positive().optional().describe("1-based page number (default 1)."),
-        page_size: z
-          .number()
-          .int()
-          .positive()
+        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+        starting_after: z
+          .string()
           .optional()
-          .describe("Items per page (default 20). The API clamps very large values."),
+          .describe("Cursor: a report_ id; returns items AFTER it (page forward)."),
+        ending_before: z
+          .string()
+          .optional()
+          .describe("Cursor: a report_ id; returns items BEFORE it (page back)."),
       },
       annotations: READ_ONLY,
     },
@@ -94,8 +96,9 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         await client.searchReports({
           q: args.q,
           folderId: args.folder_id,
-          page: args.page,
-          pageSize: args.page_size,
+          limit: args.limit,
+          startingAfter: args.starting_after,
+          endingBefore: args.ending_before,
         }),
       ),
   );
@@ -121,11 +124,30 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "List folders",
       description:
-        "List your folder tree (id, name, parent id). Read-only. Use a folder id with " +
+        "List your folder tree as a cursor-paginated list ({object:'list', data, has_more}); " +
+        "each item has id (folder_…), name, slug, parent_id. Read-only. Use a folder_ id with " +
         "reports_search to scope a search, or when deciding where to organize a report.",
+      inputSchema: {
+        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+        starting_after: z
+          .string()
+          .optional()
+          .describe("Cursor: a folder_ id; returns items AFTER it (page forward)."),
+        ending_before: z
+          .string()
+          .optional()
+          .describe("Cursor: a folder_ id; returns items BEFORE it (page back)."),
+      },
       annotations: READ_ONLY,
     },
-    async () => toToolResult(await client.listFolders()),
+    async (args) =>
+      toToolResult(
+        await client.listFolders({
+          limit: args.limit,
+          startingAfter: args.starting_after,
+          endingBefore: args.ending_before,
+        }),
+      ),
   );
 }
 

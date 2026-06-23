@@ -1508,3 +1508,26 @@ The completers PR closes the epic's loose ends:
 prod) and **un-`@wip` `upload-report-via-mcp.feature`** (a real MCP BDD e2e still needs a
 key-minting harness against the deployed `mcp.<apex>`; the logic is unit-covered meanwhile).
 273 unit tests + typecheck + docs:check green. Worktree `feat/mcp-completers`.
+
+### 2026-06-23 — Full Stripe-style API conventions (ADR-0053), worktree `feat/api-stripe-shape`
+
+After ADR-0052 (prefixed ids), the operator chose to align `/api/v1` (+ the MCP) **fully
+with Stripe**, not the pragmatic-flat shape — recorded as ADR-0053 (companion to ADR-0040
+errors + ADR-0052 ids). A **breaking wire change**, landed atomically (we own the clients):
+- **Resource envelope**: every resource is flat snake_case with `object` ("report"/"folder")
+  + `livemode` + its prefixed id.
+- **List envelope**: `{object:"list", data:[…], has_more}` — replaces `{reports/folders:[…],
+  page, page_size, total}`; reports AND folders now use it.
+- **Cursor pagination**: `limit` + `starting_after`/`ending_before` (a prefixed id), keyset on
+  the UUIDv7 id DESC. **Ordering changed from updated_at-desc to created-desc** (a re-upload no
+  longer jumps to top) — the trade-off for a stable, unique cursor. No `total`.
+- **`Request-Id: req_…`** header on every response; **`livemode`** from `API_KEY_ENV`.
+
+Layered (one PR): cursor data model (ports/in-memory/searchReports) → keyset Drizzle queries
+(report + new folder `searchByOrg`; pglite integration test) → http `resource.ts` envelope +
+`WireContext` → routes (`parseCursorParams`/`wireContext`/Request-Id; move returns the report
+resource; **dashboard reworked to Prev/Next cursors**) → MCP cursor tools → openapi (List
+envelope, object/livemode, cursor params, dropped the unimplemented `dashboard_url`) + ADR-0053
++ glossary. No DB migration (keyset on the existing id PK). 281 unit tests + typecheck +
+docs:check + mcp build green. Operator now prefers full Stripe conventions for new endpoints
+(memory). Worktree `feat/api-stripe-shape`.

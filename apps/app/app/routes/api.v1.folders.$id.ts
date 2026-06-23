@@ -10,7 +10,7 @@ import { makeFolderId } from "arp-domain";
 import { deleteFolderToHttp, errorToHttp, parseJsonBody, renameFolderToHttp } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
-import { toResponse } from "../server/http.server";
+import { toResponse, wireContext } from "../server/http.server";
 
 export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
@@ -39,7 +39,7 @@ export async function action(args: ActionFunctionArgs) {
       { orgId },
       { folderId: id.value, name },
     );
-    return toResponse(renameFolderToHttp(result));
+    return toResponse(renameFolderToHttp(result, wireContext()));
   }
 
   return toResponse({

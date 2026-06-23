@@ -15,7 +15,7 @@ import {
 } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps } from "../server/container.server";
-import { toResponse, unauthenticated } from "../server/http.server";
+import { toResponse, unauthenticated, wireContext } from "../server/http.server";
 import { resolveReportSlug } from "../server/report-handle.server";
 
 // GET — read a single report by slug, scoped to the acting org. resolveActorForRead
@@ -34,7 +34,7 @@ export async function loader(args: LoaderFunctionArgs) {
     { orgId: actor.value.orgId },
     { slug: slug.value },
   );
-  return toResponse(getReportToHttp(result));
+  return toResponse(getReportToHttp(result, wireContext()));
 }
 
 export async function action(args: ActionFunctionArgs) {
@@ -60,7 +60,7 @@ export async function action(args: ActionFunctionArgs) {
       { orgId },
       { slug: slug.value, title },
     );
-    return toResponse(renameReportToHttp(result));
+    return toResponse(renameReportToHttp(result, wireContext()));
   }
 
   return toResponse({

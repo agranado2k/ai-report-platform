@@ -27,7 +27,7 @@ import {
   type VersionManifest,
   versionId,
 } from "arp-domain";
-import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
@@ -144,8 +144,10 @@ export class DrizzleReportRepository implements ReportRepository {
   }
 
   async searchByOrg(org: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
-    // Org-scoped, newest-first, paged. Optional folder filter + title/slug
-    // substring search. Ordering is served by the (org_id, updated_at) index.
+    // Org-scoped cursor pagination (ADR-0053): keyset on the report id (UUIDv7),
+    // DESC = newest-created first. `starting_after` pages forward (id < cursor);
+    // `ending_before` pages back (id > cursor, fetched ASC then reversed). Optional
+    // folder filter + literal title/slug substring search.
     try {
       const db = this.ctx.current();
       const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];
@@ -161,34 +163,35 @@ export class DrizzleReportRepository implements ReportRepository {
         const match = or(ilike(reports.title, like), ilike(reports.slug, like));
         if (match) filters.push(match);
       }
-      const where = and(...filters);
+      const back = q.endingBefore !== undefined;
+      if (q.startingAfter) filters.push(lt(reports.id, q.startingAfter));
+      if (q.endingBefore) filters.push(gt(reports.id, q.endingBefore));
 
-      const [rows, totals] = await Promise.all([
-        db
-          .select({
-            id: reports.id,
-            slug: reports.slug,
-            title: reports.title,
-            liveVersionId: reports.liveVersionId,
-            folderId: reports.folderId,
-          })
-          .from(reports)
-          .where(where)
-          .orderBy(desc(reports.updatedAt))
-          .limit(q.limit)
-          .offset(q.offset),
-        db.select({ n: count() }).from(reports).where(where),
-      ]);
+      const rows = await db
+        .select({
+          id: reports.id,
+          slug: reports.slug,
+          title: reports.title,
+          liveVersionId: reports.liveVersionId,
+          folderId: reports.folderId,
+        })
+        .from(reports)
+        .where(and(...filters))
+        .orderBy(back ? asc(reports.id) : desc(reports.id))
+        .limit(q.limit + 1); // +1 to detect has_more
 
+      const hasMore = rows.length > q.limit;
+      const slice = rows.slice(0, q.limit);
+      const page = back ? slice.reverse() : slice; // always present newest-first
       return ok({
-        items: rows.map((r) => ({
+        items: page.map((r) => ({
           id: reportId(r.id),
           slug: r.slug as Slug,
           title: r.title,
           isPublished: r.liveVersionId !== null,
           folderId: folderId(r.folderId),
         })),
-        total: Number(totals[0]?.n ?? 0),
+        hasMore,
       });
     } catch (e) {
       return err2("searchReportsByOrg", e);

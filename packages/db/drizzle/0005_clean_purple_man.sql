@@ -1,0 +1,2 @@
+CREATE INDEX "folders_org_id_keyset_idx" ON "folders" USING btree ("org_id","id" DESC NULLS LAST) WHERE "folders"."deleted_at" is null;--> statement-breakpoint
+CREATE INDEX "reports_org_id_keyset_idx" ON "reports" USING btree ("org_id","id" DESC NULLS LAST) WHERE "reports"."deleted_at" is null;

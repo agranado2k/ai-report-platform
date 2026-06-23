@@ -32,6 +32,8 @@ import type {
   ClerkOrgProvisioner,
   Clock,
   EventOutbox,
+  FolderListQuery,
+  FolderPage,
   FolderRepository,
   Hasher,
   IdempotencyBegin,
@@ -55,11 +57,42 @@ import type {
   UnitOfWork,
 } from "../ports";
 
+/** In-memory keyset paginator (ADR-0053) over id DESC (newest-created first),
+ *  mirroring the adapters' `WHERE id < :after / > :before ORDER BY id DESC` query. */
+function keysetPage<T extends { readonly id: string }>(
+  all: readonly T[],
+  q: { readonly limit: number; readonly startingAfter?: string; readonly endingBefore?: string },
+): { items: readonly T[]; hasMore: boolean } {
+  const sorted = [...all].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  if (q.startingAfter) {
+    const i = sorted.findIndex((x) => x.id === q.startingAfter);
+    const pool = i >= 0 ? sorted.slice(i + 1) : [];
+    return { items: pool.slice(0, q.limit), hasMore: pool.length > q.limit };
+  }
+  if (q.endingBefore) {
+    const i = sorted.findIndex((x) => x.id === q.endingBefore);
+    const pool = i >= 0 ? sorted.slice(0, i) : [];
+    // the `limit` items immediately before the cursor (closest to it)
+    return {
+      items: pool.slice(Math.max(0, pool.length - q.limit)),
+      hasMore: pool.length > q.limit,
+    };
+  }
+  return { items: sorted.slice(0, q.limit), hasMore: sorted.length > q.limit };
+}
+
 export class InMemoryFolderRepository implements FolderRepository {
   private readonly byId = new Map<string, Folder>();
 
   async listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>> {
     return ok([...this.byId.values()].filter((f) => f.orgId === orgId && f.deletedAt === null));
+  }
+
+  async searchByOrg(orgId: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>> {
+    const matched = [...this.byId.values()].filter(
+      (f) => f.orgId === orgId && f.deletedAt === null,
+    );
+    return ok(keysetPage(matched, q));
   }
 
   async findById(id: FolderId): Promise<Result<Folder | null, AppError>> {
@@ -123,23 +156,25 @@ export class InMemoryReportRepository implements ReportRepository {
 
   async searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
     const needle = q.query?.trim().toLowerCase();
-    const all = [...this.byId.values()]
+    const matched = [...this.byId.values()]
       .filter((r) => r.orgId === orgId && r.deletedAt === null)
       .filter((r) => (q.folderId ? r.folderId === q.folderId : true))
       .filter((r) =>
         needle
           ? r.title.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle)
           : true,
-      )
-      .reverse(); // newest-first (insertion-order proxy; see listByOrg note)
-    const items = all.slice(q.offset, q.offset + q.limit).map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      isPublished: r.liveVersionId !== null,
-      folderId: r.folderId,
-    }));
-    return ok({ items, total: all.length });
+      );
+    const { items, hasMore } = keysetPage(matched, q); // keyset on id DESC (ADR-0053)
+    return ok({
+      items: items.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        title: r.title,
+        isPublished: r.liveVersionId !== null,
+        folderId: r.folderId,
+      })),
+      hasMore,
+    });
   }
 
   async save(report: Report): Promise<Result<void, AppError>> {

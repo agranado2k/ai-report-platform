@@ -5,19 +5,16 @@
 // translates HTTP ⇆ use-case Result and never throws a bare error to the client.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { searchReports, type UploadActor, uploadReport } from "arp-application";
-import { err, type FolderId, makeFolderId } from "arp-domain";
+import { err, type FolderId, makeFolderId, makeReportId } from "arp-domain";
 import { errorToHttp, searchReportsToHttp, uploadResultToHttp } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
-import { toResponse, unauthenticated } from "../server/http.server";
+import { parseCursorParams, toResponse, unauthenticated, wireContext } from "../server/http.server";
 
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-// GET /api/v1/reports — the acting org's reports, newest-first, **paged + searchable**
-// (ADR-0036). Query params: `q` (title/slug substring), `folder_id` (filter),
-// `page` (1-based), `page_size` (1..100, default 20). resolveActorForRead resolves
-// the org WITHOUT provisioning (GETs stay safe); no session / no active org → 401.
+// GET /api/v1/reports — the acting org's reports, newest-created-first, **cursor
+// paginated + searchable** (ADR-0036, ADR-0053). Query params: `q` (title/slug),
+// `folder_id` (filter), `limit`, `starting_after`/`ending_before` (a report_ id).
+// resolveActorForRead resolves the org WITHOUT provisioning; no session/org → 401.
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
   if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
@@ -25,26 +22,23 @@ export async function loader(args: LoaderFunctionArgs) {
 
   const url = new URL(args.request.url);
   const query = url.searchParams.get("q")?.trim() || undefined;
-  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
-  const rawPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "", 10);
-  const pageSize = Number.isFinite(rawPageSize)
-    ? Math.min(MAX_PAGE_SIZE, Math.max(1, rawPageSize))
-    : DEFAULT_PAGE_SIZE;
+  const cursor = parseCursorParams(url.searchParams, makeReportId);
+  if (!cursor.ok) return toResponse(errorToHttp(cursor.error)); // malformed cursor → 422
 
   let folderId: FolderId | undefined;
   const rawFolder = url.searchParams.get("folder_id")?.trim();
   if (rawFolder) {
     const parsed = makeFolderId(rawFolder);
-    if (!parsed.ok) return toResponse(errorToHttp(parsed.error)); // malformed uuid → 422
+    if (!parsed.ok) return toResponse(errorToHttp(parsed.error)); // malformed id → 422
     folderId = parsed.value;
   }
 
   const result = await searchReports(
     { reports: deps().reports },
     { orgId: actor.value.orgId },
-    { query, folderId, page, pageSize },
+    { query, folderId, ...cursor.value },
   );
-  return toResponse(searchReportsToHttp(result));
+  return toResponse(searchReportsToHttp(result, wireContext()));
 }
 
 export async function action(args: ActionFunctionArgs) {
@@ -67,7 +61,7 @@ export async function action(args: ActionFunctionArgs) {
   // The report is served on the PSL-isolated view origin (ADR-002 / ADR-0038):
   // view_url = `${viewBaseUrl}/${slug}`. The composition root owns env access
   // (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
-  const opts = { viewBaseUrl: viewOrigin(request) };
+  const opts = { viewBaseUrl: viewOrigin(request), livemode: wireContext().livemode };
 
   // 1. Resolve the acting principal — requires a signed-in Clerk session
   //    (ADR-0048); unauthenticated → 401. resolveUploadActor provisions the

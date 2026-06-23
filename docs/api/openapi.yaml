@@ -26,14 +26,12 @@ paths:
     get:
       operationId: listReports
       tags: [Reports]
-      summary: List the acting org's reports (paged + searchable)
+      summary: List the acting org's reports (cursor-paginated + searchable)
       description: >
-        Returns the signed-in org's reports as lightweight summaries (slug,
-        title, publish state, folder placement) — the read projection behind the
-        dashboard (ADR-0036), newest first. **Paged**: the response carries
-        `page`, `page_size`, and `total`. Org-scoped: a caller only ever sees its
-        own org's reports. A session with no active organization → 401 (the API
-        surfaces an explicit Problem rather than an empty list).
+        Returns the signed-in org's reports as a cursor-paginated list envelope
+        (`{ object: "list", data, has_more }`, ADR-0053), newest-created first.
+        Org-scoped: a caller only ever sees its own org's reports. A session with
+        no active organization → 401 (an explicit Problem, not an empty list).
       security:
         - apiKey: []
       parameters:
@@ -46,20 +44,13 @@ paths:
           in: query
           required: false
           schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
-          description: Restrict to one folder. A malformed (non-UUID) value → 422.
-        - name: page
-          in: query
-          required: false
-          schema: { type: integer, minimum: 1, default: 1 }
-          description: 1-based page number. Out-of-range / non-numeric values are clamped to 1 (not rejected).
-        - name: page_size
-          in: query
-          required: false
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-          description: Page size. Out-of-range / non-numeric values are clamped to 1..100 (default 20), not rejected.
+          description: Restrict to one folder. A malformed value → 422.
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/StartingAfter' }
+        - { $ref: '#/components/parameters/EndingBefore' }
       responses:
         '200':
-          description: One page of the org's reports (possibly empty) plus paging metadata.
+          description: A cursor-paginated list of the org's reports (possibly empty).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReportList' }
@@ -129,16 +120,21 @@ paths:
     get:
       operationId: listFolders
       tags: [Folders]
-      summary: List the acting org's folders
+      summary: List the acting org's folders (cursor-paginated)
       description: >
-        Returns the signed-in org's folders as a flat list; `parent_id` links
-        them into the tree (the Root folder has a null parent). Org-scoped
+        Returns the signed-in org's folders as a cursor-paginated list envelope
+        (`{ object: "list", data, has_more }`, ADR-0053), newest-created first;
+        `parent_id` links them into the tree (Root has a null parent). Org-scoped
         (ADR-0036). A session with no active organization → 401.
       security:
         - apiKey: []
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/StartingAfter' }
+        - { $ref: '#/components/parameters/EndingBefore' }
       responses:
         '200':
-          description: The org's folders (the Root folder is present once the org is provisioned).
+          description: A cursor-paginated list of the org's folders.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FolderList' }
@@ -256,10 +252,10 @@ paths:
             schema: { $ref: '#/components/schemas/MoveReportRequest' }
       responses:
         '200':
-          description: The report's new placement.
+          description: The moved report resource (its folder_id now updated).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MoveResult' }
+              schema: { $ref: '#/components/schemas/ReportSummary' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -408,17 +404,43 @@ components:
         payload fingerprint (for upload: content_hash + target). A match replays
         the stored response without re-executing; an explicit key reused with a
         different body → 422; a concurrent in-flight retry → 409. Keys live 24h.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      description: Max items per page (ADR-0053). Out-of-range / non-numeric is clamped to 1..100.
+    StartingAfter:
+      name: starting_after
+      in: query
+      required: false
+      schema: { type: string }
+      description: >
+        Cursor (ADR-0053): a prefixed id (report_… / folder_…). Returns the items
+        AFTER it in newest-created-first order (page forward). A malformed id → 422.
+    EndingBefore:
+      name: ending_before
+      in: query
+      required: false
+      schema: { type: string }
+      description: >
+        Cursor (ADR-0053): a prefixed id. Returns the items BEFORE it (page back).
+        Mutually exclusive with starting_after. A malformed id → 422.
 
   schemas:
     UploadResult:
+      description: The created `report` resource (ADR-0053).
       type: object
-      required: [id, slug, view_url, version, scan_status]
+      required: [object, slug, view_url, version, scan_status, livemode]
       properties:
+        object: { type: string, enum: [report] }
         id:
           type: string
           pattern: '^report_[0-9A-Za-z]{22}$'
           example: report_7KpQ2mX9vR4nB6cD8eF1gH
-          description: The created report's External Id (ADR-0052) — for API addressing.
+          description: >
+            The report's External Id (ADR-0052) — present on a create or re-upload,
+            omitted only on an idempotent replay (the stored response). Address by `slug`.
         slug:
           type: string
           description: Permanent capability-URL slug (nanoid(10), ~10^18 entropy).
@@ -433,34 +455,29 @@ components:
           type: string
           enum: [pending, clean, flagged, blocked]
           description: Always `pending` at upload; the verdict arrives asynchronously.
-        dashboard_url:
-          type: string
-          format: uri
-          description: Owner dashboard URL on app.<domain>.
+        livemode:
+          type: boolean
+          description: True on the live deployment, false on preview/dev (ADR-0053).
 
     ReportList:
-      description: One page of report summaries plus paging metadata.
+      description: A cursor-paginated list of reports (ADR-0053 list envelope).
       type: object
-      required: [reports, page, page_size, total]
+      required: [object, data, has_more]
       properties:
-        reports:
+        object: { type: string, enum: [list] }
+        data:
           type: array
           items: { $ref: '#/components/schemas/ReportSummary' }
-        page:
-          type: integer
-          description: 1-based page number of this response.
-        page_size:
-          type: integer
-          description: Number of items per page.
-        total:
-          type: integer
-          description: Total reports matching the query (across all pages).
+        has_more:
+          type: boolean
+          description: True if more items follow; page on with `starting_after` = the last id.
 
     ReportSummary:
-      description: Lightweight read projection of a Report for list views (ADR-0036).
+      description: A `report` resource — summary projection (ADR-0036, ADR-0053).
       type: object
-      required: [id, slug, title, is_published, folder_id]
+      required: [object, id, slug, title, is_published, folder_id, livemode]
       properties:
+        object: { type: string, enum: [report] }
         id:
           type: string
           pattern: '^report_[0-9A-Za-z]{22}$'
@@ -477,20 +494,29 @@ components:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: The Folder the report is currently placed in.
+        livemode:
+          type: boolean
+          description: True on the live deployment (ADR-0053).
 
     FolderList:
+      description: A cursor-paginated list of folders (ADR-0053 list envelope).
       type: object
-      required: [folders]
+      required: [object, data, has_more]
       properties:
-        folders:
+        object: { type: string, enum: [list] }
+        data:
           type: array
           items: { $ref: '#/components/schemas/Folder' }
+        has_more:
+          type: boolean
+          description: True if more items follow; page on with `starting_after` = the last id.
 
     Folder:
-      description: A tree-structured organizing unit inside an Org (ADR-0036).
+      description: A `folder` resource — a tree-structured organizing unit (ADR-0036, ADR-0053).
       type: object
-      required: [id, name, slug, parent_id]
+      required: [object, id, name, slug, parent_id, livemode]
       properties:
+        object: { type: string, enum: [folder] }
         id: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
         name: { type: string }
         slug:
@@ -500,6 +526,9 @@ components:
           type: [string, 'null']
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Parent folder id; null for the org Root folder.
+        livemode:
+          type: boolean
+          description: True on the live deployment (ADR-0053).
 
     CreateFolderRequest:
       type: object
@@ -537,16 +566,6 @@ components:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Target folder id; must belong to your org.
-
-    MoveResult:
-      type: object
-      required: [slug, folder_id]
-      properties:
-        slug: { type: string, description: The moved report's slug (unchanged). }
-        folder_id:
-          type: string
-          pattern: '^folder_[0-9A-Za-z]{22}$'
-          description: The folder the report now lives in.
 
     Problem:
       description: RFC 9457 Problem Details (ADR-0040).

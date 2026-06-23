@@ -1,10 +1,13 @@
-// searchReports — the paged, searchable dashboard read across an org's reports
-// (ADR-0036, Reports & Folders). Pure orchestration over the ReportRepository
-// (ADR-0024): turn a 1-based page + optional query/folder filter into a
-// limit/offset query and return the page plus the total (for page navigation).
-// Org scope is the authorization boundary — a caller only sees its own org.
-import type { AppError, FolderId, OrgId, Result } from "arp-domain";
+// searchReports — the cursor-paginated, searchable read across an org's reports
+// (ADR-0036, Reports & Folders; ADR-0053 cursor pagination). Pure orchestration
+// over the ReportRepository (ADR-0024): clamp the limit, pass the keyset cursor
+// (startingAfter/endingBefore on the report id) + optional query/folder filter,
+// return the page {items, hasMore}. Org scope is the authorization boundary.
+import type { AppError, FolderId, OrgId, ReportId, Result } from "arp-domain";
 import type { ReportPage, ReportRepository } from "../ports";
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 
 export interface SearchReportsDeps {
   readonly reports: ReportRepository;
@@ -15,29 +18,25 @@ export interface SearchReportsActor {
 export interface SearchReportsInput {
   readonly query?: string;
   readonly folderId?: FolderId;
-  /** 1-based page number; clamped to >= 1. */
-  readonly page: number;
-  readonly pageSize: number;
-}
-
-export interface SearchReportsResult extends ReportPage {
-  readonly page: number;
-  readonly pageSize: number;
+  readonly limit?: number;
+  readonly startingAfter?: ReportId;
+  readonly endingBefore?: ReportId;
 }
 
 export async function searchReports(
   deps: SearchReportsDeps,
   actor: SearchReportsActor,
   input: SearchReportsInput,
-): Promise<Result<SearchReportsResult, AppError>> {
-  const page = Math.max(1, Math.floor(input.page) || 1);
-  const pageSize = Math.max(1, Math.floor(input.pageSize) || 1);
-  const result = await deps.reports.searchByOrg(actor.orgId, {
+): Promise<Result<ReportPage, AppError>> {
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(1, Math.floor(input.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT),
+  );
+  return deps.reports.searchByOrg(actor.orgId, {
     query: input.query,
     folderId: input.folderId,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
+    limit,
+    startingAfter: input.startingAfter,
+    endingBefore: input.endingBefore,
   });
-  if (!result.ok) return result;
-  return { ok: true, value: { ...result.value, page, pageSize } };
 }

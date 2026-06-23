@@ -16,7 +16,7 @@ import {
   renameReport,
   searchReports,
 } from "arp-application";
-import { folderId, makeSlug } from "arp-domain";
+import { folderId, makeSlug, reportId } from "arp-domain";
 import {
   AppHeader,
   Button,
@@ -49,7 +49,9 @@ export async function loader(args: LoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const requestedFolder = url.searchParams.get("folder") ?? "";
-  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  // Cursor pagination (ADR-0053): report-id cursors carried in the dashboard URL.
+  const after = url.searchParams.get("starting_after") || undefined;
+  const before = url.searchParams.get("ending_before") || undefined;
 
   const actorR = await resolveActorForRead(args);
   // The dashboard degrades to an empty list for both "no actor" and an infra
@@ -60,9 +62,8 @@ export async function loader(args: LoaderFunctionArgs) {
   const empty = {
     folders: [] as FolderNode[],
     items: [],
-    total: 0,
-    page: 1,
-    pageSize: PAGE_SIZE,
+    hasPrev: false,
+    hasNext: false,
     q,
     selectedFolderId: null,
     rootId: null,
@@ -88,19 +89,27 @@ export async function loader(args: LoaderFunctionArgs) {
     {
       query: q || undefined,
       folderId: selectedFolderId ? folderId(selectedFolderId) : undefined,
-      page,
-      pageSize: PAGE_SIZE,
+      limit: PAGE_SIZE,
+      startingAfter: after ? reportId(after) : undefined,
+      endingBefore: before ? reportId(before) : undefined,
     },
   );
   if (!searchR.ok) console.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
-  const result = searchR.ok ? searchR.value : { items: [], total: 0, page: 1, pageSize: PAGE_SIZE };
+  const result = searchR.ok ? searchR.value : { items: [], hasMore: false };
+
+  // `has_more` is the repo's frontier IN THE FETCH DIRECTION. Forward (or first
+  // page): it's "more after" = Next; a forward page also has a Prev (newer items).
+  // Backward (ending_before): it's "more before" = Prev, and there's always a Next
+  // (the page we came from). Translate to explicit hasPrev/hasNext for the UI.
+  const back = Boolean(before);
+  const hasNext = back ? true : result.hasMore;
+  const hasPrev = back ? result.hasMore : Boolean(after);
 
   return json({
     folders,
     items: result.items,
-    total: result.total,
-    page: result.page,
-    pageSize: result.pageSize,
+    hasPrev,
+    hasNext,
     q,
     selectedFolderId,
     rootId: root?.id ?? null,
@@ -226,22 +235,23 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function Index() {
-  const { folders, items, total, page, pageSize, q, selectedFolderId, rootId, viewBase } =
+  const { folders, items, hasPrev, hasNext, q, selectedFolderId, rootId, viewBase } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
   const root = folders.find((f) => f.parentId === null);
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const createParent = selectedFolderId ?? rootId;
   const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
 
-  // Page links preserve the active search + folder filter.
-  const pageHref = (p: number) => {
+  // Cursor links (ADR-0053) preserve the active search + folder filter; the cursor
+  // is the boundary report id (forward = starting_after, back = ending_before).
+  const cursorHref = (cursor?: { starting_after?: string; ending_before?: string }) => {
     const sp = new URLSearchParams();
     if (q) sp.set("q", q);
     if (selectedFolderId) sp.set("folder", selectedFolderId);
-    if (p > 1) sp.set("page", String(p));
+    if (cursor?.starting_after) sp.set("starting_after", cursor.starting_after);
+    if (cursor?.ending_before) sp.set("ending_before", cursor.ending_before);
     const s = sp.toString();
     return s ? `/?${s}` : "/";
   };
@@ -315,7 +325,8 @@ export default function Index() {
         <section className="min-w-0 flex-1">
           <p className="mb-3 text-sm text-muted">
             <span className="font-medium text-fg">{scopeLabel}</span>
-            {q ? ` · matching “${q}”` : ""} · {total} report{total === 1 ? "" : "s"}
+            {q ? ` · matching “${q}”` : ""} · {items.length}
+            {hasNext ? "+" : ""} report{items.length === 1 && !hasNext ? "" : "s"}
           </p>
           {items.length === 0 ? (
             <EmptyState
@@ -401,20 +412,25 @@ export default function Index() {
             </ul>
           )}
 
-          {totalPages > 1 ? (
+          {hasPrev || hasNext ? (
             <div className="mt-4 flex items-center gap-3 text-sm">
-              {page > 1 ? (
-                <Link to={pageHref(page - 1)} className="text-brand hover:text-brand-hover">
+              {hasPrev ? (
+                <Link
+                  to={cursorHref(items[0] ? { ending_before: items[0].id } : undefined)}
+                  className="text-brand hover:text-brand-hover"
+                >
                   ← Prev
                 </Link>
               ) : (
                 <span className="text-subtle">← Prev</span>
               )}
-              <span className="text-muted">
-                Page {page} of {totalPages}
-              </span>
-              {page < totalPages ? (
-                <Link to={pageHref(page + 1)} className="text-brand hover:text-brand-hover">
+              {hasNext ? (
+                <Link
+                  to={cursorHref(
+                    items.length ? { starting_after: items[items.length - 1]?.id } : undefined,
+                  )}
+                  className="text-brand hover:text-brand-hover"
+                >
                   Next →
                 </Link>
               ) : (

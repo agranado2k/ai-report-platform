@@ -120,7 +120,7 @@ Indexes: `key_prefix`, `acting_user_id`, `last_used_at`.
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | |
 
-Indexes: `org_id`, `(org_id, parent_id, slug) WHERE deleted_at IS NULL` unique, and `(org_id, slug) WHERE parent_id IS NULL AND deleted_at IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048). Both exclude soft-deleted rows so a deleted folder doesn't keep its sibling-slug slot (recreating a same-named folder must succeed, ADR-0036).
+Indexes: `org_id`, `(org_id, id DESC) WHERE deleted_at IS NULL` (cursor-paginated `searchByOrg`, keyset on the folder id, ADR-0053), `(org_id, parent_id, slug) WHERE deleted_at IS NULL` unique, and `(org_id, slug) WHERE parent_id IS NULL AND deleted_at IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048). Both exclude soft-deleted rows so a deleted folder doesn't keep its sibling-slug slot (recreating a same-named folder must succeed, ADR-0036).
 
 #### `folder_collaborators` — grants (Phase 2.5)
 | Column | Type | Notes |
@@ -147,7 +147,7 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | takedown → soft delete |
 
-Indexes: `slug` unique, `(org_id, folder_id)`, `(org_id, updated_at DESC) WHERE deleted_at IS NULL` (serves the dashboard's org-wide, newest-first paged listing/search — `searchByOrg`), `deleted_at` partial.
+Indexes: `slug` unique, `(org_id, folder_id)`, `(org_id, id DESC) WHERE deleted_at IS NULL` (serves the cursor-paginated org-wide listing/search — `searchByOrg`, keyset on the report id, ADR-0053), `(org_id, updated_at DESC) WHERE deleted_at IS NULL` (retained for any `updated_at`-ordered access), `deleted_at` partial.
 The `reports.live_version_id ↔ report_versions.report_id` cycle is broken by
 making `live_version_id` nullable and set after the first version commits.
 

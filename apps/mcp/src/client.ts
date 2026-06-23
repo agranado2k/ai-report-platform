@@ -21,15 +21,18 @@ export type ApiResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly problem: Problem };
 
-export interface ReportPage {
-  readonly reports: readonly Record<string, unknown>[];
-  readonly page: number;
-  readonly page_size: number;
-  readonly total: number;
+/** The Stripe-style list envelope (ADR-0053): `{ object: "list", data, has_more }`. */
+export interface ListEnvelope {
+  readonly object: "list";
+  readonly data: readonly Record<string, unknown>[];
+  readonly has_more: boolean;
 }
 
-export interface FolderList {
-  readonly folders: readonly Record<string, unknown>[];
+/** Cursor-pagination params (ADR-0053): the cursor is a prefixed id. */
+export interface CursorParams {
+  readonly limit?: number;
+  readonly startingAfter?: string;
+  readonly endingBefore?: string;
 }
 
 export interface ApiClientConfig {
@@ -41,33 +44,40 @@ export interface ApiClientConfig {
   readonly fetch?: typeof fetch;
 }
 
-export interface SearchReportsParams {
+export interface SearchReportsParams extends CursorParams {
   readonly q?: string;
   readonly folderId?: string;
-  readonly page?: number;
-  readonly pageSize?: number;
+}
+
+/** Append the cursor params (snake_case on the wire) to a query string. */
+function appendCursor(qs: URLSearchParams, p: CursorParams): void {
+  if (p.limit !== undefined) qs.set("limit", String(p.limit));
+  if (p.startingAfter) qs.set("starting_after", p.startingAfter);
+  if (p.endingBefore) qs.set("ending_before", p.endingBefore);
 }
 
 export class ApiClient {
   constructor(private readonly cfg: ApiClientConfig) {}
 
-  searchReports(params: SearchReportsParams): Promise<ApiResult<ReportPage>> {
+  searchReports(params: SearchReportsParams): Promise<ApiResult<ListEnvelope>> {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.folderId) qs.set("folder_id", params.folderId);
-    if (params.page !== undefined) qs.set("page", String(params.page));
-    if (params.pageSize !== undefined) qs.set("page_size", String(params.pageSize));
+    appendCursor(qs, params);
     const query = qs.toString();
-    return this.get<ReportPage>(`/api/v1/reports${query ? `?${query}` : ""}`);
+    return this.get<ListEnvelope>(`/api/v1/reports${query ? `?${query}` : ""}`);
   }
 
-  /** Fetch a single report by slug (summary shape); 404 → problem. */
+  /** Fetch a single report by slug or report_ id (summary shape); 404 → problem. */
   getReport(slug: string): Promise<ApiResult<Record<string, unknown>>> {
     return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
-  listFolders(): Promise<ApiResult<FolderList>> {
-    return this.get<FolderList>("/api/v1/folders");
+  listFolders(params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+    const qs = new URLSearchParams();
+    appendCursor(qs, params);
+    const query = qs.toString();
+    return this.get<ListEnvelope>(`/api/v1/folders${query ? `?${query}` : ""}`);
   }
 
   /** Create a report, or re-upload a new version of `updateSlug` (multipart, ADR-0037). */
