@@ -431,14 +431,16 @@ components:
     UploadResult:
       description: The created `report` resource (ADR-0053).
       type: object
-      required: [object, id, slug, view_url, version, scan_status, livemode]
+      required: [object, slug, view_url, version, scan_status, livemode]
       properties:
         object: { type: string, enum: [report] }
         id:
           type: string
           pattern: '^report_[0-9A-Za-z]{22}$'
           example: report_7KpQ2mX9vR4nB6cD8eF1gH
-          description: The created report's External Id (ADR-0052) — for API addressing.
+          description: >
+            The report's External Id (ADR-0052) — present on a create or re-upload,
+            omitted only on an idempotent replay (the stored response). Address by `slug`.
         slug:
           type: string
           description: Permanent capability-URL slug (nanoid(10), ~10^18 entropy).

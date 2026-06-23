@@ -39,7 +39,6 @@ export interface ReportSummary {
   readonly folderId: FolderId;
 }
 
-/** A paged, optionally-filtered query over an org's reports (dashboard search). */
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC
  *  (newest-created first). `startingAfter`/`endingBefore` are exclusive id bounds. */
 export interface CursorParams<Id> {
@@ -58,7 +57,6 @@ export interface ReportSearchQuery extends CursorParams<ReportId> {
 /** Cursor-paginated query over an org's folder tree (ADR-0053). */
 export type FolderListQuery = CursorParams<FolderId>;
 
-/** One page of report summaries plus the total matching the query (for paging). */
 /** A cursor-paginated slice (ADR-0053): the page items + whether more follow. */
 export interface CursorPage<T> {
   readonly items: readonly T[];
@@ -73,7 +71,8 @@ export interface ReportRepository {
   findById(id: ReportId): Promise<Result<Report | null, AppError>>;
   /** The org's non-deleted reports as summaries, newest first (dashboard list). */
   listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>>;
-  /** Paged + filtered org-wide search (newest first), backed by (org_id, updated_at). */
+  /** Cursor-paginated + filtered org-wide search (newest-created first), keyset on
+   *  the report id (ADR-0053). */
   searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>>;
   /** Persist the aggregate + any new versions (called inside a UnitOfWork). */
   save(report: Report): Promise<Result<void, AppError>>;
