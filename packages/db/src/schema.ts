@@ -64,10 +64,13 @@ export const users = pgTable(
     email: text("email").notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    deletedAt: deletedAt(),
   },
   (t) => [
     uniqueIndex("users_clerk_user_id_uniq").on(t.clerkUserId),
     index("users_email_idx").on(t.email),
+    // Partial: only soft-deleted rows (purge job lookup), mirrors reports (ADR-0054).
+    index("users_deleted_at_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
   ],
 );
 
