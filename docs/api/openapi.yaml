@@ -412,8 +412,13 @@ components:
   schemas:
     UploadResult:
       type: object
-      required: [slug, view_url, version, scan_status]
+      required: [id, slug, view_url, version, scan_status]
       properties:
+        id:
+          type: string
+          pattern: '^report_[0-9A-Za-z]{22}$'
+          example: report_7KpQ2mX9vR4nB6cD8eF1gH
+          description: The created report's External Id (ADR-0052) — for API addressing.
         slug:
           type: string
           description: Permanent capability-URL slug (nanoid(10), ~10^18 entropy).

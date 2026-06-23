@@ -1,8 +1,10 @@
 // Resolve a report path handle to its Slug (ADR-0052). A report is addressable by
 // EITHER its `report_…` External Id OR its capability `slug`; the existing use cases
 // key on Slug, so we resolve a report_ id to the report's slug here (one findById)
-// and let the use case do the org-ownership authz. A report_ id for a missing /
-// deleted / not-yours report resolves to NotFound (the use case would too).
+// and let the use case do the org-ownership authz. `findById` is NOT org-scoped, so:
+// a missing/deleted report_ id → NotFound (404) here; a report in ANOTHER org
+// resolves to its slug, then the use case's org check returns NotAllowed (403) —
+// the same 403-vs-404 posture as the slug path (ADR-0052; slugs/ids aren't enumerable).
 import type { ReportRepository } from "arp-application";
 import {
   type AppError,

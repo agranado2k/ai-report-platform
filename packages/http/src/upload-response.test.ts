@@ -1,5 +1,5 @@
 import type { UploadOutcome } from "arp-application";
-import { type AppError, err, ok } from "arp-domain";
+import { type AppError, err, ok, reportId, reportIdToWire } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { uploadResultToHttp } from "./upload-response";
 
@@ -24,6 +24,12 @@ describe("uploadResultToHttp — success", () => {
       scan_status: "clean",
     });
     expect(res.headers?.Location).toBe("https://view.example/abcde12345");
+  });
+
+  it("returns the report_ External Id when the upload created a report (ADR-0052)", () => {
+    const rid = reportId("019ed70f-491d-707a-a263-4c31243f0c9f");
+    const res = uploadResultToHttp(ok({ ...outcome(), reportId: rid }), OPTS);
+    expect((res.body as { id?: string }).id).toBe(reportIdToWire(rid));
   });
 });
 
