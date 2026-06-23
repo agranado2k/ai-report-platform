@@ -79,6 +79,27 @@ describe("searchReports use case (cursor pagination, ADR-0053)", () => {
     expect(pages).toBe(3); // 10 + 10 + 5
   });
 
+  it("pages backward with ending_before (Prev) → the previous page, has_more=false at the start", async () => {
+    const reports = await seed(25);
+    const p1 = await searchReports({ reports }, { orgId: orgA }, { limit: 10 });
+    if (!p1.ok) throw new Error("p1");
+    const p2 = await searchReports(
+      { reports },
+      { orgId: orgA },
+      { limit: 10, startingAfter: p1.value.items[9]?.id },
+    );
+    if (!p2.ok) throw new Error("p2");
+    // ending_before page 2's first id → back to page 1's items, in the same order
+    const back = await searchReports(
+      { reports },
+      { orgId: orgA },
+      { limit: 10, endingBefore: p2.value.items[0]?.id },
+    );
+    expect(back.ok && back.value.items.map((r) => r.id)).toEqual(p1.value.items.map((r) => r.id));
+    // page 1 is the start — no more (newer) items before it
+    expect(back.ok && back.value.hasMore).toBe(false);
+  });
+
   it("filters by a case-insensitive title query", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(rep("aaaaaaaaaa", "Quarterly revenue"));

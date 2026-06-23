@@ -59,12 +59,11 @@ export async function loader(args: LoaderFunctionArgs) {
   // the distinction (401 vs 500) instead.
   if (!actorR.ok) console.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
   const actor = actorR.ok ? actorR.value : null;
-  const paged = Boolean(after || before);
   const empty = {
     folders: [] as FolderNode[],
     items: [],
-    hasMore: false,
-    paged,
+    hasPrev: false,
+    hasNext: false,
     q,
     selectedFolderId: null,
     rootId: null,
@@ -98,11 +97,19 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!searchR.ok) console.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
   const result = searchR.ok ? searchR.value : { items: [], hasMore: false };
 
+  // `has_more` is the repo's frontier IN THE FETCH DIRECTION. Forward (or first
+  // page): it's "more after" = Next; a forward page also has a Prev (newer items).
+  // Backward (ending_before): it's "more before" = Prev, and there's always a Next
+  // (the page we came from). Translate to explicit hasPrev/hasNext for the UI.
+  const back = Boolean(before);
+  const hasNext = back ? true : result.hasMore;
+  const hasPrev = back ? result.hasMore : Boolean(after);
+
   return json({
     folders,
     items: result.items,
-    hasMore: result.hasMore,
-    paged,
+    hasPrev,
+    hasNext,
     q,
     selectedFolderId,
     rootId: root?.id ?? null,
@@ -228,7 +235,7 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function Index() {
-  const { folders, items, hasMore, paged, q, selectedFolderId, rootId, viewBase } =
+  const { folders, items, hasPrev, hasNext, q, selectedFolderId, rootId, viewBase } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
@@ -319,7 +326,7 @@ export default function Index() {
           <p className="mb-3 text-sm text-muted">
             <span className="font-medium text-fg">{scopeLabel}</span>
             {q ? ` · matching “${q}”` : ""} · {items.length}
-            {hasMore ? "+" : ""} report{items.length === 1 && !hasMore ? "" : "s"}
+            {hasNext ? "+" : ""} report{items.length === 1 && !hasNext ? "" : "s"}
           </p>
           {items.length === 0 ? (
             <EmptyState
@@ -405,9 +412,9 @@ export default function Index() {
             </ul>
           )}
 
-          {paged || hasMore ? (
+          {hasPrev || hasNext ? (
             <div className="mt-4 flex items-center gap-3 text-sm">
-              {paged ? (
+              {hasPrev ? (
                 <Link
                   to={cursorHref(items[0] ? { ending_before: items[0].id } : undefined)}
                   className="text-brand hover:text-brand-hover"
@@ -417,7 +424,7 @@ export default function Index() {
               ) : (
                 <span className="text-subtle">← Prev</span>
               )}
-              {hasMore ? (
+              {hasNext ? (
                 <Link
                   to={cursorHref(
                     items.length ? { starting_after: items[items.length - 1]?.id } : undefined,
