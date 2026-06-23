@@ -296,13 +296,20 @@ export interface IdentityStore {
     clerkUserId: string,
     clerkOrgId: string,
   ): Promise<Result<ProvisionedIdentity | null, AppError>>;
-  /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity. */
+  /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity.
+   *  MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal). */
   createPersonalIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
     readonly orgName: string;
   }): Promise<Result<ProvisionedIdentity, AppError>>;
+  /**
+   * Soft-delete our mirrored user (stamp `deleted_at`) for a Clerk `user.deleted`
+   * (ADR-0054). Returns the affected `UserId` (so the caller can cascade), or null
+   * when no LIVE user matched — idempotent: replays / unknown ids are a no-op.
+   */
+  softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>>;
 }
 
 /**
@@ -371,4 +378,9 @@ export interface ApiKeyStore {
   listForUser(actingUserId: UserId): Promise<Result<readonly ApiKeySummary[], AppError>>;
   /** Revoke a key the user owns (idempotent: re-revoking is a no-op). */
   revoke(id: string, actingUserId: UserId): Promise<Result<void, AppError>>;
+  /**
+   * Revoke ALL of a user's live keys (the user-soft-delete cascade, ADR-0054).
+   * Returns the count revoked; idempotent — already-revoked keys are skipped.
+   */
+  revokeAllForUser(actingUserId: UserId): Promise<Result<number, AppError>>;
 }

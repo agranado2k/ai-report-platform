@@ -23,6 +23,9 @@ function storeWhereVerify(result: Result<ApiKeyPrincipal | null, AppError>): Api
     revoke: async () => {
       throw new Error("unused");
     },
+    revokeAllForUser: async () => {
+      throw new Error("unused");
+    },
   };
 }
 

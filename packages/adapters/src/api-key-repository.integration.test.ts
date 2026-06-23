@@ -96,6 +96,23 @@ describe("DrizzleApiKeyRepository (pglite integration)", () => {
     }
   });
 
+  it("revokeAllForUser revokes every live key, returns the count, and is idempotent (ADR-0054)", async () => {
+    await mint("a");
+    await mint("b");
+    await mint("c");
+
+    const revoked = await repo.revokeAllForUser(seed.userId);
+    expect(revoked.ok && revoked.value).toBe(3);
+
+    // All keys are now revoked → none verify.
+    const list = await repo.listForUser(seed.userId);
+    expect(list.ok && list.value.every((k) => k.revokedAt !== null)).toBe(true);
+
+    // Replay → 0 live keys left to revoke.
+    const again = await repo.revokeAllForUser(seed.userId);
+    expect(again.ok && again.value).toBe(0);
+  });
+
   it("verify resolves the correct key when several exist", async () => {
     const a = await mint("a");
     const b = await mint("b");
