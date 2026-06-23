@@ -1581,3 +1581,22 @@ from `var.clerk_webhook_signing_secret` — OPTIONAL (default ""), so the env va
 the `CLERK_WEBHOOK_SIGNING_SECRET` GitHub Actions secret (CI applies infra, ADR-018). Bumped
 to 292 tests after the claude-review self-healing-cascade fix (PR #98). Follow-ups: restore
 flow; orphaned personal-org cleanup. Worktree `feat/user-soft-delete`.
+
+### 2026-06-23 — OpenTelemetry observability design (ADR-0055), worktree `feat/observability-otel`
+
+Grilled the observability design (priority 2) and recorded **ADR-0055**. Decisions: **three
+pillars** (traces+metrics+logs) → **Grafana Cloud** (Tempo/Loki/Mimir; chosen largely for the
+richest **MCP server**, `grafana/mcp-grafana`, so an agent can query telemetry) → **direct OTLP,
+no collector**. **`@vercel/otel`** on the Vercel apps (solves span-flush-before-freeze; `fetch`
+auto-instr → MCP→/api/v1 continuity), **`otel-cf-workers`** on the cron Worker, **`view`
+deferred**. Async pipeline linked via **span links** (new `scan_jobs.trace_context` col, captured
+in the scan-queue adapter, linked at the drain) + always-on `report.id`/`version.id` attributes.
+Logs: **`pino` + instrumentation-pino → OTLP → Loki** from a shared **`packages/observability`**;
+domain/application stay pure (ADR-0024). Metrics emitted from the functions (auto HTTP RED +
+custom counters; delta temporality; per-invocation flush; low-cardinality labels only). **100%
+sampling** pre-launch. Redaction at source (no collector): deny secrets/report-content/auth-
+headers/email; prefer `report_id` over `slug` (capability URL, ADR-0038). **`Request-Id` is now
+`req_<base62(trace_id)>` — amends ADR-0053 §5** (one id; decodes straight to a Tempo trace).
+Config optional/fail-open; Grafana token wired like the Clerk webhook secret. Not yet implemented
+— ADR + glossary only this pass. Riskiest open item to validate first: metrics flush on Vercel
+serverless (`@vercel/otel`'s metrics flush is weaker than spans).
