@@ -3,6 +3,7 @@
 // JSON body or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
 import type { AppError, Folder, FolderId, Report, Result, Slug } from "arp-domain";
+import { folderIdToWire, reportIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 
 /** POST /api/v1/reports/{slug}/move — 200 echoing the report's new placement. */
@@ -14,17 +15,19 @@ export function moveReportToHttp(
   return {
     status: 200,
     contentType: "application/json",
-    body: { slug: placement.slug, folder_id: placement.folderId },
+    body: { slug: placement.slug, folder_id: folderIdToWire(placement.folderId) },
   };
 }
 
-/** The wire shape of a Report (summary; no org id) — shared by rename + get. */
+/** The wire shape of a Report (summary; no org id) — shared by rename + get. Both
+ *  the `report_…` id and the capability `slug` are returned (ADR-0052). */
 function reportSummaryBody(r: Report) {
   return {
+    id: reportIdToWire(r.id),
     slug: r.slug,
     title: r.title,
     is_published: r.liveVersionId !== null,
-    folder_id: r.folderId,
+    folder_id: folderIdToWire(r.folderId),
   };
 }
 
@@ -46,9 +49,14 @@ export function deleteReportToHttp(result: Result<void, AppError>): HttpResponse
   return { status: 204, contentType: "application/json", body: undefined };
 }
 
-/** The wire shape of a Folder (no org id). */
+/** The wire shape of a Folder (no org id) — External Ids prefixed (ADR-0052). */
 function folderBody(f: Folder) {
-  return { id: f.id, name: f.name, slug: f.slug, parent_id: f.parentId };
+  return {
+    id: folderIdToWire(f.id),
+    name: f.name,
+    slug: f.slug,
+    parent_id: f.parentId ? folderIdToWire(f.parentId) : null,
+  };
 }
 
 /** POST /api/v1/folders — 201 with the created folder. */

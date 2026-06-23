@@ -30,8 +30,9 @@ export async function action(args: ActionFunctionArgs) {
   if (!body.ok) return toResponse(errorToHttp(body.error));
   const name = typeof body.value.name === "string" ? body.value.name : "";
   const rawParent = typeof body.value.parent_id === "string" ? body.value.parent_id.trim() : "";
-  // Validate the UUID at the boundary → 422 (a bad value would otherwise throw in
-  // Postgres and surface as a 500). makeFolderId also rejects "" (required).
+  // Decode the parent folder_ External Id at the boundary → 422 (a bad value would
+  // otherwise throw in Postgres and surface as a 500). makeFolderId rejects a bare
+  // uuid / wrong prefix / "" (required), ADR-0052.
   const parentId = makeFolderId(rawParent);
   if (!parentId.ok) return toResponse(errorToHttp(parentId.error));
 

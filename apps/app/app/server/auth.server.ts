@@ -13,7 +13,14 @@ import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { authenticateApiKey, provisionIdentity, type UploadActor } from "arp-application";
-import { type AppError, err, ok, type Result } from "arp-domain";
+import {
+  type AppError,
+  err,
+  ok,
+  type Result,
+  clerkOrgId as toClerkOrgId,
+  clerkUserId as toClerkUserId,
+} from "arp-domain";
 import { defineEnv } from "arp-env";
 import { apiKeyStore, provisionDeps } from "./container.server";
 
@@ -147,8 +154,8 @@ export async function resolveUploadActor(
       return err({ kind: "Unauthenticated", message: "session is missing the email claim" });
     }
     return provisionIdentity(provisionDeps(), {
-      clerkUserId: userId,
-      clerkOrgId: orgId ?? null,
+      clerkUserId: toClerkUserId(userId),
+      clerkOrgId: orgId ? toClerkOrgId(orgId) : null,
       email,
     });
   }
@@ -164,8 +171,8 @@ export async function resolveUploadActor(
     const personal = await deps.clerkOrgs.findPersonalOrg(oauthUserId);
     if (!personal.ok) return personal; // Clerk outage → propagate (→ 500)
     return provisionIdentity(deps, {
-      clerkUserId: oauthUserId,
-      clerkOrgId: personal.value,
+      clerkUserId: toClerkUserId(oauthUserId),
+      clerkOrgId: personal.value ? toClerkOrgId(personal.value) : null,
       email: email.value,
     });
   }

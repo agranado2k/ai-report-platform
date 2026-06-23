@@ -1,7 +1,7 @@
 // UploadReportUseCase — the content-only upload pipeline (ADR-0037, ADR-0039).
 // Pure orchestration over the driven ports (no I/O of its own; ADR-0024). The
 // HTTP adapter maps the returned AppError to a status (ADR-0040) and a success
-// to 201 { slug, view_url, version, scan_status }.
+// to 201 { id, slug, view_url, version, scan_status }.
 
 import {
   type AppError,

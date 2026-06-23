@@ -4,6 +4,7 @@
 // boundary); the domain/application keep returning Result<T, AppError> (ADR-0024).
 import type { UploadOutcome } from "arp-application";
 import type { AppError, Result } from "arp-domain";
+import { reportIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 
 export type { HttpResponse };
@@ -24,11 +25,20 @@ export function uploadResultToHttp(
 ): HttpResponse {
   if (result.ok) {
     const { slug, version, scanStatus } = result.value.result;
+    const { reportId } = result.value; // the created report's id (fresh upload only)
     const viewUrl = `${opts.viewBaseUrl}/${slug}`;
     return {
       status: 201,
       contentType: "application/json",
-      body: { slug, view_url: viewUrl, version, scan_status: scanStatus },
+      // Return the report_ External Id alongside the slug (ADR-0052 §4) so the
+      // caller has the API addressing id for the report it just created.
+      body: {
+        ...(reportId ? { id: reportIdToWire(reportId) } : {}),
+        slug,
+        view_url: viewUrl,
+        version,
+        scan_status: scanStatus,
+      },
       headers: { Location: viewUrl },
     };
   }

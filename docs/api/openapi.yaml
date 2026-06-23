@@ -45,7 +45,7 @@ paths:
         - name: folder_id
           in: query
           required: false
-          schema: { type: string, format: uuid }
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: Restrict to one folder. A malformed (non-UUID) value → 422.
         - name: page
           in: query
@@ -188,7 +188,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: The folder id.
       requestBody:
         required: true
@@ -221,7 +221,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: The folder id.
       responses:
         '204':
@@ -412,8 +412,13 @@ components:
   schemas:
     UploadResult:
       type: object
-      required: [slug, view_url, version, scan_status]
+      required: [id, slug, view_url, version, scan_status]
       properties:
+        id:
+          type: string
+          pattern: '^report_[0-9A-Za-z]{22}$'
+          example: report_7KpQ2mX9vR4nB6cD8eF1gH
+          description: The created report's External Id (ADR-0052) — for API addressing.
         slug:
           type: string
           description: Permanent capability-URL slug (nanoid(10), ~10^18 entropy).
@@ -454,18 +459,23 @@ components:
     ReportSummary:
       description: Lightweight read projection of a Report for list views (ADR-0036).
       type: object
-      required: [slug, title, is_published, folder_id]
+      required: [id, slug, title, is_published, folder_id]
       properties:
+        id:
+          type: string
+          pattern: '^report_[0-9A-Za-z]{22}$'
+          example: report_7KpQ2mX9vR4nB6cD8eF1gH
+          description: The report's External Id (ADR-0052) — for authenticated API addressing.
         slug:
           type: string
-          description: Permanent capability-URL slug (nanoid(10)).
+          description: Permanent capability-URL slug (nanoid(10)) — the viewer / public handle.
         title: { type: string }
         is_published:
           type: boolean
           description: True when a clean version is live (servable at the viewer URL).
         folder_id:
           type: string
-          format: uuid
+          pattern: '^folder_[0-9A-Za-z]{22}$'
           description: The Folder the report is currently placed in.
 
     FolderList:
@@ -481,14 +491,14 @@ components:
       type: object
       required: [id, name, slug, parent_id]
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
         name: { type: string }
         slug:
           type: string
           description: URL-safe folder slug, unique among siblings within the org.
         parent_id:
           type: [string, 'null']
-          format: uuid
+          pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Parent folder id; null for the org Root folder.
 
     CreateFolderRequest:
@@ -500,7 +510,7 @@ components:
           description: Display name for the new folder.
         parent_id:
           type: string
-          format: uuid
+          pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Parent folder id (use the Root folder's id for a top-level folder).
 
     RenameFolderRequest:
@@ -525,7 +535,7 @@ components:
       properties:
         folder_id:
           type: string
-          format: uuid
+          pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Target folder id; must belong to your org.
 
     MoveResult:
@@ -535,7 +545,7 @@ components:
         slug: { type: string, description: The moved report's slug (unchanged). }
         folder_id:
           type: string
-          format: uuid
+          pattern: '^folder_[0-9A-Za-z]{22}$'
           description: The folder the report now lives in.
 
     Problem:

@@ -28,8 +28,9 @@ export async function provisionIdentity(
   const name = personalOrgName(identity.email);
 
   // 1. Ensure the user has an active Clerk org — create a personal one if not
-  //    (Clerk doesn't auto-create them, ADR-0048).
-  let clerkOrgId = identity.clerkOrgId;
+  //    (Clerk doesn't auto-create them, ADR-0048). The Clerk org id is opaque to us
+  //    downstream (just a lookup key), so we widen the branded inbound type here.
+  let clerkOrgId: string | null = identity.clerkOrgId;
   if (!clerkOrgId) {
     const created = await deps.clerkOrgs.createPersonalOrg(identity.clerkUserId, name);
     if (!created.ok) return created;

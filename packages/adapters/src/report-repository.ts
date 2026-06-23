@@ -120,6 +120,7 @@ export class DrizzleReportRepository implements ReportRepository {
       const db = this.ctx.current();
       const rows = await db
         .select({
+          id: reports.id,
           slug: reports.slug,
           title: reports.title,
           liveVersionId: reports.liveVersionId,
@@ -130,6 +131,7 @@ export class DrizzleReportRepository implements ReportRepository {
         .orderBy(desc(reports.updatedAt));
       return ok(
         rows.map((r) => ({
+          id: reportId(r.id),
           slug: r.slug as Slug,
           title: r.title,
           isPublished: r.liveVersionId !== null,
@@ -164,6 +166,7 @@ export class DrizzleReportRepository implements ReportRepository {
       const [rows, totals] = await Promise.all([
         db
           .select({
+            id: reports.id,
             slug: reports.slug,
             title: reports.title,
             liveVersionId: reports.liveVersionId,
@@ -179,6 +182,7 @@ export class DrizzleReportRepository implements ReportRepository {
 
       return ok({
         items: rows.map((r) => ({
+          id: reportId(r.id),
           slug: r.slug as Slug,
           title: r.title,
           isPublished: r.liveVersionId !== null,

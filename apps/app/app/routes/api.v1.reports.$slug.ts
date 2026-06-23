@@ -6,7 +6,6 @@
 // the pure arp-http mappers. The use cases own org-ownership authz.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { deleteReport, getReport, renameReport } from "arp-application";
-import { makeSlug } from "arp-domain";
 import {
   deleteReportToHttp,
   errorToHttp,
@@ -17,6 +16,7 @@ import {
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps } from "../server/container.server";
 import { toResponse, unauthenticated } from "../server/http.server";
+import { resolveReportSlug } from "../server/report-handle.server";
 
 // GET — read a single report by slug, scoped to the acting org. resolveActorForRead
 // resolves the org WITHOUT provisioning (GETs stay safe); no session / no org → 401.
@@ -26,7 +26,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
   if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
 
-  const slug = makeSlug(String(args.params.slug ?? ""));
+  const slug = await resolveReportSlug(String(args.params.slug ?? ""), deps().reports);
   if (!slug.ok) return toResponse(errorToHttp(slug.error));
 
   const result = await getReport(
@@ -41,7 +41,7 @@ export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) return toResponse(errorToHttp(actor.error)); // 401 / 500 per kind
 
-  const slug = makeSlug(String(args.params.slug ?? ""));
+  const slug = await resolveReportSlug(String(args.params.slug ?? ""), deps().reports);
   if (!slug.ok) return toResponse(errorToHttp(slug.error));
   const orgId = actor.value.orgId;
   const method = args.request.method.toUpperCase();

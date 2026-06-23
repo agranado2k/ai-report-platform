@@ -112,6 +112,7 @@ export class InMemoryReportRepository implements ReportRepository {
       // fake keeps original insertion position. Tests must not rely on re-save order.
       .reverse()
       .map((r) => ({
+        id: r.id,
         slug: r.slug,
         title: r.title,
         isPublished: r.liveVersionId !== null,
@@ -132,6 +133,7 @@ export class InMemoryReportRepository implements ReportRepository {
       )
       .reverse(); // newest-first (insertion-order proxy; see listByOrg note)
     const items = all.slice(q.offset, q.offset + q.limit).map((r) => ({
+      id: r.id,
       slug: r.slug,
       title: r.title,
       isPublished: r.liveVersionId !== null,
