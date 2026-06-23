@@ -9,7 +9,7 @@ import { makeFolderId } from "arp-domain";
 import { errorToHttp, moveReportToHttp, parseJsonBody } from "arp-http";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
-import { toResponse } from "../server/http.server";
+import { toResponse, wireContext } from "../server/http.server";
 import { resolveReportSlug } from "../server/report-handle.server";
 
 export async function action(args: ActionFunctionArgs) {
@@ -32,5 +32,5 @@ export async function action(args: ActionFunctionArgs) {
     { orgId: actor.value.orgId },
     { slug: slug.value, toFolderId: toFolderId.value },
   );
-  return toResponse(moveReportToHttp(result, { slug: slug.value, folderId: toFolderId.value }));
+  return toResponse(moveReportToHttp(result, wireContext()));
 }

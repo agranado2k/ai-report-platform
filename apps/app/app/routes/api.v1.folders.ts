@@ -8,14 +8,18 @@ import { makeFolderId } from "arp-domain";
 import { createFolderToHttp, errorToHttp, listFoldersToHttp, parseJsonBody } from "arp-http";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
-import { toResponse, unauthenticated } from "../server/http.server";
+import { parseCursorParams, toResponse, unauthenticated, wireContext } from "../server/http.server";
 
+// GET /api/v1/folders — cursor-paginated folder list (ADR-0053): `limit`,
+// `starting_after`/`ending_before` (a folder_ id). parent_id links the tree.
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
   if (!actor.ok) return toResponse(errorToHttp(actor.error)); // infra failure → 500
   if (!actor.value) return toResponse(unauthenticated()); // no session / no org → 401
-  const result = await folderRepo().listByOrg(actor.value.orgId);
-  return toResponse(listFoldersToHttp(result));
+  const cursor = parseCursorParams(new URL(args.request.url).searchParams, makeFolderId);
+  if (!cursor.ok) return toResponse(errorToHttp(cursor.error)); // malformed cursor → 422
+  const result = await folderRepo().searchByOrg(actor.value.orgId, cursor.value);
+  return toResponse(listFoldersToHttp(result, wireContext()));
 }
 
 // POST /api/v1/folders — create a folder under parent_id (ADR-0036). Write path
@@ -36,10 +40,10 @@ export async function action(args: ActionFunctionArgs) {
   const parentId = makeFolderId(rawParent);
   if (!parentId.ok) return toResponse(errorToHttp(parentId.error));
 
-  const result = await createFolder(
+  const created = await createFolder(
     { folders: folderRepo(), ids: deps().ids },
     { orgId: actor.value.orgId },
     { parentId: parentId.value, name },
   );
-  return toResponse(createFolderToHttp(result));
+  return toResponse(createFolderToHttp(created, wireContext()));
 }
