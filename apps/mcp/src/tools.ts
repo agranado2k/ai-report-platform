@@ -78,7 +78,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "before you update, move, or delete it. Omit `q` to list everything.",
       inputSchema: {
         q: z.string().optional().describe("Free-text match on title/slug. Omit to list all."),
-        folder_id: z.string().optional().describe("Restrict results to this folder id."),
+        folder_id: z.string().optional().describe("Restrict to this folder_ id."),
         page: z.number().int().positive().optional().describe("1-based page number (default 1)."),
         page_size: z
           .number()
@@ -109,7 +109,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "Read-only. Use it to confirm a report exists / check its current title or folder before " +
         "an update, move, or delete. A slug that isn't yours (or doesn't exist) returns not-found.",
       inputSchema: {
-        slug: z.string().describe("The report's slug (e.g. from reports_search)."),
+        slug: z.string().describe("The report's slug or its report_ id (from reports_search)."),
       },
       annotations: READ_ONLY,
     },
@@ -172,7 +172,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Rename a report",
       description: "Change a report's title. Find its slug with reports_search first.",
       inputSchema: {
-        slug: z.string().describe("The report's slug."),
+        slug: z.string().describe("The report's slug or its report_ id."),
         title: z.string().describe("The new title."),
       },
       annotations: MUTATE,
@@ -186,8 +186,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Move a report",
       description: "Move a report into a different folder. Use folders_list to find the folder id.",
       inputSchema: {
-        slug: z.string().describe("The report's slug."),
-        folder_id: z.string().describe("The destination folder id."),
+        slug: z.string().describe("The report's slug or its report_ id."),
+        folder_id: z.string().describe("The destination folder_ id (from folders_list)."),
       },
       annotations: MUTATE,
     },
@@ -215,7 +215,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "existing one; use folders_list to find the root (or another) folder id.",
       inputSchema: {
         name: z.string().describe("The folder name."),
-        parent_id: z.string().describe("Parent folder id (required)."),
+        parent_id: z.string().describe("Parent folder_ id (required; from folders_list)."),
       },
       annotations: CREATE,
     },
@@ -229,7 +229,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Rename a folder",
       description: "Change a folder's name. Use folders_list to find its id.",
       inputSchema: {
-        id: z.string().describe("The folder id."),
+        id: z.string().describe("The folder_ id (from folders_list)."),
         name: z.string().describe("The new name."),
       },
       annotations: MUTATE,
@@ -243,7 +243,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Delete a folder",
       description:
         "Delete a folder. Blocked (error) if it still contains reports or subfolders. Destructive.",
-      inputSchema: { id: z.string().describe("The folder id.") },
+      inputSchema: { id: z.string().describe("The folder_ id (from folders_list).") },
       annotations: DESTROY,
     },
     async (args) => toToolResult(await client.deleteFolder(args.id)),
