@@ -157,6 +157,21 @@ export class DrizzleApiKeyRepository implements ApiKeyStore {
     }
   }
 
+  async revokeAllForUser(actingUser: UserId): Promise<Result<number, AppError>> {
+    try {
+      // The user-soft-delete cascade (ADR-0054): revoke every LIVE key the user owns.
+      const rows = await this.ctx
+        .current()
+        .update(apiKeys)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(apiKeys.actingUserId, actingUser), isNull(apiKeys.revokedAt)))
+        .returning({ id: apiKeys.id });
+      return ok(rows.length);
+    } catch (e) {
+      return thrown("apiKey.revokeAllForUser", e);
+    }
+  }
+
   private async rootFolderId(orgRowId: string): Promise<string | undefined> {
     const [f] = await this.ctx
       .current()

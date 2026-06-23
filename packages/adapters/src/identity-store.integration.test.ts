@@ -90,4 +90,50 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       }),
     ).rejects.toThrow();
   });
+
+  // ── User soft-delete (ADR-0054) ──────────────────────────────────────────
+  const mirror = () =>
+    store.createPersonalIdentity({
+      clerkUserId: CU,
+      clerkOrgId: CO,
+      email: "ann@example.com",
+      orgName: "ann's workspace",
+    });
+
+  it("softDeleteByClerkId stamps deleted_at, returns the userId, and hides the user from findByClerk", async () => {
+    const created = await mirror();
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const deleted = await store.softDeleteByClerkId(CU);
+    expect(deleted.ok && deleted.value).toBe(created.value.userId);
+
+    const found = await store.findByClerk(CU, CO);
+    expect(found.ok && found.value).toBeNull(); // soft-deleted → no actor
+  });
+
+  it("softDeleteByClerkId returns null for an unknown user", async () => {
+    const unknown = await store.softDeleteByClerkId("clerk_user_ghost");
+    expect(unknown.ok && unknown.value).toBeNull();
+  });
+
+  it("softDeleteByClerkId re-resolves an already-deleted user (self-healing retry)", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    const first = await store.softDeleteByClerkId(CU);
+    expect(first.ok && first.value).toBe(created.value.userId);
+    // A replay still returns the same userId so a retried webhook can re-run the cascade
+    // (the deleted_at timestamp is preserved by COALESCE, not overwritten).
+    const again = await store.softDeleteByClerkId(CU);
+    expect(again.ok && again.value).toBe(created.value.userId);
+  });
+
+  it("createPersonalIdentity refuses to resurrect a soft-deleted user — deletion is terminal", async () => {
+    await mirror();
+    await store.softDeleteByClerkId(CU);
+
+    const reprovision = await mirror();
+    expect(reprovision.ok).toBe(false);
+    if (!reprovision.ok) expect(reprovision.error.kind).toBe("NotAllowed");
+  });
 });

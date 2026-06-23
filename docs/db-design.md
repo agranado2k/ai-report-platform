@@ -19,8 +19,10 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
   are separate, URL-facing identifiers — never the primary key.
 - **Timestamps**: `timestamptz` (UTC), millisecond precision.
 - **Soft delete**: `deleted_at timestamptz NULL` on user-visible resources
-  (`orgs`, `folders`, `reports`). Hard purge is a scheduled job after the appeal
-  window. Queries filter `deleted_at IS NULL`.
+  (`orgs`, `folders`, `reports`, `users`). Hard purge is a scheduled job after the
+  appeal window. Queries filter `deleted_at IS NULL`. For `users` the delete is
+  terminal (never resurrected, ADR-0054); the `clerk_user_id` unique index is
+  deliberately full (non-partial) so the soft-deleted row keeps its slot.
 - **Tenant isolation**: every owned-row query filters by `org_id`, enforced in
   the repositories (ADR-020). A custom ESLint rule flags a raw select on a
   tenant table without an `org_id` predicate.
@@ -88,8 +90,9 @@ Indexes: `clerk_org_id` unique, `plan`.
 | `clerk_user_id` | text | unique |
 | `email` | text | denormalized for pre-signup grant resolution |
 | `created_at` / `updated_at` | timestamptz | |
+| `deleted_at` | timestamptz NULL | Clerk `user.deleted` → soft delete (ADR-0054); terminal — never resurrected |
 
-Indexes: `clerk_user_id` unique, `email`.
+Indexes: `clerk_user_id` unique, `email`, `deleted_at` partial (`WHERE deleted_at IS NOT NULL`, purge-job lookup — mirrors reports, ADR-0054).
 
 #### `api_keys`
 | Column | Type | Notes |

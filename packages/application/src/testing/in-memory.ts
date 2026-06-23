@@ -15,6 +15,7 @@ import {
   makeSlug,
   userId as makeUserId,
   versionId as makeVersionId,
+  notAllowed,
   type OrgId,
   ok,
   type Report,
@@ -22,10 +23,14 @@ import {
   type Result,
   type Slug,
   type TerminalScanStatus,
+  type UserId,
   type VersionId,
   validationError,
 } from "arp-domain";
 import type {
+  ApiKeyPrincipal,
+  ApiKeyStore,
+  ApiKeySummary,
   BlobFile,
   BlobStore,
   BundleProcessor,
@@ -473,6 +478,8 @@ export class FakeHasher implements Hasher {
 /** Mirrors Clerk identities in a Map, keyed by `clerkUserId|clerkOrgId`. */
 export class InMemoryIdentityStore implements IdentityStore {
   private readonly byClerk = new Map<string, ProvisionedIdentity>();
+  /** Clerk user ids that have been soft-deleted (ADR-0054) — terminal. */
+  private readonly deleted = new Set<string>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -483,6 +490,7 @@ export class InMemoryIdentityStore implements IdentityStore {
     clerkUserId: string,
     clerkOrgId: string,
   ): Promise<Result<ProvisionedIdentity | null, AppError>> {
+    if (this.deleted.has(clerkUserId)) return ok(null); // soft-deleted → no actor
     return ok(this.byClerk.get(this.key(clerkUserId, clerkOrgId)) ?? null);
   }
 
@@ -492,6 +500,10 @@ export class InMemoryIdentityStore implements IdentityStore {
     readonly email: string;
     readonly orgName: string;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
+    // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054).
+    if (this.deleted.has(input.clerkUserId)) {
+      return err(notAllowed("this account has been deleted"));
+    }
     this.seq += 1;
     const provisioned: ProvisionedIdentity = {
       userId: makeUserId(`user-${this.seq}`),
@@ -500,6 +512,116 @@ export class InMemoryIdentityStore implements IdentityStore {
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
     return ok(provisioned);
+  }
+
+  async softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>> {
+    // Resolve the user by Clerk id REGARDLESS of prior delete state, so a retried
+    // webhook still drives the (idempotent) cascade (self-healing, ADR-0054). The
+    // stamp itself is idempotent; null only when no user row exists.
+    const entry = [...this.byClerk.entries()].find(([k]) => k.startsWith(`${clerkUserId}|`));
+    if (!entry) return ok(null); // unknown id — no-op
+    this.deleted.add(clerkUserId); // idempotent — preserves the original deletion
+    return ok(entry[1].userId);
+  }
+}
+
+/** In-memory ApiKeyStore — stores keys as plain records (no real crypto); enough
+ *  to exercise the revoke / cascade paths in use-case tests. */
+export class InMemoryApiKeyStore implements ApiKeyStore {
+  private seq = 0;
+  /** Test toggle: when true, revokeAllForUser fails (simulate a partial-cascade failure). */
+  failRevokeAllForUser = false;
+  readonly keys: {
+    id: string;
+    actingUserId: UserId;
+    issuedInOrgId: OrgId;
+    name: string;
+    scopes: readonly string[];
+    keyPrefix: string;
+    token: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+    revokedAt: number | null;
+  }[] = [];
+
+  private summary(k: (typeof this.keys)[number]): ApiKeySummary {
+    return {
+      id: k.id,
+      name: k.name,
+      scopes: k.scopes,
+      keyPrefix: k.keyPrefix,
+      createdAt: k.createdAt,
+      lastUsedAt: k.lastUsedAt,
+      revokedAt: k.revokedAt,
+    };
+  }
+
+  async verify(token: string): Promise<Result<ApiKeyPrincipal | null, AppError>> {
+    const k = this.keys.find((x) => x.token === token && x.revokedAt === null);
+    if (!k) return ok(null);
+    k.lastUsedAt = 0;
+    return ok({
+      userId: k.actingUserId,
+      orgId: k.issuedInOrgId,
+      rootFolderId: makeFolderId("folder-root"),
+      scopes: k.scopes,
+    });
+  }
+
+  async create(input: {
+    readonly actingUserId: UserId;
+    readonly issuedInOrgId: OrgId;
+    readonly name: string;
+    readonly scopes: readonly string[];
+  }): Promise<Result<{ readonly token: string; readonly summary: ApiKeySummary }, AppError>> {
+    this.seq += 1;
+    const id = `key-${this.seq}`;
+    const token = `arp_test_${this.seq}`;
+    const record = {
+      id,
+      actingUserId: input.actingUserId,
+      issuedInOrgId: input.issuedInOrgId,
+      name: input.name,
+      scopes: input.scopes,
+      keyPrefix: `arp_${id}`,
+      token,
+      createdAt: this.seq,
+      lastUsedAt: null,
+      revokedAt: null,
+    };
+    this.keys.push(record);
+    return ok({ token, summary: this.summary(record) });
+  }
+
+  async listForUser(actingUserId: UserId): Promise<Result<readonly ApiKeySummary[], AppError>> {
+    return ok(
+      this.keys
+        .filter((k) => k.actingUserId === actingUserId)
+        .reverse()
+        .map((k) => this.summary(k)),
+    );
+  }
+
+  async revoke(id: string, actingUserId: UserId): Promise<Result<void, AppError>> {
+    const k = this.keys.find(
+      (x) => x.id === id && x.actingUserId === actingUserId && x.revokedAt === null,
+    );
+    if (k) k.revokedAt = this.seq;
+    return ok(undefined);
+  }
+
+  async revokeAllForUser(actingUserId: UserId): Promise<Result<number, AppError>> {
+    if (this.failRevokeAllForUser) {
+      return err({ kind: "Unexpected", message: "simulated revoke failure" });
+    }
+    let n = 0;
+    for (const k of this.keys) {
+      if (k.actingUserId === actingUserId && k.revokedAt === null) {
+        k.revokedAt = this.seq;
+        n += 1;
+      }
+    }
+    return ok(n);
   }
 }
 

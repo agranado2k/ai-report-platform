@@ -4,8 +4,18 @@
 // Row I/O only; the provisioning policy lives in the provisionIdentity use case.
 import type { IdentityStore, ProvisionedIdentity } from "arp-application";
 import { folders, orgs, users } from "arp-db/schema";
-import { type AppError, folderId, ok, orgId, type Result, userId } from "arp-domain";
-import { and, eq, isNull } from "drizzle-orm";
+import {
+  type AppError,
+  err,
+  folderId,
+  notAllowed,
+  ok,
+  orgId,
+  type Result,
+  type UserId,
+  userId,
+} from "arp-domain";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbContext } from "./client";
 
@@ -21,7 +31,8 @@ export class DrizzleIdentityStore implements IdentityStore {
       const [u] = await db
         .select({ id: users.id })
         .from(users)
-        .where(eq(users.clerkUserId, clerkUserId))
+        // Soft-deleted users don't resolve as an actor (ADR-0054).
+        .where(and(eq(users.clerkUserId, clerkUserId), isNull(users.deletedAt)))
         .limit(1);
       const [o] = await db
         .select({ id: orgs.id })
@@ -44,6 +55,17 @@ export class DrizzleIdentityStore implements IdentityStore {
     readonly orgName: string;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     try {
+      // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054). A
+      // re-auth with the same Clerk id stays blocked until an explicit restore.
+      const [existing] = await this.ctx
+        .current()
+        .select({ deletedAt: users.deletedAt })
+        .from(users)
+        .where(eq(users.clerkUserId, input.clerkUserId))
+        .limit(1);
+      if (existing?.deletedAt != null) {
+        return err(notAllowed("this account has been deleted"));
+      }
       // One transaction so the User/Org/Root-folder trio commits all-or-nothing.
       // Concurrency-safe: each find-or-create is an upsert guarded by a unique
       // index (clerk_user_id, clerk_org_id, and the partial Root-folder index),
@@ -95,6 +117,24 @@ export class DrizzleIdentityStore implements IdentityStore {
       return ok(provisioned);
     } catch (e) {
       return thrown("identity.createPersonalIdentity", e);
+    }
+  }
+
+  async softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>> {
+    try {
+      // Stamp deleted_at on the LIVE user only (idempotent: a replay updates 0 rows).
+      // Resolve + stamp regardless of prior delete state, so a retried webhook still
+      // drives the (idempotent) cascade (self-healing, ADR-0054). COALESCE preserves
+      // the original deleted_at; RETURNING gives the id to cascade on. null = no row.
+      const [row] = await this.ctx
+        .current()
+        .update(users)
+        .set({ deletedAt: sql`coalesce(${users.deletedAt}, now())` })
+        .where(eq(users.clerkUserId, clerkUserId))
+        .returning({ id: users.id });
+      return ok(row ? userId(row.id) : null);
+    } catch (e) {
+      return thrown("identity.softDeleteByClerkId", e);
     }
   }
 
