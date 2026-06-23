@@ -9,6 +9,8 @@
 
 import type {
   AppError,
+  ClerkOrgId,
+  ClerkUserId,
   DomainEvent,
   Folder,
   FolderId,
@@ -258,9 +260,9 @@ export interface UnitOfWork {
 // ── Identity & Access (ADR-0048: Clerk JIT personal-org provisioning) ────────
 /** The authenticated principal as Clerk reports it, before mirroring into our DB. */
 export interface ClerkIdentity {
-  readonly clerkUserId: string;
+  readonly clerkUserId: ClerkUserId;
   /** The session's active Clerk org, or null when the user has none yet. */
-  readonly clerkOrgId: string | null;
+  readonly clerkOrgId: ClerkOrgId | null;
   readonly email: string;
 }
 

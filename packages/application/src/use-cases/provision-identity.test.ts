@@ -1,15 +1,19 @@
-import { type AppError, err, type Result } from "arp-domain";
+import { type AppError, clerkOrgId, clerkUserId, err, type Result } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { ClerkIdentity, ClerkOrgProvisioner } from "../ports";
 import { FakeClerkOrgProvisioner, InMemoryIdentityStore } from "../testing/in-memory";
 import { provisionIdentity } from "./provision-identity";
 
 const withOrg: ClerkIdentity = {
-  clerkUserId: "u_1",
-  clerkOrgId: "org_1",
+  clerkUserId: clerkUserId("u_1"),
+  clerkOrgId: clerkOrgId("org_1"),
   email: "ann@example.com",
 };
-const noOrg: ClerkIdentity = { clerkUserId: "u_2", clerkOrgId: null, email: "bob@example.com" };
+const noOrg: ClerkIdentity = {
+  clerkUserId: clerkUserId("u_2"),
+  clerkOrgId: null,
+  email: "bob@example.com",
+};
 
 function deps() {
   return { identities: new InMemoryIdentityStore(), clerkOrgs: new FakeClerkOrgProvisioner() };
