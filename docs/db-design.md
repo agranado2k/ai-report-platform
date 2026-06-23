@@ -88,8 +88,9 @@ Indexes: `clerk_org_id` unique, `plan`.
 | `clerk_user_id` | text | unique |
 | `email` | text | denormalized for pre-signup grant resolution |
 | `created_at` / `updated_at` | timestamptz | |
+| `deleted_at` | timestamptz NULL | Clerk `user.deleted` → soft delete (ADR-0054); terminal — never resurrected |
 
-Indexes: `clerk_user_id` unique, `email`.
+Indexes: `clerk_user_id` unique, `email`, `deleted_at` partial (`WHERE deleted_at IS NOT NULL`, purge-job lookup — mirrors reports, ADR-0054).
 
 #### `api_keys`
 | Column | Type | Notes |

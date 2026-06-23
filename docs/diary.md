@@ -1555,3 +1555,25 @@ the release-config fix. 282 unit tests + typecheck + docs:check green.
 
 Next priorities (queued): (1) soft-delete for **users** (reports already have `deleted_at`);
 (2) OpenTelemetry — structured logs with a `trace_id` across the stack.
+
+### 2026-06-23 — User soft-delete via Clerk webhook (ADR-0054), worktree `feat/user-soft-delete`
+
+PR #97 merged → **v2.0.0 cut** (the release-config fix works: `BREAKING CHANGE:` now drives
+the major). Live API confirmed serving the `mode` enum + envelope.
+
+Then started **user soft-delete** (priority 1). Operator decisions (grilled): trigger =
+**Clerk `user.deleted` webhook**; cascade = **revoke API keys, keep org + reports**;
+reactivation = **blocked (terminal)**. Recorded as **ADR-0054** (un-defers the ADR-0048
+webhook, scoped to `user.deleted`). Built:
+- `users.deleted_at` + partial purge index (migration `0006`), mirroring reports.
+- `IdentityStore.softDeleteByClerkId` + `findByClerk` deleted-filter + `createPersonalIdentity`
+  resurrection-block (the "terminal" rule); `ApiKeyStore.revokeAllForUser` cascade;
+  `handleUserDeleted` use case. In-memory fakes (+ new `InMemoryApiKeyStore`) + pglite
+  integration tests (soft-delete, block, bulk revoke).
+- `POST /webhooks/clerk` route — **zero new deps** (`@clerk/backend`'s `verifyWebhook` against
+  `CLERK_WEBHOOK_SIGNING_SECRET`); fails closed (503 unset / 400 bad sig); idempotent.
+
+290 unit tests + typecheck + docs:check green. **Infra still to apply (operator):** set
+`CLERK_WEBHOOK_SIGNING_SECRET` in Vercel env + register the Clerk webhook endpoint
+(`user.deleted`). The route is inert (503) until then. Follow-ups: restore flow; orphaned
+personal-org cleanup. Worktree `feat/user-soft-delete`.
