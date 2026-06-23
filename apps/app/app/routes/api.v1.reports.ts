@@ -61,7 +61,7 @@ export async function action(args: ActionFunctionArgs) {
   // The report is served on the PSL-isolated view origin (ADR-002 / ADR-0038):
   // view_url = `${viewBaseUrl}/${slug}`. The composition root owns env access
   // (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
-  const opts = { viewBaseUrl: viewOrigin(request), livemode: wireContext().livemode };
+  const opts = { viewBaseUrl: viewOrigin(request), mode: wireContext().mode };
 
   // 1. Resolve the acting principal — requires a signed-in Clerk session
   //    (ADR-0048); unauthenticated → 401. resolveUploadActor provisions the

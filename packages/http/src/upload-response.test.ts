@@ -3,7 +3,7 @@ import { type AppError, err, ok, reportId, reportIdToWire } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { uploadResultToHttp } from "./upload-response";
 
-const OPTS = { viewBaseUrl: "https://view.example", livemode: true };
+const OPTS = { viewBaseUrl: "https://view.example", mode: "prod" as const };
 
 const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => ({
   result: { slug: "abcde12345", version: 1, scanStatus: "clean", ...over },
@@ -23,7 +23,7 @@ describe("uploadResultToHttp — success", () => {
       view_url: "https://view.example/abcde12345",
       version: 1,
       scan_status: "clean",
-      livemode: true,
+      mode: "prod",
     });
     expect(res.headers?.Location).toBe("https://view.example/abcde12345");
   });

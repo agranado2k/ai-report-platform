@@ -431,7 +431,7 @@ components:
     UploadResult:
       description: The created `report` resource (ADR-0053).
       type: object
-      required: [object, slug, view_url, version, scan_status, livemode]
+      required: [object, slug, view_url, version, scan_status, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -455,9 +455,10 @@ components:
           type: string
           enum: [pending, clean, flagged, blocked]
           description: Always `pending` at upload; the verdict arrives asynchronously.
-        livemode:
-          type: boolean
-          description: True on the live deployment, false on preview/dev (ADR-0053).
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
 
     ReportList:
       description: A cursor-paginated list of reports (ADR-0053 list envelope).
@@ -475,7 +476,7 @@ components:
     ReportSummary:
       description: A `report` resource — summary projection (ADR-0036, ADR-0053).
       type: object
-      required: [object, id, slug, title, is_published, folder_id, livemode]
+      required: [object, id, slug, title, is_published, folder_id, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -494,9 +495,10 @@ components:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: The Folder the report is currently placed in.
-        livemode:
-          type: boolean
-          description: True on the live deployment (ADR-0053).
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
 
     FolderList:
       description: A cursor-paginated list of folders (ADR-0053 list envelope).
@@ -514,7 +516,7 @@ components:
     Folder:
       description: A `folder` resource — a tree-structured organizing unit (ADR-0036, ADR-0053).
       type: object
-      required: [object, id, name, slug, parent_id, livemode]
+      required: [object, id, name, slug, parent_id, mode]
       properties:
         object: { type: string, enum: [folder] }
         id: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
@@ -526,9 +528,10 @@ components:
           type: [string, 'null']
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Parent folder id; null for the org Root folder.
-        livemode:
-          type: boolean
-          description: True on the live deployment (ADR-0053).
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
 
     CreateFolderRequest:
       type: object

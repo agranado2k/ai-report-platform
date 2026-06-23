@@ -1,5 +1,5 @@
 // HTTP response mappers for the write API (ADR-0040, ADR-0053). Pure — turn the
-// use-case Result into the resource body (Stripe-style `object` + `livemode` +
+// use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
 import type { AppError, Folder, Report, Result } from "arp-domain";

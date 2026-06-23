@@ -1530,4 +1530,28 @@ resource; **dashboard reworked to Prev/Next cursors**) → MCP cursor tools → 
 envelope, object/livemode, cursor params, dropped the unimplemented `dashboard_url`) + ADR-0053
 + glossary. No DB migration (keyset on the existing id PK). 281 unit tests + typecheck +
 docs:check + mcp build green. Operator now prefers full Stripe conventions for new endpoints
-(memory). Worktree `feat/api-stripe-shape`.
+(memory). Worktree `feat/api-stripe-shape`. **Merged as PR #96** → released (see next entry).
+
+### 2026-06-23 — Post-merge confirmation + wrap-up (worktree `feat/api-mode-enum`)
+
+PR #96 merged (v1.45.0). **Confirmed live on prod**: `Migrate DB (prod)` applied the `0005`
+keyset indexes; the MCP→API round-trip returns the full envelope (`{object:"list", data:[{
+object:"report", id:"report_…", folder_id:"folder_…", …}], has_more}`); `Request-Id: req_…`
+header present; E2E (BDD) green. Nothing broke.
+
+Two follow-ups in this wrap-up PR:
+1. **Release-config fix** — the breaking change shipped as v1.45.0 (minor), NOT v2.0.0. Cause:
+   `.releaserc.json` custom `releaseRules` are evaluated before the built-in breaking→major
+   default and the first **type**-match wins, so a `feat!`/`docs` commit with a `BREAKING
+   CHANGE:` footer matched `{type}` and never reached major. Fix: prepend
+   `{breaking:true, release:major}`. (The changelog generator is a separate plugin — that's why
+   the ⚠ BREAKING CHANGES section appeared anyway.)
+2. **`livemode` boolean → `mode` enum** (`"prod"`/`"dev"`) on every wire resource — amends
+   ADR-0053 §4 (same day, before any external consumer). Reads self-evidently + leaves room for
+   more deployment kinds. Another breaking wire change (owned consumers, atomic).
+
+This PR is itself a breaking change, so on merge it should finally cut **v2.0.0** — validating
+the release-config fix. 282 unit tests + typecheck + docs:check green.
+
+Next priorities (queued): (1) soft-delete for **users** (reports already have `deleted_at`);
+(2) OpenTelemetry — structured logs with a `trace_id` across the stack.

@@ -4,7 +4,7 @@ import { err, folderId, folderIdToWire, ok, orgId, reportId, reportIdToWire } fr
 import { describe, expect, it } from "vitest";
 import { listFoldersToHttp, searchReportsToHttp } from "./list-response";
 
-const CTX = { livemode: true };
+const CTX = { mode: "prod" as const };
 const slug = (s: string): Slug => s as Slug;
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
@@ -45,7 +45,7 @@ describe("listFoldersToHttp (Stripe list envelope, ADR-0053)", () => {
           name: "Root",
           slug: "root",
           parent_id: null,
-          livemode: true,
+          mode: "prod",
         },
         {
           object: "folder",
@@ -53,7 +53,7 @@ describe("listFoldersToHttp (Stripe list envelope, ADR-0053)", () => {
           name: "Q1",
           slug: "q1",
           parent_id: folderIdToWire(folderId(F1)),
-          livemode: true,
+          mode: "prod",
         },
       ],
     });
@@ -96,13 +96,13 @@ describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
           title: "First",
           is_published: true,
           folder_id: folderIdToWire(folderId(F1)),
-          livemode: true,
+          mode: "prod",
         },
       ],
     });
   });
 
-  it("stamps livemode:false when the context says so", () => {
+  it("stamps mode:dev when the context says so", () => {
     const page: ReportPage = {
       items: [
         {
@@ -115,8 +115,8 @@ describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
       ],
       hasMore: false,
     };
-    const res = searchReportsToHttp(ok(page), { livemode: false });
-    expect((res.body as { data: { livemode: boolean }[] }).data[0]?.livemode).toBe(false);
+    const res = searchReportsToHttp(ok(page), { mode: "dev" });
+    expect((res.body as { data: { mode: string }[] }).data[0]?.mode).toBe("dev");
   });
 
   it("maps an error to a problem response", () => {
