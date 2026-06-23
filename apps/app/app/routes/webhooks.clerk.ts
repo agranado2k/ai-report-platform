@@ -20,7 +20,12 @@ function json(status: number, body: unknown): Response {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "method_not_allowed" }), {
+      status: 405,
+      headers: { "content-type": "application/json", allow: "POST" },
+    });
+  }
 
   const signingSecret = defineEnv().CLERK_WEBHOOK_SIGNING_SECRET;
   if (!signingSecret) return json(503, { error: "webhook_not_configured" }); // fail-closed
