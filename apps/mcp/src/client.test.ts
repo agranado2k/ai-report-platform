@@ -27,19 +27,21 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("ApiClient", () => {
-  it("searchReports GETs /api/v1/reports with the params and forwards the bearer", async () => {
-    const { fn, calls } = stub(json({ reports: [], page: 2, page_size: 20, total: 0 }));
+  it("searchReports GETs /api/v1/reports with cursor params + forwards the bearer", async () => {
+    const { fn, calls } = stub(json({ object: "list", data: [], has_more: false }));
     const client = new ApiClient({
       baseUrl: "https://app.example.com",
       authorization: "Bearer arp_live_x",
       fetch: fn,
     });
 
-    const r = await client.searchReports({ q: "metrics", page: 2 });
+    const r = await client.searchReports({ q: "metrics", limit: 2, startingAfter: "report_abc" });
 
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data.total).toBe(0);
-    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports?q=metrics&page=2");
+    if (r.ok) expect(r.data.has_more).toBe(false);
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports?q=metrics&limit=2&starting_after=report_abc",
+    );
     expect(calls[0]?.headers.authorization).toBe("Bearer arp_live_x");
   });
 
