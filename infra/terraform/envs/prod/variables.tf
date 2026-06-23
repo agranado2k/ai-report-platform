@@ -59,6 +59,18 @@ variable "clerk_secret_key" {
   sensitive   = true
 }
 
+# Clerk webhook signing secret (ADR-0054) for the prod `user.deleted` endpoint
+# (app.<apex>/webhooks/clerk), from the Clerk dashboard → Webhooks (`whsec_…`).
+# OPTIONAL (default ""): when empty the env var is not provisioned and the route
+# stays fail-closed (503), so the apply never breaks on a not-yet-set secret. Set
+# it via TF_VAR_clerk_webhook_signing_secret (.tfvars.local + the CI secret store).
+variable "clerk_webhook_signing_secret" {
+  type        = string
+  description = "Clerk user.deleted webhook signing secret (whsec_…) — prod app project."
+  sensitive   = true
+  default     = ""
+}
+
 # Staging/test Clerk instance keys (ADR-0048). Provisioned onto Vercel `preview`
 # deploys ONLY, so a PR preview authenticates against the test Clerk instance and
 # can never mint real users/orgs in the production pool or touch live data.

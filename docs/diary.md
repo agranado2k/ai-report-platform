@@ -1573,7 +1573,11 @@ webhook, scoped to `user.deleted`). Built:
 - `POST /webhooks/clerk` route — **zero new deps** (`@clerk/backend`'s `verifyWebhook` against
   `CLERK_WEBHOOK_SIGNING_SECRET`); fails closed (503 unset / 400 bad sig); idempotent.
 
-290 unit tests + typecheck + docs:check green. **Infra still to apply (operator):** set
-`CLERK_WEBHOOK_SIGNING_SECRET` in Vercel env + register the Clerk webhook endpoint
-(`user.deleted`). The route is inert (503) until then. Follow-ups: restore flow; orphaned
-personal-org cleanup. Worktree `feat/user-soft-delete`.
+290 unit tests + typecheck + docs:check green. **Infra:** the operator registered the Clerk
+`user.deleted` webhook endpoint for app.agranado.com; the Terraform now provisions
+`CLERK_WEBHOOK_SIGNING_SECRET` onto the **app** Vercel project (production target, ADR-0054)
+from `var.clerk_webhook_signing_secret` — OPTIONAL (default ""), so the env var is omitted
+(route stays 503) until `TF_VAR_clerk_webhook_signing_secret` is set in `.tfvars.local` **and**
+the `CLERK_WEBHOOK_SIGNING_SECRET` GitHub Actions secret (CI applies infra, ADR-018). Bumped
+to 292 tests after the claude-review self-healing-cascade fix (PR #98). Follow-ups: restore
+flow; orphaned personal-org cleanup. Worktree `feat/user-soft-delete`.

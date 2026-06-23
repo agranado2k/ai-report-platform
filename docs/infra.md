@@ -124,6 +124,7 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `GH_REPO_ADMIN_TOKEN` | GitHub PAT (admin scope for the github_repo module) | shared |
 | `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | prod (preview target, ADR-0048) |
 | `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod (production target) |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | Clerk dashboard → Webhooks signing secret (`whsec_…`) for the `user.deleted` endpoint at `app.<apex>/webhooks/clerk` (ADR-0054) | prod (`TF_VAR_clerk_webhook_signing_secret`, app project only) |
 | `RESEND_API_KEY` | Resend send-only domain key | shared (pass-through) |
 | `RESEND_DNS_RECORDS_JSON` | JSON-encoded list from Resend dashboard | shared |
 | `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |

@@ -153,13 +153,23 @@ locals {
 }
 
 module "vercel_app" {
-  source                = "../../modules/vercel-app"
-  name                  = "arp-app-prod"
-  team_id               = var.vercel_team_id
-  github_repo           = local.repo
-  root_directory        = "apps/app"
-  domains               = ["app.${local.apex}"]
-  environment_variables = local.shared_env
+  source         = "../../modules/vercel-app"
+  name           = "arp-app-prod"
+  team_id        = var.vercel_team_id
+  github_repo    = local.repo
+  root_directory = "apps/app"
+  domains        = ["app.${local.apex}"]
+  # The Clerk user.deleted webhook secret (ADR-0054) is scoped to the APP project
+  # only (the webhook route lives in apps/app) — kept out of the view project's env.
+  # production-only: the Clerk webhook endpoint is registered for app.<apex>. Omitted
+  # entirely until the secret is provided (TF_VAR_clerk_webhook_signing_secret), so the
+  # route stays fail-closed (503) rather than the apply breaking on an unset var.
+  environment_variables = merge(
+    local.shared_env,
+    var.clerk_webhook_signing_secret != "" ? {
+      CLERK_WEBHOOK_SIGNING_SECRET = { value = var.clerk_webhook_signing_secret, target = ["production"] }
+    } : {},
+  )
 }
 
 module "vercel_view" {
