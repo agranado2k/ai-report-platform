@@ -26,7 +26,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0050 | [App design system — Tailwind v4 + CSS-first design tokens](0050-app-design-system-tailwind-v4-tokens.md) | Accepted (2026-06-19) |
 | 0051 | [Remote MCP server — stateless Streamable HTTP, thin client over /api/v1](0051-mcp-server.md) | Accepted (2026-06-22) — refines ADR-003 |
 | 0052 | [Stripe-style prefixed external IDs + third-party ID segregation](0052-external-id-scheme.md) | Accepted (2026-06-22) |
-| 0053 | [Full Stripe-style API conventions — object/list envelopes, cursor pagination, livemode + Request-Id](0053-api-payload-shape.md) | Accepted (2026-06-23) |
+| 0053 | [Full Stripe-style API conventions — object/list envelopes, cursor pagination, mode + Request-Id](0053-api-payload-shape.md) | Accepted (2026-06-23, amended same day: livemode→mode) |
 
 ## Backlog (ADRs 1–30 from the spec)
 

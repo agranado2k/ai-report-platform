@@ -20,7 +20,7 @@ import {
   renameReportToHttp,
 } from "./write-response";
 
-const CTX = { livemode: true };
+const CTX = { mode: "prod" as const };
 const slug = (s: string): Slug => s as Slug;
 const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
@@ -45,7 +45,7 @@ const reportResource = (title: string, folder = F1) => ({
   title,
   is_published: true,
   folder_id: folderIdToWire(folderId(folder)),
-  livemode: true,
+  mode: "prod",
 });
 
 const folder = (name: string): Folder => ({
@@ -62,7 +62,7 @@ const folderResource = (name: string) => ({
   name,
   slug: "q1",
   parent_id: folderIdToWire(folderId(F1)),
-  livemode: true,
+  mode: "prod",
 });
 
 describe("report resource mappers (ADR-0053)", () => {

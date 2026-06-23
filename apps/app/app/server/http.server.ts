@@ -24,10 +24,10 @@ export function toResponse(http: HttpResponse): Response {
   });
 }
 
-/** The wire context stamped onto every resource (ADR-0053): livemode from the env
- *  (`live` deploy → true). */
+/** The wire context stamped onto every resource (ADR-0053): the deployment `mode`
+ *  from the env (`live` key env → "prod", else "dev"). */
 export function wireContext(): WireContext {
-  return { livemode: defineEnv().API_KEY_ENV === "live" };
+  return { mode: defineEnv().API_KEY_ENV === "live" ? "prod" : "dev" };
 }
 
 const DEFAULT_LIMIT = 20;
