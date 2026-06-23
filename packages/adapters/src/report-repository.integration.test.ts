@@ -190,18 +190,20 @@ describe("DrizzleReportRepository (pglite integration)", () => {
       ),
     );
 
-    // page 1 of size 2 → 2 items, total 3
-    const page1 = await repo.searchByOrg(ids.orgId, { limit: 2, offset: 0 });
+    // page 1 of size 2 → 2 items, has_more (cursor pagination, ADR-0053)
+    const page1 = await repo.searchByOrg(ids.orgId, { limit: 2 });
     expect(page1.ok && page1.value.items.length).toBe(2);
-    expect(page1.ok && page1.value.total).toBe(3);
+    expect(page1.ok && page1.value.hasMore).toBe(true);
 
-    // page 2 → the remaining 1
-    const page2 = await repo.searchByOrg(ids.orgId, { limit: 2, offset: 2 });
+    // page 2 via starting_after the last id → the remaining 1, no more
+    const cursor = page1.ok ? page1.value.items[1]?.id : undefined;
+    const page2 = await repo.searchByOrg(ids.orgId, { limit: 2, startingAfter: cursor });
     expect(page2.ok && page2.value.items.length).toBe(1);
+    expect(page2.ok && page2.value.hasMore).toBe(false);
 
     // title substring (case-insensitive) → 2 "Quarterly" matches
-    const q = await repo.searchByOrg(ids.orgId, { query: "quarter", limit: 10, offset: 0 });
-    expect(q.ok && q.value.total).toBe(2);
+    const q = await repo.searchByOrg(ids.orgId, { query: "quarter", limit: 10 });
+    expect(q.ok && q.value.items.length).toBe(2);
   });
 
   it("searchByOrg excludes soft-deleted reports", async () => {
@@ -213,8 +215,8 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
     await repo.save(r);
     await repo.softDelete(r.id);
-    const res = await repo.searchByOrg(ids.orgId, { query: "Doomed", limit: 10, offset: 0 });
-    expect(res.ok && res.value.total).toBe(0);
+    const res = await repo.searchByOrg(ids.orgId, { query: "Doomed", limit: 10 });
+    expect(res.ok && res.value.items.length).toBe(0);
   });
 
   it("searchByOrg matches LIKE metacharacters literally (no wildcard injection)", async () => {
@@ -236,8 +238,8 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
 
     // "100%" must match only the literal "100% complete", not "1000 reports".
-    const res = await repo.searchByOrg(ids.orgId, { query: "100%", limit: 10, offset: 0 });
-    expect(res.ok && res.value.total).toBe(1);
+    const res = await repo.searchByOrg(ids.orgId, { query: "100%", limit: 10 });
+    expect(res.ok && res.value.items.length).toBe(1);
     expect(res.ok && res.value.items[0]?.title).toBe("100% complete");
   });
 });

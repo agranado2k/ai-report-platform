@@ -3,7 +3,7 @@
 // (folders_org_parent_slug_uniq); a violation maps to a client-correctable
 // ValidationError. Row<->domain mapping is a pure function (unit-testable);
 // queries are integration-tested against pglite (ADR-0046).
-import type { FolderRepository } from "arp-application";
+import type { FolderListQuery, FolderPage, FolderRepository } from "arp-application";
 import { folders } from "arp-db/schema";
 import {
   type AppError,
@@ -17,7 +17,7 @@ import {
   type Result,
   validationError,
 } from "arp-domain";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { DbContext } from "./client";
 
 type FolderRow = typeof folders.$inferSelect;
@@ -55,6 +55,30 @@ export class DrizzleFolderRepository implements FolderRepository {
       return ok(rows.map(rowToFolder));
     } catch (e) {
       return errUnexpected("listFoldersByOrg", e);
+    }
+  }
+
+  async searchByOrg(org: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>> {
+    // Cursor pagination (ADR-0053): keyset on the folder id (UUIDv7), DESC = newest
+    // first; starting_after pages forward (id < cursor), ending_before pages back.
+    try {
+      const db = this.ctx.current();
+      const filters = [eq(folders.orgId, org), isNull(folders.deletedAt)];
+      const back = q.endingBefore !== undefined;
+      if (q.startingAfter) filters.push(lt(folders.id, q.startingAfter));
+      if (q.endingBefore) filters.push(gt(folders.id, q.endingBefore));
+      const rows = await db
+        .select()
+        .from(folders)
+        .where(and(...filters))
+        .orderBy(back ? asc(folders.id) : desc(folders.id))
+        .limit(q.limit + 1);
+      const hasMore = rows.length > q.limit;
+      const slice = rows.slice(0, q.limit);
+      const page = back ? slice.reverse() : slice;
+      return ok({ items: page.map(rowToFolder), hasMore });
+    } catch (e) {
+      return errUnexpected("searchFoldersByOrg", e);
     }
   }
 
