@@ -15,6 +15,7 @@
   "dependencies": {
     "@clerk/backend": "^3.7.1",
     "@neondatabase/serverless": "^0.10.4",
+    "@node-rs/argon2": "^2.0.2",
     "arp-application": "workspace:*",
     "arp-db": "workspace:*",
     "arp-domain": "workspace:*",
