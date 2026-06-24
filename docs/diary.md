@@ -1600,3 +1600,19 @@ headers/email; prefer `report_id` over `slug` (capability URL, ADR-0038). **`Req
 Config optional/fail-open; Grafana token wired like the Clerk webhook secret. Not yet implemented
 — ADR + glossary only this pass. Riskiest open item to validate first: metrics flush on Vercel
 serverless (`@vercel/otel`'s metrics flush is weaker than spans).
+
+### 2026-06-24 — Report sharing & ACLs design (ADR-0056), worktree `feat/report-acls`
+
+Grilled the full sharing/ACL epic (operator chose: both report view-ACLs + folder collaborators,
+all four modes) and recorded **ADR-0056**. Today every clean report is fully public-by-slug; the
+schema (`acls`, `folder_collaborators`) + enums + `grant_` prefix exist but with **zero code**.
+Keystone decisions: **(1)** enforcement = the **app authorizes, the viewer verifies** — private
+report → redirect to `app.` (has Clerk + runs the `Acl` check) → mint a short-lived signed
+**access token** → back to `view.?access=`; **(2)** token = **HMAC compact, slug-bound, ~15-min,
+stateless**, shared `VIEW_ACCESS_TOKEN_SECRET`; **(3)** `Acl` is an aggregate member of `Report`,
+loaded on single reads, **default-public on missing** (no backfill), enforcement combinable with
+folder grants (P4); **(4)** the viewer is the R2-masking gateway and gates the **full bundle**
+(entry + assets) via a report-scoped **unlock cookie** (a self-issued capability, NOT Clerk creds
+→ ADR-002/0038 isolation preserved). A dedicated CF-Worker edge gateway is a separate future ADR.
+Phased P1→P5 (foundation+public/password → org → allowlist → folder collaborators → UserCreated
+grant resolution). Building **P1** now (TDD). Worktree `feat/report-acls`.

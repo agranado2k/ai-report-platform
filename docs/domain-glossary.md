@@ -28,8 +28,10 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 - **Move (a Report)** — reassigning a `Report` to a different `Folder` within the same `Org` (its `folder_id` is mutable post-create). A `Report` still belongs to exactly one `Folder`; the move requires both the report and the target folder to be in the actor's `Org`. Spec: ADR-0036.
 - **Collaborator** — a `User` granted access to a `Folder` outside their own `Org` (or inside it). Grants are inherited by descendant folders and reports. Part of the `Folder` aggregate (owned by Reports & Folders); the grantee is referenced by `UserId`/email via the shared kernel. Spec: ADR-009.
 - **Grant level** — a Value Object carried by a `Collaborator` grant: `editor` or `admin` (persisted as `folder_collaborators.permission`). Distinct from an `ApiKey` `Scope`. Spec: ADR-009.
-- **Acl** (Access Control List) — per-`Report` sharing configuration. Part of the `Report` aggregate (one `Acl` per `Report`). Modes (`AclMode`): `public`, `password`, `org`, `allowlist`. Spec: User-facing summary / Sharing modes.
+- **Acl** (Access Control List) — per-`Report` sharing configuration. Part of the `Report` aggregate (one `Acl` per `Report`); loaded on single-report reads, **defaults to `public` when no `acls` row exists** (ADR-0056). Modes (`AclMode`): `public`, `password`, `org`, `allowlist`. Spec: ADR-0056 (extends ADR-0038).
   - _Spell out_ "ACL" only when expanding the acronym in prose; the type/term is `Acl`.
+- **Access token** — a short-lived (~15-min), slug-bound, HMAC-signed compact capability **minted by the app** after it authorizes a private-report request (by `Acl` mode) and **verified by the viewer** (ADR-0056). The mechanism that lets the credential-free `view.<domain>` origin (ADR-002/0038) serve a private report without ever holding Clerk credentials. Stateless (exp-bounded).
+- **Unlock cookie** — a report-scoped (`/<slug>`), short-lived, HttpOnly cookie the **viewer** sets after verifying an `Access token`, so the whole report bundle (entry + relative-URL assets) is gated by one per-request credential (ADR-0056). A self-issued **capability**, NOT app/Clerk credentials — so it doesn't breach the ADR-002/0038 origin isolation.
 
 ## Identity & Access context
 
