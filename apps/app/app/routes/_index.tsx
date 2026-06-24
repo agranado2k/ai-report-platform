@@ -32,6 +32,7 @@ import {
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo, viewOrigin } from "../server/container.server";
+import { log } from "../server/log.server";
 
 export const meta: MetaFunction = () => [
   { title: "Your reports — ai-report-platform" },
@@ -57,7 +58,7 @@ export async function loader(args: LoaderFunctionArgs) {
   // The dashboard degrades to an empty list for both "no actor" and an infra
   // failure (logged) — a rendered page beats a 500 here; the JSON API surfaces
   // the distinction (401 vs 500) instead.
-  if (!actorR.ok) console.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
+  if (!actorR.ok) log.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
   const actor = actorR.ok ? actorR.value : null;
   const empty = {
     folders: [] as FolderNode[],
@@ -72,7 +73,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!actor) return json(empty);
 
   const foldersR = await folderRepo().listByOrg(actor.orgId);
-  if (!foldersR.ok) console.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
+  if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
   const folders: FolderNode[] = (foldersR.ok ? foldersR.value : []).map((f) => ({
     id: f.id,
     parentId: f.parentId,
@@ -94,7 +95,7 @@ export async function loader(args: LoaderFunctionArgs) {
       endingBefore: before ? reportId(before) : undefined,
     },
   );
-  if (!searchR.ok) console.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
+  if (!searchR.ok) log.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
   const result = searchR.ok ? searchR.value : { items: [], hasMore: false };
 
   // `has_more` is the repo's frontier IN THE FETCH DIRECTION. Forward (or first

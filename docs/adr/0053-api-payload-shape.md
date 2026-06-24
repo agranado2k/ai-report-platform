@@ -28,7 +28,7 @@ The `/api/v1` wire had two slices decided by ADR — **errors** (ADR-0040, RFC 9
 2. **List envelope.** `{ "object": "list", "data": [<resource>…], "has_more": <bool> }`. No `total` (cursor lists don't count).
 3. **Cursor pagination.** `limit` (1..100, default 20, clamped) + `starting_after` / `ending_before` (a prefixed id, mutually exclusive); `has_more` derived from a `limit+1` fetch. **Keyset on the UUIDv7 id, DESC = newest-created first.** This *changes the report ordering* from most-recently-**updated** to most-recently-**created** (a re-upload no longer jumps to the top) — the accepted trade-off for a stable, unique cursor key (`updated_at` is mutable + non-unique).
 4. **mode.** `"prod"` on the live deployment, `"dev"` on preview/dev — derived from `API_KEY_ENV === "live"`. _(Amended 2026-06-23, same day: shipped first as a `livemode` boolean; changed to a `mode` enum before any external consumer, so it reads self-evidently and leaves room for more deployment kinds.)_
-5. **Request-Id.** A `req_<base62>` correlation id on every response (the `Request-Id` header), generated at the http boundary.
+5. **Request-Id.** A `req_<base62>` correlation id on every response (the `Request-Id` header), generated at the http boundary. _(**Amended by ADR-0055**: the value is now `base62(trace_id)` — same `req_…` wire shape, but it decodes to the OTel trace — rather than an independent UUIDv7.)_
 6. **Unchanged.** Errors stay RFC 9457 (ADR-0040); casing is snake_case wire / camelCase domain, translated **only** in `packages/http`.
 
 ## Consequences

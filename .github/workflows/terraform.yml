@@ -145,6 +145,10 @@ jobs:
       # Clerk user.deleted webhook signing secret → app project (ADR-0054). Empty
       # when the secret is unset → the env var is omitted + the route stays 503.
       TF_VAR_clerk_webhook_signing_secret: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
+      # OpenTelemetry → Grafana Cloud (ADR-0055). Empty when unset → no OTEL env
+      # provisioned → telemetry fail-open.
+      TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+      TF_VAR_grafana_otlp_headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
       TF_VAR_r2_access_key_id: ${{ secrets.R2_APP_ACCESS_KEY_ID }}
       TF_VAR_r2_secret_access_key: ${{ secrets.R2_APP_SECRET_ACCESS_KEY }}
       # Required so dflook's container can post the plan as a PR comment.
@@ -238,6 +242,10 @@ jobs:
       # Clerk user.deleted webhook signing secret → app project (ADR-0054). Empty
       # when the secret is unset → the env var is omitted + the route stays 503.
       TF_VAR_clerk_webhook_signing_secret: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
+      # OpenTelemetry → Grafana Cloud (ADR-0055). Empty when unset → no OTEL env
+      # provisioned → telemetry fail-open.
+      TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+      TF_VAR_grafana_otlp_headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
       TF_VAR_r2_access_key_id: ${{ secrets.R2_APP_ACCESS_KEY_ID }}
       TF_VAR_r2_secret_access_key: ${{ secrets.R2_APP_SECRET_ACCESS_KEY }}
     steps:

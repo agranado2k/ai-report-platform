@@ -66,7 +66,8 @@ Terms used identically across all three contexts.
 - **List envelope** — the API/MCP shape of a collection (ADR-0053): `{ object: "list", data: [<resource>…], has_more }`. No `total`. Returned by every list endpoint (reports, folders).
 - **Cursor pagination** — keyset pagination over an entity's `External Id` (UUIDv7), newest-created first (ADR-0053): `limit` (1..100, default 20) + `starting_after` / `ending_before` (a prefixed id); `has_more` signals another page. Replaces offset/`page`. `CursorPage<T>` = `{ items, hasMore }` is the internal (pre-wire) form.
 - **mode** — enum on every wire `Resource` (ADR-0053): `"prod"` on the live deployment, `"dev"` on preview/dev (from `API_KEY_ENV`). An enum (not a boolean) so it reads self-evidently on the wire and leaves room for more deployment kinds.
-- **Request-Id** — a `req_…` correlation id returned in the `Request-Id` response header on every API response (ADR-0053), for support/log correlation.
+- **Request-Id** — a `req_…` correlation id returned in the `Request-Id` response header on every API response. As of ADR-0055 it **is** the request's OTel `trace_id`, `base62`-encoded (same `req_…` wire shape as ADR-0053, now reversible): decode a `Request-Id` → `trace_id` → the full trace + correlated logs in Grafana. Falls back to a random `req_` id when no trace is active.
+- **Trace / span / span link** — observability primitives (ADR-0055, OpenTelemetry): a **trace** is one end-to-end operation (a `trace_id`), made of **spans** (timed units of work); a **span link** causally connects spans in *different* traces — used to tie a report's upload trace to its later async-scan trace across the pg-boss pipeline. Telemetry is I/O, so it lives only in adapters + apps (ADR-0024), never in `domain`/`application`.
 - **Timestamp** — UTC `Date` (millisecond precision). All persisted timestamps are stored as Postgres `timestamptz`.
 
 ## Domain events
