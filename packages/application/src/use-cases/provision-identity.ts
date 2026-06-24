@@ -12,8 +12,9 @@ export interface ProvisionIdentityDeps {
   readonly clerkOrgs: ClerkOrgProvisioner;
 }
 
-/** The scope a session-authenticated user holds on their own org (ADR-0039). */
-const SELF_WRITE_SCOPE = "reports:write";
+/** The scopes a session-authenticated user holds on their own org (ADR-0039): full
+ *  control of their own reports, including sharing config (`acl:write`, ADR-0056). */
+const SELF_SCOPES = ["reports:write", "acl:write"];
 
 /** Display name for a user's personal org, derived from their email local-part. */
 function personalOrgName(email: string): string {
@@ -57,6 +58,6 @@ export async function provisionIdentity(
     userId: provisioned.userId,
     orgId: provisioned.orgId,
     folderId: provisioned.rootFolderId,
-    scopes: [SELF_WRITE_SCOPE],
+    scopes: SELF_SCOPES,
   });
 }

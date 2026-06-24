@@ -5,6 +5,7 @@
 import {
   AllowAllPlanLimiter,
   ApiKeyService,
+  Argon2PasswordHasher,
   CleanStubScanner,
   ClerkBackendOrgProvisioner,
   DbContext,
@@ -91,6 +92,14 @@ let _folders: DrizzleFolderRepository | undefined;
 export function folderRepo(): DrizzleFolderRepository {
   if (!_folders) _folders = new DrizzleFolderRepository(context());
   return _folders;
+}
+
+let _passwordHasher: Argon2PasswordHasher | undefined;
+
+/** The argon2id password hasher (ADR-0056) — backs `password`-mode report ACLs. */
+export function passwordHasher(): Argon2PasswordHasher {
+  if (!_passwordHasher) _passwordHasher = new Argon2PasswordHasher();
+  return _passwordHasher;
 }
 
 let _apiKeys: DrizzleApiKeyRepository | undefined;

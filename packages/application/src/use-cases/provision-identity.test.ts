@@ -20,13 +20,13 @@ function deps() {
 }
 
 describe("provisionIdentity (ADR-0048 Clerk JIT personal-org)", () => {
-  it("mirrors a new identity that already has an active Clerk org, with reports:write", async () => {
+  it("mirrors a new identity that already has an active Clerk org, with reports:write + acl:write", async () => {
     const d = deps();
     const r = await provisionIdentity(d, withOrg);
 
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value.scopes).toEqual(["reports:write"]);
+      expect(r.value.scopes).toEqual(["reports:write", "acl:write"]);
       expect(r.value.orgId).toBeTruthy();
       expect(r.value.folderId).toBeTruthy(); // the org's Root folder
     }

@@ -18,6 +18,7 @@ import {
   moveReportToHttp,
   renameFolderToHttp,
   renameReportToHttp,
+  setAclToHttp,
 } from "./write-response";
 
 const CTX = { mode: "prod" as const };
@@ -47,6 +48,7 @@ const reportResource = (title: string, folder = F1) => ({
   is_published: true,
   folder_id: folderIdToWire(folderId(folder)),
   mode: "prod",
+  acl: { mode: "public" },
 });
 
 const folder = (name: string): Folder => ({
@@ -96,6 +98,30 @@ describe("report resource mappers (ADR-0053)", () => {
     const res = deleteReportToHttp(ok(undefined));
     expect(res.status).toBe(204);
     expect(res.body).toBeUndefined();
+  });
+
+  it("setAclToHttp → 200 with the report's acl; the password hash NEVER leaks", () => {
+    const pw: Report = {
+      ...report("Shared"),
+      acl: { mode: "password", passwordHash: "$argon2id$secret" },
+    };
+    const res = setAclToHttp(ok(pw), CTX);
+    expect(res.status).toBe(200);
+    expect((res.body as { acl: unknown }).acl).toEqual({ mode: "password" });
+    expect(JSON.stringify(res.body)).not.toContain("argon2id");
+    expect(JSON.stringify(res.body)).not.toContain("passwordHash");
+  });
+
+  it("setAclToHttp → allowlist surfaces allowed_emails (snake_case)", () => {
+    const al: Report = {
+      ...report("Shared"),
+      acl: { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"] },
+    };
+    const res = setAclToHttp(ok(al), CTX);
+    expect((res.body as { acl: unknown }).acl).toEqual({
+      mode: "allowlist",
+      allowed_emails: ["a@b.com", "c@d.io"],
+    });
   });
 });
 
