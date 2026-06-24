@@ -2,6 +2,9 @@
 // apps get serverless-safe span flushing. Fail-open: with no OTLP endpoint
 // configured, telemetry is simply off and the app boots normally (the API_KEY_PEPPER
 // pattern). Called once from each app's server entry; never from domain/application.
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { PinoInstrumentation } from "@opentelemetry/instrumentation-pino";
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { registerOTel } from "@vercel/otel";
 
 /** Minimal view of the env this module reads (the OTLP endpoint/headers are read by
@@ -35,10 +38,11 @@ export function resourceAttributes(opts: TelemetryOptions): Record<string, strin
 let started = false;
 
 /**
- * Initialize tracing (this slice). The OTLP trace exporter + auth header are read
- * by @vercel/otel from OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_HEADERS, and
- * it force-flushes spans before Vercel freezes the function. Idempotent + fail-open.
- * Returns whether telemetry was started. (Logs + metrics pillars wired in follow-ups.)
+ * Initialize tracing + logs (ADR-0055). The OTLP exporters + auth header are read
+ * by @vercel/otel / the OTLP exporters from OTEL_EXPORTER_OTLP_ENDPOINT /
+ * OTEL_EXPORTER_OTLP_HEADERS; @vercel/otel force-flushes before Vercel freezes the
+ * function. Idempotent + fail-open. Returns whether telemetry was started.
+ * (Metrics pillar lands in a follow-up slice.)
  */
 export function initTelemetry(opts: TelemetryOptions, env: TelemetryEnv = process.env): boolean {
   if (started) return true;
@@ -46,7 +50,11 @@ export function initTelemetry(opts: TelemetryOptions, env: TelemetryEnv = proces
   registerOTel({
     serviceName: opts.service,
     attributes: resourceAttributes(opts),
-    instrumentations: ["fetch"], // fetch propagation → MCP→/api/v1 continuity
+    // "fetch" → outbound propagation (MCP→/api/v1). PinoInstrumentation injects
+    // trace_id/span_id into pino logs AND bridges them to the Logs SDK; the OTLP
+    // log processor ships them to Loki (ADR-0055).
+    instrumentations: ["fetch", new PinoInstrumentation()],
+    logRecordProcessors: [new BatchLogRecordProcessor(new OTLPLogExporter())],
   });
   started = true;
   return true;
