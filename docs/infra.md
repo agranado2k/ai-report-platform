@@ -125,6 +125,8 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | prod (preview target, ADR-0048) |
 | `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod (production target) |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | Clerk dashboard → Webhooks signing secret (`whsec_…`) for the `user.deleted` endpoint at `app.<apex>/webhooks/clerk` (ADR-0054) | prod (`TF_VAR_clerk_webhook_signing_secret`, app project only) |
+| `GRAFANA_OTLP_ENDPOINT` | Grafana Cloud OTLP gateway URL (Connections → OTLP) — sets `OTEL_EXPORTER_OTLP_ENDPOINT` (ADR-0055) | prod (`TF_VAR_grafana_otlp_endpoint`, app project, prod+preview) |
+| `GRAFANA_OTLP_HEADERS` | OTLP basic-auth header `Authorization=Basic base64(instanceID:token)` — sets `OTEL_EXPORTER_OTLP_HEADERS` (ADR-0055) | prod (`TF_VAR_grafana_otlp_headers`, app project, prod+preview) |
 | `RESEND_API_KEY` | Resend send-only domain key | shared (pass-through) |
 | `RESEND_DNS_RECORDS_JSON` | JSON-encoded list from Resend dashboard | shared |
 | `ANTHROPIC_API_KEY` | for the Claude PR-review workflow | shared (pass-through) |

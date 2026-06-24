@@ -71,6 +71,21 @@ variable "clerk_webhook_signing_secret" {
   default     = ""
 }
 
+# OpenTelemetry → Grafana Cloud (ADR-0055). endpoint is the OTLP gateway URL (not
+# secret); headers carries the basic-auth (instanceID:token) so it IS secret. Both
+# OPTIONAL (default "") — unset → no OTEL env provisioned → telemetry fail-open.
+variable "grafana_otlp_endpoint" {
+  type        = string
+  description = "Grafana Cloud OTLP gateway URL → OTEL_EXPORTER_OTLP_ENDPOINT."
+  default     = ""
+}
+variable "grafana_otlp_headers" {
+  type        = string
+  description = "OTLP auth header (Authorization=Basic …) → OTEL_EXPORTER_OTLP_HEADERS."
+  sensitive   = true
+  default     = ""
+}
+
 # Staging/test Clerk instance keys (ADR-0048). Provisioned onto Vercel `preview`
 # deploys ONLY, so a PR preview authenticates against the test Clerk instance and
 # can never mint real users/orgs in the production pool or touch live data.

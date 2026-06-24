@@ -169,6 +169,13 @@ module "vercel_app" {
     var.clerk_webhook_signing_secret != "" ? {
       CLERK_WEBHOOK_SIGNING_SECRET = { value = var.clerk_webhook_signing_secret, target = ["production"] }
     } : {},
+    # OpenTelemetry → Grafana Cloud (ADR-0055). The OTel SDK reads these standard
+    # OTEL_* names directly. On production + preview so PR previews also emit; omitted
+    # until configured (fail-open — no endpoint → initTelemetry is a no-op).
+    var.grafana_otlp_endpoint != "" ? {
+      OTEL_EXPORTER_OTLP_ENDPOINT = { value = var.grafana_otlp_endpoint, target = ["production", "preview"], sensitive = false }
+      OTEL_EXPORTER_OTLP_HEADERS  = { value = var.grafana_otlp_headers, target = ["production", "preview"] }
+    } : {},
   )
 }
 
