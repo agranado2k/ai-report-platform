@@ -1,5 +1,6 @@
 // Public surface of the domain package.
 
+export * from "./access-token";
 export * from "./acl";
 export * from "./brand";
 export * from "./errors";
