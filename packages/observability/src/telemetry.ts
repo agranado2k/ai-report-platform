@@ -7,11 +7,9 @@ import { PinoInstrumentation } from "@opentelemetry/instrumentation-pino";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { registerOTel } from "@vercel/otel";
 
-/** Minimal view of the env this module reads (the OTLP endpoint/headers are read by
- *  the SDK itself; we only gate on the endpoint's presence). */
-interface TelemetryEnv {
-  readonly OTEL_EXPORTER_OTLP_ENDPOINT?: string;
-}
+/** The env this module reads (the OTLP endpoint/headers are read by the SDK itself;
+ *  we only gate on the endpoint's presence). Compatible with `process.env`. */
+type TelemetryEnv = Record<string, string | undefined>;
 
 export interface TelemetryOptions {
   /** Resource service.name — arp-app / arp-mcp / arp-worker (ADR-0055). */

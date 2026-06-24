@@ -95,6 +95,9 @@ importers:
       arp-http:
         specifier: workspace:*
         version: link:../../packages/http
+      arp-observability:
+        specifier: workspace:^
+        version: link:../../packages/observability
       isbot:
         specifier: ^5.1.0
         version: 5.1.40
