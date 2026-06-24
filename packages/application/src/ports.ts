@@ -85,6 +85,16 @@ export interface ReportRepository {
   setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>>;
 }
 
+/**
+ * Password hashing for `password`-mode ACLs (ADR-0056, argon2id). I/O lives in the
+ * adapter; the `setAcl` use case hashes a new password, the viewer-auth endpoint
+ * verifies a submitted one against the stored hash.
+ */
+export interface PasswordHasher {
+  hash(plaintext: string): Promise<Result<string, AppError>>;
+  verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>>;
+}
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
 export interface FolderRepository {

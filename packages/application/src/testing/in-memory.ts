@@ -48,6 +48,7 @@ import type {
   IdempotencyStore,
   IdentityStore,
   IdGenerator,
+  PasswordHasher,
   PlanLimiter,
   ProcessedBundle,
   ProvisionedIdentity,
@@ -645,5 +646,15 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
 
   async findPersonalOrg(_clerkUserId: string): Promise<Result<string | null, AppError>> {
     return ok(this.personalOrgId);
+  }
+}
+
+/** Deterministic password hasher for use-case tests (NOT argon2 — `hashed:<plaintext>`). */
+export class FakePasswordHasher implements PasswordHasher {
+  async hash(plaintext: string): Promise<Result<string, AppError>> {
+    return ok(`hashed:${plaintext}`);
+  }
+  async verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>> {
+    return ok(hash === `hashed:${plaintext}`);
   }
 }
