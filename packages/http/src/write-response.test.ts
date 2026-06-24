@@ -37,6 +37,7 @@ const report = (title: string, folder = F1): Report => ({
   liveVersionId: versionId(V1),
   versions: [],
   deletedAt: null,
+  acl: { mode: "public" },
 });
 const reportResource = (title: string, folder = F1) => ({
   object: "report",

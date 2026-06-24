@@ -68,6 +68,26 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     }
   });
 
+  it("setAcl upserts the Acl; findBySlug loads it (default public when unset, ADR-0056)", async () => {
+    await repo.save(newReport());
+    // No acls row yet → default public.
+    const before = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    expect(before.ok && before.value?.acl).toEqual({ mode: "public" });
+
+    // Set password mode → persisted + loaded.
+    await repo.setAcl(RID, { mode: "password", passwordHash: "$argon2id$abc" });
+    const pw = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    expect(pw.ok && pw.value?.acl).toEqual({ mode: "password", passwordHash: "$argon2id$abc" });
+
+    // Change to allowlist → the onConflictDoUpdate upserts in place (one row per report).
+    await repo.setAcl(RID, { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"] });
+    const al = await repo.findBySlug(makeSlugOrThrow(SLUG));
+    expect(al.ok && al.value?.acl).toEqual({
+      mode: "allowlist",
+      allowedEmails: ["a@b.com", "c@d.io"],
+    });
+  });
+
   it("finds the same report by id", async () => {
     await repo.save(newReport());
     const found = await repo.findById(RID);

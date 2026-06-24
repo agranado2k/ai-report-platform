@@ -4,6 +4,7 @@
 // without Neon/R2.
 
 import {
+  type Acl,
   type AppError,
   type DomainEvent,
   err,
@@ -191,6 +192,12 @@ export class InMemoryReportRepository implements ReportRepository {
   async softDelete(id: ReportId): Promise<Result<void, AppError>> {
     const r = this.byId.get(id);
     if (r) this.byId.set(id, { ...r, deletedAt: 1 });
+    return ok(undefined);
+  }
+
+  async setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>> {
+    const r = this.byId.get(id);
+    if (r) this.byId.set(id, { ...r, acl });
     return ok(undefined);
   }
 }

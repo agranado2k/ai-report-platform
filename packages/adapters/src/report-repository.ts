@@ -8,13 +8,15 @@ import type {
   ReportSearchQuery,
   ReportSummary,
 } from "arp-application";
-import { reports, reportVersions } from "arp-db/schema";
+import { acls, reports, reportVersions } from "arp-db/schema";
 import {
+  type Acl,
   type AppError,
   folderId,
   type OrgId,
   ok,
   orgId,
+  PUBLIC_ACL,
   type Report,
   type ReportId,
   type ReportVersion,
@@ -75,7 +77,22 @@ export function rowToVersion(row: VersionRow): ReportVersion {
   };
 }
 
-export function rowsToReport(report: ReportRow, versions: readonly VersionRow[]): Report {
+/** Map the 1:1 `acls` row to the domain `Acl` (ADR-0056). No row ⇒ `public`. */
+export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
+  if (!row) return PUBLIC_ACL;
+  switch (row.mode) {
+    case "password":
+      return { mode: "password", passwordHash: row.passwordHash ?? "" };
+    case "allowlist":
+      return { mode: "allowlist", allowedEmails: (row.allowedEmails as string[] | null) ?? [] };
+    case "org":
+      return { mode: "org" };
+    default:
+      return { mode: "public" };
+  }
+}
+
+export function rowsToReport(report: ReportRow, versions: readonly VersionRow[], acl: Acl): Report {
   return {
     id: reportId(report.id),
     orgId: orgId(report.orgId),
@@ -85,6 +102,7 @@ export function rowsToReport(report: ReportRow, versions: readonly VersionRow[])
     liveVersionId: (report.liveVersionId ?? null) as VersionId | null,
     versions: versions.map(rowToVersion),
     deletedAt: report.deletedAt === null ? null : report.deletedAt.getTime(),
+    acl,
   };
 }
 
@@ -208,7 +226,9 @@ export class DrizzleReportRepository implements ReportRepository {
         .from(reportVersions)
         .where(eq(reportVersions.reportId, row.id))
         .orderBy(asc(reportVersions.versionNo));
-      return ok(rowsToReport(row, versions));
+      // The Acl is an aggregate member (ADR-0056) — loaded with the report; no row = public.
+      const [aclRow] = await db.select().from(acls).where(eq(acls.reportId, row.id)).limit(1);
+      return ok(rowsToReport(row, versions, rowToAcl(aclRow)));
     } catch (e) {
       return err2("findReport", e);
     }
@@ -254,6 +274,25 @@ export class DrizzleReportRepository implements ReportRepository {
       return ok(undefined);
     } catch (e) {
       return err2("softDeleteReport", e);
+    }
+  }
+
+  async setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>> {
+    try {
+      // Mode-specific columns; null out the ones the mode doesn't use (ADR-0056).
+      const passwordHash = acl.mode === "password" ? acl.passwordHash : null;
+      const allowedEmails = acl.mode === "allowlist" ? [...acl.allowedEmails] : null;
+      await this.ctx
+        .current()
+        .insert(acls)
+        .values({ reportId: id, mode: acl.mode, passwordHash, allowedEmails })
+        .onConflictDoUpdate({
+          target: acls.reportId,
+          set: { mode: acl.mode, passwordHash, allowedEmails, updatedAt: new Date() },
+        });
+      return ok(undefined);
+    } catch (e) {
+      return err2("setAcl", e);
     }
   }
 }

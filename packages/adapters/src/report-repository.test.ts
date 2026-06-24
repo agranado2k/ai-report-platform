@@ -91,11 +91,12 @@ describe("report-repository mappers", () => {
       updatedAt: new Date(),
       deletedAt: new Date(5),
     };
-    const back = rowsToReport(reportRow, []);
+    const back = rowsToReport(reportRow, [], { mode: "public" });
     expect(back.id).toBe("rid");
     expect(back.slug).toBe("abcdefghij");
     expect(back.deletedAt).toBe(5);
     expect(back.versions).toEqual([]);
+    expect(back.acl).toEqual({ mode: "public" });
   });
 });
 
