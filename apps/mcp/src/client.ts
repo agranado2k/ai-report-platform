@@ -36,7 +36,7 @@ export interface CursorParams {
 }
 
 export interface ApiClientConfig {
-  /** Origin of the API, e.g. https://app.agranado.com. */
+  /** Origin of the API, e.g. https://app.centaurspec.com. */
   readonly baseUrl: string;
   /** The caller's `Authorization` header, forwarded verbatim (or null = anonymous). */
   readonly authorization: string | null;
