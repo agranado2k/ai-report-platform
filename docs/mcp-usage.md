@@ -1,6 +1,6 @@
 # Using the MCP server
 
-The platform ships a remote **Model Context Protocol** server at **`https://mcp.agranado.com/mcp`** so AI agents (Claude Desktop/Code, the MCP Inspector, anything MCP-aware) can manage your reports — upload, organise, rename, move, delete, search — without crafting raw HTTP. It's a thin client over the live `/api/v1` (ADR-0051); the API does the work.
+The platform ships a remote **Model Context Protocol** server at **`https://mcp.centaurspec.com/mcp`** so AI agents (Claude Desktop/Code, the MCP Inspector, anything MCP-aware) can manage your reports — upload, organise, rename, move, delete, search — without crafting raw HTTP. It's a thin client over the live `/api/v1` (ADR-0051); the API does the work.
 
 ## Connect
 
@@ -11,14 +11,14 @@ Two front doors, same tools. Pick by client.
 Best for **Claude Desktop / claude.ai**. The server is an OAuth 2.1 resource server; the client self-registers (Dynamic Client Registration) and you sign in through Clerk.
 
 1. Claude → **Settings → Connectors → Add custom connector**.
-2. URL: `https://mcp.agranado.com/mcp` → **Add**.
+2. URL: `https://mcp.centaurspec.com/mcp` → **Add**.
 3. A browser window opens → **sign in** (Clerk) → **consent**. The connector shows **Connected**; its tools appear in chat.
 
 No config file, no pasted secret. (Requires the operator to have created the Clerk OAuth app with DCR — see `docs/infra.md`.)
 
 ### B. API key — headless / config-file clients
 
-Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.agranado.com/settings/api-keys` (shown once).
+Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.centaurspec.com/settings/api-keys` (shown once).
 
 - **Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS) via the `mcp-remote` bridge:
   ```json
@@ -26,17 +26,17 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
     "mcpServers": {
       "arp-reports": {
         "command": "npx",
-        "args": ["mcp-remote", "https://mcp.agranado.com/mcp", "--header", "Authorization:${AUTH_TOKEN}"],
+        "args": ["mcp-remote", "https://mcp.centaurspec.com/mcp", "--header", "Authorization:${AUTH_TOKEN}"],
         "env": { "AUTH_TOKEN": "Bearer arp_live_YOUR_KEY" }
       }
     }
   }
   ```
   (The `${AUTH_TOKEN}` indirection avoids Claude Desktop's space-splitting of `--header` args.)
-- **Claude Code:** `claude mcp add --transport http arp-reports https://mcp.agranado.com/mcp --header "Authorization: Bearer arp_live_YOUR_KEY"`.
+- **Claude Code:** `claude mcp add --transport http arp-reports https://mcp.centaurspec.com/mcp --header "Authorization: Bearer arp_live_YOUR_KEY"`.
 - **Raw smoke test:**
   ```bash
-  curl -sS https://mcp.agranado.com/mcp \
+  curl -sS https://mcp.centaurspec.com/mcp \
     -H "Authorization: Bearer arp_live_YOUR_KEY" \
     -H "content-type: application/json" \
     -H "accept: application/json, text/event-stream" \
@@ -60,7 +60,7 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 | `folders_rename` | mutate | Rename a folder. |
 | `folders_delete` | destructive | Delete a folder (blocked if it still has reports/subfolders). |
 
-Reports are served on the separate viewer origin: `https://view.agranado.com/<slug>`.
+Reports are served on the separate viewer origin: `https://view.centaurspec.com/<slug>`.
 
 ## Notes
 

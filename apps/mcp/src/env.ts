@@ -5,7 +5,7 @@
 import { z } from "zod";
 
 const schema = z.object({
-  /** Origin of the report platform API, e.g. https://app.agranado.com (ADR-003). */
+  /** Origin of the report platform API, e.g. https://app.centaurspec.com (ADR-003). */
   APP_ORIGIN: z.url(),
   /** Local dev port (ignored on Vercel, which routes via the serverless function). */
   PORT: z.coerce.number().int().positive().default(8787),
@@ -17,7 +17,7 @@ const schema = z.object({
   // the MCP's first secret; keep it scoped to OAuth.
   CLERK_SECRET_KEY: z.string().trim().min(1).optional(),
   PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().trim().min(1).optional(),
-  // Canonical public origin of THIS MCP server, e.g. https://mcp.agranado.com.
+  // Canonical public origin of THIS MCP server, e.g. https://mcp.centaurspec.com.
   // Used as the fixed OAuth resource identifier (RFC 9728 metadata + the token
   // audience we verify against) instead of the client-controlled Host header.
   // Optional: in local dev / previews (no stable origin) we fall back to Host.
