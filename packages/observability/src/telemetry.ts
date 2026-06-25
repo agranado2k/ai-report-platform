@@ -7,8 +7,9 @@ import { PinoInstrumentation } from "@opentelemetry/instrumentation-pino";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
 
-/** The env this module reads (the OTLP endpoint/headers are read by the SDK itself;
- *  we only gate on the endpoint's presence). Compatible with `process.env`. */
+/** The env this module reads: OTEL_EXPORTER_OTLP_ENDPOINT + OTEL_EXPORTER_OTLP_HEADERS
+ *  — parsed explicitly here (not by the SDK) and passed to the exporters, plus the
+ *  endpoint-presence gate. Compatible with `process.env`. */
 type TelemetryEnv = Record<string, string | undefined>;
 
 export interface TelemetryOptions {
