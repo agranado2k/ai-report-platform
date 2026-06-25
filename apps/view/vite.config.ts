@@ -4,6 +4,9 @@ import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
+  // The view pulls @node-rs/argon2 transitively via arp-adapters (it never calls it).
+  // Its native `.node` binary can't be bundled — keep it external (ADR-0056).
+  ssr: { external: ["@node-rs/argon2"] },
   plugins: [
     remix({
       presets: [vercelPreset()],
