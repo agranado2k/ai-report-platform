@@ -63,6 +63,17 @@ export const serverSchema = {
   // Terraform sets it only on the production target, so previews/dev fall back to
   // the request origin (the cross-origin serve is then prod-only).
   VIEW_ORIGIN: z.url().optional(),
+
+  // Canonical app origin, e.g. "https://app.example" (ADR-0056). The viewer
+  // redirects a private report to `${APP_ORIGIN}/unlock/${slug}` to authorize.
+  // OPTIONAL: set on prod; previews/dev fall back to the request origin.
+  APP_ORIGIN: z.url().optional(),
+
+  // Shared HMAC secret for the app↔view access token (ADR-0056). The app mints,
+  // the credential-free viewer verifies. OPTIONAL: when unset, private-report
+  // gating is inert (no token can be minted/verified) — the upload/set_acl path
+  // still works; enforcement just can't engage until the secret is provisioned.
+  VIEW_ACCESS_TOKEN_SECRET: trimmedString.optional(),
 } as const;
 
 /**
