@@ -19,6 +19,10 @@ export function resolveAccessDecision(
   nowSeconds: number,
 ): AccessDecision {
   if (!isPrivateAcl(acl)) return { kind: "serve" };
+  // Fail closed when the secret is unset (previews/dev): Node's HMAC accepts an empty
+  // key, so without this an attacker could forge `payload.HMAC("",payload)` and the
+  // verify below would pass. No secret ⇒ unverifiable ⇒ unlock (claude-review #100).
+  if (!secret) return { kind: "unlock" };
   // The app's one-time `?access` hand-off — verify, then signal the loader to set
   // the unlock cookie so the rest of the bundle (relative-URL assets) is gated too.
   if (tokens.query && verifyAccessToken(tokens.query, slug, secret, nowSeconds)) {

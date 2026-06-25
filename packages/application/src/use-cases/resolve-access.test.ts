@@ -1,4 +1,4 @@
-import { mintAccessToken } from "arp-domain";
+import { mintAccessToken, verifyAccessToken } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { resolveAccessDecision } from "./resolve-access";
 
@@ -58,6 +58,23 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     ).toEqual({ kind: "unlock" });
     expect(
       resolveAccessDecision({ mode: "org" }, { query: "tampered.sig" }, SLUG, SECRET, NOW),
+    ).toEqual({ kind: "unlock" });
+  });
+
+  it("fails closed when the secret is empty — an empty-HMAC forged token must not grant", () => {
+    // Node's createHmac("sha256","") is valid, so a token forged under the empty
+    // secret WOULD verify — proving the gate can't rely on verify alone.
+    const forged = mintAccessToken(SLUG, 900, "", NOW);
+    expect(verifyAccessToken(forged, SLUG, "", NOW + 1)).toBe(true);
+    // But the decision fails closed because the secret is unset (claude-review #100).
+    expect(
+      resolveAccessDecision(
+        { mode: "password", passwordHash: "h" },
+        { query: forged },
+        SLUG,
+        "",
+        NOW + 1,
+      ),
     ).toEqual({ kind: "unlock" });
   });
 
