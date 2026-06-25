@@ -11,3 +11,13 @@ Feature: Platform health endpoint
     And the JSON field "service" is "app"
     And the JSON field "version" is present
     And the JSON field "commit" is present
+
+  # Regression guard for the #100 → prod-down incident (#103): /health does NOT import
+  # the composition root, so a runtime module-load crash (e.g. an un-traced native dep
+  # like @node-rs/argon2) passed CI green while every real route 500'd. This hits an
+  # API route that DOES import container.server — a 401 proves the serverless function
+  # boots and all imports resolve; a module-load crash would 500 (and not parse as JSON).
+  Scenario: The API surface boots without a runtime module-load crash
+    When I GET "/api/v1/reports" on the app
+    Then the response status is 401
+    And the JSON field "code" is "unauthenticated"
