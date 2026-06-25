@@ -49,6 +49,13 @@ export function parseOtlpHeaders(raw: string | undefined): Record<string, string
   return headers;
 }
 
+/** Build a per-signal OTLP URL: trim + strip trailing slash(es) off the endpoint,
+ *  then append the signal path (`/v1/traces`, `/v1/logs`) — so the double-slash that
+ *  silently broke export can't recur (ADR-0055, claude-review #105). */
+export function otlpSignalUrl(endpoint: string, signalPath: string): string {
+  return `${endpoint.trim().replace(/\/+$/, "")}${signalPath}`;
+}
+
 /** The OTel resource attributes — only set the ones we have (ADR-0055). */
 export function resourceAttributes(opts: TelemetryOptions): Record<string, string> {
   return {
@@ -71,9 +78,8 @@ export function initTelemetry(opts: TelemetryOptions, env: TelemetryEnv = proces
   if (started) return true;
   if (!isTelemetryEnabled(env)) return false;
 
-  // Gate guarantees the endpoint is present; strip a trailing slash so the signal
-  // paths (`/v1/traces`, `/v1/logs`) don't double up.
-  const endpoint = (env.OTEL_EXPORTER_OTLP_ENDPOINT as string).trim().replace(/\/+$/, "");
+  // Gate guarantees the endpoint is present.
+  const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT as string;
   const headers = parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS);
 
   registerOTel({
@@ -85,9 +91,14 @@ export function initTelemetry(opts: TelemetryOptions, env: TelemetryEnv = proces
     instrumentations: ["fetch", new PinoInstrumentation()],
     // Explicit OTLP/HTTP protobuf trace exporter → Tempo (@vercel/otel adds the
     // serverless flush). Explicit endpoint + decoded auth headers.
-    traceExporter: new OTLPHttpProtoTraceExporter({ url: `${endpoint}/v1/traces`, headers }),
+    traceExporter: new OTLPHttpProtoTraceExporter({
+      url: otlpSignalUrl(endpoint, "/v1/traces"),
+      headers,
+    }),
     logRecordProcessors: [
-      new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers })),
+      new BatchLogRecordProcessor(
+        new OTLPLogExporter({ url: otlpSignalUrl(endpoint, "/v1/logs"), headers }),
+      ),
     ],
   });
   started = true;
