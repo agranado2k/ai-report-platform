@@ -1616,3 +1616,19 @@ folder grants (P4); **(4)** the viewer is the R2-masking gateway and gates the *
 → ADR-002/0038 isolation preserved). A dedicated CF-Worker edge gateway is a separate future ADR.
 Phased P1→P5 (foundation+public/password → org → allowlist → folder collaborators → UserCreated
 grant resolution). Building **P1** now (TDD). Worktree `feat/report-acls`.
+
+### 2026-06-24 — P1 (foundation + public/password) complete on `feat/report-acls`
+
+Built the whole password-mode sharing path TDD (9 feature commits, all green: 328 unit tests +
+a pglite ACL round-trip). Layers: **`Acl` value object** (4 modes + validation) → **`Acl` on the
+`Report` aggregate** (LEFT JOIN `acls`, default-public on missing, `setAcl` upsert) → **`setAcl`
+use case** (`acl:write` scope + org check, hashes via the PasswordHasher port) → **argon2id
+adapter** (`@node-rs/argon2`, new dep) → **access-token codec** (HMAC, slug-bound, ~15-min,
+`node:crypto`) → **`set_acl` API route** (`POST /api/v1/reports/{slug}/acl`; openapi `Acl`/
+`Report` schemas; the single-report wire resource now carries `acl`, never the hash; owners gain
+`acl:write`) → **`resolveAccessDecision`** (the viewer's pure private-report gate) → **viewer
+enforcement + app `/unlock/{slug}` route** (password form → argon2id verify → mint token →
+`VIEW_ORIGIN/{slug}?access=…` → unlock cookie; org/allowlist show "not yet available") →
+**infra**: self-generated `VIEW_ACCESS_TOKEN_SECRET` in `shared_env` (same value app+view),
+`APP_ORIGIN` already present. `org`/`allowlist` are set-able but enforced in P2/P3 (viewer fails
+closed). New runtime dep: `@node-rs/argon2`. Next: open the PR for P1.
