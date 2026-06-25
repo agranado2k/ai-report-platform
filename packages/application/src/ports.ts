@@ -8,6 +8,7 @@
 // (ids/slug/clock) return plain values for deterministic tests.
 
 import type {
+  Acl,
   AppError,
   ClerkOrgId,
   ClerkUserId,
@@ -79,6 +80,19 @@ export interface ReportRepository {
   /** Soft-delete a report (sets deleted_at → the viewer returns 410, ADR-0038).
    * The caller has validated the report exists and is in the actor's org. */
   softDelete(id: ReportId): Promise<Result<void, AppError>>;
+  /** Upsert the report's `Acl` (ADR-0056) into the 1:1 `acls` row. The caller has
+   *  validated org ownership + the `acl:write` scope and hashed any password. */
+  setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>>;
+}
+
+/**
+ * Password hashing for `password`-mode ACLs (ADR-0056, argon2id). I/O lives in the
+ * adapter; the `setAcl` use case hashes a new password, the viewer-auth endpoint
+ * verifies a submitted one against the stored hash.
+ */
+export interface PasswordHasher {
+  hash(plaintext: string): Promise<Result<string, AppError>>;
+  verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>>;
 }
 
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced

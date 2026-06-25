@@ -2,6 +2,7 @@
 // pure: each operation returns a new Report plus the domain events it emitted.
 // No I/O (ADR-024); persistence lives in adapters (ADR-020).
 
+import { type Acl, PUBLIC_ACL } from "./acl";
 import type { FolderId, OrgId, ReportId, UserId, VersionId } from "./brand";
 import type { AppError } from "./errors";
 import { notFound, validationError } from "./errors";
@@ -21,6 +22,9 @@ export interface Report {
   readonly liveVersionId: VersionId | null;
   readonly versions: readonly ReportVersion[];
   readonly deletedAt: number | null;
+  /** Sharing configuration (ADR-0056). Defaults to `public`; only loaded on
+   *  single-report reads (not in list summaries). */
+  readonly acl: Acl;
 }
 
 /** A state transition's result: the new aggregate state + the events it raised. */
@@ -62,6 +66,7 @@ export function createReport(p: CreateReportParams): Emission {
     liveVersionId: null,
     versions: [firstVersion],
     deletedAt: null,
+    acl: PUBLIC_ACL, // new reports are public until set_acl (ADR-0056)
   };
   const event: ReportVersionUploaded = {
     type: "ReportVersionUploaded",

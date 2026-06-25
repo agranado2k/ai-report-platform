@@ -2,22 +2,34 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { AppError, Folder, Report, Result } from "arp-domain";
+import type { Acl, AppError, Folder, Report, Result } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import { folderBody, reportBody, type WireContext } from "./resource";
 
-/** A Report aggregate → the `report` resource body (summary shape). */
+/** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
+ *  allowed emails; the argon2id password hash is NEVER serialized. */
+function aclToWire(acl: Acl) {
+  return acl.mode === "allowlist"
+    ? { mode: "allowlist", allowed_emails: acl.allowedEmails }
+    : { mode: acl.mode };
+}
+
+/** A Report aggregate → the `report` resource body. Single-report responses carry
+ *  the `acl` block (loaded with the aggregate); list summaries do not (ADR-0056). */
 function reportResource(r: Report, ctx: WireContext) {
-  return reportBody(
-    {
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      isPublished: r.liveVersionId !== null,
-      folderId: r.folderId,
-    },
-    ctx,
-  );
+  return {
+    ...reportBody(
+      {
+        id: r.id,
+        slug: r.slug,
+        title: r.title,
+        isPublished: r.liveVersionId !== null,
+        folderId: r.folderId,
+      },
+      ctx,
+    ),
+    acl: aclToWire(r.acl),
+  };
 }
 
 /** POST /api/v1/reports/{slug}/move — 200 with the moved report resource. */
@@ -37,6 +49,12 @@ export function renameReportToHttp(
 
 /** GET /api/v1/reports/{slug} — 200 with the report resource, or a problem. */
 export function getReportToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+}
+
+/** POST /api/v1/reports/{slug}/acl — 200 with the report resource + its new acl. */
+export function setAclToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
 }

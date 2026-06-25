@@ -5,6 +5,7 @@
 import {
   AllowAllPlanLimiter,
   ApiKeyService,
+  Argon2PasswordHasher,
   CleanStubScanner,
   ClerkBackendOrgProvisioner,
   DbContext,
@@ -57,6 +58,12 @@ export function viewOrigin(request: Request): string {
   return defineEnv().VIEW_ORIGIN ?? new URL(request.url).origin;
 }
 
+/** The shared HMAC secret for minting view access tokens (ADR-0056); undefined when
+ *  unset (previews/dev) → the unlock route fails closed. */
+export function accessTokenSecret(): string | undefined {
+  return defineEnv().VIEW_ACCESS_TOKEN_SECRET;
+}
+
 export function deps(): UploadReportDeps {
   if (_deps) return _deps;
   const env = defineEnv();
@@ -91,6 +98,14 @@ let _folders: DrizzleFolderRepository | undefined;
 export function folderRepo(): DrizzleFolderRepository {
   if (!_folders) _folders = new DrizzleFolderRepository(context());
   return _folders;
+}
+
+let _passwordHasher: Argon2PasswordHasher | undefined;
+
+/** The argon2id password hasher (ADR-0056) — backs `password`-mode report ACLs. */
+export function passwordHasher(): Argon2PasswordHasher {
+  if (!_passwordHasher) _passwordHasher = new Argon2PasswordHasher();
+  return _passwordHasher;
 }
 
 let _apiKeys: DrizzleApiKeyRepository | undefined;

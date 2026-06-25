@@ -60,6 +60,14 @@ resource "random_password" "scan_drain_secret" {
   special = false
 }
 
+# Shared HMAC secret for the app↔view access token (ADR-0056). Self-generated, never
+# operator input. The SAME value lands on both the app (mints) and view (verifies)
+# projects via shared_env, so the credential-free viewer can verify what the app signs.
+resource "random_password" "view_access_token_secret" {
+  length  = 48
+  special = false
+}
+
 # Server-side HMAC pepper for `arp_` API keys (ADR-0008). Self-generated, never
 # operator input. Distinct per environment so a preview-minted `arp_test_` key
 # can't verify against production even while previews share the prod DB (see the
@@ -138,6 +146,11 @@ locals {
     # Worker presents to POST /internal/scan-drain. On `preview` too, so the e2e
     # can drive the drain deterministically (CF cron only targets prod).
     SCAN_DRAIN_SECRET = { value = random_password.scan_drain_secret.result, target = ["production", "preview"] }
+
+    # Shared access-token secret for private-report gating (ADR-0056). The same value
+    # on both app + view (this is shared_env) so the app's mint verifies at the viewer.
+    # On preview too, so PR previews can exercise the password-mode unlock flow.
+    VIEW_ACCESS_TOKEN_SECRET = { value = random_password.view_access_token_secret.result, target = ["production", "preview"] }
 
     # API-key auth (ADR-0008). HMAC pepper + environment label, split by target
     # like the Clerk keys above: production mints/verifies `arp_live_…` keys with

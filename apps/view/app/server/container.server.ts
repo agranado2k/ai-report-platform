@@ -21,6 +21,16 @@ function context(): DbContext {
   return _ctx;
 }
 
+/** Access-token config for private-report gating (ADR-0056). `appOrigin` is where
+ *  the viewer sends an un-authorized private request; `secret` verifies the token. */
+export function viewerAccessConfig(): {
+  secret: string | undefined;
+  appOrigin: string | undefined;
+} {
+  const env = defineEnv();
+  return { secret: env.VIEW_ACCESS_TOKEN_SECRET, appOrigin: env.APP_ORIGIN };
+}
+
 export function viewerDeps(): ViewerDeps {
   if (_deps) return _deps;
   const env = defineEnv();

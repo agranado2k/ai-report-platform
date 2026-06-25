@@ -5,6 +5,9 @@ import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
+  // @node-rs/argon2 (ADR-0056) ships a native `.node` binary — keep it external so
+  // the SSR bundler doesn't try to bundle it; Vercel traces it into the function.
+  ssr: { external: ["@node-rs/argon2"] },
   plugins: [
     // Tailwind v4 (CSS-first @theme tokens) — must run before Remix's CSS handling.
     tailwindcss(),

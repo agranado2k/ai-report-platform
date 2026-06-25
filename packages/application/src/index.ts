@@ -15,6 +15,8 @@ export * from "./use-cases/process-scan-result";
 export * from "./use-cases/provision-identity";
 export * from "./use-cases/rename-folder";
 export * from "./use-cases/rename-report";
+export * from "./use-cases/resolve-access";
 export * from "./use-cases/search-reports";
+export * from "./use-cases/set-acl";
 export * from "./use-cases/upload-report";
 export * from "./use-cases/view-report";

@@ -12,6 +12,7 @@ export * from "./event-outbox";
 export * from "./folder-repository";
 export * from "./idempotency-store";
 export * from "./identity-store";
+export * from "./password-hasher";
 export * from "./pg-boss";
 export * from "./pg-boss-scan-queue";
 export * from "./plan-limiter";

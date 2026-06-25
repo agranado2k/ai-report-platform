@@ -4,6 +4,7 @@
 // without Neon/R2.
 
 import {
+  type Acl,
   type AppError,
   type DomainEvent,
   err,
@@ -47,6 +48,7 @@ import type {
   IdempotencyStore,
   IdentityStore,
   IdGenerator,
+  PasswordHasher,
   PlanLimiter,
   ProcessedBundle,
   ProvisionedIdentity,
@@ -191,6 +193,12 @@ export class InMemoryReportRepository implements ReportRepository {
   async softDelete(id: ReportId): Promise<Result<void, AppError>> {
     const r = this.byId.get(id);
     if (r) this.byId.set(id, { ...r, deletedAt: 1 });
+    return ok(undefined);
+  }
+
+  async setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>> {
+    const r = this.byId.get(id);
+    if (r) this.byId.set(id, { ...r, acl });
     return ok(undefined);
   }
 }
@@ -638,5 +646,15 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
 
   async findPersonalOrg(_clerkUserId: string): Promise<Result<string | null, AppError>> {
     return ok(this.personalOrgId);
+  }
+}
+
+/** Deterministic password hasher for use-case tests (NOT argon2 — `hashed:<plaintext>`). */
+export class FakePasswordHasher implements PasswordHasher {
+  async hash(plaintext: string): Promise<Result<string, AppError>> {
+    return ok(`hashed:${plaintext}`);
+  }
+  async verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>> {
+    return ok(hash === `hashed:${plaintext}`);
   }
 }
