@@ -22,7 +22,7 @@
 - **Google social login on prod** — ~~needs custom OAuth credentials~~ **RESOLVED 2026-06-25:** custom Google OAuth credentials wired; Google login works on `app.centaurspec.com`. NB on any re-domain, add the new `clerk.<domain>/v1/oauth_callback` to the Google client or login fails `redirect_uri_mismatch` — see the 2026-06-25 cutover entry.
 - License — `README.md` says TBD. Pick before any public launch.
 - Final project name — `ai-report-platform` is the working title.
-- PSL submission — open the PR against `publicsuffix/list` to add `view.agranado.com` (2-6 wk SLA; ship without waiting).
+- PSL submission — open the PR against `publicsuffix/list` to add `view.centaurspec.com` (2-6 wk SLA; ship without waiting).
 - R2 bucket versioning — `TODO` in `modules/r2/main.tf` (cloudflare provider didn't expose versioning as a resource arg; revisit on a provider bump or wrap via the R2 API).
 
 ### Memory pointers for future-me
