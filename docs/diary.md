@@ -1632,3 +1632,23 @@ enforcement + app `/unlock/{slug}` route** (password form → argon2id verify �
 **infra**: self-generated `VIEW_ACCESS_TOKEN_SECRET` in `shared_env` (same value app+view),
 `APP_ORIGIN` already present. `org`/`allowlist` are set-able but enforced in P2/P3 (viewer fails
 closed). New runtime dep: `@node-rs/argon2`. Next: open the PR for P1.
+
+### 2026-06-25 — P1 sharing/ACLs shipped (#100); two incidents; OTel finally exporting
+
+P1 merged (#100). Then a cascade worth recording:
+- **P0 prod-down (#101):** `@node-rs/argon2`'s native `.node` was `ssr.external` but only a dep of
+  `packages/adapters` → not resolvable from `apps/*` node_modules under pnpm-strict → Vercel never
+  traced it into the lambda → every app/view route 500'd `ERR_MODULE_NOT_FOUND`. CI was green (smoke
+  only hit `/health`, which doesn't import the container). Fix: declare argon2 as a direct dep of
+  both apps. **#103/#104** then hardened the preview smoke to probe `/api/v1/reports` (→401 not 500)
+  so a module-load crash can't pass CI green again.
+- **OTel was silently dropping everything (ADR-0055 spike):** SDK initialized (real trace_ids) but
+  Tempo+Loki empty. Root cause #1: `OTEL_EXPORTER_OTLP_HEADERS` used `Basic%20<token>` — the OTLP
+  exporter didn't percent-decode it → Grafana 401 (a raw OTLP curl with a literal space → 200,
+  proving endpoint+auth). Fixed the GH secret to a literal space. Root cause #2: even then, traces
+  didn't ship — `@vercel/otel`'s implicit export wasn't sending the app's spans to our OTLP endpoint.
+  Fix (this PR): construct **explicit** OTLP trace+log exporters in `telemetry.ts` with the endpoint
+  + headers parsed/`decodeURIComponent`-decoded from env, passed to `registerOTel`. Verify after
+  deploy: Tempo `{resource.service.name="arp-app"}` + Loki `{service_name="arp-app"}` should populate.
+  **Lesson:** Terraform is path-filtered to `infra/terraform/**`, so a secret change needs an infra
+  change or `workflow_dispatch` apply + a fresh deploy to reach the runtime.
