@@ -12,6 +12,7 @@ import {
   DrizzleApiKeyRepository,
   DrizzleEventOutbox,
   DrizzleFolderRepository,
+  DrizzleGrantStore,
   DrizzleIdempotencyStore,
   DrizzleIdentityStore,
   DrizzleReportRepository,
@@ -22,12 +23,19 @@ import {
   NanoidSlugFactory,
   PgBossScanWorkQueue,
   R2BlobStore,
+  ResendEmailSender,
   Sha256Hasher,
+  SystemClock,
+  UpstashNonceStore,
   UuidV7IdGenerator,
 } from "arp-adapters";
 import type {
+  Clock,
   DrainScansDeps,
+  EmailSender,
+  GrantStore,
   HandleUserDeletedDeps,
+  NonceStore,
   ProvisionIdentityDeps,
   UploadReportDeps,
 } from "arp-application";
@@ -62,6 +70,51 @@ export function viewOrigin(request: Request): string {
  *  unset (previews/dev) → the unlock route fails closed. */
 export function accessTokenSecret(): string | undefined {
   return defineEnv().VIEW_ACCESS_TOKEN_SECRET;
+}
+
+/** App origin for building magic-link URLs (ADR-0056): `${APP_ORIGIN}/unlock/${slug}?link=…`.
+ *  Falls back to the request origin on previews/dev where `APP_ORIGIN` is unset. */
+export function appOrigin(request: Request): string {
+  return defineEnv().APP_ORIGIN ?? new URL(request.url).origin;
+}
+
+let _nonces: UpstashNonceStore | undefined;
+/** The Upstash nonce store (ADR-0056/0011) — backs allowlist magic links; undefined when
+ *  the Upstash env is unset (previews/dev) → the unlock route fails closed. */
+export function nonceStore(): NonceStore | undefined {
+  if (_nonces) return _nonces;
+  const env = defineEnv();
+  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) return undefined;
+  _nonces = new UpstashNonceStore({
+    url: env.UPSTASH_REDIS_REST_URL,
+    token: env.UPSTASH_REDIS_REST_TOKEN,
+  });
+  return _nonces;
+}
+
+let _email: ResendEmailSender | undefined;
+/** The Resend email sender (ADR-0057) — sends allowlist magic links; undefined when the
+ *  Resend env is unset → the unlock route fails closed. */
+export function emailSender(): EmailSender | undefined {
+  if (_email) return _email;
+  const env = defineEnv();
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return undefined;
+  _email = new ResendEmailSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM });
+  return _email;
+}
+
+let _grants: DrizzleGrantStore | undefined;
+/** The grant store (ADR-0056, revocation-C) — durable, revocable allowlist access grants. */
+export function grantStore(): GrantStore {
+  if (!_grants) _grants = new DrizzleGrantStore(context());
+  return _grants;
+}
+
+let _clock: SystemClock | undefined;
+/** The system clock — epoch ms; backs grant expiry on magic-link redeem. */
+export function clock(): Clock {
+  if (!_clock) _clock = new SystemClock();
+  return _clock;
 }
 
 export function deps(): UploadReportDeps {

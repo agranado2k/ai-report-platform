@@ -35,7 +35,7 @@ Today every published, clean report is **fully public to anyone with the slug** 
 
 - **P1 — Foundation + `public`/`password`:** the `Acl` value object + load (JOIN, default-public); `setAcl` use case (`acl:write`); `set_acl` API; access-token mint (app) + verify (view); the password flow (viewer form → app verifies argon2id → token → unlock cookie). New: argon2id dep, `VIEW_ACCESS_TOKEN_SECRET`.
 - **P2 — `org`:** the redirect handshake → app checks the Clerk session's org == the report's org → token.
-- **P3 — `allowlist`:** magic-link email (Resend) → app verifies → token. The link token is single-use; the access token stays stateless.
+- **P3 — `allowlist`:** magic-link email (Resend) → app verifies → token. The link token is single-use; the access token stays stateless. **Redemption is POST-only** — the `?link=` GET renders a confirm interstitial and the state change (consume the nonce + create the grant) happens only on the submitted POST, so an email link scanner's unsolicited GET (Outlook SafeLinks / Gmail prefetch / AV sandboxes) can't burn the one-time nonce before the user clicks. Revocation is **stateful** (revocation-C): a durable `report_grants` row, checked live per viewer request, deleted on email-removal / mode-change.
 - **P4 — Folder collaborators:** `folder_collaborators` repo + grant/revoke (`grant_` id, `acl:write`/admin) + tree-walk inheritance + the combinable access check.
 - **P5 — Cross-context resolution:** `UserCreated` (Clerk `user.created` webhook) → resolve pending `grantee_email` → `UserId`; `AclChanged`/`CollaboratorGranted` domain events.
 
