@@ -306,6 +306,10 @@ export interface IdGenerator {
   reportId(): ReportId;
   versionId(): VersionId;
   folderId(): FolderId;
+  /** An opaque, unguessable id for a magic-link nonce (ADR-0056); not a domain id.
+   *  Unforgeability rests on the link's HMAC + the store's single-use GETDEL, not on
+   *  this id's entropy, so a time-ordered uuidv7 is sufficient. */
+  nonceId(): string;
 }
 
 export interface SlugFactory {
