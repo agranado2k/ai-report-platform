@@ -2,6 +2,11 @@
 // return what the route needs to mint the access token (ADR-0056, revocation-C). The
 // nonce is single-use (NonceStore.take = GETDEL). Re-validates the allowlist at redeem
 // time — the owner may have removed the email since the link was sent.
+//
+// CONSUME-BEFORE-VALIDATE (deliberate): we `take` the nonce before loading the report, so a
+// replayed link can never pass the authz checks twice. Trade-off — a transient findBySlug
+// infra error also burns the one-time link (the user requests a new one). Acceptable here;
+// 5c could re-`put` the nonce on a non-ok (infra, not authz) load if recovery matters.
 import {
   type AppError,
   err,

@@ -1,7 +1,9 @@
-// sendMagicLink — issue an allowlist magic link (ADR-0056). PRIVACY: always resolves
-// ok without revealing whether the email is on the list; it only stores a nonce + sends
-// the email when the address is actually allowlisted. The route shows the same generic
-// "if your email is on the list, we've sent a link" regardless.
+// sendMagicLink — issue an allowlist magic link (ADR-0056). PRIVACY: every non-sending
+// path resolves ok without revealing whether the email is on the list; it only stores a
+// nonce + sends when the address is actually allowlisted. CONTRACT for the route (5c): show
+// the same generic "if your email is on the list, we've sent a link" on ANY outcome — an
+// err means only an infra failure (nonce store / email send), which the route logs but does
+// NOT surface (so a Resend outage can't be distinguished from "not on the list").
 import { type AppError, mintMagicLinkToken, ok, type Result, type Slug } from "arp-domain";
 import type { EmailSender, IdGenerator, NonceStore, ReportRepository } from "../ports";
 
