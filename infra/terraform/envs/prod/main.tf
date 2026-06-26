@@ -186,11 +186,14 @@ module "vercel_app" {
     # only (the unlock route sends). EMAIL_FROM is on the apex domain verified with Resend
     # (modules/resend-domain, DKIM/SPF already provisioned in the shared zone). Production
     # + preview so a PR preview can exercise the flow; omitted until the key is provided
-    # (fail-open — no EmailSender wired).
-    var.resend_api_key != "" ? {
-      RESEND_API_KEY = { value = var.resend_api_key, target = ["production", "preview"] }
-      EMAIL_FROM     = { value = "noreply@${local.apex}", target = ["production", "preview"], sensitive = false }
-    } : {},
+    # (fail-open — no EmailSender wired). A `for … if` comprehension (not a `? {} : {}`
+    # ternary) with both entries the same shape keeps the conditional type consistent.
+    {
+      for k, v in {
+        RESEND_API_KEY = { value = var.resend_api_key, target = ["production", "preview"], sensitive = true }
+        EMAIL_FROM     = { value = "noreply@${local.apex}", target = ["production", "preview"], sensitive = false }
+      } : k => v if var.resend_api_key != ""
+    },
     # OpenTelemetry → Grafana Cloud (ADR-0055). The OTel SDK reads these standard
     # OTEL_* names directly. On production + preview so PR previews also emit; omitted
     # until configured (fail-open — no endpoint → initTelemetry is a no-op). A map
