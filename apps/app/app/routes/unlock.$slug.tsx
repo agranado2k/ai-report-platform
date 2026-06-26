@@ -22,6 +22,17 @@ const ACCESS_TTL_SECONDS = 900; // 15 min (password mode)
 // `slug` is always a validated nanoid (makeSlug) before it reaches here, so it's safe
 // to interpolate into the form action; no inline styles (the app-origin CSP, ADR-013/#65,
 // may forbid them) — plain, functional HTML (claude-review #100).
+// HTML-attribute escape — the `?link=` token is echoed into a hidden input on the confirm
+// page, so an attacker-supplied `?link="><script>…` must not break out (claude-review #116).
+const escapeAttr = (s: string) =>
+  s.replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
+  );
+
+// These raw Responses bypass entry.server.tsx, so set baseline framing headers here — the
+// credential/email forms must not be frameable (clickjacking, claude-review #116). No inline
+// styles (the app-origin CSP, ADR-013/#65, may forbid them) — plain, functional HTML.
 function html(body: string, status = 200): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8" />
@@ -30,7 +41,12 @@ function html(body: string, status = 200): Response {
 <body>${body}</body></html>`,
     {
       status,
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "x-frame-options": "DENY",
+        "content-security-policy": "frame-ancestors 'none'",
+      },
     },
   );
 }
@@ -68,6 +84,20 @@ const linkSentPage = () =>
 <p>If your email is on the access list for this report, we've sent a one-time link. It expires in 15 minutes.</p>`,
   );
 
+// Confirm interstitial — the magic-link GET lands here; the actual redemption happens only
+// when the user submits this form (POST), so email scanners' unsolicited GETs can't burn the
+// one-time link (claude-review #116). The token is escaped into the hidden field.
+function confirmLinkPage(slug: string, token: string): Response {
+  return html(
+    `<h1>View this report</h1>
+<p>You've been given access. Open it below — this link works once.</p>
+<form method="post" action="/unlock/${slug}">
+<input type="hidden" name="token" value="${escapeAttr(token)}" />
+<p><button type="submit">View report</button></p>
+</form>`,
+  );
+}
+
 async function loadAcl(slug: Slug) {
   const found = await deps().reports.findBySlug(slug);
   return found.ok ? found.value : null;
@@ -87,32 +117,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   return notice("This sharing mode isn’t available yet.");
 }
 
-// Allowlist GET: a `?link=` query is a magic-link redemption; otherwise show the email form.
-async function allowlistLoader(slug: Slug, request: Request): Promise<Response> {
+// Allowlist GET: a `?link=` query shows the confirm interstitial (redemption is POST-only, so
+// an email scanner's prefetch can't consume the nonce); otherwise show the email form.
+function allowlistLoader(slug: Slug, request: Request): Response {
   const link = new URL(request.url).searchParams.get("link");
-  if (!link) return allowlistForm(slug);
-
-  const secret = accessTokenSecret();
-  const nonces = nonceStore();
-  if (!secret || !nonces) return notice("Private viewing is not configured.");
-
-  const redeemed = await redeemMagicLink(
-    { reports: deps().reports, nonces, grants: grantStore(), clock: clock() },
-    { slug, token: link, secret },
-  );
-  if (!redeemed.ok) {
-    return allowlistForm(slug, {
-      error: "That link is invalid or has expired — request a new one.",
-    });
-  }
-  // The access token's TTL matches the grant the viewer will check per request (5d).
-  const token = mintAccessToken(
-    slug,
-    redeemed.value.accessTtlSeconds,
-    secret,
-    Math.floor(Date.now() / 1000),
-  );
-  return redirectToView(slug, token, request);
+  return link ? confirmLinkPage(slug, link) : allowlistForm(slug);
 }
 
 export async function action({ params, request }: ActionFunctionArgs) {
@@ -139,10 +148,37 @@ export async function action({ params, request }: ActionFunctionArgs) {
   }
 
   if (report.acl.mode === "allowlist") {
+    const form = await request.formData();
+    const token = form.get("token");
+
+    // A `token` field = the confirm-page submission → redeem (POST-only, so a scanner's GET
+    // can't consume the one-time nonce, claude-review #116).
+    if (typeof token === "string" && token) {
+      const nonces = nonceStore();
+      if (!nonces) return notice("Private viewing is not configured.");
+      const redeemed = await redeemMagicLink(
+        { reports: deps().reports, nonces, grants: grantStore(), clock: clock() },
+        { slug: slug.value, token, secret },
+      );
+      if (!redeemed.ok) {
+        return allowlistForm(slug.value, {
+          error: "That link is invalid or has expired — request a new one.",
+        });
+      }
+      // The access token's TTL matches the grant the viewer will check per request (5d).
+      const accessToken = mintAccessToken(
+        slug.value,
+        redeemed.value.accessTtlSeconds,
+        secret,
+        Math.floor(Date.now() / 1000),
+      );
+      return redirectToView(slug.value, accessToken, request);
+    }
+
+    // Otherwise the email form → send a magic link.
     const nonces = nonceStore();
     const email = emailSender();
     if (!nonces || !email) return notice("Private viewing is not configured.");
-    const form = await request.formData();
     const entered = String(form.get("email") ?? "");
     // Await the send for reliability — a serverless lambda may freeze before a fire-and-
     // forget promise flushes. sendMagicLink is privacy-preserving (only sends when the
