@@ -50,6 +50,7 @@ import type {
   IdempotencyStore,
   IdentityStore,
   IdGenerator,
+  NonceStore,
   PasswordHasher,
   PlanLimiter,
   ProcessedBundle,
@@ -667,5 +668,19 @@ export class FakeEmailSender implements EmailSender {
   async send(message: EmailMessage): Promise<Result<void, AppError>> {
     this.sent.push(message);
     return ok(undefined);
+  }
+}
+
+/** In-memory single-use NonceStore for use-case tests (ADR-0056) — `take` deletes. */
+export class FakeNonceStore implements NonceStore {
+  private readonly store = new Map<string, string>();
+  async put(id: string, value: string, _ttlSeconds: number): Promise<Result<void, AppError>> {
+    this.store.set(id, value);
+    return ok(undefined);
+  }
+  async take(id: string): Promise<Result<string | null, AppError>> {
+    const v = this.store.get(id) ?? null;
+    this.store.delete(id);
+    return ok(v);
   }
 }
