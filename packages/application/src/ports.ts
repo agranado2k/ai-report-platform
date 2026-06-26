@@ -306,6 +306,8 @@ export interface IdGenerator {
   reportId(): ReportId;
   versionId(): VersionId;
   folderId(): FolderId;
+  /** An opaque high-entropy id for a magic-link nonce (ADR-0056); not a domain id. */
+  nonceId(): string;
 }
 
 export interface SlugFactory {

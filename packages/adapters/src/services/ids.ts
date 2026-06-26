@@ -24,4 +24,8 @@ export class UuidV7IdGenerator implements IdGenerator {
   folderId(): FolderId {
     return folderId(uuidv7());
   }
+
+  nonceId(): string {
+    return uuidv7();
+  }
 }

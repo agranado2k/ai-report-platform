@@ -398,6 +398,11 @@ export class SequentialIdGenerator implements IdGenerator {
     this.f += 1;
     return makeFolderId(`f${this.f}`);
   }
+  private n = 0;
+  nonceId(): string {
+    this.n += 1;
+    return `nonce-${this.n}`;
+  }
 }
 
 export class SequentialSlugFactory implements SlugFactory {
