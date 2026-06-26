@@ -65,6 +65,13 @@ describe("DrizzleGrantStore (pglite integration, ADR-0056 revocation-C)", () => 
     expect(await live(store, "a@b.com")).toBe(true);
   });
 
+  it("matches email case-insensitively (grant A@B.com → check a@b.com)", async () => {
+    await store.grant(RID, "A@B.com", Date.now() + 60_000);
+    expect(await live(store, "a@b.com")).toBe(true);
+    await store.revoke(RID, "  A@B.COM ");
+    expect(await live(store, "a@b.com")).toBe(false);
+  });
+
   it("revokeAll clears every grant for the report", async () => {
     await store.grant(RID, "a@b.com", Date.now() + 60_000);
     await store.grant(RID, "c@d.io", Date.now() + 60_000);

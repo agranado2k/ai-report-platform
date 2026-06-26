@@ -30,7 +30,7 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
   `plan_limits_json`, `scopes`, `findings`, `meta_json`, `allowed_emails`,
   `csp_extras`). Anything we filter or aggregate on gets a real column.
 - **Foreign keys**: `ON DELETE RESTRICT` by default; `ON DELETE CASCADE` only on
-  `report_versions → reports`, `acls → reports`, and
+  `report_versions → reports`, `acls → reports`, `report_grants → reports`, and
   `scan_jobs → report_versions`. The app soft-deletes; cascades defend against
   accidental hard-deletes via migrations (and keep the
   `reports → report_versions → scan_jobs` chain consistent under a hard purge).

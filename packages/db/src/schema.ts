@@ -2,7 +2,7 @@
 // (the contract). Grouped by bounded context (ADR-0036). Ids are UUIDv7 set
 // app-side (no DB default). Column names are explicit snake_case. FK policy:
 // ON DELETE RESTRICT by default; CASCADE only on report_versions→reports,
-// acls→reports, scan_jobs→report_versions (db-design.md → Conventions).
+// acls→reports, report_grants→reports, scan_jobs→report_versions (db-design.md → Conventions).
 
 import { sql } from "drizzle-orm";
 import {

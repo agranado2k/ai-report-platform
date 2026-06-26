@@ -12,6 +12,10 @@ function grantErr(op: string, e: unknown): Result<never, AppError> {
   return err({ kind: "Unexpected", message: `grantStore.${op}: ${String(e)}` });
 }
 
+// Match the domain's allowlist normalization (acl.ts `normalizeEmails`) so a grant
+// keyed "A@B.com" still matches a lowercased allowlist + check (claude-review #114).
+const normEmail = (email: string) => email.trim().toLowerCase();
+
 export class DrizzleGrantStore implements GrantStore {
   constructor(private readonly ctx: DbContext) {}
 
@@ -25,7 +29,7 @@ export class DrizzleGrantStore implements GrantStore {
       await this.ctx
         .current()
         .insert(reportGrants)
-        .values({ reportId, email, expiresAt })
+        .values({ reportId, email: normEmail(email), expiresAt })
         .onConflictDoUpdate({
           target: [reportGrants.reportId, reportGrants.email],
           set: { expiresAt, grantedAt: new Date() },
@@ -45,7 +49,7 @@ export class DrizzleGrantStore implements GrantStore {
         .where(
           and(
             eq(reportGrants.reportId, reportId),
-            eq(reportGrants.email, email),
+            eq(reportGrants.email, normEmail(email)),
             gt(reportGrants.expiresAt, new Date()),
           ),
         )
@@ -61,7 +65,7 @@ export class DrizzleGrantStore implements GrantStore {
       await this.ctx
         .current()
         .delete(reportGrants)
-        .where(and(eq(reportGrants.reportId, reportId), eq(reportGrants.email, email)));
+        .where(and(eq(reportGrants.reportId, reportId), eq(reportGrants.email, normEmail(email))));
       return ok(undefined);
     } catch (e) {
       return grantErr("revoke", e);

@@ -130,6 +130,8 @@ export interface NonceStore {
  * Created on magic-link redeem; the viewer checks a **live** grant per request, so
  * removing an allowlisted email (or switching mode) revokes immediately — the next
  * request denies. Distinct from the stateless ~15-min token `password` mode uses.
+ * Emails are matched **normalized** (trimmed + lowercased, like the `Acl` allowlist) —
+ * the store does this defensively, so callers needn't pre-normalize.
  */
 export interface GrantStore {
   /** Create or refresh a grant for (report, email) expiring at `expiresAtMs`. */
