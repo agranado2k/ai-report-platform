@@ -10,7 +10,7 @@ const RESEND_ENDPOINT = "https://api.resend.com/emails";
 export interface ResendOptions {
   /** Resend API key (`re_…`). */
   readonly apiKey: string;
-  /** The verified From address, e.g. `noreply@mail.<apex>` (DKIM/SPF set, ADR-0057). */
+  /** The verified From address, e.g. `noreply@<apex>` (the Resend-verified apex; DKIM/SPF set, ADR-0057). */
   readonly from: string;
   /** Injectable fetch for tests; defaults to the global. */
   readonly fetchImpl?: typeof fetch;
@@ -24,6 +24,9 @@ export class ResendEmailSender implements EmailSender {
     try {
       const res = await doFetch(RESEND_ENDPOINT, {
         method: "POST",
+        // Bound the outbound call so a hung Resend connection can't block the caller
+        // (the unlock request, once wired) — the catch maps the abort to a Result error.
+        signal: AbortSignal.timeout(10_000),
         headers: {
           authorization: `Bearer ${this.opts.apiKey}`,
           "content-type": "application/json",

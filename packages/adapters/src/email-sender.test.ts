@@ -8,7 +8,7 @@ describe("ResendEmailSender (ADR-0057)", () => {
     const fetchImpl = vi.fn(async () => okResponse());
     const sender = new ResendEmailSender({
       apiKey: "re_test_key",
-      from: "noreply@mail.example.com",
+      from: "noreply@example.com",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
@@ -22,11 +22,31 @@ describe("ResendEmailSender (ADR-0057)", () => {
     expect((init.headers as Record<string, string>).authorization).toBe("Bearer re_test_key");
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({
-      from: "noreply@mail.example.com",
+      from: "noreply@example.com",
       to: "a@b.com",
       subject: "Your link",
       html: "<p>hi</p>",
     });
+  });
+
+  it("includes `text` only when provided (conditional spread)", async () => {
+    const fetchImpl = vi.fn(async () => okResponse());
+    const sender = new ResendEmailSender({
+      apiKey: "k",
+      from: "f@x.com",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await sender.send({ to: "a@b.com", subject: "s", html: "h", text: "plain" });
+    const withText = JSON.parse(
+      (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
+    );
+    expect(withText.text).toBe("plain");
+
+    await sender.send({ to: "a@b.com", subject: "s", html: "h" });
+    const noText = JSON.parse(
+      (fetchImpl.mock.calls[1] as unknown as [string, RequestInit])[1].body as string,
+    );
+    expect("text" in noText).toBe(false);
   });
 
   it("maps a non-2xx response to an error (status surfaced, no throw)", async () => {

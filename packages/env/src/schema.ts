@@ -79,7 +79,7 @@ export const serverSchema = {
   // unset ⇒ no EmailSender is wired, so the allowlist send-link path stays inert
   // (returns the generic "if your email is on the list…" without actually sending).
   RESEND_API_KEY: trimmedString.optional(),
-  // The verified From address, e.g. "noreply@mail.<apex>" (DKIM/SPF set, ADR-0057).
+  // The verified From address, e.g. "noreply@<apex>" (the Resend-verified apex; DKIM/SPF set, ADR-0057).
   EMAIL_FROM: trimmedString.optional(),
 } as const;
 
