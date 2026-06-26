@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isPrivateAcl, makeAcl, PUBLIC_ACL } from "./acl";
+import {
+  DEFAULT_ACCESS_TTL_SECONDS,
+  isPrivateAcl,
+  MAX_ACCESS_TTL_SECONDS,
+  makeAcl,
+  PUBLIC_ACL,
+} from "./acl";
 import type { AclMode } from "./value-objects";
 
 describe("Acl (ADR-0056)", () => {
@@ -11,7 +17,9 @@ describe("Acl (ADR-0056)", () => {
   it("org / password / allowlist are private (need authorization)", () => {
     expect(isPrivateAcl({ mode: "org" })).toBe(true);
     expect(isPrivateAcl({ mode: "password", passwordHash: "h" })).toBe(true);
-    expect(isPrivateAcl({ mode: "allowlist", allowedEmails: ["a@b.com"] })).toBe(true);
+    expect(
+      isPrivateAcl({ mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 3600 }),
+    ).toBe(true);
   });
 
   it("makeAcl builds public / org with no extra data", () => {
@@ -26,11 +34,38 @@ describe("Acl (ADR-0056)", () => {
     expect(makeAcl({ mode: "password", passwordHash: "  " }).ok).toBe(false);
   });
 
-  it("makeAcl(allowlist) requires ≥1 email; normalizes (trim + lowercase + dedupe)", () => {
+  it("makeAcl(allowlist) requires ≥1 email; normalizes (trim + lowercase + dedupe); defaults TTL", () => {
     const r = makeAcl({ mode: "allowlist", allowedEmails: ["A@B.com", " c@d.io ", "a@b.com"] });
-    expect(r.ok && r.value).toEqual({ mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"] });
+    expect(r.ok && r.value).toEqual({
+      mode: "allowlist",
+      allowedEmails: ["a@b.com", "c@d.io"],
+      accessTtlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+    });
     expect(makeAcl({ mode: "allowlist", allowedEmails: [] }).ok).toBe(false);
     expect(makeAcl({ mode: "allowlist", allowedEmails: ["not-an-email"] }).ok).toBe(false);
+  });
+
+  it("makeAcl(allowlist) takes an owner-set access TTL and validates its range", () => {
+    const ok = makeAcl({ mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 86_400 });
+    expect(ok.ok && ok.value).toEqual({
+      mode: "allowlist",
+      allowedEmails: ["a@b.com"],
+      accessTtlSeconds: 86_400,
+    });
+    // out of range / non-integer → rejected
+    expect(makeAcl({ mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 5 }).ok).toBe(
+      false,
+    );
+    expect(
+      makeAcl({
+        mode: "allowlist",
+        allowedEmails: ["a@b.com"],
+        accessTtlSeconds: MAX_ACCESS_TTL_SECONDS + 1,
+      }).ok,
+    ).toBe(false);
+    expect(
+      makeAcl({ mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 1.5 }).ok,
+    ).toBe(false);
   });
 
   it("rejects an unknown mode", () => {

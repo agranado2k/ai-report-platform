@@ -79,12 +79,18 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     const pw = await repo.findBySlug(makeSlugOrThrow(SLUG));
     expect(pw.ok && pw.value?.acl).toEqual({ mode: "password", passwordHash: "$argon2id$abc" });
 
-    // Change to allowlist → the onConflictDoUpdate upserts in place (one row per report).
-    await repo.setAcl(RID, { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"] });
+    // Change to allowlist → the onConflictDoUpdate upserts in place (one row per report);
+    // the owner-set access_ttl_seconds round-trips (ADR-0056).
+    await repo.setAcl(RID, {
+      mode: "allowlist",
+      allowedEmails: ["a@b.com", "c@d.io"],
+      accessTtlSeconds: 86_400,
+    });
     const al = await repo.findBySlug(makeSlugOrThrow(SLUG));
     expect(al.ok && al.value?.acl).toEqual({
       mode: "allowlist",
       allowedEmails: ["a@b.com", "c@d.io"],
+      accessTtlSeconds: 86_400,
     });
   });
 

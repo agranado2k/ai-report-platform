@@ -65,14 +65,19 @@ describe("setAcl use case (ADR-0056)", () => {
     if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 
-  it("allowlist normalizes emails; empty list is a ValidationError", async () => {
+  it("allowlist normalizes emails + carries the owner access TTL; empty list is a ValidationError", async () => {
     const { reports, hasher } = await seed();
     const ok = await setAcl({ reports, hasher }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["A@B.com", " a@b.com "],
+      accessTtlSeconds: 86_400,
     });
-    expect(ok.ok && ok.value.acl).toEqual({ mode: "allowlist", allowedEmails: ["a@b.com"] });
+    expect(ok.ok && ok.value.acl).toEqual({
+      mode: "allowlist",
+      allowedEmails: ["a@b.com"],
+      accessTtlSeconds: 86_400,
+    });
     const bad = await setAcl({ reports, hasher }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",

@@ -181,6 +181,7 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | `mode` | `acl_mode` | default `public` (the only Phase-1 mode) |
 | `password_hash` | text NULL | argon2id, password mode |
 | `allowed_emails` | jsonb NULL | allowlist mode |
+| `access_ttl_seconds` | integer NULL | owner-set access duration for allowlist grants (ADR-0056); null for other modes |
 | `csp_extras` | jsonb NULL | paid-plan per-report CSP opt-in |
 | `updated_at` | timestamptz | |
 

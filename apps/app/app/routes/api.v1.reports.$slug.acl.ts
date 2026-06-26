@@ -31,11 +31,13 @@ export async function action(args: ActionFunctionArgs) {
   const allowedEmails = Array.isArray(body.value.allowed_emails)
     ? body.value.allowed_emails.filter((e): e is string => typeof e === "string")
     : undefined;
+  const accessTtlSeconds =
+    typeof body.value.access_ttl_seconds === "number" ? body.value.access_ttl_seconds : undefined;
 
   const result = await setAcl(
     { reports: deps().reports, hasher: passwordHasher() },
     { orgId: actor.value.orgId, scopes: actor.value.scopes },
-    { slug: slug.value, mode: rawMode as AclMode, password, allowedEmails },
+    { slug: slug.value, mode: rawMode as AclMode, password, allowedEmails, accessTtlSeconds },
   );
   return toResponse(setAclToHttp(result, wireContext()));
 }

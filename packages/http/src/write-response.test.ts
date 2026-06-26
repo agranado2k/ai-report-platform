@@ -112,15 +112,16 @@ describe("report resource mappers (ADR-0053)", () => {
     expect(JSON.stringify(res.body)).not.toContain("passwordHash");
   });
 
-  it("setAclToHttp → allowlist surfaces allowed_emails (snake_case)", () => {
+  it("setAclToHttp → allowlist surfaces allowed_emails + access_ttl_seconds (snake_case)", () => {
     const al: Report = {
       ...report("Shared"),
-      acl: { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"] },
+      acl: { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"], accessTtlSeconds: 86_400 },
     };
     const res = setAclToHttp(ok(al), CTX);
     expect((res.body as { acl: unknown }).acl).toEqual({
       mode: "allowlist",
       allowed_emails: ["a@b.com", "c@d.io"],
+      access_ttl_seconds: 86_400,
     });
   });
 });

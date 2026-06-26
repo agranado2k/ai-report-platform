@@ -552,6 +552,11 @@ components:
           type: array
           items: { type: string, format: email }
           description: The allowlisted viewer emails (allowlist mode only).
+        access_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 7776000
+          description: Owner-set access duration for redeemed magic-link grants (allowlist mode only), ADR-0056.
 
     Report:
       description: >
@@ -641,6 +646,11 @@ components:
           type: array
           items: { type: string, format: email }
           description: Allowlisted viewer emails (allowlist mode only).
+        access_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 7776000
+          description: Owner access duration for allowlist grants (allowlist mode only); defaults to 7 days when omitted. ADR-0056.
 
     MoveReportRequest:
       type: object

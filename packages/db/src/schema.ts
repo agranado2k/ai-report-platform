@@ -225,6 +225,8 @@ export const acls = pgTable("acls", {
   mode: aclModeEnum("mode").notNull().default("public"),
   passwordHash: text("password_hash"),
   allowedEmails: jsonb("allowed_emails"),
+  // Owner-set access duration for `allowlist` grants (ADR-0056); null for other modes.
+  accessTtlSeconds: integer("access_ttl_seconds"),
   cspExtras: jsonb("csp_extras"),
   updatedAt: updatedAt(),
 });

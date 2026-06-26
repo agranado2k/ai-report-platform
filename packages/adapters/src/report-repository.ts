@@ -12,6 +12,7 @@ import { acls, reports, reportVersions } from "arp-db/schema";
 import {
   type Acl,
   type AppError,
+  DEFAULT_ACCESS_TTL_SECONDS,
   folderId,
   type OrgId,
   ok,
@@ -84,7 +85,11 @@ export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
     case "password":
       return { mode: "password", passwordHash: row.passwordHash ?? "" };
     case "allowlist":
-      return { mode: "allowlist", allowedEmails: (row.allowedEmails as string[] | null) ?? [] };
+      return {
+        mode: "allowlist",
+        allowedEmails: (row.allowedEmails as string[] | null) ?? [],
+        accessTtlSeconds: row.accessTtlSeconds ?? DEFAULT_ACCESS_TTL_SECONDS,
+      };
     case "org":
       return { mode: "org" };
     default:
@@ -282,13 +287,20 @@ export class DrizzleReportRepository implements ReportRepository {
       // Mode-specific columns; null out the ones the mode doesn't use (ADR-0056).
       const passwordHash = acl.mode === "password" ? acl.passwordHash : null;
       const allowedEmails = acl.mode === "allowlist" ? [...acl.allowedEmails] : null;
+      const accessTtlSeconds = acl.mode === "allowlist" ? acl.accessTtlSeconds : null;
       await this.ctx
         .current()
         .insert(acls)
-        .values({ reportId: id, mode: acl.mode, passwordHash, allowedEmails })
+        .values({ reportId: id, mode: acl.mode, passwordHash, allowedEmails, accessTtlSeconds })
         .onConflictDoUpdate({
           target: acls.reportId,
-          set: { mode: acl.mode, passwordHash, allowedEmails, updatedAt: new Date() },
+          set: {
+            mode: acl.mode,
+            passwordHash,
+            allowedEmails,
+            accessTtlSeconds,
+            updatedAt: new Date(),
+          },
         });
       return ok(undefined);
     } catch (e) {

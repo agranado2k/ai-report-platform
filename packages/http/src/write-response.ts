@@ -7,10 +7,14 @@ import { errorToHttp, type HttpResponse } from "./problem";
 import { folderBody, reportBody, type WireContext } from "./resource";
 
 /** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
- *  allowed emails; the argon2id password hash is NEVER serialized. */
+ *  allowed emails + owner access TTL; the argon2id password hash is NEVER serialized. */
 function aclToWire(acl: Acl) {
   return acl.mode === "allowlist"
-    ? { mode: "allowlist", allowed_emails: acl.allowedEmails }
+    ? {
+        mode: "allowlist",
+        allowed_emails: acl.allowedEmails,
+        access_ttl_seconds: acl.accessTtlSeconds,
+      }
     : { mode: acl.mode };
 }
 
