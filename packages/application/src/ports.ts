@@ -113,6 +113,18 @@ export interface EmailSender {
   send(message: EmailMessage): Promise<Result<void, AppError>>;
 }
 
+/**
+ * Single-use, TTL-bounded key→value store for the `allowlist` magic-link nonce
+ * (ADR-0056, backed by Upstash Redis / ADR-0011). The use case stores `{slug,email}`
+ * under a fresh id on send, and `take`s it on redeem — `take` is an **atomic
+ * get-and-delete** (Redis GETDEL), so a nonce works exactly once.
+ */
+export interface NonceStore {
+  put(id: string, value: string, ttlSeconds: number): Promise<Result<void, AppError>>;
+  /** Atomically read + delete; null when absent / expired / already consumed. */
+  take(id: string): Promise<Result<string | null, AppError>>;
+}
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
 export interface FolderRepository {
