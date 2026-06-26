@@ -34,6 +34,7 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 - **Unlock cookie** — a report-scoped (`/<slug>`), short-lived, HttpOnly cookie the **viewer** sets after verifying an `Access token`, so the whole report bundle (entry + relative-URL assets) is gated by one per-request credential (ADR-0056). A self-issued **capability**, NOT app/Clerk credentials — so it doesn't breach the ADR-002/0038 origin isolation.
 - **Access expiry** — the owner-configured duration an `allowlist`-mode viewer stays unlocked after redeeming a magic link (`acls.access_ttl_seconds`, ADR-0056). A finite TTL the owner picks (presets within 60s–90d, default 7 days); it sets the `Access token` + `Unlock cookie` lifetime for that grant. Distinct from the fixed ~15-min token `password` mode uses.
 - **EmailSender** — the application port for outbound transactional email (`send({to,subject,html})`, ADR-0057). The only adapter is `ResendEmailSender` (Resend HTTP API). Its first use is the `allowlist` magic link; fail-open (no `RESEND_API_KEY` ⇒ no sender wired). Distinct from `Notifier` (an unbuilt domain-event sink).
+- **NonceStore** — the application port for a single-use, TTL-bounded `id→value` store backing the `allowlist` magic link (ADR-0056). `put` writes with an expiry; `take` is an **atomic get-and-delete** (Redis `GETDEL`) so a nonce redeems exactly once. Adapter: `UpstashNonceStore` (Upstash Redis REST, ADR-0011). Distinct from the stateless, exp-bounded `Access token`.
 
 ## Identity & Access context
 
