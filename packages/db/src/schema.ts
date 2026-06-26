@@ -2,7 +2,7 @@
 // (the contract). Grouped by bounded context (ADR-0036). Ids are UUIDv7 set
 // app-side (no DB default). Column names are explicit snake_case. FK policy:
 // ON DELETE RESTRICT by default; CASCADE only on report_versions→reports,
-// acls→reports, scan_jobs→report_versions (db-design.md → Conventions).
+// acls→reports, report_grants→reports, scan_jobs→report_versions (db-design.md → Conventions).
 
 import { sql } from "drizzle-orm";
 import {
@@ -230,6 +230,26 @@ export const acls = pgTable("acls", {
   cspExtras: jsonb("csp_extras"),
   updatedAt: updatedAt(),
 });
+
+// Durable, revocable access grants for `allowlist` mode (ADR-0056, revocation-C).
+// One row per (report, allowlisted email), created on magic-link redeem. The viewer
+// checks a live grant per request; removing an email / switching mode deletes the
+// grant → immediate revocation. Distinct from the stateless ~15-min password token.
+export const reportGrants = pgTable(
+  "report_grants",
+  {
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => reports.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    grantedAt: tstz("granted_at").notNull().defaultNow(),
+    expiresAt: tstz("expires_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.reportId, t.email] }),
+    index("report_grants_expires_at_idx").on(t.expiresAt), // purge job
+  ],
+);
 
 // ── Abuse & Moderation ──────────────────────────────────────────────────────
 export const scanJobs = pgTable(

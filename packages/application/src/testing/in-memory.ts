@@ -43,6 +43,7 @@ import type {
   FolderListQuery,
   FolderPage,
   FolderRepository,
+  GrantStore,
   Hasher,
   IdempotencyBegin,
   IdempotencyKeyRef,
@@ -682,5 +683,37 @@ export class FakeNonceStore implements NonceStore {
     const v = this.store.get(id) ?? null;
     this.store.delete(id);
     return ok(v);
+  }
+}
+
+/** In-memory revocable GrantStore for use-case tests (ADR-0056, revocation-C). */
+export class InMemoryGrantStore implements GrantStore {
+  private readonly grants = new Map<string, number>(); // `${reportId}|${email}` → expiresAtMs
+  // Time via the Clock port (not Date.now()) so use-case tests with a FixedClock stay
+  // deterministic; email normalized like the real store + the allowlist (claude-review #114).
+  constructor(private readonly clock: Clock) {}
+  private key(reportId: ReportId, email: string) {
+    return `${reportId}|${email.trim().toLowerCase()}`;
+  }
+  async grant(
+    reportId: ReportId,
+    email: string,
+    expiresAtMs: number,
+  ): Promise<Result<void, AppError>> {
+    this.grants.set(this.key(reportId, email), expiresAtMs);
+    return ok(undefined);
+  }
+  async isGranted(reportId: ReportId, email: string): Promise<Result<boolean, AppError>> {
+    const exp = this.grants.get(this.key(reportId, email));
+    return ok(exp !== undefined && exp > this.clock.now());
+  }
+  async revoke(reportId: ReportId, email: string): Promise<Result<void, AppError>> {
+    this.grants.delete(this.key(reportId, email));
+    return ok(undefined);
+  }
+  async revokeAll(reportId: ReportId): Promise<Result<void, AppError>> {
+    for (const k of [...this.grants.keys()])
+      if (k.startsWith(`${reportId}|`)) this.grants.delete(k);
+    return ok(undefined);
   }
 }

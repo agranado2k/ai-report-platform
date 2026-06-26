@@ -125,6 +125,25 @@ export interface NonceStore {
   take(id: string): Promise<Result<string | null, AppError>>;
 }
 
+/**
+ * Durable, revocable access grants for `allowlist` mode (ADR-0056, revocation-C).
+ * Created on magic-link redeem; the viewer checks a **live** grant per request, so
+ * removing an allowlisted email (or switching mode) revokes immediately — the next
+ * request denies. Distinct from the stateless ~15-min token `password` mode uses.
+ * Emails are matched **normalized** (trimmed + lowercased, like the `Acl` allowlist) —
+ * the store does this defensively, so callers needn't pre-normalize.
+ */
+export interface GrantStore {
+  /** Create or refresh a grant for (report, email) expiring at `expiresAtMs`. */
+  grant(reportId: ReportId, email: string, expiresAtMs: number): Promise<Result<void, AppError>>;
+  /** Whether a **live** (non-expired) grant exists for (report, email). */
+  isGranted(reportId: ReportId, email: string): Promise<Result<boolean, AppError>>;
+  /** Revoke a single grant — an email removed from the allowlist. */
+  revoke(reportId: ReportId, email: string): Promise<Result<void, AppError>>;
+  /** Revoke every grant for a report — mode switched away from allowlist. */
+  revokeAll(reportId: ReportId): Promise<Result<void, AppError>>;
+}
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
 export interface FolderRepository {
