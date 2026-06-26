@@ -185,6 +185,16 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | `csp_extras` | jsonb NULL | paid-plan per-report CSP opt-in |
 | `updated_at` | timestamptz | |
 
+#### `report_grants` — durable, revocable allowlist access grants (ADR-0056, revocation-C)
+| Column | Type | Notes |
+|---|---|---|
+| `report_id` | uuid FK → reports **ON DELETE CASCADE** | part of the PK |
+| `email` | text | the allowlisted viewer; part of the PK |
+| `granted_at` | timestamptz | set/refreshed on magic-link redeem |
+| `expires_at` | timestamptz | `granted_at + acl.access_ttl_seconds`; the viewer checks `> now()` per request |
+
+PK `(report_id, email)` — one grant per allowlisted viewer; redeem upserts. Created on redeem; the viewer's per-request `isGranted` check is what makes revocation immediate (removing the email / switching mode deletes the row). `report_grants_expires_at_idx` supports the expired-row purge job.
+
 ### Abuse & Moderation
 
 #### `scan_jobs` — the `ScanJob` aggregate (added rev 8)

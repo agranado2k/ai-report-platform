@@ -11,6 +11,7 @@ export * from "./client";
 export * from "./email-sender";
 export * from "./event-outbox";
 export * from "./folder-repository";
+export * from "./grant-store";
 export * from "./idempotency-store";
 export * from "./identity-store";
 export * from "./nonce-store";

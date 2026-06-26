@@ -231,6 +231,26 @@ export const acls = pgTable("acls", {
   updatedAt: updatedAt(),
 });
 
+// Durable, revocable access grants for `allowlist` mode (ADR-0056, revocation-C).
+// One row per (report, allowlisted email), created on magic-link redeem. The viewer
+// checks a live grant per request; removing an email / switching mode deletes the
+// grant → immediate revocation. Distinct from the stateless ~15-min password token.
+export const reportGrants = pgTable(
+  "report_grants",
+  {
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => reports.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    grantedAt: tstz("granted_at").notNull().defaultNow(),
+    expiresAt: tstz("expires_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.reportId, t.email] }),
+    index("report_grants_expires_at_idx").on(t.expiresAt), // purge job
+  ],
+);
+
 // ── Abuse & Moderation ──────────────────────────────────────────────────────
 export const scanJobs = pgTable(
   "scan_jobs",
