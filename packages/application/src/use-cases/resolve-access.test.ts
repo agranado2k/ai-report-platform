@@ -106,6 +106,18 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     expect(await decide(ALLOW, { cookie: token })).toEqual({ kind: "unlock" }); // no grant seeded
   });
 
+  it("allowlist: email removed from the allowlist → unlock even with a live grant", async () => {
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000); // grant still live (5e hasn't pruned it)
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, "a@b.com");
+    const removed: Acl = {
+      mode: "allowlist",
+      allowedEmails: ["someone@x.com"],
+      accessTtlSeconds: 3600,
+    };
+    expect(await decide(removed, { cookie: token }, { grants })).toEqual({ kind: "unlock" });
+  });
+
   it("allowlist: a token carrying no email claim → unlock", async () => {
     const grants = newGrants();
     await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);

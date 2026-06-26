@@ -38,9 +38,13 @@ export async function resolveAccessDecision(
     fromQuery ?? (tokens.cookie ? readAccessToken(tokens.cookie, slug, secret, nowSeconds) : null);
   if (!claims) return ok({ kind: "unlock" });
 
-  // Revocation-C: an allowlist token is only good while its grant is live.
+  // Revocation-C, defense-in-depth: serve only if the email is BOTH currently allowlisted
+  // AND holds a live grant. The allowlist check (the live source of truth, already loaded
+  // with the report) makes removal revoke on the very next request — independent of setAcl
+  // pruning the grant (5e). The grant proves redemption (allowlisted ≠ redeemed) + bounds
+  // expiry. Either failing → unlock.
   if (acl.mode === "allowlist") {
-    if (!claims.email) return ok({ kind: "unlock" });
+    if (!claims.email || !acl.allowedEmails.includes(claims.email)) return ok({ kind: "unlock" });
     const live = await grants.isGranted(reportId, claims.email);
     if (!live.ok) return live;
     if (!live.value) return ok({ kind: "unlock" });
