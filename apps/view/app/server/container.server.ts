@@ -3,13 +3,15 @@
 // wires only the two ports it needs — NOT the full upload deps. Boundary layer
 // (ADR-0020): the only place apps/view assembles concrete adapters. Env via
 // defineEnv() (arp-env, ADR-0043). One DbContext + deps set per warm lambda.
-import { DbContext, DrizzleReportRepository, R2BlobStore } from "arp-adapters";
-import type { BlobStore, ReportRepository } from "arp-application";
+import { DbContext, DrizzleGrantStore, DrizzleReportRepository, R2BlobStore } from "arp-adapters";
+import type { BlobStore, GrantStore, ReportRepository } from "arp-application";
 import { defineEnv } from "arp-env";
 
 export interface ViewerDeps {
   readonly reports: ReportRepository;
   readonly blobs: BlobStore;
+  /** Allowlist revocation-C — the per-request live-grant check (ADR-0056). */
+  readonly grants: GrantStore;
 }
 
 let _ctx: DbContext | undefined;
@@ -44,6 +46,7 @@ export function viewerDeps(): ViewerDeps {
       endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       keyPrefix: env.R2_KEY_PREFIX,
     }),
+    grants: new DrizzleGrantStore(context()),
   };
   return _deps;
 }
