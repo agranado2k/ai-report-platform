@@ -30,6 +30,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0054 | [User soft-delete via the Clerk user.deleted webhook (terminal, API-key revoke cascade)](0054-user-soft-delete.md) | Accepted (2026-06-23) |
 | 0055 | [OpenTelemetry observability — three pillars to Grafana Cloud](0055-opentelemetry-observability.md) | Accepted (2026-06-23) — amends ADR-0053 §5 |
 | 0056 | [Report sharing & ACLs — app-authorized, viewer-verified access tokens](0056-report-sharing-acls.md) | Accepted (2026-06-24) — extends ADR-0038 |
+| 0057 | [Transactional email via Resend (the allowlist magic link)](0057-transactional-email-resend.md) | Accepted (2026-06-26) — supports ADR-0056 |
 
 ## Backlog (ADRs 1–30 from the spec)
 

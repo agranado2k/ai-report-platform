@@ -182,6 +182,15 @@ module "vercel_app" {
     var.clerk_webhook_signing_secret != "" ? {
       CLERK_WEBHOOK_SIGNING_SECRET = { value = var.clerk_webhook_signing_secret, target = ["production"] }
     } : {},
+    # Transactional email via Resend (ADR-0057) — the allowlist magic link. App project
+    # only (the unlock route sends). EMAIL_FROM is on the apex domain verified with Resend
+    # (modules/resend-domain, DKIM/SPF already provisioned in the shared zone). Production
+    # + preview so a PR preview can exercise the flow; omitted until the key is provided
+    # (fail-open — no EmailSender wired).
+    var.resend_api_key != "" ? {
+      RESEND_API_KEY = { value = var.resend_api_key, target = ["production", "preview"] }
+      EMAIL_FROM     = { value = "noreply@${local.apex}", target = ["production", "preview"], sensitive = false }
+    } : {},
     # OpenTelemetry → Grafana Cloud (ADR-0055). The OTel SDK reads these standard
     # OTEL_* names directly. On production + preview so PR previews also emit; omitted
     # until configured (fail-open — no endpoint → initTelemetry is a no-op). A map

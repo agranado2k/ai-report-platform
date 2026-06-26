@@ -145,6 +145,7 @@ jobs:
       # Clerk user.deleted webhook signing secret → app project (ADR-0054). Empty
       # when the secret is unset → the env var is omitted + the route stays 503.
       TF_VAR_clerk_webhook_signing_secret: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
+      TF_VAR_resend_api_key: ${{ secrets.RESEND_API_KEY }}
       # OpenTelemetry → Grafana Cloud (ADR-0055). Empty when unset → no OTEL env
       # provisioned → telemetry fail-open.
       TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
@@ -242,6 +243,7 @@ jobs:
       # Clerk user.deleted webhook signing secret → app project (ADR-0054). Empty
       # when the secret is unset → the env var is omitted + the route stays 503.
       TF_VAR_clerk_webhook_signing_secret: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
+      TF_VAR_resend_api_key: ${{ secrets.RESEND_API_KEY }}
       # OpenTelemetry → Grafana Cloud (ADR-0055). Empty when unset → no OTEL env
       # provisioned → telemetry fail-open.
       TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
