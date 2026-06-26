@@ -1,7 +1,7 @@
 // POST /api/v1/reports/{slug}/acl — set a report's sharing Acl (ADR-0056). Thin
 // transport adapter: resolve the actor (must hold `acl:write`) → parse
-// { mode, password?, allowed_emails? } → run setAcl → serialize via arp-http. The
-// use case validates org ownership + the scope and hashes any password (argon2id).
+// { mode, password?, allowed_emails?, access_ttl_seconds? } → run setAcl → serialize
+// via arp-http. The use case validates org ownership + the scope and hashes any password.
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { setAcl } from "arp-application";
 import { ACL_MODES, type AclMode, validationError } from "arp-domain";
