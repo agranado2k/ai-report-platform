@@ -37,6 +37,8 @@ export interface SetAclInput {
   readonly password?: string;
   /** Required (≥1) for `allowlist` mode. */
   readonly allowedEmails?: readonly string[];
+  /** Owner access TTL (seconds) for `allowlist` mode; defaults when omitted. */
+  readonly accessTtlSeconds?: number;
 }
 
 export async function setAcl(
@@ -61,7 +63,12 @@ export async function setAcl(
     passwordHash = hashed.value;
   }
 
-  const acl = makeAcl({ mode: input.mode, passwordHash, allowedEmails: input.allowedEmails });
+  const acl = makeAcl({
+    mode: input.mode,
+    passwordHash,
+    allowedEmails: input.allowedEmails,
+    accessTtlSeconds: input.accessTtlSeconds,
+  });
   if (!acl.ok) return acl;
 
   const saved = await deps.reports.setAcl(found.value.id, acl.value);

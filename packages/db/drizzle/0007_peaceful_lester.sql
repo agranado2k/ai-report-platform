@@ -1,0 +1,1 @@
+ALTER TABLE "acls" ADD COLUMN "access_ttl_seconds" integer;
