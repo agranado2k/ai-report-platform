@@ -4,25 +4,25 @@
 
 ---
 
-## Current state — 2026-06-22
+## Current state — 2026-06-25
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.agranado.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `c0452c8` — Merge PR #70 (app-wide dashboard auth gate). |
+| **Last commit on main**| `a163176` — Merge PR #107 (apex domain cutover → centaurspec.com). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
-| **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.agranado.com` + `accounts.agranado.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.agranado.com**, session-gated) + `arp-view-prod` (**view.agranado.com**, public viewer) + `arp-mcp-prod` (**mcp.agranado.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.agranado.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.agranado.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/sync-spec-diary` (this docs-sync PR, #56). |
+| **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
+| **Active worktrees**   | `docs/centaurspec-cutover` (this diary/infra-docs PR). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
 
 - **`/` (dashboard landing) — gated or public?** Currently gated by the app-wide auth gate (anon → `/sign-in`); decide whether to allowlist `/` as a public signed-out landing. One-line change either way.
-- **Google social login on prod** — needs custom OAuth credentials (Google Cloud client_id/secret → Clerk), since prod (a live Clerk instance) doesn't get Clerk's shared dev credentials. Until then, email sign-in works; Google can be disabled. (clerk-js/dev-browser/preview-key gotchas already resolved — see the 2026-06-17 entries.)
+- **Google social login on prod** — ~~needs custom OAuth credentials~~ **RESOLVED 2026-06-25:** custom Google OAuth credentials wired; Google login works on `app.centaurspec.com`. NB on any re-domain, add the new `clerk.<domain>/v1/oauth_callback` to the Google client or login fails `redirect_uri_mismatch` — see the 2026-06-25 cutover entry.
 - License — `README.md` says TBD. Pick before any public launch.
 - Final project name — `ai-report-platform` is the working title.
-- PSL submission — open the PR against `publicsuffix/list` to add `view.agranado.com` (2-6 wk SLA; ship without waiting).
+- PSL submission — open the PR against `publicsuffix/list` to add `view.centaurspec.com` (2-6 wk SLA; ship without waiting).
 - R2 bucket versioning — `TODO` in `modules/r2/main.tf` (cloudflare provider didn't expose versioning as a resource arg; revisit on a provider bump or wrap via the R2 API).
 
 ### Memory pointers for future-me
@@ -1652,3 +1652,40 @@ P1 merged (#100). Then a cascade worth recording:
   deploy: Tempo `{resource.service.name="arp-app"}` + Loki `{service_name="arp-app"}` should populate.
   **Lesson:** Terraform is path-filtered to `infra/terraform/**`, so a secret change needs an infra
   change or `workflow_dispatch` apply + a fresh deploy to reach the runtime.
+
+### 2026-06-25 — Apex domain cutover: agranado.com → centaurspec.com (product = "Centaur")
+
+Bought **centaurspec.com** (Cloudflare Registrar) as the real product domain. `agranado.com` was only
+ever a placeholder for the product **and** is the operator's personal domain, so it stays — only the
+product's `app`/`view`/`mcp`/`clerk`/`accounts` subdomains moved off it.
+
+Mechanics (PR #107, infra apply shared→prod):
+- **One knob:** the `APEX_DOMAIN` GitHub Actions repo variable → `centaurspec.com`. Terraform fans it
+  out to every origin env var, Vercel custom-domain binding, and DNS record. `shared` plan was
+  **12 add / 12 destroy** (every `cloudflare_record` `-/+` — the `zone_id` change forces replacement, so
+  records moved zones; the old agranado.com product records were destroyed, not orphaned).
+- **Clerk live instance re-domained** to `clerk.centaurspec.com` / `accounts.centaurspec.com`. The
+  `pk_live` encodes the Frontend API host, so it changed → updated `CLERK_PUBLISHABLE_KEY_PROD` +
+  `CLERK_SECRET_KEY_PROD`. Same instance kept ⇒ user IDs + reports preserved.
+- **DKIM cluster id changed on re-domain** (`d6r9n5il5s3x` → `iqr5g5hmntgy`) → re-pointed
+  `clk._domainkey`/`clk2._domainkey`/`clkmail` in `local.clerk_records`.
+
+Two gotchas that bit (both now in `infra.md`):
+1. **Vercel deploy vs Terraform-env race** — the merge-built prod deployments snapshot env *before*
+   `apply-prod` updates it, so the apps served stale `agranado.com` origins + old `pk_live` (MCP
+   advertised `mcp.agranado.com`). Fix: **redeploy** all three prod projects (Vercel API `forceNew=1`)
+   after the apply. Worth automating a post-apply redeploy step. (See memory `vercel-env-redeploy-race`.)
+2. **Google OAuth `redirect_uri_mismatch`** — social login broke because the Google Cloud OAuth client
+   still allow-listed `clerk.agranado.com/v1/oauth_callback`. Fix: add the new `clerk.centaurspec.com`
+   callback + JS origins in Google Cloud Console. Every social provider's OAuth app needs this on a
+   re-domain.
+
+Verified live: DNS (app/view/mcp/clerk/accounts), TLS, Clerk jwks 200, MCP OAuth metadata =
+`mcp.centaurspec.com` / `clerk.centaurspec.com`, app `pk_live` decodes to `clerk.centaurspec.com`,
+email **and** Google login working. Resend's domain moved with the apex, but the app doesn't send mail
+in code (Clerk handles auth email), so no Resend re-verification was needed.
+
+Residual (non-blocking): previously-shared `view.agranado.com/<slug>` links are dead (single-apex
+model, no redirect); MCP connectors must be re-added at `mcp.centaurspec.com`; confirm the Clerk
+`user.deleted` webhook URL now points at `app.centaurspec.com/webhooks/clerk`; remove the stale
+agranado.com Google redirect URI when convenient.
