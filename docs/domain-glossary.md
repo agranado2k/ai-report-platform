@@ -33,6 +33,7 @@ The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Doma
 - **Access token** — a short-lived (~15-min), slug-bound, HMAC-signed compact capability **minted by the app** after it authorizes a private-report request (by `Acl` mode) and **verified by the viewer** (ADR-0056). The mechanism that lets the credential-free `view.<domain>` origin (ADR-002/0038) serve a private report without ever holding Clerk credentials. Stateless (exp-bounded).
 - **Unlock cookie** — a report-scoped (`/<slug>`), short-lived, HttpOnly cookie the **viewer** sets after verifying an `Access token`, so the whole report bundle (entry + relative-URL assets) is gated by one per-request credential (ADR-0056). A self-issued **capability**, NOT app/Clerk credentials — so it doesn't breach the ADR-002/0038 origin isolation.
 - **Access expiry** — the owner-configured duration an `allowlist`-mode viewer stays unlocked after redeeming a magic link (`acls.access_ttl_seconds`, ADR-0056). A finite TTL the owner picks (presets within 60s–90d, default 7 days); it sets the `Access token` + `Unlock cookie` lifetime for that grant. Distinct from the fixed ~15-min token `password` mode uses.
+- **EmailSender** — the application port for outbound transactional email (`send({to,subject,html})`, ADR-0057). The only adapter is `ResendEmailSender` (Resend HTTP API). Its first use is the `allowlist` magic link; fail-open (no `RESEND_API_KEY` ⇒ no sender wired). Distinct from `Notifier` (an unbuilt domain-event sink).
 
 ## Identity & Access context
 

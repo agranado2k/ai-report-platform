@@ -71,6 +71,16 @@ variable "clerk_webhook_signing_secret" {
   default     = ""
 }
 
+# Resend API key for transactional email (ADR-0057, the allowlist magic link). OPTIONAL
+# (default ""): empty ⇒ RESEND_API_KEY/EMAIL_FROM are not provisioned and no EmailSender
+# is wired (the send-link path stays inert). Set via TF_VAR_resend_api_key (CI secret).
+variable "resend_api_key" {
+  type        = string
+  description = "Resend API key (re_…) for transactional email — prod app project."
+  sensitive   = true
+  default     = ""
+}
+
 # OpenTelemetry → Grafana Cloud (ADR-0055). endpoint is the OTLP gateway URL (not
 # secret); headers carries the basic-auth (instanceID:token) so it IS secret. Both
 # OPTIONAL (default "") — unset → no OTEL env provisioned → telemetry fail-open.

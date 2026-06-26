@@ -95,6 +95,24 @@ export interface PasswordHasher {
   verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>>;
 }
 
+/** A transactional email to send (ADR-0056/0057). HTML is required; `text` is an
+ *  optional plain-text fallback. The From address is adapter config, not per-message. */
+export interface EmailMessage {
+  readonly to: string;
+  readonly subject: string;
+  readonly html: string;
+  readonly text?: string;
+}
+
+/**
+ * Outbound transactional email (ADR-0057, Resend). The only sender right now is the
+ * `allowlist` magic link. I/O lives in the adapter; use cases depend on this port and
+ * are tested with a capturing fake. Fail-open at the composition root (no key ⇒ omitted).
+ */
+export interface EmailSender {
+  send(message: EmailMessage): Promise<Result<void, AppError>>;
+}
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
 export interface FolderRepository {

@@ -37,6 +37,8 @@ import type {
   BundleProcessor,
   ClerkOrgProvisioner,
   Clock,
+  EmailMessage,
+  EmailSender,
   EventOutbox,
   FolderListQuery,
   FolderPage,
@@ -656,5 +658,14 @@ export class FakePasswordHasher implements PasswordHasher {
   }
   async verify(plaintext: string, hash: string): Promise<Result<boolean, AppError>> {
     return ok(hash === `hashed:${plaintext}`);
+  }
+}
+
+/** Capturing EmailSender for use-case tests (ADR-0057) — records sent messages, never sends. */
+export class FakeEmailSender implements EmailSender {
+  readonly sent: EmailMessage[] = [];
+  async send(message: EmailMessage): Promise<Result<void, AppError>> {
+    this.sent.push(message);
+    return ok(undefined);
   }
 }

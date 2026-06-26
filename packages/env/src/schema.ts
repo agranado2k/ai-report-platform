@@ -74,6 +74,13 @@ export const serverSchema = {
   // gating is inert (no token can be minted/verified) — the upload/set_acl path
   // still works; enforcement just can't engage until the secret is provisioned.
   VIEW_ACCESS_TOKEN_SECRET: trimmedString.optional(),
+
+  // Transactional email via Resend (ADR-0057) — the allowlist magic link. OPTIONAL:
+  // unset ⇒ no EmailSender is wired, so the allowlist send-link path stays inert
+  // (returns the generic "if your email is on the list…" without actually sending).
+  RESEND_API_KEY: trimmedString.optional(),
+  // The verified From address, e.g. "noreply@<apex>" (the Resend-verified apex; DKIM/SPF set, ADR-0057).
+  EMAIL_FROM: trimmedString.optional(),
 } as const;
 
 /**
