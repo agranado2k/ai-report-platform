@@ -143,6 +143,9 @@ export async function action({ params, request }: ActionFunctionArgs) {
       ACCESS_TTL_SECONDS,
       secret,
       Math.floor(Date.now() / 1000),
+      {
+        mode: "password",
+      },
     );
     return redirectToView(slug.value, token, request);
   }
@@ -172,7 +175,7 @@ export async function action({ params, request }: ActionFunctionArgs) {
         redeemed.value.accessTtlSeconds,
         secret,
         Math.floor(Date.now() / 1000),
-        redeemed.value.email,
+        { mode: "allowlist", email: redeemed.value.email },
       );
       return redirectToView(slug.value, accessToken, request);
     }

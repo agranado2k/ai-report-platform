@@ -7,6 +7,7 @@ const SECRET = "view-access-secret";
 const SLUG = "abcdefghij";
 const NOW = 1_700_000_000;
 const RID = reportId("00000000-0000-7000-8000-0000000000a1");
+const PW: Acl = { mode: "password", passwordHash: "h" };
 const ALLOW: Acl = { mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 3600 };
 
 const newGrants = () => new InMemoryGrantStore(new FixedClock(NOW * 1000));
@@ -39,8 +40,8 @@ describe("resolveAccessDecision (ADR-0056)", () => {
   });
 
   it("a valid ?access hand-off → grant (loader sets the unlock cookie) with maxAge", async () => {
-    const token = mintAccessToken(SLUG, 900, SECRET, NOW);
-    expect(await decide({ mode: "password", passwordHash: "h" }, { query: token })).toEqual({
+    const token = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide(PW, { query: token })).toEqual({
       kind: "grant",
       token,
       maxAgeSeconds: 900,
@@ -49,51 +50,49 @@ describe("resolveAccessDecision (ADR-0056)", () => {
 
   it("a valid unlock cookie → serve", async () => {
     expect(
-      await decide(
-        { mode: "password", passwordHash: "h" },
-        { cookie: mintAccessToken(SLUG, 900, SECRET, NOW) },
-      ),
-    ).toEqual({ kind: "serve" });
+      await decide(PW, { cookie: mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" }) }),
+    ).toEqual({
+      kind: "serve",
+    });
   });
 
   it("an expired/invalid token → unlock (fails closed)", async () => {
-    const expired = mintAccessToken(SLUG, 900, SECRET, NOW);
-    expect(
-      await decide(
-        { mode: "password", passwordHash: "h" },
-        { cookie: expired },
-        { now: NOW + 901 },
-      ),
-    ).toEqual({
-      kind: "unlock",
-    });
+    const expired = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide(PW, { cookie: expired }, { now: NOW + 901 })).toEqual({ kind: "unlock" });
     expect(await decide({ mode: "org" }, { query: "tampered.sig" })).toEqual({ kind: "unlock" });
   });
 
   it("fails closed when the secret is empty — an empty-HMAC forged token must not grant", async () => {
-    const forged = mintAccessToken(SLUG, 900, "", NOW);
+    const forged = mintAccessToken(SLUG, 900, "", NOW, { mode: "password" });
     expect(verifyAccessToken(forged, SLUG, "", NOW + 1)).toBe(true);
-    expect(
-      await decide(
-        { mode: "password", passwordHash: "h" },
-        { query: forged },
-        { secret: "", now: NOW + 1 },
-      ),
-    ).toEqual({ kind: "unlock" });
+    expect(await decide(PW, { query: forged }, { secret: "", now: NOW + 1 })).toEqual({
+      kind: "unlock",
+    });
   });
 
   it("a token minted for a different slug does not unlock this one", async () => {
-    const other = mintAccessToken("zzzzzzzzzz", 900, SECRET, NOW);
+    const other = mintAccessToken("zzzzzzzzzz", 900, SECRET, NOW, { mode: "org" });
     expect(await decide({ mode: "org" }, { cookie: other, query: other })).toEqual({
       kind: "unlock",
     });
+  });
+
+  it("a token minted under a different mode → unlock (mode-bound; no cross-mode bypass)", async () => {
+    // An allowlist cookie must NOT serve a report the owner has since switched to password.
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000); // grant still live
+    const allowToken = mintAccessToken(SLUG, 3600, SECRET, NOW, {
+      mode: "allowlist",
+      email: "a@b.com",
+    });
+    expect(await decide(PW, { cookie: allowToken }, { grants })).toEqual({ kind: "unlock" });
   });
 
   // ── allowlist / revocation-C ──────────────────────────────────────────────
   it("allowlist: valid token + LIVE grant → grant (cookie maxAge = grant TTL)", async () => {
     const grants = newGrants();
     await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);
-    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, "a@b.com");
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
     expect(await decide(ALLOW, { query: token }, { grants })).toEqual({
       kind: "grant",
       token,
@@ -102,14 +101,14 @@ describe("resolveAccessDecision (ADR-0056)", () => {
   });
 
   it("allowlist: valid token but NO live grant → unlock (revoked since mint)", async () => {
-    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, "a@b.com");
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
     expect(await decide(ALLOW, { cookie: token })).toEqual({ kind: "unlock" }); // no grant seeded
   });
 
   it("allowlist: email removed from the allowlist → unlock even with a live grant", async () => {
     const grants = newGrants();
     await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000); // grant still live (5e hasn't pruned it)
-    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, "a@b.com");
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
     const removed: Acl = {
       mode: "allowlist",
       allowedEmails: ["someone@x.com"],
@@ -121,7 +120,7 @@ describe("resolveAccessDecision (ADR-0056)", () => {
   it("allowlist: a token carrying no email claim → unlock", async () => {
     const grants = newGrants();
     await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);
-    const token = mintAccessToken(SLUG, 3600, SECRET, NOW); // no email
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist" }); // no email
     expect(await decide(ALLOW, { cookie: token }, { grants })).toEqual({ kind: "unlock" });
   });
 });

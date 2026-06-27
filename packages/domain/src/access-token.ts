@@ -8,6 +8,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export interface AccessClaims {
   readonly slug: string;
   readonly exp: number; // epoch seconds
+  /** The `Acl` mode this token was minted under — the viewer rejects it if the report's
+   *  mode has since changed (e.g. `allowlist`→`password`), so a stale long-lived cookie
+   *  can't survive a mode switch (revocation-C, ADR-0056). */
+  readonly mode?: string;
   /** Allowlist only — the address the link was redeemed for; the viewer checks a live
    *  `report_grants` row for it per request (revocation-C, ADR-0056). Absent otherwise. */
   readonly email?: string;
@@ -17,19 +21,20 @@ function sign(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-/** Mint a slug-bound token valid for `ttlSeconds` from `nowSeconds`. `email` is carried
- *  for `allowlist` reports so the viewer can check a live grant; omit for other modes. */
+/** Mint a slug-bound token valid for `ttlSeconds` from `nowSeconds`. `mode` binds it to the
+ *  Acl mode it authorizes; `email` is carried for `allowlist` so the viewer can check a grant. */
 export function mintAccessToken(
   slug: string,
   ttlSeconds: number,
   secret: string,
   nowSeconds: number,
-  email?: string,
+  extra: { readonly mode?: string; readonly email?: string } = {},
 ): string {
   const claims: AccessClaims = {
     slug,
     exp: nowSeconds + ttlSeconds,
-    ...(email ? { email } : {}),
+    ...(extra.mode ? { mode: extra.mode } : {}),
+    ...(extra.email ? { email: extra.email } : {}),
   };
   const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
   return `${payload}.${sign(payload, secret)}`;
@@ -60,6 +65,7 @@ export function readAccessToken(
     return null;
   }
   if (typeof claims?.slug !== "string" || typeof claims?.exp !== "number") return null;
+  if (claims.mode !== undefined && typeof claims.mode !== "string") return null;
   if (claims.email !== undefined && typeof claims.email !== "string") return null;
   if (claims.exp <= nowSeconds) return null;
   return claims.slug === expectedSlug ? claims : null;

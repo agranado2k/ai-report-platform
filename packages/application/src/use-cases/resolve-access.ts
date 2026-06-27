@@ -38,6 +38,12 @@ export async function resolveAccessDecision(
     fromQuery ?? (tokens.cookie ? readAccessToken(tokens.cookie, slug, secret, nowSeconds) : null);
   if (!claims) return ok({ kind: "unlock" });
 
+  // Bind the token to the Acl mode it was minted under: a stale long-lived cookie (an
+  // allowlist token lives as long as its grant, up to 90d) must NOT survive the owner
+  // switching modes — e.g. allowlist→password would otherwise serve for months on the old
+  // cookie since the membership/grant checks below only run for allowlist (claude-review #117).
+  if (claims.mode !== acl.mode) return ok({ kind: "unlock" });
+
   // Revocation-C, defense-in-depth: serve only if the email is BOTH currently allowlisted
   // AND holds a live grant. The allowlist check (the live source of truth, already loaded
   // with the report) makes removal revoke on the very next request — independent of setAcl
