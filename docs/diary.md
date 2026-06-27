@@ -1689,3 +1689,33 @@ Residual (non-blocking): previously-shared `view.agranado.com/<slug>` links are 
 model, no redirect); MCP connectors must be re-added at `mcp.centaurspec.com`; confirm the Clerk
 `user.deleted` webhook URL now points at `app.centaurspec.com/webhooks/clerk`; remove the stale
 agranado.com Google redirect URI when convenient.
+
+## 2026-06-27 — Report sharing / ACLs: allowlist phase + revocation-C enforcement (ADR-0056/0057)
+
+Catch-up entry (the log skipped the sharing epic). **ADR-0056** (report sharing / ACLs) + **ADR-0057**
+(transactional email via Resend) drive a multi-mode viewer-access feature on the `Acl` aggregate:
+`public` (live since ADR-0038) / `password` / `org` / `allowlist`. **P1 (public/password)** shipped — the
+app `/unlock/{slug}` route mints a slug-bound HMAC `Access token` (app mints, the credential-free view
+origin verifies); the viewer swaps the `?access` hand-off for an HttpOnly, path-scoped `Unlock cookie`.
+`org` is deferred (owner-only single-member orgs for now).
+
+**Allowlist phase** (PRD #109), built slice-by-slice, each its own PR + bot-reviewed:
+- 5a `report_grants` table + `GrantStore` (migration 0008) — durable, revocable grants, PK `(report_id,email)`.
+- 1–4 foundations: owner-set `access_ttl_seconds` on the Acl; `EmailSender`/Resend; `NonceStore`/Upstash
+  (single-use GETDEL); the magic-link codec (HMAC over a nonce id).
+- 5b `sendMagicLink` + `redeemMagicLink` use cases (privacy-preserving send; redeem re-validates the
+  allowlist + creates the grant).
+- 5c the `/unlock` allowlist branch — email form → send; **POST-only redemption via a confirm
+  interstitial** so email link scanners (SafeLinks/Gmail prefetch) can't burn the one-time nonce
+  (claude-review #116); frame-guarded raw responses.
+- 5d (**this PR #117** — keystone): **revocation-C now enforces.** The access token carries the redeemed
+  `email`; the viewer's `resolveAccessDecision` is async + gates an allowlist serve on **both** current
+  allowlist membership AND a live `report_grants` row, **per request**. So removing an email denies on
+  the very next request — independent of `setAcl` pruning the grant (5e). Cookie `maxAge` = the grant's
+  TTL, so long grants aren't re-prompted; revocation stays immediate via the per-request check.
+
+Decision recorded: the viewer's **dual gate** (live allowlist membership + live grant) is defense-in-depth
+— the allowlist is the live source of truth; the grant proves redemption + bounds expiry.
+
+Remaining: **5e** `setAcl` revoke-on-change (proactively delete grants on email-removal / mode-switch) +
+rate-limit; **6** e2e + docs. Active worktree: `viewer-grant-check` (PR #117).

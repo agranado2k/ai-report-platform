@@ -143,6 +143,9 @@ export async function action({ params, request }: ActionFunctionArgs) {
       ACCESS_TTL_SECONDS,
       secret,
       Math.floor(Date.now() / 1000),
+      {
+        mode: "password",
+      },
     );
     return redirectToView(slug.value, token, request);
   }
@@ -165,12 +168,14 @@ export async function action({ params, request }: ActionFunctionArgs) {
           error: "That link is invalid or has expired — request a new one.",
         });
       }
-      // The access token's TTL matches the grant the viewer will check per request (5d).
+      // TTL matches the grant; the email is carried in the token so the viewer can check
+      // a live grant for it per request (revocation-C, ADR-0056).
       const accessToken = mintAccessToken(
         slug.value,
         redeemed.value.accessTtlSeconds,
         secret,
         Math.floor(Date.now() / 1000),
+        { mode: "allowlist", email: redeemed.value.email },
       );
       return redirectToView(slug.value, accessToken, request);
     }

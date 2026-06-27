@@ -1,87 +1,126 @@
-import { mintAccessToken, verifyAccessToken } from "arp-domain";
+import { type Acl, mintAccessToken, reportId, verifyAccessToken } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { resolveAccessDecision } from "./resolve-access";
+import { FixedClock, InMemoryGrantStore } from "../testing/in-memory";
+import { type AccessDecision, resolveAccessDecision } from "./resolve-access";
 
 const SECRET = "view-access-secret";
 const SLUG = "abcdefghij";
 const NOW = 1_700_000_000;
-const valid = () => mintAccessToken(SLUG, 900, SECRET, NOW);
+const RID = reportId("00000000-0000-7000-8000-0000000000a1");
+const PW: Acl = { mode: "password", passwordHash: "h" };
+const ALLOW: Acl = { mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 3600 };
+
+const newGrants = () => new InMemoryGrantStore(new FixedClock(NOW * 1000));
+
+async function decide(
+  acl: Acl,
+  tokens: { cookie?: string; query?: string },
+  opts: { grants?: InMemoryGrantStore; secret?: string; now?: number } = {},
+): Promise<AccessDecision> {
+  const r = await resolveAccessDecision(
+    acl,
+    RID,
+    tokens,
+    SLUG,
+    opts.secret ?? SECRET,
+    opts.now ?? NOW,
+    opts.grants ?? newGrants(),
+  );
+  if (!r.ok) throw new Error("unexpected error result");
+  return r.value;
+}
 
 describe("resolveAccessDecision (ADR-0056)", () => {
-  it("a public report always serves (no token needed)", () => {
-    expect(resolveAccessDecision({ mode: "public" }, {}, SLUG, SECRET, NOW)).toEqual({
+  it("a public report always serves (no token needed)", async () => {
+    expect(await decide({ mode: "public" }, {})).toEqual({ kind: "serve" });
+  });
+
+  it("a private report with no token → unlock (redirect to the app)", async () => {
+    expect(await decide({ mode: "org" }, {})).toEqual({ kind: "unlock" });
+  });
+
+  it("a valid ?access hand-off → grant (loader sets the unlock cookie) with maxAge", async () => {
+    const token = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide(PW, { query: token })).toEqual({
+      kind: "grant",
+      token,
+      maxAgeSeconds: 900,
+    });
+  });
+
+  it("a valid unlock cookie → serve", async () => {
+    expect(
+      await decide(PW, { cookie: mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" }) }),
+    ).toEqual({
       kind: "serve",
     });
   });
 
-  it("a private report with no token → unlock (redirect to the app)", () => {
-    expect(resolveAccessDecision({ mode: "org" }, {}, SLUG, SECRET, NOW)).toEqual({
+  it("an expired/invalid token → unlock (fails closed)", async () => {
+    const expired = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide(PW, { cookie: expired }, { now: NOW + 901 })).toEqual({ kind: "unlock" });
+    expect(await decide({ mode: "org" }, { query: "tampered.sig" })).toEqual({ kind: "unlock" });
+  });
+
+  it("fails closed when the secret is empty — an empty-HMAC forged token must not grant", async () => {
+    const forged = mintAccessToken(SLUG, 900, "", NOW, { mode: "password" });
+    expect(verifyAccessToken(forged, SLUG, "", NOW + 1)).toBe(true);
+    expect(await decide(PW, { query: forged }, { secret: "", now: NOW + 1 })).toEqual({
       kind: "unlock",
     });
   });
 
-  it("a valid ?access hand-off → grant (loader sets the unlock cookie)", () => {
-    const token = valid();
-    expect(
-      resolveAccessDecision(
-        { mode: "password", passwordHash: "h" },
-        { query: token },
-        SLUG,
-        SECRET,
-        NOW,
-      ),
-    ).toEqual({ kind: "grant", token });
+  it("a token minted for a different slug does not unlock this one", async () => {
+    const other = mintAccessToken("zzzzzzzzzz", 900, SECRET, NOW, { mode: "org" });
+    expect(await decide({ mode: "org" }, { cookie: other, query: other })).toEqual({
+      kind: "unlock",
+    });
   });
 
-  it("a valid unlock cookie → serve", () => {
-    expect(
-      resolveAccessDecision(
-        { mode: "password", passwordHash: "h" },
-        { cookie: valid() },
-        SLUG,
-        SECRET,
-        NOW,
-      ),
-    ).toEqual({ kind: "serve" });
+  it("a token minted under a different mode → unlock (mode-bound; no cross-mode bypass)", async () => {
+    // An allowlist cookie must NOT serve a report the owner has since switched to password.
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000); // grant still live
+    const allowToken = mintAccessToken(SLUG, 3600, SECRET, NOW, {
+      mode: "allowlist",
+      email: "a@b.com",
+    });
+    expect(await decide(PW, { cookie: allowToken }, { grants })).toEqual({ kind: "unlock" });
   });
 
-  it("an expired/invalid token → unlock (fails closed)", () => {
-    const expired = mintAccessToken(SLUG, 900, SECRET, NOW);
-    expect(
-      resolveAccessDecision(
-        { mode: "password", passwordHash: "h" },
-        { cookie: expired },
-        SLUG,
-        SECRET,
-        NOW + 901,
-      ),
-    ).toEqual({ kind: "unlock" });
-    expect(
-      resolveAccessDecision({ mode: "org" }, { query: "tampered.sig" }, SLUG, SECRET, NOW),
-    ).toEqual({ kind: "unlock" });
+  // ── allowlist / revocation-C ──────────────────────────────────────────────
+  it("allowlist: valid token + LIVE grant → grant (cookie maxAge = grant TTL)", async () => {
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
+    expect(await decide(ALLOW, { query: token }, { grants })).toEqual({
+      kind: "grant",
+      token,
+      maxAgeSeconds: 3600,
+    });
   });
 
-  it("fails closed when the secret is empty — an empty-HMAC forged token must not grant", () => {
-    // Node's createHmac("sha256","") is valid, so a token forged under the empty
-    // secret WOULD verify — proving the gate can't rely on verify alone.
-    const forged = mintAccessToken(SLUG, 900, "", NOW);
-    expect(verifyAccessToken(forged, SLUG, "", NOW + 1)).toBe(true);
-    // But the decision fails closed because the secret is unset (claude-review #100).
-    expect(
-      resolveAccessDecision(
-        { mode: "password", passwordHash: "h" },
-        { query: forged },
-        SLUG,
-        "",
-        NOW + 1,
-      ),
-    ).toEqual({ kind: "unlock" });
+  it("allowlist: valid token but NO live grant → unlock (revoked since mint)", async () => {
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
+    expect(await decide(ALLOW, { cookie: token })).toEqual({ kind: "unlock" }); // no grant seeded
   });
 
-  it("a token minted for a different slug does not unlock this one", () => {
-    const other = mintAccessToken("zzzzzzzzzz", 900, SECRET, NOW);
-    expect(
-      resolveAccessDecision({ mode: "org" }, { cookie: other, query: other }, SLUG, SECRET, NOW),
-    ).toEqual({ kind: "unlock" });
+  it("allowlist: email removed from the allowlist → unlock even with a live grant", async () => {
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000); // grant still live (5e hasn't pruned it)
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist", email: "a@b.com" });
+    const removed: Acl = {
+      mode: "allowlist",
+      allowedEmails: ["someone@x.com"],
+      accessTtlSeconds: 3600,
+    };
+    expect(await decide(removed, { cookie: token }, { grants })).toEqual({ kind: "unlock" });
+  });
+
+  it("allowlist: a token carrying no email claim → unlock", async () => {
+    const grants = newGrants();
+    await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);
+    const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist" }); // no email
+    expect(await decide(ALLOW, { cookie: token }, { grants })).toEqual({ kind: "unlock" });
   });
 });

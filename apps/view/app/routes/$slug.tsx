@@ -14,7 +14,6 @@ import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 // ADR-002/0038 origin isolation holds. Path-scoped + the value is a slug-bound token,
 // so it only unlocks its own report.
 const UNLOCK_COOKIE = "arp_unlock";
-const UNLOCK_TTL_SECONDS = 900; // 15 min, matches the access-token TTL
 
 function readUnlockCookie(request: Request): string | undefined {
   const raw = request.headers.get("cookie");
@@ -26,9 +25,12 @@ function readUnlockCookie(request: Request): string | undefined {
   return undefined;
 }
 
-function unlockCookie(slug: string, token: string): string {
+// Max-Age = the token's remaining life (= the grant's TTL for allowlist, ~15 min for
+// password), so a long-lived allowlist grant isn't re-prompted every 15 min. Revocation
+// stays immediate via the per-request grant check, not via a short cookie (ADR-0056).
+function unlockCookie(slug: string, token: string, maxAgeSeconds: number): string {
   // HttpOnly + Secure + SameSite=Lax; path-scoped to this report only.
-  return `${UNLOCK_COOKIE}=${token}; Path=/${slug}; Max-Age=${UNLOCK_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
+  return `${UNLOCK_COOKIE}=${token}; Path=/${slug}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 // Thrown error responses (404 / 410 / 451 / 500) still carry the ADR-013 view
@@ -63,7 +65,7 @@ function scanningHoldingPage(): Response {
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const { reports, blobs } = viewerDeps();
+  const { reports, blobs, grants } = viewerDeps();
 
   const slug = makeSlug(params.slug ?? "");
   // Unknown/invalid slug is indistinguishable from blocked content → 404.
@@ -89,13 +91,19 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // (from the `?access` hand-off or a prior unlock cookie). Public reports serve directly.
   const { secret, appOrigin } = viewerAccessConfig();
   const url = new URL(request.url);
-  const decision = resolveAccessDecision(
+  // Async + grant-aware: for `allowlist`, a valid token is only honored while its
+  // `report_grants` row is live (revocation-C) — the per-request check (ADR-0056).
+  const decided = await resolveAccessDecision(
     report.acl,
+    report.id,
     { cookie: readUnlockCookie(request), query: url.searchParams.get("access") ?? undefined },
     slug.value,
     secret ?? "",
     Math.floor(Date.now() / 1000),
+    grants,
   );
+  if (!decided.ok) throw errorResponse(500, "Access check failed");
+  const decision = decided.value;
   if (decision.kind === "unlock") {
     // Send the viewer to the app to authorize. Fail closed if the app origin is unset.
     if (!appOrigin) throw errorResponse(503, "Private report — viewing is not available here");
@@ -105,11 +113,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     return new Response(null, { status: 302, headers });
   }
   if (decision.kind === "grant") {
-    // Valid hand-off → set the unlock cookie and redirect to the clean URL (drops
-    // the token from the address bar / history); the cookie carries it from here.
+    // Valid hand-off → set the unlock cookie (lasting as long as the token/grant) and
+    // redirect to the clean URL (drops the token from the address bar / history).
     const headers = viewHeaders();
     headers.set("location", `/${slug.value}`);
-    headers.set("set-cookie", unlockCookie(slug.value, decision.token));
+    headers.set("set-cookie", unlockCookie(slug.value, decision.token, decision.maxAgeSeconds));
     headers.set("cache-control", "no-store");
     return new Response(null, { status: 303, headers });
   }
