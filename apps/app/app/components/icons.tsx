@@ -70,3 +70,22 @@ export function MoreIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/** Copy — clipboard affordance (endpoints, secrets). */
+export function CopyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+    </Icon>
+  );
+}
+
+/** Check — copied/created confirmation. */
+export function CheckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </Icon>
+  );
+}
