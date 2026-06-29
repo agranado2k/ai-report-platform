@@ -264,6 +264,32 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/reports/{slug}/acl:
+    get:
+      operationId: getReportAcl
+      tags: [Reports]
+      summary: Read a report's sharing ACL
+      description: >
+        Return the current sharing ACL for the report identified by `slug` (ADR-0056) as a
+        standalone `{ object: "acl", mode, … }` resource — `allowed_emails` + `access_ttl_seconds`
+        are present only for `allowlist` mode; the password hash is never returned. Org-scoped;
+        a report outside your org reads as not-found.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      responses:
+        '200':
+          description: The report's acl resource (`object: "acl"`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Acl' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       operationId: setReportAcl
       tags: [Reports]
@@ -544,6 +570,10 @@ components:
       type: object
       required: [mode]
       properties:
+        object:
+          type: string
+          enum: [acl]
+          description: Resource type discriminator (ADR-0053). Present on the standalone GET /acl response; omitted when embedded in a report resource.
         mode:
           type: string
           enum: [public, password, org, allowlist]

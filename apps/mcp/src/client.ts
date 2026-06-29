@@ -112,6 +112,35 @@ export class ApiClient {
     return this.request<unknown>("DELETE", `/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
+  /** Read a report's sharing acl — `{ object: "acl", mode, allowed_emails?, access_ttl_seconds? }`. */
+  getReportAcl(slug: string): Promise<ApiResult<Record<string, unknown>>> {
+    return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
+  }
+
+  /** Set a report's sharing acl (ADR-0056). Sends only the fields relevant to `mode`. */
+  setReportAcl(
+    slug: string,
+    params: {
+      readonly mode: string;
+      readonly allowedEmails?: readonly string[];
+      readonly password?: string;
+      readonly accessTtlSeconds?: number;
+    },
+  ): Promise<ApiResult<unknown>> {
+    return this.request<unknown>("POST", `/api/v1/reports/${encodeURIComponent(slug)}/acl`, {
+      json: {
+        mode: params.mode,
+        ...(params.allowedEmails ? { allowed_emails: params.allowedEmails } : {}),
+        // `!== undefined`, not truthiness — forward an explicit empty password so the server
+        // returns a clear "password required" rather than a generic error (claude-review #118).
+        ...(params.password !== undefined ? { password: params.password } : {}),
+        ...(params.accessTtlSeconds !== undefined
+          ? { access_ttl_seconds: params.accessTtlSeconds }
+          : {}),
+      },
+    });
+  }
+
   createFolder(params: {
     readonly name: string;
     readonly parentId: string;

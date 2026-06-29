@@ -63,6 +63,19 @@ export function setAclToHttp(result: Result<Report, AppError>, ctx: WireContext)
   return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
 }
 
+/** The `Acl` as a standalone `object: "acl"` resource (ADR-0053/0056) — the focused
+ *  read shape for GET /acl, distinct from the full report resource POST returns. */
+function aclResource(acl: Acl) {
+  return { object: "acl", ...aclToWire(acl) };
+}
+
+/** GET /api/v1/reports/{slug}/acl — 200 with just the acl resource, or a problem.
+ *  No `WireContext` needed: the acl carries no prefixed ids. */
+export function getAclToHttp(result: Result<Report, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: aclResource(result.value.acl) };
+}
+
 /** DELETE /api/v1/reports/{slug} — 204 No Content on success. */
 export function deleteReportToHttp(result: Result<void, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);

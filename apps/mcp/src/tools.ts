@@ -120,6 +120,22 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_get_acl",
+    {
+      title: "Get a report's sharing settings",
+      description:
+        "Read a report's sharing acl — returns { object:'acl', mode, and for allowlist the " +
+        "allowed_emails + access_ttl_seconds }. Read-only. mode is one of public | password | " +
+        "org | allowlist. Use it before reports_set_acl to see the current sharing state.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => toToolResult(await client.getReportAcl(args.slug)),
+  );
+
+  server.registerTool(
     "folders_list",
     {
       title: "List folders",
@@ -214,6 +230,48 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       annotations: MUTATE,
     },
     async (args) => toToolResult(await client.moveReport(args.slug, args.folder_id)),
+  );
+
+  server.registerTool(
+    "reports_set_acl",
+    {
+      title: "Set a report's sharing settings",
+      description:
+        "Set how a report is shared (ADR-0056). mode: 'public' (anyone with the link), " +
+        "'password' (requires `password`), 'allowlist' (only `allowed_emails` — each is emailed a " +
+        "one-time magic link; optional `access_ttl_seconds` sets how long their access lasts), or " +
+        "'org'. REPLACES the whole acl — send the COMPLETE allowed_emails list, not a delta. " +
+        "Use reports_get_acl first to see the current state.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        mode: z.enum(["public", "password", "org", "allowlist"]).describe("The sharing mode."),
+        allowed_emails: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "allowlist mode: the FULL list of emails allowed to view (replaces any existing).",
+          ),
+        password: z.string().optional().describe("password mode: the viewing password."),
+        access_ttl_seconds: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "allowlist mode: how long granted access lasts (60–7776000; default 604800 = 7d).",
+          ),
+      },
+      annotations: MUTATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.setReportAcl(args.slug, {
+          mode: args.mode,
+          allowedEmails: args.allowed_emails,
+          password: args.password,
+          accessTtlSeconds: args.access_ttl_seconds,
+        }),
+      ),
   );
 
   server.registerTool(

@@ -14,6 +14,7 @@ import {
   createFolderToHttp,
   deleteFolderToHttp,
   deleteReportToHttp,
+  getAclToHttp,
   getReportToHttp,
   moveReportToHttp,
   renameFolderToHttp,
@@ -150,5 +151,31 @@ describe("folder resource mappers (ADR-0053)", () => {
     const res = deleteFolderToHttp(ok(undefined));
     expect(res.status).toBe(204);
     expect(res.body).toBeUndefined();
+  });
+
+  it("getAclToHttp public → 200 { object: acl, mode }", () => {
+    const res = getAclToHttp(ok(report("R")));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ object: "acl", mode: "public" });
+  });
+
+  it("getAclToHttp allowlist → surfaces allowed_emails + access_ttl_seconds (no hash)", () => {
+    const allowlistReport: Report = {
+      ...report("R"),
+      acl: { mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 604800 },
+    };
+    const res = getAclToHttp(ok(allowlistReport));
+    expect(res.body).toEqual({
+      object: "acl",
+      mode: "allowlist",
+      allowed_emails: ["a@b.com"],
+      access_ttl_seconds: 604800,
+    });
+  });
+
+  it("getAclToHttp NotFound → problem passthrough", () => {
+    const res = getAclToHttp(err({ kind: "NotFound", message: "no report" }));
+    expect(res.status).toBe(404);
+    expect(res.contentType).toBe("application/problem+json");
   });
 });
