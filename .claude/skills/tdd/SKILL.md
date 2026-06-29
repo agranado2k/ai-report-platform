@@ -5,7 +5,7 @@ description: Test-driven development with red-green-refactor loop. Use when user
 
 # Test-Driven Development
 
-> **Project context — `ai-report-platform`** (read first):
+> **Project context — Centaur Spec** (read first):
 >
 > - **Test runner**: vitest. Run a workspace's tests with `pnpm turbo test --filter=<workspace>`. From within an app/package dir, `pnpm test` works directly. Append `--run --coverage` for a one-shot coverage report.
 > - **Test file conventions**: prefer `*.spec.ts` for unit/integration tests (co-located with source or under `src/__tests__/`). Use `*.spec-d.ts` for type-level tests.

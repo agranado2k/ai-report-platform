@@ -1,6 +1,6 @@
 # Development diary
 
-> Living history of the `ai-report-platform` build. The **Current state** block at the top is the agent re-orientation summary — read it first when picking up the project. Below it: forward-chronological entries, newest at the bottom.
+> Living history of the Centaur Spec build. The **Current state** block at the top is the agent re-orientation summary — read it first when picking up the project. Below it: forward-chronological entries, newest at the bottom.
 
 ---
 
@@ -21,7 +21,7 @@
 - **`/` (dashboard landing) — gated or public?** Currently gated by the app-wide auth gate (anon → `/sign-in`); decide whether to allowlist `/` as a public signed-out landing. One-line change either way.
 - **Google social login on prod** — ~~needs custom OAuth credentials~~ **RESOLVED 2026-06-25:** custom Google OAuth credentials wired; Google login works on `app.centaurspec.com`. NB on any re-domain, add the new `clerk.<domain>/v1/oauth_callback` to the Google client or login fails `redirect_uri_mismatch` — see the 2026-06-25 cutover entry.
 - License — `README.md` says TBD. Pick before any public launch.
-- Final project name — `ai-report-platform` is the working title.
+- **Final project name — resolved:** brand **Centaur**, full name **Centaur Spec** (domain centaurspec.com).
 - PSL submission — open the PR against `publicsuffix/list` to add `view.centaurspec.com` (2-6 wk SLA; ship without waiting).
 - R2 bucket versioning — `TODO` in `modules/r2/main.tf` (cloudflare provider didn't expose versioning as a resource arg; revisit on a provider bump or wrap via the R2 API).
 
@@ -1754,3 +1754,13 @@ page** (a new `apps/marketing` on the apex `centaurspec.com`) is **parked** — 
 mockup is published via Centaur for reference, to become the real Remix app later (plan PRs a–e).
 Process note: typecheck/biome/build were verified locally before each push. Active worktree:
 `docs/forge-ember-diary` (this entry).
+
+### 2026-06-29 — Product name resolved: Centaur / Centaur Spec
+
+Settled the long-open "final project name" question (the working title was `ai-report-platform`).
+The brand is **Centaur** (the short wordmark in the app chrome) and the full name is **Centaur Spec**
+(prose, docs, and the viewer / MCP / OpenAPI surfaces); domain `centaurspec.com`. PR #126 swept the old
+name out of user-facing copy + project docs and the safe identifiers (root package → `centaur-spec`).
+The **technical identity stays `ai-report-platform`** — the GitHub repo, Neon `project_name`, git
+remote, local path, Terraform resources, and `arp-*` workspace packages — since renaming those breaks
+git/infra/CI/state. (See the domain glossary's "Product name" note.)

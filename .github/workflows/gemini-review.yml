@@ -100,7 +100,7 @@ jobs:
           prompt: |
             /pr-code-review
 
-            Project context: ai-report-platform. Before flagging anything,
+            Project context: Centaur Spec. Before flagging anything,
             read CLAUDE.md and docs/diary.md (ADRs are the contract).
 
             Project-specific review focus — flag any code that violates:

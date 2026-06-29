@@ -1,6 +1,6 @@
 # Database design
 
-The detailed schema reference for `ai-report-platform` (Postgres on Neon). The
+The detailed schema reference for Centaur Spec (Postgres on Neon). The
 `docs/spec.html` "Database design" section (rev 8) defines the table catalog and
 is the **contract**; this doc is the column-level reference the Drizzle schema
 (`packages/db`, ADR-020) is generated from. Where the two disagree, the spec

@@ -72,7 +72,7 @@ export default function Upload() {
             name="html"
             rows={12}
             aria-label="Report HTML"
-            defaultValue={"<h1>Hello from ai-report-platform</h1>\n<p>It works.</p>"}
+            defaultValue={"<h1>Hello from Centaur Spec</h1>\n<p>It works.</p>"}
             className="font-mono"
           />
           <div>
