@@ -236,7 +236,7 @@ export class DrizzleReportRepository implements ReportRepository {
         .from(reportVersions)
         .where(eq(reportVersions.reportId, row.id))
         .orderBy(asc(reportVersions.versionNo));
-      // The Acl is an aggregate member (ADR-0056) — loaded with the report; no row = public.
+      // The Acl is an aggregate member (ADR-0056) — loaded with the report; no row = private.
       const [aclRow] = await db.select().from(acls).where(eq(acls.reportId, row.id)).limit(1);
       return ok(rowsToReport(row, versions, rowToAcl(aclRow)));
     } catch (e) {

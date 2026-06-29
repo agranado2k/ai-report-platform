@@ -1,5 +1,5 @@
 // Acl — per-Report sharing configuration (ADR-0056). An aggregate member of
-// `Report` (ADR-0036); one `Acl` per report, defaulting to `public`. A pure value
+// `Report` (ADR-0036); one `Acl` per report, defaulting to `private` (owner-only). A pure value
 // object: no I/O. The argon2id password hash is supplied by the setAcl use case
 // (hashing is an adapter concern); the wire mapper never serializes it (ADR-0053 §12).
 import { type AppError, validationError } from "./errors";
