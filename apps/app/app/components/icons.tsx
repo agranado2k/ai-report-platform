@@ -42,3 +42,31 @@ export function KeyIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/** Document — a report row's leading glyph (and its open affordance). */
+export function DocumentIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 13h6M9 17h4" />
+    </Icon>
+  );
+}
+
+/** Folder — replaces the 📁 emoji in the tree + per-report folder tag. */
+export function FolderIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 7h6l2 2h10v9a2 2 0 0 1-2 2H3z" />
+    </Icon>
+  );
+}
+
+/** Overflow / "more actions" — the kebab that opens a row's action menu. */
+export function MoreIcon(props: IconProps) {
+  return (
+    <Icon {...props} strokeWidth="2.4">
+      <path d="M5 12h.01M12 12h.01M19 12h.01" />
+    </Icon>
+  );
+}
