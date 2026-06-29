@@ -30,7 +30,7 @@ import {
   StatusBadge,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { deps, folderRepo, viewOrigin } from "../server/container.server";
+import { deps, folderRepo } from "../server/container.server";
 import { log } from "../server/log.server";
 
 export const meta: MetaFunction = () => [
@@ -45,7 +45,6 @@ const PAGE_SIZE = 20;
 // org WITHOUT provisioning (GETs stay safe). Query params: `?q=` (title/slug
 // search), `?folder=<id>` (filter to one folder), `?page=` (1-based).
 export async function loader(args: LoaderFunctionArgs) {
-  const viewBase = viewOrigin(args.request);
   const url = new URL(args.request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const requestedFolder = url.searchParams.get("folder") ?? "";
@@ -67,7 +66,6 @@ export async function loader(args: LoaderFunctionArgs) {
     q,
     selectedFolderId: null,
     rootId: null,
-    viewBase,
   };
   if (!actor) return json(empty);
 
@@ -113,7 +111,6 @@ export async function loader(args: LoaderFunctionArgs) {
     q,
     selectedFolderId,
     rootId: root?.id ?? null,
-    viewBase,
   });
 }
 
@@ -235,7 +232,7 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function Index() {
-  const { folders, items, hasPrev, hasNext, q, selectedFolderId, rootId, viewBase } =
+  const { folders, items, hasPrev, hasNext, q, selectedFolderId, rootId } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
@@ -338,8 +335,11 @@ export default function Index() {
               {items.map((r) => (
                 <li key={r.slug} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <span className="min-w-0">
+                    {/* Owner open (ADR-0056): /reports/{slug}/open mints an owner access token
+                        so the owner reaches their own report directly — no password / magic link
+                        even when it's private. The viewer still gates everyone else. */}
                     <a
-                      href={`${viewBase}/${r.slug}`}
+                      href={`/reports/${r.slug}/open`}
                       className="font-medium text-fg hover:text-brand"
                     >
                       {r.title}
