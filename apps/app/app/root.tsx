@@ -1,4 +1,4 @@
-import { ClerkApp } from "@clerk/remix";
+import { ClerkApp, SignedIn } from "@clerk/remix";
 import { rootAuthLoader } from "@clerk/remix/ssr.server";
 import { type LinksFunction, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import {
@@ -15,6 +15,7 @@ import { defineEnv } from "arp-env";
 import { buttonClass } from "./components/Button";
 import { EmptyState } from "./components/EmptyState";
 import { PageShell } from "./components/PageShell";
+import { TopBar } from "./components/TopBar";
 import stylesheet from "./tailwind.css?url";
 
 // The compiled Tailwind stylesheet (static, served from 'self' — CSP-safe) +
@@ -89,7 +90,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  return <Outlet />;
+  return (
+    <>
+      {/* Global brand chrome — only for signed-in pages (sign-in renders bare). */}
+      <SignedIn>
+        <TopBar />
+      </SignedIn>
+      <Outlet />
+    </>
+  );
 }
 
 // Root error boundary — also Remix's app-wide 404 (unmatched routes render here).

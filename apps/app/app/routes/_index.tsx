@@ -1,4 +1,3 @@
-import { SignedIn, UserButton } from "@clerk/remix";
 import {
   type ActionFunctionArgs,
   json,
@@ -35,7 +34,7 @@ import { deps, folderRepo, viewOrigin } from "../server/container.server";
 import { log } from "../server/log.server";
 
 export const meta: MetaFunction = () => [
-  { title: "Your reports — ai-report-platform" },
+  { title: "Your reports — Centaur" },
   { name: "description", content: "Dashboard: your reports, organised in folders." },
 ];
 
@@ -259,19 +258,7 @@ export default function Index() {
 
   return (
     <PageShell>
-      <AppHeader
-        title="Your reports"
-        actions={
-          <>
-            <Link to="/upload" className={buttonClass("primary")}>
-              Upload a report
-            </Link>
-            <SignedIn>
-              <UserButton afterSignOutUrl="/" />
-            </SignedIn>
-          </>
-        }
-      />
+      <AppHeader title="Your reports" />
 
       {/* Search (GET) — org-wide; preserves the folder filter when set. */}
       <Form method="get" className="mb-6 flex items-center gap-2">

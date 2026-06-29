@@ -15,7 +15,7 @@ import { AppHeader, Button, buttonClass, Card, Input, PageShell } from "../compo
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { apiKeyStore } from "../server/container.server";
 
-export const meta: MetaFunction = () => [{ title: "API keys — ai-report-platform" }];
+export const meta: MetaFunction = () => [{ title: "API keys — Centaur" }];
 
 const GENERIC_500 = "Couldn't verify your account. Please try again.";
 

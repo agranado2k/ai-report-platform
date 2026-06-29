@@ -10,7 +10,7 @@ import { AppHeader, Button, buttonClass, Card, Input, PageShell, Textarea } from
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
 
-export const meta: MetaFunction = () => [{ title: "Upload a report — ai-report-platform" }];
+export const meta: MetaFunction = () => [{ title: "Upload a report — Centaur" }];
 
 export async function action(args: ActionFunctionArgs) {
   const { request } = args;
