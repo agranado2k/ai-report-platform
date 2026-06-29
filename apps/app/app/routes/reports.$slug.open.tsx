@@ -9,6 +9,7 @@ import { getReport } from "arp-application";
 import { mintAccessToken } from "arp-domain";
 import { resolveActorForRead } from "../server/auth.server";
 import { accessTokenSecret, deps, viewOrigin } from "../server/container.server";
+import { log } from "../server/log.server";
 import { resolveReportSlug } from "../server/report-handle.server";
 
 const OWNER_TTL_SECONDS = 86_400; // 24h owner view-session
@@ -36,14 +37,13 @@ export async function loader(args: LoaderFunctionArgs) {
   );
   if (!report.ok) return redirect("/");
 
-  const token = mintAccessToken(
-    slug.value,
-    OWNER_TTL_SECONDS,
-    secret,
-    Math.floor(Date.now() / 1000),
-    {
-      owner: true,
-    },
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const token = mintAccessToken(slug.value, OWNER_TTL_SECONDS, secret, nowSeconds, { owner: true });
+  // Audit the mint — this is the most privileged token in the system and bypasses every share
+  // gate for its TTL, so log who/what/when for incident response (claude-review #122).
+  log.info(
+    { orgId: actor.value.orgId, slug: slug.value, exp: nowSeconds + OWNER_TTL_SECONDS },
+    "owner-open: minted owner access token",
   );
   return redirect(`${origin}/${slug.value}?access=${encodeURIComponent(token)}`, {
     headers: { "cache-control": "no-store" },

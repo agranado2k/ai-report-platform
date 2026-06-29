@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { mintAccessToken, readAccessToken, verifyAccessToken } from "./access-token";
 
@@ -52,7 +53,6 @@ describe("access token (ADR-0056)", () => {
 
   it("rejects a token whose owner claim is not a boolean", () => {
     // Hand-craft a payload with owner: "yes" + a valid signature, to prove readAccessToken guards the type.
-    const { createHmac } = require("node:crypto");
     const payload = Buffer.from(
       JSON.stringify({ slug: SLUG, exp: NOW + 900, owner: "yes" }),
       "utf8",
