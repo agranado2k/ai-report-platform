@@ -1,4 +1,4 @@
-# ai-report-platform
+# Centaur Spec
 
 > A SaaS platform where LLMs push HTML reports to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version without breaking links.
 

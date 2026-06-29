@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: AI Report Platform API
+  title: Centaur Spec API
   version: 0.1.0
   description: >
     HTTP API for uploading and serving hosted HTML reports. The HTTP API is the

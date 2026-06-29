@@ -1,6 +1,6 @@
 # Domain glossary — Ubiquitous Language
 
-The registry of canonical terms for `ai-report-platform`, per **ADR-0036** (Domain-Driven Design). Use these spellings and meanings consistently across code (type names, function names), commit messages, PR titles, ADRs, the diary, and conversations.
+The registry of canonical terms for Centaur Spec, per **ADR-0036** (Domain-Driven Design). Use these spellings and meanings consistently across code (type names, function names), commit messages, PR titles, ADRs, the diary, and conversations.
 
 **Adding a term**: introduce it in the same PR that first uses it in code. Cross-reference the spec section that defines its behavior. Prefer business names over technical ones (`slug`, not `id`).
 
