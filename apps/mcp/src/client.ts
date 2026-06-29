@@ -131,7 +131,9 @@ export class ApiClient {
       json: {
         mode: params.mode,
         ...(params.allowedEmails ? { allowed_emails: params.allowedEmails } : {}),
-        ...(params.password ? { password: params.password } : {}),
+        // `!== undefined`, not truthiness — forward an explicit empty password so the server
+        // returns a clear "password required" rather than a generic error (claude-review #118).
+        ...(params.password !== undefined ? { password: params.password } : {}),
         ...(params.accessTtlSeconds !== undefined
           ? { access_ttl_seconds: params.accessTtlSeconds }
           : {}),

@@ -41,7 +41,7 @@ Today every published, clean report is **fully public to anyone with the slug** 
 
 ## Per-phase decisions deferred to their phase (with leanings)
 
-- `set_acl` API shape — the `acl` is a sub-resource of the report (no own id; 1:1 `acls`). Lean: `POST /api/v1/reports/{slug}/acl` returning the report resource with an embedded `acl` block (`object` discriminator TBD).
+- `set_acl` API shape — the `acl` is a sub-resource of the report (no own id; 1:1 `acls`). Lean: `POST /api/v1/reports/{slug}/acl` returning the report resource with an embedded `acl` block. **Resolved (PR #118):** the embedded `acl` block omits `object`; the standalone `GET /api/v1/reports/{slug}/acl` returns it as an `{ object: "acl", … }` resource (ADR-0053 discriminator). The `reports_get_acl` / `reports_set_acl` MCP tools wrap these.
 - Org handshake route + UX; allowlist link TTL (lean ~24h link, ~15-min access token) + single-use store; folder-grant inheritance read cost (walk vs cache); the outbox/event plumbing for P5 (only 3 domain events exist today).
 
 ## Consequences
