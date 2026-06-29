@@ -88,6 +88,17 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     expect(await decide(PW, { cookie: allowToken }, { grants })).toEqual({ kind: "unlock" });
   });
 
+  // ── private (owner-only) mode (ADR-0056) ──────────────────────────────────
+  it("private report: owner token serves; everyone else → unlock", async () => {
+    const PRIV: Acl = { mode: "private" };
+    const owner = mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });
+    expect(await decide(PRIV, { cookie: owner })).toEqual({ kind: "serve" });
+    // no token → unlock; a non-owner (e.g. a password-mode) token → unlock (mode-bound)
+    expect(await decide(PRIV, {})).toEqual({ kind: "unlock" });
+    const pwToken = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide(PRIV, { cookie: pwToken })).toEqual({ kind: "unlock" });
+  });
+
   // ── owner access (ADR-0056) ───────────────────────────────────────────────
   it("owner token serves a password report without the password (cookie → serve)", async () => {
     const owner = mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });

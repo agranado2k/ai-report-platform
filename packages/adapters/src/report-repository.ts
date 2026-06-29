@@ -13,11 +13,11 @@ import {
   type Acl,
   type AppError,
   DEFAULT_ACCESS_TTL_SECONDS,
+  DEFAULT_ACL,
   folderId,
   type OrgId,
   ok,
   orgId,
-  PUBLIC_ACL,
   type Report,
   type ReportId,
   type ReportVersion,
@@ -78,10 +78,15 @@ export function rowToVersion(row: VersionRow): ReportVersion {
   };
 }
 
-/** Map the 1:1 `acls` row to the domain `Acl` (ADR-0056). No row ⇒ `public`. */
+/** Map the 1:1 `acls` row to the domain `Acl` (ADR-0056). No row ⇒ `private` (the
+ *  private-by-default; sharing is an explicit opt-in). */
 export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
-  if (!row) return PUBLIC_ACL;
+  if (!row) return DEFAULT_ACL;
   switch (row.mode) {
+    case "private":
+      return { mode: "private" };
+    case "public":
+      return { mode: "public" };
     case "password":
       return { mode: "password", passwordHash: row.passwordHash ?? "" };
     case "allowlist":
@@ -93,7 +98,7 @@ export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
     case "org":
       return { mode: "org" };
     default:
-      return { mode: "public" };
+      return DEFAULT_ACL; // fail closed on an unexpected mode
   }
 }
 
@@ -231,7 +236,7 @@ export class DrizzleReportRepository implements ReportRepository {
         .from(reportVersions)
         .where(eq(reportVersions.reportId, row.id))
         .orderBy(asc(reportVersions.versionNo));
-      // The Acl is an aggregate member (ADR-0056) — loaded with the report; no row = public.
+      // The Acl is an aggregate member (ADR-0056) — loaded with the report; no row = private.
       const [aclRow] = await db.select().from(acls).where(eq(acls.reportId, row.id)).limit(1);
       return ok(rowsToReport(row, versions, rowToAcl(aclRow)));
     } catch (e) {
