@@ -2,7 +2,7 @@
 // pure: each operation returns a new Report plus the domain events it emitted.
 // No I/O (ADR-024); persistence lives in adapters (ADR-020).
 
-import { type Acl, PUBLIC_ACL } from "./acl";
+import { type Acl, DEFAULT_ACL } from "./acl";
 import type { FolderId, OrgId, ReportId, UserId, VersionId } from "./brand";
 import type { AppError } from "./errors";
 import { notFound, validationError } from "./errors";
@@ -66,7 +66,7 @@ export function createReport(p: CreateReportParams): Emission {
     liveVersionId: null,
     versions: [firstVersion],
     deletedAt: null,
-    acl: PUBLIC_ACL, // new reports are public until set_acl (ADR-0056)
+    acl: DEFAULT_ACL, // new reports are private until set_acl shares them (ADR-0056)
   };
   const event: ReportVersionUploaded = {
     type: "ReportVersionUploaded",

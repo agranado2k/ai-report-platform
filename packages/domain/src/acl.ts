@@ -15,6 +15,7 @@ export const MAX_ACCESS_TTL_SECONDS = 7_776_000; // 90 days
 
 /** The four sharing modes as a discriminated union (carries only mode-relevant data). */
 export type Acl =
+  | { readonly mode: "private" }
   | { readonly mode: "public" }
   | { readonly mode: "org" }
   | { readonly mode: "password"; readonly passwordHash: string }
@@ -25,10 +26,19 @@ export type Acl =
       readonly accessTtlSeconds: number;
     };
 
-/** The default: a report with no `acls` row is public (ADR-0056). */
+/** `private` = owner-only: the viewer serves it ONLY to an owner token (ADR-0056), nobody
+ *  else — no public link, no password, no allowlist. This is the **default** for a report
+ *  with no `acls` row (private-by-default; sharing is an explicit opt-in). */
+export const PRIVATE_ACL: Acl = { mode: "private" };
+
+/** A report with no `acls` row defaults to `private` (ADR-0056). */
+export const DEFAULT_ACL: Acl = PRIVATE_ACL;
+
+/** Retained for callers that explicitly want public (e.g. opt-in sharing). */
 export const PUBLIC_ACL: Acl = { mode: "public" };
 
-/** Private modes require the app to authorize before the viewer serves (ADR-0056). */
+/** Private modes require the app to authorize before the viewer serves (ADR-0056) —
+ *  everything except `public`, which serves to anyone with the link. */
 export function isPrivateAcl(acl: Acl): boolean {
   return acl.mode !== "public";
 }
@@ -66,6 +76,8 @@ export interface MakeAclInput {
  *  the plaintext password before calling this). Pure. */
 export function makeAcl(input: MakeAclInput): Result<Acl, AppError> {
   switch (input.mode) {
+    case "private":
+      return ok({ mode: "private" });
     case "public":
       return ok({ mode: "public" });
     case "org":

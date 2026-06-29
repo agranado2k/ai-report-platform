@@ -45,7 +45,13 @@ describe("db schema", () => {
     expect(schema.grantLevelEnum.enumValues).toEqual(["editor", "admin"]);
     expect(schema.scanStatusEnum.enumValues).toEqual(["pending", "clean", "flagged", "blocked"]);
     expect(schema.scanJobStatusEnum.enumValues).toEqual(["queued", "running", "done", "failed"]);
-    expect(schema.aclModeEnum.enumValues).toEqual(["public", "password", "org", "allowlist"]);
+    expect(schema.aclModeEnum.enumValues).toEqual([
+      "private",
+      "public",
+      "password",
+      "org",
+      "allowlist",
+    ]);
     expect(schema.idempotencyStateEnum.enumValues).toEqual(["in_flight", "completed"]);
     expect(schema.abuseStatusEnum.enumValues).toEqual(["open", "actioned", "dismissed"]);
     expect(schema.outboxStatusEnum.enumValues).toEqual(["pending", "delivered", "failed"]);

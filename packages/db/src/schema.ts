@@ -26,7 +26,13 @@ export const planEnum = pgEnum("plan", ["free", "pro"]);
 export const grantLevelEnum = pgEnum("grant_level", ["editor", "admin"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "clean", "flagged", "blocked"]);
 export const scanJobStatusEnum = pgEnum("scan_job_status", ["queued", "running", "done", "failed"]);
-export const aclModeEnum = pgEnum("acl_mode", ["public", "password", "org", "allowlist"]);
+export const aclModeEnum = pgEnum("acl_mode", [
+  "private",
+  "public",
+  "password",
+  "org",
+  "allowlist",
+]);
 export const idempotencyStateEnum = pgEnum("idempotency_state", ["in_flight", "completed"]);
 export const abuseStatusEnum = pgEnum("abuse_status", ["open", "actioned", "dismissed"]);
 export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "delivered", "failed"]);
@@ -222,7 +228,7 @@ export const acls = pgTable("acls", {
   reportId: uuid("report_id")
     .primaryKey()
     .references(() => reports.id, { onDelete: "cascade" }),
-  mode: aclModeEnum("mode").notNull().default("public"),
+  mode: aclModeEnum("mode").notNull().default("private"),
   passwordHash: text("password_hash"),
   allowedEmails: jsonb("allowed_emails"),
   // Owner-set access duration for `allowlist` grants (ADR-0056); null for other modes.
