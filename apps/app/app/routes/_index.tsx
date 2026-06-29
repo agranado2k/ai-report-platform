@@ -21,10 +21,14 @@ import {
   Button,
   buttonClass,
   cx,
+  DocumentIcon,
+  EditableReportTitle,
   EmptyState,
+  FolderIcon,
   type FolderNode,
   FolderTree,
   Input,
+  MoreIcon,
   PageShell,
   Select,
   StatusBadge,
@@ -142,7 +146,6 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "rename-report") {
     const slug = makeSlug(String(form.get("slug") ?? ""));
     const title = String(form.get("title") ?? "");
-    const folder = String(form.get("folder") ?? "").trim();
     if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
     const r = await renameReport(
       { reports: deps().reports },
@@ -155,7 +158,9 @@ export async function action(args: ActionFunctionArgs) {
         { status: r.error.kind === "ValidationError" ? 422 : 400 },
       );
     }
-    return redirect(folder ? `/?folder=${folder}` : "/");
+    // Inline rename submits via useFetcher — return JSON so the dashboard
+    // revalidates in place instead of navigating (the old form-POST redirected).
+    return json({ ok: true });
   }
 
   if (intent === "delete-report") {
@@ -331,70 +336,76 @@ export default function Index() {
               }
             />
           ) : (
-            <ul className="divide-y divide-border">
+            <ul>
               {items.map((r) => (
-                <li key={r.slug} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                  <span className="min-w-0">
-                    {/* Owner open (ADR-0056): /reports/{slug}/open mints an owner access token
-                        so the owner reaches their own report directly — no password / magic link
-                        even when it's private. The viewer still gates everyone else. */}
-                    <a
-                      href={`/reports/${r.slug}/open`}
-                      className="font-medium text-fg hover:text-brand"
-                    >
-                      {r.title}
-                    </a>{" "}
-                    <code className="font-mono text-xs text-subtle">{r.slug}</code>{" "}
-                    <span className="text-xs text-subtle">
-                      <span aria-hidden="true">📁</span> {folderName(r.folderId)}
-                    </span>
-                  </span>
-                  <span className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge isPublished={r.isPublished} />
-                    <Form method="post" className="flex items-center gap-1">
-                      <input type="hidden" name="intent" value="move" />
-                      <input type="hidden" name="slug" value={r.slug} />
-                      <Select
-                        name="toFolderId"
-                        defaultValue={r.folderId}
-                        aria-label={`Move ${r.title} to folder`}
-                        size="sm"
-                        className="text-xs"
-                      >
-                        {folders.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
-                      </Select>
-                      <Button type="submit" size="sm">
-                        Move
-                      </Button>
-                    </Form>
-                    <Form method="post" className="flex items-center gap-1">
-                      <input type="hidden" name="intent" value="rename-report" />
-                      <input type="hidden" name="slug" value={r.slug} />
-                      <input type="hidden" name="folder" value={r.folderId} />
-                      <Input
-                        name="title"
-                        defaultValue={r.title}
-                        aria-label={`Rename ${r.title}`}
-                        size="sm"
-                        className="w-32 text-xs"
-                      />
-                      <Button type="submit" size="sm">
-                        Rename
-                      </Button>
-                    </Form>
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="delete-report" />
-                      <input type="hidden" name="slug" value={r.slug} />
-                      <input type="hidden" name="folder" value={r.folderId} />
-                      <Button type="submit" size="sm" variant="danger">
-                        Delete
-                      </Button>
-                    </Form>
-                  </span>
+                <li
+                  key={r.slug}
+                  className="group flex items-center gap-3 border-b border-border py-3 last:border-0"
+                >
+                  {/* Document icon = open the report. Owner-open (ADR-0056): /reports/{slug}/open
+                      mints an owner access token, so the owner reaches their own report directly —
+                      no password / magic link even when it's private; the viewer still gates
+                      everyone else. (The title click renames.) */}
+                  <a
+                    href={`/reports/${r.slug}/open`}
+                    aria-label={`Open ${r.title}`}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
+                  >
+                    <DocumentIcon className="h-4 w-4" />
+                  </a>
+                  <div className="min-w-0 flex-1">
+                    <EditableReportTitle slug={r.slug} title={r.title} />
+                    <div className="mt-0.5 flex items-center gap-2 pl-1.5 text-xs text-subtle">
+                      <code className="font-mono">{r.slug}</code>
+                      <span className="inline-flex items-center gap-1">
+                        <FolderIcon className="h-3.5 w-3.5" />
+                        {folderName(r.folderId)}
+                      </span>
+                    </div>
+                  </div>
+                  <StatusBadge isPublished={r.isPublished} />
+                  {/* Row actions behind a native <details> menu — no JS, CSP-safe. */}
+                  <details className="relative shrink-0">
+                    <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden">
+                      <MoreIcon className="h-4 w-4" />
+                      <span className="sr-only">Actions for {r.title}</span>
+                    </summary>
+                    <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-lg">
+                      <Form method="post" className="flex items-center gap-1.5 p-1">
+                        <input type="hidden" name="intent" value="move" />
+                        <input type="hidden" name="slug" value={r.slug} />
+                        <Select
+                          name="toFolderId"
+                          defaultValue={r.folderId}
+                          aria-label={`Move ${r.title} to folder`}
+                          size="sm"
+                          className="min-w-0 flex-1 text-xs"
+                        >
+                          {folders.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </Select>
+                        <Button type="submit" size="sm">
+                          Move
+                        </Button>
+                      </Form>
+                      <Form method="post" className="p-1">
+                        <input type="hidden" name="intent" value="delete-report" />
+                        <input type="hidden" name="slug" value={r.slug} />
+                        <input type="hidden" name="folder" value={r.folderId} />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          variant="danger"
+                          className="w-full justify-start"
+                        >
+                          Delete report
+                        </Button>
+                      </Form>
+                    </div>
+                  </details>
                 </li>
               ))}
             </ul>

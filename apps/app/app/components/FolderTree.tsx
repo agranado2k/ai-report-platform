@@ -2,6 +2,7 @@ import { Form, Link } from "@remix-run/react";
 import { Button } from "./Button";
 import { cx } from "./cx";
 import { Input } from "./Input";
+import { FolderIcon } from "./icons";
 
 /** Client-safe folder shape for the sidebar tree (no org id / timestamps). */
 export interface FolderNode {
@@ -50,7 +51,10 @@ export function FolderTree({
           selected ? "bg-brand/10 font-semibold text-brand" : "text-fg hover:bg-surface-raised",
         )}
       >
-        <span aria-hidden="true">📁</span> {node.name}
+        <span className="inline-flex items-center gap-1.5">
+          <FolderIcon className="h-3.5 w-3.5 shrink-0" />
+          {node.name}
+        </span>
       </Link>
       {selected && node.parentId !== null ? (
         <div className={cx("my-1 flex flex-col gap-1.5", pad)}>
