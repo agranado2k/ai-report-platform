@@ -32,7 +32,9 @@ const GENERIC_500 = "Couldn't verify your account. Please try again.";
 
 /** The MCP server lives at `mcp.<apex>` (a sibling of this app at `app.<apex>`);
  *  derive its `/mcp` endpoint from the app origin so the Connect helper is right
- *  in prod without the app holding an MCP_ORIGIN env. */
+ *  in prod without the app holding an MCP_ORIGIN env. Assumes the `app.<apex>`
+ *  topology — the host swap is a no-op on any other origin (preview `*.vercel.app`
+ *  shows the preview host; an apex/custom APP_ORIGIN would want MCP_ORIGIN wired). */
 function mcpEndpoint(request: Request): string {
   const url = new URL(appOrigin(request));
   url.host = url.host.replace(/^app\./, "mcp.");
@@ -129,13 +131,13 @@ export default function ApiKeys() {
               <KeyIcon className="h-4 w-4" />
               API keys &amp; MCP
             </span>
-            <span className={cx(navItem, "text-subtle")}>
+            <span className={cx(navItem, "text-subtle")} aria-disabled="true">
               Members
               <span className="ml-auto rounded border border-border px-1.5 text-[10px] uppercase">
                 soon
               </span>
             </span>
-            <span className={cx(navItem, "text-subtle")}>
+            <span className={cx(navItem, "text-subtle")} aria-disabled="true">
               Billing
               <span className="ml-auto rounded border border-border px-1.5 text-[10px] uppercase">
                 soon
