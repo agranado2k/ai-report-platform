@@ -126,19 +126,20 @@ export function ErrorBoundary() {
 }
 
 // Clerk renders its own DOM (SignIn / SignUp / UserButton); we theme it via the
-// appearance API. Values mirror the design tokens (theme.css) — Clerk computes
-// shades from the literal hex, and CSS-var resolution inside its injected styles
-// is unreliable, so we duplicate the hexes here intentionally.
-// TODO(dark): these literals don't follow `.dark` — swap appearance (or use a
-// Clerk dark baseTheme) when the dark theme toggle lands.
+// appearance API. Values mirror the "Forge & Ember" design tokens (theme.css) —
+// Clerk computes shades from the literal hex, and CSS-var resolution inside its
+// injected styles is unreliable, so we duplicate the hexes here intentionally.
+// Forge & Ember is warm-dark, so these are dark-surface values (copper primary,
+// parchment text on warm ink). If Clerk's default light chrome shows through on
+// any element, a follow-up can add @clerk/themes `dark` baseTheme.
 const clerkAppearance = {
   variables: {
-    colorPrimary: "#5e6ad2",
-    colorText: "#171717",
-    colorTextSecondary: "#62666d",
-    colorBackground: "#ffffff",
-    colorInputBackground: "#ffffff",
-    colorInputText: "#171717",
+    colorPrimary: "#c8762d",
+    colorText: "#f2e9dc",
+    colorTextSecondary: "#c6b9a6",
+    colorBackground: "#241c16",
+    colorInputBackground: "#2c231b",
+    colorInputText: "#f2e9dc",
     fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif',
     borderRadius: "8px",
   },
