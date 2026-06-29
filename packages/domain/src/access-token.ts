@@ -15,6 +15,10 @@ export interface AccessClaims {
   /** Allowlist only — the address the link was redeemed for; the viewer checks a live
    *  `report_grants` row for it per request (revocation-C, ADR-0056). Absent otherwise. */
   readonly email?: string;
+  /** Owner access (ADR-0056): minted by the app ONLY for the authenticated owner of the
+   *  report. The viewer trusts the signed claim and serves regardless of share mode —
+   *  the owner isn't subject to their own report's password/allowlist gate. */
+  readonly owner?: boolean;
 }
 
 function sign(payload: string, secret: string): string {
@@ -28,13 +32,14 @@ export function mintAccessToken(
   ttlSeconds: number,
   secret: string,
   nowSeconds: number,
-  extra: { readonly mode?: string; readonly email?: string } = {},
+  extra: { readonly mode?: string; readonly email?: string; readonly owner?: boolean } = {},
 ): string {
   const claims: AccessClaims = {
     slug,
     exp: nowSeconds + ttlSeconds,
     ...(extra.mode ? { mode: extra.mode } : {}),
     ...(extra.email ? { email: extra.email } : {}),
+    ...(extra.owner ? { owner: true } : {}),
   };
   const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
   return `${payload}.${sign(payload, secret)}`;
@@ -67,6 +72,7 @@ export function readAccessToken(
   if (typeof claims?.slug !== "string" || typeof claims?.exp !== "number") return null;
   if (claims.mode !== undefined && typeof claims.mode !== "string") return null;
   if (claims.email !== undefined && typeof claims.email !== "string") return null;
+  if (claims.owner !== undefined && typeof claims.owner !== "boolean") return null;
   if (claims.exp <= nowSeconds) return null;
   return claims.slug === expectedSlug ? claims : null;
 }

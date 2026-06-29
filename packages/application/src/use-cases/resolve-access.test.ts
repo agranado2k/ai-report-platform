@@ -88,6 +88,29 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     expect(await decide(PW, { cookie: allowToken }, { grants })).toEqual({ kind: "unlock" });
   });
 
+  // ── owner access (ADR-0056) ───────────────────────────────────────────────
+  it("owner token serves a password report without the password (cookie → serve)", async () => {
+    const owner = mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });
+    expect(await decide(PW, { cookie: owner })).toEqual({ kind: "serve" });
+  });
+
+  it("owner token serves an allowlist report with NO grant + email not on the list (?access → grant)", async () => {
+    const owner = mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });
+    expect(await decide(ALLOW, { query: owner })).toEqual({
+      kind: "grant",
+      token: owner,
+      maxAgeSeconds: 86_400,
+    });
+  });
+
+  it("owner bypass still respects slug-binding, expiry, and the empty-secret fail-closed", async () => {
+    const owner = mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });
+    expect(await decide(PW, { cookie: owner }, { now: NOW + 86_401 })).toEqual({ kind: "unlock" }); // expired
+    const otherSlug = mintAccessToken("zzzzzzzzzz", 86_400, SECRET, NOW, { owner: true });
+    expect(await decide(PW, { cookie: otherSlug })).toEqual({ kind: "unlock" }); // wrong slug
+    expect(await decide(PW, { cookie: owner }, { secret: "" })).toEqual({ kind: "unlock" }); // no secret
+  });
+
   // ── allowlist / revocation-C ──────────────────────────────────────────────
   it("allowlist: valid token + LIVE grant → grant (cookie maxAge = grant TTL)", async () => {
     const grants = newGrants();

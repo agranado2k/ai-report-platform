@@ -38,6 +38,21 @@ export async function resolveAccessDecision(
     fromQuery ?? (tokens.cookie ? readAccessToken(tokens.cookie, slug, secret, nowSeconds) : null);
   if (!claims) return ok({ kind: "unlock" });
 
+  // Owner access (ADR-0056): an `owner` token is minted by the app ONLY for the
+  // authenticated owner of the report, so it bypasses the mode-bound + allowlist/grant
+  // gates below — the owner is not subject to their own report's share gate. It is still
+  // signature-checked + slug-bound + exp-bounded (readAccessToken, above) and fails closed
+  // on an unset secret. A `?access` hand-off still becomes `grant` (sets the unlock cookie).
+  if (claims.owner === true) {
+    return fromQuery && tokens.query
+      ? ok({
+          kind: "grant",
+          token: tokens.query,
+          maxAgeSeconds: Math.max(0, claims.exp - nowSeconds),
+        })
+      : ok({ kind: "serve" });
+  }
+
   // Bind the token to the Acl mode it was minted under: a stale long-lived cookie (an
   // allowlist token lives as long as its grant, up to 90d) must NOT survive the owner
   // switching modes — e.g. allowlist→password would otherwise serve for months on the old
