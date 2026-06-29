@@ -206,4 +206,39 @@ describe("ApiClient writes", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.problem.code).toBe("not_found");
   });
+
+  it("getReportAcl GETs /reports/{slug}/acl", async () => {
+    const { fn, calls } = stub(
+      json({
+        object: "acl",
+        mode: "allowlist",
+        allowed_emails: ["a@b.com"],
+        access_ttl_seconds: 604800,
+      }),
+    );
+    const r = await client(fn).getReportAcl("abc12345");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.mode).toBe("allowlist");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/acl");
+  });
+
+  it("setReportAcl POSTs /acl with only the fields relevant to the mode", async () => {
+    const { fn, calls } = stub(json({ object: "report", acl: { mode: "allowlist" } }));
+    const r = await client(fn).setReportAcl("abc12345", {
+      mode: "allowlist",
+      allowedEmails: ["a@b.com"],
+      accessTtlSeconds: 604800,
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/acl");
+    const sent = JSON.parse(calls[0]?.body as string);
+    expect(sent).toEqual({
+      mode: "allowlist",
+      allowed_emails: ["a@b.com"],
+      access_ttl_seconds: 604800,
+    });
+    expect("password" in sent).toBe(false); // absent fields omitted
+  });
 });
