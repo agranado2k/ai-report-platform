@@ -5,6 +5,8 @@ export { Card } from "./Card";
 export { cx } from "./cx";
 export { EmptyState } from "./EmptyState";
 export { type FolderNode, FolderTree } from "./FolderTree";
+export { KeyIcon, UploadIcon } from "./icons";
+export { Logo } from "./Logo";
 export { Input, Select, Textarea } from "./Input";
 export { PageShell } from "./PageShell";
 export { StatusBadge } from "./StatusBadge";
