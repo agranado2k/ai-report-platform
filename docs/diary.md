@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-06-25
+## Current state — 2026-06-29
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `a163176` — Merge PR #107 (apex domain cutover → centaurspec.com). |
+| **Last commit on main**| `bebc86b` — Merge PR #123 (Forge & Ember redesign, final PR). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/centaurspec-cutover` (this diary/infra-docs PR). |
+| **Active worktrees**   | `docs/forge-ember-diary` (this redesign diary PR). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -1719,3 +1719,38 @@ Decision recorded: the viewer's **dual gate** (live allowlist membership + live 
 
 Remaining: **5e** `setAcl` revoke-on-change (proactively delete grants on email-removal / mode-switch) +
 rate-limit; **6** e2e + docs. Active worktree: `viewer-grant-check` (PR #117).
+
+### 2026-06-29 — Forge & Ember: the Centaur UI redesign (4 PRs)
+
+After the apex cutover (#107) Centaur had a name + domain but a placeholder UI (Linear-indigo, light
+theme, emoji icons, "ai-report-platform" in the page titles). Direction came from web research +
+operator review of three candidate palettes — published as **clickable mockups via Centaur itself**
+(dogfooding the viewer at `view.centaurspec.com`): chosen **"Forge & Ember"**, a warm-dark craft-tech
+identity (copper `#c8762d` → ember `#e8a04c` on warm ink `#1a1410`, parchment text, sage accent).
+**ADR-0058** records it (amends ADR-0050).
+
+Shipped as four sequenced PRs, each bot-reviewed and `/pr-iterate`'d to green:
+
+- **#119 — design tokens.** Retheme `apps/app/app/styles/theme.css` to warm-dark **by default**; the
+  ADR-0050 `@theme inline` → `var()` indirection re-skinned 100% of the UI with **zero component-class
+  changes**. Clerk `appearance` re-keyed; `color-scheme: dark` added (review catch). New tokens:
+  `--color-accent` (sage), `--font-serif`.
+- **#120 — brand chrome.** A global `TopBar` (Centaur logomark + serif wordmark + Upload + avatar),
+  rendered inside `<SignedIn>` so it stays off the public sign-in page; the avatar menu gains an
+  "API keys & MCP" link via Clerk `UserButton.MenuItems`. Inline SVG icon set replaces the emoji
+  (no icon-library runtime dep, ADR-0050). Page `<title>`s → "Centaur".
+- **#121 — inline rename + reports-list redesign.** Click a report title to rename it in place
+  (`EditableReportTitle` + `useFetcher`; the `rename-report` action now returns JSON so the list
+  revalidates in place instead of navigating). Escape cancels reliably; rejected renames surface the
+  error. Rows: a doc icon that opens the report, slug/folder chips, a status pill (motion-safe pulse),
+  and a **no-JS `<details>` "⋯" menu** for Move/Delete (CSP/Trusted-Types-safe).
+- **#123 — Settings → API keys & MCP.** A settings sub-nav + a **"Connect to Claude" helper** that
+  surfaces the `mcp.<apex>/mcp` endpoint (derived from the app origin, no `MCP_ORIGIN` env in the app)
+  with copy; refined key rows (masked prefix, Active/Revoked pills). Glossary notes "MCP token" is a
+  UI synonym for the `arp_` `ApiKey`, not a separate credential.
+
+No backend/contract changes beyond the rename action's redirect→JSON. The real **marketing landing
+page** (a new `apps/marketing` on the apex `centaurspec.com`) is **parked** — a Forge & Ember HTML
+mockup is published via Centaur for reference, to become the real Remix app later (plan PRs a–e).
+Process note: typecheck/biome/build were verified locally before each push. Active worktree:
+`docs/forge-ember-diary` (this entry).
