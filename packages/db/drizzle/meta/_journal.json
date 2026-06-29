@@ -71,6 +71,13 @@
       "when": 1782767800998,
       "tag": "0009_fine_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782767900000,
+      "tag": "0010_private_default",
+      "breakpoints": true
     }
   ]
 }
