@@ -48,7 +48,10 @@ the operator via published mockups before implementation.
   tokens: `--color-accent` (sage) + `--font-serif` (system serif for brand/display;
   UI stays Inter, code stays JetBrains Mono — no new font files vendored here).
 - **Clerk** `appearance` hexes (`root.tsx`) updated to the warm-dark values (Clerk
-  needs literals, not `var()`), resolving the prior `TODO(dark)`.
+  needs literals, not `var()`), resolving the prior `TODO(dark)`. **Amended (PR #125):**
+  the variable overrides alone left Clerk's *computed* neutrals (account-menu items,
+  icons, dividers) on light defaults — so Clerk uses `@clerk/themes` `dark` as
+  `baseTheme` with the Forge & Ember `variables` layered on top.
 
 ## Consequences
 

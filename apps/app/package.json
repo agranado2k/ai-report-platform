@@ -13,6 +13,7 @@
   "dependencies": {
     "@clerk/backend": "^2.33.0",
     "@clerk/remix": "^4.13.43",
+    "@clerk/themes": "^2.4.57",
     "@node-rs/argon2": "^2.0.2",
     "@remix-run/node": "^2.15.0",
     "@remix-run/react": "^2.15.0",

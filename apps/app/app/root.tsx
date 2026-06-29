@@ -1,5 +1,6 @@
 import { ClerkApp, SignedIn } from "@clerk/remix";
 import { rootAuthLoader } from "@clerk/remix/ssr.server";
+import { dark } from "@clerk/themes";
 import { type LinksFunction, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import {
   isRouteErrorResponse,
@@ -135,13 +136,15 @@ export function ErrorBoundary() {
 }
 
 // Clerk renders its own DOM (SignIn / SignUp / UserButton); we theme it via the
-// appearance API. Values mirror the "Forge & Ember" design tokens (theme.css) —
-// Clerk computes shades from the literal hex, and CSS-var resolution inside its
-// injected styles is unreliable, so we duplicate the hexes here intentionally.
-// Forge & Ember is warm-dark, so these are dark-surface values (copper primary,
-// parchment text on warm ink). If Clerk's default light chrome shows through on
-// any element, a follow-up can add @clerk/themes `dark` baseTheme.
+// appearance API. The `dark` baseTheme is load-bearing: it makes Clerk's COMPUTED
+// neutral colours (popover menu items, icons, dividers, secondary text) light and
+// readable on the warm-ink surfaces — the variable overrides alone left the
+// account menu dark-on-dark. On top of the dark base we tint with the Forge &
+// Ember accents (copper primary, warm-ink background, parchment text); Clerk needs
+// literal hex here, not CSS vars (var() resolution inside its injected styles is
+// unreliable), so we duplicate the theme.css values intentionally.
 const clerkAppearance = {
+  baseTheme: dark,
   variables: {
     colorPrimary: "#c8762d",
     colorText: "#f2e9dc",
