@@ -125,8 +125,9 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       title: "Get a report's sharing settings",
       description:
         "Read a report's sharing acl — returns { object:'acl', mode, and for allowlist the " +
-        "allowed_emails + access_ttl_seconds }. Read-only. mode is one of public | password | " +
-        "org | allowlist. Use it before reports_set_acl to see the current sharing state.",
+        "allowed_emails + access_ttl_seconds }. Read-only. mode is one of private (owner-only, the " +
+        "default) | public | password | org | allowlist. Use it before reports_set_acl to see the " +
+        "current sharing state.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
       },
