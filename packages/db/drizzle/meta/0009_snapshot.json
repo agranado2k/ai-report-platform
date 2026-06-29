@@ -1,5 +1,5 @@
 {
-  "id": "9a1a7018-00c1-477c-ba2d-994c34abe40c",
+  "id": "677b250d-3830-4649-9f6a-03da646beb84",
   "prevId": "96b72ccc-182f-4cef-82d7-af48157b008c",
   "version": "7",
   "dialect": "postgresql",
@@ -163,7 +163,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'private'"
+          "default": "'public'"
         },
         "password_hash": {
           "name": "password_hash",

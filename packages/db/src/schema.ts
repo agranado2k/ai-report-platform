@@ -228,7 +228,11 @@ export const acls = pgTable("acls", {
   reportId: uuid("report_id")
     .primaryKey()
     .references(() => reports.id, { onDelete: "cascade" }),
-  mode: aclModeEnum("mode").notNull().default("private"),
+  // The column default is legacy/unused — set_acl always writes an explicit mode, and a
+  // missing acls row is loaded as `private` in code (rowToAcl ⇒ DEFAULT_ACL). We deliberately
+  // do NOT `SET DEFAULT 'private'` here: that would force ADD-VALUE-then-use the new enum value
+  // in one migration transaction, which Postgres rejects (#127). App-enforced default wins.
+  mode: aclModeEnum("mode").notNull().default("public"),
   passwordHash: text("password_hash"),
   allowedEmails: jsonb("allowed_emails"),
   // Owner-set access duration for `allowlist` grants (ADR-0056); null for other modes.

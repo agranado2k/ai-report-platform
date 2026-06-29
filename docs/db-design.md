@@ -178,7 +178,7 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | Column | Type | Notes |
 |---|---|---|
 | `report_id` | uuid PK / FK → reports **ON DELETE CASCADE** | 1:1 with reports |
-| `mode` | `acl_mode` | default `private` (private-by-default; sharing is an explicit opt-in, ADR-0056) |
+| `mode` | `acl_mode` | column default `public` (legacy/unused — set_acl always writes a mode). **Private-by-default is app-enforced**: a missing `acls` row loads as `private` (ADR-0056) |
 | `password_hash` | text NULL | argon2id, password mode |
 | `allowed_emails` | jsonb NULL | allowlist mode |
 | `access_ttl_seconds` | integer NULL | owner-set access duration for allowlist grants (ADR-0056); null for other modes |
