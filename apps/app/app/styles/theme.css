@@ -13,6 +13,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  /* Warm-dark is the default — tell the UA so native chrome (scrollbars, form
+   * controls, autofill, date/select popups) renders dark, not light. */
+  color-scheme: dark;
   /* surfaces — warm ink */
   --bg: #1a1410;
   --surface: #241c16;
