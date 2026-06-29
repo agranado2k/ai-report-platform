@@ -1754,3 +1754,13 @@ page** (a new `apps/marketing` on the apex `centaurspec.com`) is **parked** — 
 mockup is published via Centaur for reference, to become the real Remix app later (plan PRs a–e).
 Process note: typecheck/biome/build were verified locally before each push. Active worktree:
 `docs/forge-ember-diary` (this entry).
+
+### 2026-06-29 — Product name resolved: Centaur / Centaur Spec
+
+Settled the long-open "final project name" question (the working title was `ai-report-platform`).
+The brand is **Centaur** (the short wordmark in the app chrome) and the full name is **Centaur Spec**
+(prose, docs, and the viewer / MCP / OpenAPI surfaces); domain `centaurspec.com`. PR #126 swept the old
+name out of user-facing copy + project docs and the safe identifiers (root package → `centaur-spec`).
+The **technical identity stays `ai-report-platform`** — the GitHub repo, Neon `project_name`, git
+remote, local path, Terraform resources, and `arp-*` workspace packages — since renaming those breaks
+git/infra/CI/state. (See the domain glossary's "Product name" note.)

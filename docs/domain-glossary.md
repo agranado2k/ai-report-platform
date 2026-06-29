@@ -2,6 +2,8 @@
 
 The registry of canonical terms for Centaur Spec, per **ADR-0036** (Domain-Driven Design). Use these spellings and meanings consistently across code (type names, function names), commit messages, PR titles, ADRs, the diary, and conversations.
 
+**Product name** — the product is **Centaur** (the short wordmark used in the app chrome — `TopBar`/`Logo` and page-title suffixes) and **Centaur Spec** (the full name used in standalone copy, docs, and the viewer/MCP/OpenAPI surfaces). Domain: `centaurspec.com`. This is a brand name, **not** a bounded-context domain term and not used in code: the workspace packages (`arp-*`), the GitHub repo, and the Neon project keep the original `ai-report-platform` technical identifier (PR #126).
+
 **Adding a term**: introduce it in the same PR that first uses it in code. Cross-reference the spec section that defines its behavior. Prefer business names over technical ones (`slug`, not `id`).
 
 **Changing a term**: rename across the codebase in a single PR. Update this glossary in the same commit. Do NOT leave aliases — the point of Ubiquitous Language is that there is exactly one name per concept.
