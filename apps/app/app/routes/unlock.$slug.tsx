@@ -112,6 +112,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (report.acl.mode === "public") {
     return redirectToView(slug.value, undefined, request); // nothing to authorize
   }
+  // private = owner-only: there's nothing a non-owner can do here (the owner reaches it via
+  // the dashboard's owner-open, not this page). Show a plain notice — no form (ADR-0056).
+  if (report.acl.mode === "private") {
+    return notice("This report is private — only its owner can view it.", 403);
+  }
   if (report.acl.mode === "password") return passwordForm(slug.value);
   if (report.acl.mode === "allowlist") return allowlistLoader(slug.value, request);
   return notice("This sharing mode isn’t available yet.");

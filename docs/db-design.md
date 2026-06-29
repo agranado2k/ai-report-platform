@@ -58,7 +58,7 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
 | `grant_level` | `editor`, `admin` |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `scan_job_status` | `queued`, `running`, `done`, `failed` |
-| `acl_mode` | `public`, `password`, `org`, `allowlist` |
+| `acl_mode` | `private`, `public`, `password`, `org`, `allowlist` |
 | `idempotency_state` | `in_flight`, `completed` |
 | `abuse_status` | `open`, `actioned`, `dismissed` |
 | `outbox_status` | `pending`, `delivered`, `failed` |
@@ -178,7 +178,7 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | Column | Type | Notes |
 |---|---|---|
 | `report_id` | uuid PK / FK → reports **ON DELETE CASCADE** | 1:1 with reports |
-| `mode` | `acl_mode` | default `public` (the only Phase-1 mode) |
+| `mode` | `acl_mode` | default `private` (private-by-default; sharing is an explicit opt-in, ADR-0056) |
 | `password_hash` | text NULL | argon2id, password mode |
 | `allowed_emails` | jsonb NULL | allowlist mode |
 | `access_ttl_seconds` | integer NULL | owner-set access duration for allowlist grants (ADR-0056); null for other modes |

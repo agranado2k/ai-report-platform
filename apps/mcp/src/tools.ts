@@ -237,14 +237,16 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Set a report's sharing settings",
       description:
-        "Set how a report is shared (ADR-0056). mode: 'public' (anyone with the link), " +
-        "'password' (requires `password`), 'allowlist' (only `allowed_emails` — each is emailed a " +
-        "one-time magic link; optional `access_ttl_seconds` sets how long their access lasts), or " +
-        "'org'. REPLACES the whole acl — send the COMPLETE allowed_emails list, not a delta. " +
-        "Use reports_get_acl first to see the current state.",
+        "Set how a report is shared (ADR-0056). mode: 'private' (owner-only — only you can view, " +
+        "the default for new reports), 'public' (anyone with the link), 'password' (requires " +
+        "`password`), 'allowlist' (only `allowed_emails` — each is emailed a one-time magic link; " +
+        "optional `access_ttl_seconds` sets how long their access lasts), or 'org'. REPLACES the " +
+        "whole acl — send the COMPLETE allowed_emails list, not a delta. Use reports_get_acl first.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
-        mode: z.enum(["public", "password", "org", "allowlist"]).describe("The sharing mode."),
+        mode: z
+          .enum(["private", "public", "password", "org", "allowlist"])
+          .describe("The sharing mode."),
         allowed_emails: z
           .array(z.string())
           .optional()
