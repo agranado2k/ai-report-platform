@@ -92,6 +92,9 @@ export function describeSetAclGrantPruningContract(
       expect(allow.ok).toBe(true);
       await h.grants.grant(h.reportId, "a@b.com", Date.now() + 60_000);
       await h.grants.grant(h.reportId, "c@d.io", Date.now() + 60_000);
+      // Assert the pre-state so the revocation below can't pass vacuously.
+      expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
+      expect(await isLive(h.grants, h.reportId, "c@d.io")).toBe(true);
 
       const narrowed = await setAcl(deps, actorFor(h.orgId), {
         slug: h.slug,
@@ -101,6 +104,27 @@ export function describeSetAclGrantPruningContract(
       expect(narrowed.ok).toBe(true);
       expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(false); // removed → revoked
       expect(await isLive(h.grants, h.reportId, "c@d.io")).toBe(true); // kept → untouched
+    });
+
+    it("allowlist widening (additions only) leaves existing grants untouched", async () => {
+      const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
+      const allow = await setAcl(deps, actorFor(h.orgId), {
+        slug: h.slug,
+        mode: "allowlist",
+        allowedEmails: ["a@b.com"],
+      });
+      expect(allow.ok).toBe(true);
+      await h.grants.grant(h.reportId, "a@b.com", Date.now() + 60_000);
+      expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
+
+      const widened = await setAcl(deps, actorFor(h.orgId), {
+        slug: h.slug,
+        mode: "allowlist",
+        allowedEmails: ["a@b.com", "c@d.io"],
+      });
+      expect(widened.ok).toBe(true);
+      // A re-added / kept email must NOT need to re-redeem a magic link.
+      expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
     });
 
     it("a non-allowlist → non-allowlist switch never touches grants", async () => {

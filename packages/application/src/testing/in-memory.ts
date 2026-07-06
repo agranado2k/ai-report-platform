@@ -700,6 +700,9 @@ export class FakeNonceStore implements NonceStore {
 
 /** In-memory revocable GrantStore for use-case tests (ADR-0056, revocation-C). */
 export class InMemoryGrantStore implements GrantStore {
+  // Failure toggles for error-path tests (same convention as failRevokeAllForUser above).
+  failRevoke = false;
+  failRevokeAll = false;
   private readonly grants = new Map<string, number>(); // `${reportId}|${email}` → expiresAtMs
   // Time via the Clock port (not Date.now()) so use-case tests with a FixedClock stay
   // deterministic; email normalized like the real store + the allowlist (claude-review #114).
@@ -720,10 +723,14 @@ export class InMemoryGrantStore implements GrantStore {
     return ok(exp !== undefined && exp > this.clock.now());
   }
   async revoke(reportId: ReportId, email: string): Promise<Result<void, AppError>> {
+    if (this.failRevoke) return err({ kind: "Unexpected", message: "simulated revoke failure" });
     this.grants.delete(this.key(reportId, email));
     return ok(undefined);
   }
   async revokeAll(reportId: ReportId): Promise<Result<void, AppError>> {
+    if (this.failRevokeAll) {
+      return err({ kind: "Unexpected", message: "simulated revokeAll failure" });
+    }
     for (const k of [...this.grants.keys()])
       if (k.startsWith(`${reportId}|`)) this.grants.delete(k);
     return ok(undefined);

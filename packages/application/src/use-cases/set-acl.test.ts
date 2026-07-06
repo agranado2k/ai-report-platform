@@ -106,6 +106,52 @@ describe("setAcl use case (ADR-0056)", () => {
     expect(r.ok && r.value.acl).toEqual({ mode: "public" });
   });
 
+  it("a revokeAll failure surfaces AND leaves the Acl unchanged (prune-before-persist)", async () => {
+    const { reports, hasher, grants } = await seed();
+    const allow = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "allowlist",
+      allowedEmails: ["a@b.com"],
+    });
+    expect(allow.ok).toBe(true);
+
+    grants.failRevokeAll = true;
+    const switched = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "public",
+    });
+    expect(switched.ok).toBe(false);
+    // Pruning runs BEFORE persistence: on failure the caller's error is truthful —
+    // nothing changed, and a retry re-prunes (persist-first would strand stale
+    // grants forever, since the re-loaded previous mode would no longer be allowlist).
+    const loaded = await reports.findBySlug(SLUG as never);
+    expect(loaded.ok && loaded.value?.acl.mode).toBe("allowlist");
+  });
+
+  it("a per-email revoke failure surfaces AND leaves the Acl roster unchanged", async () => {
+    const { reports, hasher, grants } = await seed();
+    const allow = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "allowlist",
+      allowedEmails: ["a@b.com", "c@d.io"],
+    });
+    expect(allow.ok).toBe(true);
+
+    grants.failRevoke = true;
+    const narrowed = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "allowlist",
+      allowedEmails: ["c@d.io"],
+    });
+    expect(narrowed.ok).toBe(false);
+    const loaded = await reports.findBySlug(SLUG as never);
+    expect(loaded.ok && loaded.value?.acl).toEqual({
+      mode: "allowlist",
+      allowedEmails: ["a@b.com", "c@d.io"],
+      accessTtlSeconds: 604_800,
+    });
+  });
+
   it("rejects a report in another org (NotAllowed) and an unknown slug (NotFound)", async () => {
     const { reports, hasher, grants } = await seed(orgId("00000000-0000-7000-8000-0000000000a2"));
     const notMine = await setAcl({ reports, hasher, grants }, ACTOR, {

@@ -1,9 +1,9 @@
 // setAcl — set a Report's sharing Acl (ADR-0056). Pure orchestration (ADR-0024):
 // `acl:write` scope (ADR-0016) + org ownership (the shared loadOwnedReport
-// guard), hash a new password via the PasswordHasher port, persist via
-// reports.setAcl, then prune any now-stale `report_grants` rows (ADR-0056 "5e",
-// issue #137) via the GrantStore port — a durable grant must not outlive the
-// Acl that granted it. Returns the updated Report.
+// guard), hash a new password via the PasswordHasher port, prune any now-stale
+// `report_grants` rows (ADR-0056 "5e", issue #137) via the GrantStore port —
+// a durable grant must not outlive the Acl that granted it — then persist via
+// reports.setAcl. Returns the updated Report.
 import {
   type AclMode,
   type AppError,
@@ -72,11 +72,18 @@ export async function setAcl(
   });
   if (!acl.ok) return acl;
 
-  const saved = await deps.reports.setAcl(found.value.id, acl.value);
-  if (!saved.ok) return saved;
-
+  // Prune BEFORE persisting (no unit-of-work spans the two ports). Fail-closed
+  // both ways: if pruning fails nothing changed and a retry re-prunes; if the
+  // persist then fails, grants are revoked while the emails are still
+  // allowlisted — the viewer's dual gate (resolve-access) denies until the
+  // viewer re-redeems a magic link. Persist-first would be worse: a prune
+  // failure after the persist strands the stale grants forever (the re-loaded
+  // previous mode is no longer `allowlist`, so a retry never re-prunes).
   const pruned = await pruneStaleGrants(deps.grants, found.value.id, found.value.acl, acl.value);
   if (!pruned.ok) return pruned;
+
+  const saved = await deps.reports.setAcl(found.value.id, acl.value);
+  if (!saved.ok) return saved;
 
   return ok({ ...found.value, acl: acl.value });
 }
