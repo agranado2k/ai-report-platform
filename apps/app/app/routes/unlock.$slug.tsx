@@ -3,7 +3,7 @@
 // credential-free view origin only verifies the token it mints here. P1 implements
 // `password`; P3 adds `allowlist` (email → one-time magic link → revocable grant).
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { redeemMagicLink, sendMagicLink } from "arp-application";
+import { getReportAcl, redeemMagicLink, sendMagicLink } from "arp-application";
 import { makeSlug, mintAccessToken, type Slug } from "arp-domain";
 import {
   accessTokenSecret,
@@ -99,7 +99,7 @@ function confirmLinkPage(slug: string, token: string): Response {
 }
 
 async function loadAcl(slug: Slug) {
-  const found = await deps().reports.findBySlug(slug);
+  const found = await getReportAcl({ reports: deps().reports }, { slug });
   return found.ok ? found.value : null;
 }
 

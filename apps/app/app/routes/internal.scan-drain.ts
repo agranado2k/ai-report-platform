@@ -8,11 +8,13 @@
 // `fetch` claims jobs with FOR UPDATE SKIP LOCKED, so concurrent ticks split the
 // work rather than double-process, and the reconcile/processing is idempotent.
 
-import { timingSafeEqual } from "node:crypto";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { drainScans } from "arp-application";
+import { methodNotAllowed } from "arp-domain";
 import { defineEnv } from "arp-env";
+import { errorToHttp, secretMatches } from "arp-http";
 import { scanDrainDeps } from "../server/container.server";
+import { toResponse } from "../server/http.server";
 
 /** Jobs claimed per tick — bounded so a drain stays well under Vercel's 300s limit. */
 const BATCH_SIZE = 20;
@@ -30,16 +32,11 @@ function bearerToken(header: string | null): string | undefined {
   return scheme?.toLowerCase() === "bearer" && token ? token : undefined;
 }
 
-function secretMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  // timingSafeEqual requires equal lengths; a length mismatch is simply a miss.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return jsonResponse(405, { error: "method_not_allowed" }, { allow: "POST" });
+    // The one 405 wire shape (ADR-0040, RFC 9457 problem+json + Allow header) —
+    // shared with the /api/v1 routes and the Clerk webhook.
+    return toResponse(errorToHttp(methodNotAllowed("POST")));
   }
 
   const env = defineEnv();

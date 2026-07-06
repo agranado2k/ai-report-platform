@@ -14,6 +14,7 @@ export type AppError =
   | { readonly kind: "IdempotencyInFlight"; readonly message: string }
   | { readonly kind: "PlanLimitExceeded"; readonly message: string }
   | { readonly kind: "RateLimited"; readonly message: string }
+  | { readonly kind: "MethodNotAllowed"; readonly message: string; readonly allow: string }
   | { readonly kind: "Unexpected"; readonly message: string };
 
 export const validationError = (message: string, field?: string): AppError =>
@@ -27,4 +28,12 @@ export const insufficientScope = (scope: string): AppError => ({
   kind: "InsufficientScope",
   message: `missing required scope: ${scope}`,
   scope,
+});
+
+/** The one 405 wire shape (ADR-0040): `allow` is the comma-joined method list
+ *  rendered on the response's `Allow` header (e.g. "PATCH, DELETE"). */
+export const methodNotAllowed = (allow: string, message?: string): AppError => ({
+  kind: "MethodNotAllowed",
+  message: message ?? `allowed methods: ${allow}`,
+  allow,
 });

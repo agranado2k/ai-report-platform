@@ -10,12 +10,13 @@ import {
   createFolder,
   deleteFolder,
   deleteReport,
+  listFolders,
   moveReport,
   renameFolder,
   renameReport,
   searchReports,
 } from "arp-application";
-import { folderId, makeSlug, reportId } from "arp-domain";
+import { folderIdToWire, makeFolderId, makeReportId, makeSlug, reportIdToWire } from "arp-domain";
 import {
   AppHeader,
   Button,
@@ -35,6 +36,7 @@ import {
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, folderRepo } from "../server/container.server";
+import { errorToJson } from "../server/http.server";
 import { log } from "../server/log.server";
 
 export const meta: MetaFunction = () => [
@@ -52,9 +54,15 @@ export async function loader(args: LoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const requestedFolder = url.searchParams.get("folder") ?? "";
-  // Cursor pagination (ADR-0053): report-id cursors carried in the dashboard URL.
-  const after = url.searchParams.get("starting_after") || undefined;
-  const before = url.searchParams.get("ending_before") || undefined;
+  // Cursor pagination (ADR-0053): report-id cursors carried in the dashboard URL,
+  // as the SAME wire-encoded `report_` External Id the JSON API uses (ADR-0052) —
+  // the ids below are wire-encoded on the way out, so the links this page renders
+  // (cursorHref) round-trip through here. A malformed/tampered cursor decodes to
+  // an error, which we log and treat as absent (a bad param degrades to page 1
+  // rather than a hard failure — this is a page load, not the JSON API's 422
+  // boundary).
+  const afterRaw = url.searchParams.get("starting_after") || undefined;
+  const beforeRaw = url.searchParams.get("ending_before") || undefined;
 
   const actorR = await resolveActorForRead(args);
   // The dashboard degrades to an empty list for both "no actor" and an infra
@@ -73,27 +81,40 @@ export async function loader(args: LoaderFunctionArgs) {
   };
   if (!actor) return json(empty);
 
-  const foldersR = await folderRepo().listByOrg(actor.orgId);
+  // No pagination params → listFolders returns the WHOLE org folder tree in
+  // one unpaginated page (the sidebar needs every folder to build it).
+  const foldersR = await listFolders({ folders: folderRepo() }, { orgId: actor.orgId });
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  const folders: FolderNode[] = (foldersR.ok ? foldersR.value : []).map((f) => ({
-    id: f.id,
-    parentId: f.parentId,
+  const folders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
+    id: folderIdToWire(f.id),
+    parentId: f.parentId ? folderIdToWire(f.parentId) : null,
     name: f.name,
   }));
   const root = folders.find((f) => f.parentId === null) ?? null;
-  // Only honor a folder filter that exists in the org.
+  // Only honor a folder filter that exists in the org (this existence check also
+  // guards against a garbage `?folder=` value — it simply won't match).
   const selectedFolderId =
     requestedFolder && folders.some((f) => f.id === requestedFolder) ? requestedFolder : null;
+  const selectedFolderIdDecoded = selectedFolderId ? makeFolderId(selectedFolderId) : undefined;
+  if (selectedFolderIdDecoded && !selectedFolderIdDecoded.ok) {
+    log.warn(`dashboard: malformed folder id in query — ${selectedFolderIdDecoded.error.message}`);
+  }
+  const after = afterRaw ? makeReportId(afterRaw) : undefined;
+  if (after && !after.ok)
+    log.warn(`dashboard: malformed starting_after cursor — ${after.error.message}`);
+  const before = beforeRaw ? makeReportId(beforeRaw) : undefined;
+  if (before && !before.ok)
+    log.warn(`dashboard: malformed ending_before cursor — ${before.error.message}`);
 
   const searchR = await searchReports(
     { reports: deps().reports },
     { orgId: actor.orgId },
     {
       query: q || undefined,
-      folderId: selectedFolderId ? folderId(selectedFolderId) : undefined,
+      folderId: selectedFolderIdDecoded?.ok ? selectedFolderIdDecoded.value : undefined,
       limit: PAGE_SIZE,
-      startingAfter: after ? reportId(after) : undefined,
-      endingBefore: before ? reportId(before) : undefined,
+      startingAfter: after?.ok ? after.value : undefined,
+      endingBefore: before?.ok ? before.value : undefined,
     },
   );
   if (!searchR.ok) log.warn(`dashboard: searchReports failed — ${searchR.error.message}`);
@@ -103,13 +124,19 @@ export async function loader(args: LoaderFunctionArgs) {
   // page): it's "more after" = Next; a forward page also has a Prev (newer items).
   // Backward (ending_before): it's "more before" = Prev, and there's always a Next
   // (the page we came from). Translate to explicit hasPrev/hasNext for the UI.
-  const back = Boolean(before);
+  // Based on the RAW param's presence, not decode success — a malformed cursor
+  // degrades to page 1 above, and page 1 has no Prev regardless.
+  const back = Boolean(beforeRaw);
   const hasNext = back ? true : result.hasMore;
-  const hasPrev = back ? result.hasMore : Boolean(after);
+  const hasPrev = back ? result.hasMore : Boolean(afterRaw);
 
   return json({
     folders,
-    items: result.items,
+    items: result.items.map((r) => ({
+      ...r,
+      id: reportIdToWire(r.id),
+      folderId: folderIdToWire(r.folderId),
+    })),
     hasPrev,
     hasNext,
     q,
@@ -125,7 +152,7 @@ export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) {
     if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
-    return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
+    return errorToJson(actor.error);
   }
   const form = await args.request.formData();
   const intent = String(form.get("intent") ?? "new-folder");
@@ -134,12 +161,17 @@ export async function action(args: ActionFunctionArgs) {
     const slug = makeSlug(String(form.get("slug") ?? ""));
     const rawTo = String(form.get("toFolderId") ?? "").trim();
     if (!slug.ok || !rawTo) return json({ error: "Invalid move request." }, { status: 400 });
+    // Decode the target folder's wire External Id at the boundary → 422 on a
+    // malformed value, instead of silently coercing it into a branded id
+    // (api.v1.reports.$slug.move.ts follows the same pattern).
+    const toFolderId = makeFolderId(rawTo);
+    if (!toFolderId.ok) return errorToJson(toFolderId.error);
     const r = await moveReport(
       { reports: deps().reports, folders: folderRepo() },
       { orgId: actor.value.orgId },
-      { slug: slug.value, toFolderId: folderId(rawTo) },
+      { slug: slug.value, toFolderId: toFolderId.value },
     );
-    if (!r.ok) return json({ error: r.error.message }, { status: 400 });
+    if (!r.ok) return errorToJson(r.error);
     return redirect(`/?folder=${rawTo}`);
   }
 
@@ -152,12 +184,7 @@ export async function action(args: ActionFunctionArgs) {
       { orgId: actor.value.orgId },
       { slug: slug.value, title },
     );
-    if (!r.ok) {
-      return json(
-        { error: r.error.message },
-        { status: r.error.kind === "ValidationError" ? 422 : 400 },
-      );
-    }
+    if (!r.ok) return errorToJson(r.error);
     // Inline rename submits via useFetcher — return JSON so the dashboard
     // revalidates in place instead of navigating (the old form-POST redirected).
     return json({ ok: true });
@@ -172,12 +199,7 @@ export async function action(args: ActionFunctionArgs) {
       { orgId: actor.value.orgId },
       { slug: slug.value },
     );
-    if (!r.ok) {
-      return json(
-        { error: r.error.message },
-        { status: r.error.kind === "ValidationError" ? 422 : 400 },
-      );
-    }
+    if (!r.ok) return errorToJson(r.error);
     return redirect(folder ? `/?folder=${folder}` : "/");
   }
 
@@ -185,34 +207,28 @@ export async function action(args: ActionFunctionArgs) {
     const rawId = String(form.get("folderId") ?? "").trim();
     const name = String(form.get("name") ?? "");
     if (!rawId) return json({ error: "Invalid rename request." }, { status: 400 });
+    const folderId = makeFolderId(rawId);
+    if (!folderId.ok) return errorToJson(folderId.error);
     const r = await renameFolder(
       { folders: folderRepo() },
       { orgId: actor.value.orgId },
-      { folderId: folderId(rawId), name },
+      { folderId: folderId.value, name },
     );
-    if (!r.ok) {
-      return json(
-        { error: r.error.message },
-        { status: r.error.kind === "ValidationError" ? 422 : 400 },
-      );
-    }
+    if (!r.ok) return errorToJson(r.error);
     return redirect(`/?folder=${rawId}`);
   }
 
   if (intent === "delete-folder") {
     const rawId = String(form.get("folderId") ?? "").trim();
     if (!rawId) return json({ error: "Invalid delete request." }, { status: 400 });
+    const folderId = makeFolderId(rawId);
+    if (!folderId.ok) return errorToJson(folderId.error);
     const r = await deleteFolder(
       { folders: folderRepo(), reports: deps().reports },
       { orgId: actor.value.orgId },
-      { folderId: folderId(rawId) },
+      { folderId: folderId.value },
     );
-    if (!r.ok) {
-      return json(
-        { error: r.error.message },
-        { status: r.error.kind === "ValidationError" ? 422 : 400 },
-      );
-    }
+    if (!r.ok) return errorToJson(r.error);
     return redirect("/");
   }
 
@@ -220,20 +236,18 @@ export async function action(args: ActionFunctionArgs) {
   const name = String(form.get("name") ?? "");
   const rawParent = String(form.get("parentId") ?? "").trim();
   if (!rawParent) return json({ error: "Select a folder to create in." }, { status: 400 });
-  const parentId = folderId(rawParent); // createFolder validates it's in the actor's org
+  // Decode the parent's wire External Id at the boundary → 422 on a malformed
+  // value; createFolder validates it's in the actor's org.
+  const parentId = makeFolderId(rawParent);
+  if (!parentId.ok) return errorToJson(parentId.error);
 
   const r = await createFolder(
     { folders: folderRepo(), ids: deps().ids },
     { orgId: actor.value.orgId },
-    { parentId, name },
+    { parentId: parentId.value, name },
   );
-  if (!r.ok) {
-    return json(
-      { error: r.error.message },
-      { status: r.error.kind === "ValidationError" ? 422 : 400 },
-    );
-  }
-  return redirect(`/?folder=${parentId}`);
+  if (!r.ok) return errorToJson(r.error);
+  return redirect(`/?folder=${rawParent}`);
 }
 
 export default function Index() {

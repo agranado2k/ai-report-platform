@@ -9,8 +9,11 @@
 import { verifyWebhook } from "@clerk/backend/webhooks";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { handleUserDeleted } from "arp-application";
+import { methodNotAllowed } from "arp-domain";
 import { defineEnv } from "arp-env";
+import { errorToHttp } from "arp-http";
 import { userWebhookDeps } from "../server/container.server";
+import { toResponse } from "../server/http.server";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -21,10 +24,9 @@ function json(status: number, body: unknown): Response {
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "method_not_allowed" }), {
-      status: 405,
-      headers: { "content-type": "application/json", allow: "POST" },
-    });
+    // The one 405 wire shape (ADR-0040, RFC 9457 problem+json + Allow header) —
+    // shared with the /api/v1 routes and the scan-drain trigger.
+    return toResponse(errorToHttp(methodNotAllowed("POST")));
   }
 
   const signingSecret = defineEnv().CLERK_WEBHOOK_SIGNING_SECRET;

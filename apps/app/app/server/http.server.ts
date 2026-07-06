@@ -2,7 +2,8 @@
 // every JSON API route (upload, list, …) so the transport translation lives in
 // one place; all policy/shape decisions stay in the pure arp-http mappers.
 
-import { type AppError, encodeExternalId, err, ok, type Result, validationError } from "arp-domain";
+import { json } from "@remix-run/node";
+import { type AppError, encodeExternalId } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { errorToHttp, type HttpResponse, type WireContext } from "arp-http";
 import { activeTraceId } from "arp-observability";
@@ -39,40 +40,6 @@ export function wireContext(): WireContext {
   return { mode: defineEnv().API_KEY_ENV === "live" ? "prod" : "dev" };
 }
 
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-
-/**
- * Parse the cursor-pagination params (ADR-0053): `limit` (clamped 1..100, default
- * 20) + `starting_after`/`ending_before` decoded via the entity's `make*Id` (a
- * malformed cursor → 422). The single place the pagination rule lives.
- */
-export function parseCursorParams<Id>(
-  sp: URLSearchParams,
-  decode: (s: string) => Result<Id, AppError>,
-): Result<{ limit: number; startingAfter?: Id; endingBefore?: Id }, AppError> {
-  const raw = Number.parseInt(sp.get("limit") ?? "", 10);
-  const limit = Number.isFinite(raw) ? Math.min(MAX_LIMIT, Math.max(1, raw)) : DEFAULT_LIMIT;
-
-  const out: { limit: number; startingAfter?: Id; endingBefore?: Id } = { limit };
-  const after = sp.get("starting_after")?.trim();
-  const before = sp.get("ending_before")?.trim();
-  if (after && before) {
-    return err(validationError("pass only one of starting_after / ending_before", "cursor"));
-  }
-  if (after) {
-    const d = decode(after);
-    if (!d.ok) return d;
-    out.startingAfter = d.value;
-  }
-  if (before) {
-    const d = decode(before);
-    if (!d.ok) return d;
-    out.endingBefore = d.value;
-  }
-  return ok(out);
-}
-
 /**
  * The shared 401 for read routes when there's no identified actor (no session,
  * or a signed-in user with no org yet). Kept here so the message + shape live in
@@ -84,4 +51,22 @@ export function unauthenticated(): HttpResponse {
     kind: "Unauthenticated",
     message: "a signed-in session with an active organization is required",
   });
+}
+
+/**
+ * The dashboard (Remix `action`/`loader`) equivalent of `errorToHttp` — routes
+ * dashboard errors through the SAME problemFor/errorToHttp status authority the
+ * JSON API uses, instead of the ad hoc `kind === "ValidationError" ? 422 : 400`
+ * ternaries that used to collapse NotFound/NotAllowed/PlanLimitExceeded/etc. to
+ * a generic 400. Wraps the (already Unexpected-masked) detail message in the
+ * `{ error: string }` shape the dashboard's `actionData` already renders — it
+ * doesn't need the full RFC 9457 problem+json body, just the right status.
+ */
+export function errorToJson(error: AppError) {
+  const http = errorToHttp(error);
+  const detail = (http.body as { detail?: unknown }).detail;
+  return json(
+    { error: typeof detail === "string" ? detail : error.message },
+    { status: http.status },
+  );
 }
