@@ -12,7 +12,7 @@
 import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { authenticateApiKey, provisionIdentity, type UploadActor } from "arp-application";
+import { provisionIdentity, type UploadActor } from "arp-application";
 import {
   type AppError,
   err,
@@ -134,12 +134,15 @@ export async function resolveUploadActor(
   // (→ 401), NOT a fall-through to the session path.
   const token = apiKeyToken(args);
   if (token) {
-    const resolved = await authenticateApiKey({ apiKeys: apiKeyStore() }, token);
+    const resolved = await apiKeyStore().verify(token);
     if (!resolved.ok) return resolved;
     if (!resolved.value) {
       return err({ kind: "Unauthenticated", message: "invalid or revoked API key" });
     }
-    return ok(resolved.value);
+    // The resolved principal's org Root folder is the Phase-1 write default
+    // (ADR-0048); scopes come from the key row (ADR-0016), not hardcoded.
+    const p = resolved.value;
+    return ok({ userId: p.userId, orgId: p.orgId, folderId: p.rootFolderId, scopes: p.scopes });
   }
 
   // Clerk session path (ADR-0048): a browser sign-in carries the email custom claim.
@@ -200,7 +203,7 @@ export async function resolveActorForRead(
   // unmatched key reads as `null` (empty list), consistent with no-session reads.
   const token = apiKeyToken(args);
   if (token) {
-    const resolved = await authenticateApiKey({ apiKeys: apiKeyStore() }, token);
+    const resolved = await apiKeyStore().verify(token);
     if (!resolved.ok) return resolved;
     return ok(
       resolved.value ? { userId: resolved.value.userId, orgId: resolved.value.orgId } : null,
