@@ -11,9 +11,9 @@ import {
   applyScanResult,
   makeSlug,
   type OrgId,
-  reportId,
   type Report,
   type ReportId,
+  reportId,
 } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReportRepository } from "../../ports";

@@ -42,9 +42,7 @@ describe("appHeaders", () => {
         "gyroscope=(), magnetometer=(), midi=(), serial=(), bluetooth=(), interest-cohort=()",
     );
     expect(h.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(h.get("Strict-Transport-Security")).toBe(
-      "max-age=63072000; includeSubDomains; preload",
-    );
+    expect(h.get("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains; preload");
   });
 
   it("enforces Trusted Types for script with a default+react policy allowlist", () => {

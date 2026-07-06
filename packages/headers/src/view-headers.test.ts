@@ -19,8 +19,7 @@ const ENFORCING_CSP = [
   "report-to csp-endpoint",
 ].join("; ");
 
-const SANDBOX_CSP =
-  "sandbox allow-forms allow-scripts allow-popups allow-popups-to-escape-sandbox";
+const SANDBOX_CSP = "sandbox allow-forms allow-scripts allow-popups allow-popups-to-escape-sandbox";
 
 const REPORT_ONLY_CSP = [
   "default-src 'self'",
@@ -63,9 +62,7 @@ describe("viewHeaders", () => {
         "gyroscope=(), magnetometer=(), midi=(), serial=(), bluetooth=(), interest-cohort=()",
     );
     expect(h.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(h.get("Strict-Transport-Security")).toBe(
-      "max-age=63072000; includeSubDomains; preload",
-    );
+    expect(h.get("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains; preload");
   });
 
   it("pins the default Cache-Control (private, short-lived, revalidated)", () => {

@@ -56,10 +56,7 @@ function reportToRow(r: Report): typeof reports.$inferInsert {
   };
 }
 
-function versionToRow(
-  reportRowId: string,
-  v: ReportVersion,
-): typeof reportVersions.$inferInsert {
+function versionToRow(reportRowId: string, v: ReportVersion): typeof reportVersions.$inferInsert {
   return {
     id: v.id,
     reportId: reportRowId,
