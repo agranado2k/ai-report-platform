@@ -28,7 +28,7 @@ export function normalizeEmailAddress(raw: string): EmailAddress {
  *  validate format — callers that need format validation call
  *  `isValidEmailFormat` per entry (e.g. `Acl`'s allowlist, which reports the
  *  first invalid entry with its own field-specific error). */
-export function normalizeEmailAddresses(emails: readonly string[]): EmailAddress[] {
+export function normalizeEmailAddresses(emails: readonly string[]): readonly EmailAddress[] {
   const seen = new Set<string>();
   const out: EmailAddress[] = [];
   for (const raw of emails) {
@@ -46,7 +46,10 @@ export function isValidEmailFormat(value: string): boolean {
   return EMAIL_RE.test(value);
 }
 
-/** Validating smart constructor: normalize, then require a plausible email shape. */
+/** Validating smart constructor: normalize, then require a plausible email shape.
+ *  No production caller yet — forward-looking boundary-decode API; current
+ *  callers normalize + format-check separately (`Acl` reports the first
+ *  invalid allowlist entry with its own field error). */
 export function makeEmailAddress(raw: string): Result<EmailAddress, AppError> {
   const normalized = normalizeEmailAddress(raw);
   return isValidEmailFormat(normalized)
