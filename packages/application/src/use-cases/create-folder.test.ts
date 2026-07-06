@@ -64,6 +64,17 @@ describe("createFolder use case", () => {
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
+  it("rejects a soft-deleted parent (NotFound) — issue #132", async () => {
+    const d = await setup();
+    const old = await createFolder(d, { orgId: orgA }, { parentId: rootA, name: "Old" });
+    if (!old.ok) throw new Error("setup failed");
+    await d.folders.softDelete(old.value.id);
+
+    const r = await createFolder(d, { orgId: orgA }, { parentId: old.value.id, name: "Child" });
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+    expect(!r.ok && r.error.message).toBe("parent folder not found");
+  });
+
   it("rejects a duplicate sibling slug (ValidationError)", async () => {
     const d = await setup();
     await createFolder(d, { orgId: orgA }, { parentId: rootA, name: "Docs" });
