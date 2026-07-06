@@ -137,6 +137,12 @@ export class InMemoryFolderRepository implements FolderRepository {
 export class InMemoryReportRepository implements ReportRepository {
   private readonly byId = new Map<string, Report>();
   private readonly slugToId = new Map<string, string>();
+  // Monotonic per-id write sequence, bumped on every save() (create AND
+  // re-save) — mirrors the real adapter's `updated_at`, which the DB bumps on
+  // every upsert. listByOrg sorts on this descending, matching the adapter's
+  // `ORDER BY updated_at DESC` including re-save reordering.
+  private readonly lastWriteSeq = new Map<string, number>();
+  private writeSeq = 0;
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -150,11 +156,10 @@ export class InMemoryReportRepository implements ReportRepository {
   async listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
     const summaries = [...this.byId.values()]
       .filter((r) => r.orgId === orgId && r.deletedAt === null)
-      // Approximates the adapter's `ORDER BY updated_at DESC` via Map insertion
-      // order (reversed). NOTE: this does NOT model re-save reordering — the real
-      // adapter bumps updated_at on a re-upload, moving a report to the front; the
-      // fake keeps original insertion position. Tests must not rely on re-save order.
-      .reverse()
+      // Newest-last-write first — matches the adapter's `ORDER BY updated_at
+      // DESC`, including a re-save (rename, promote, move) bumping a report
+      // back to the front (ReportRepository contract suite, ADR-0046).
+      .sort((a, b) => (this.lastWriteSeq.get(b.id) ?? 0) - (this.lastWriteSeq.get(a.id) ?? 0))
       .map((r) => ({
         id: r.id,
         slug: r.slug,
@@ -191,6 +196,8 @@ export class InMemoryReportRepository implements ReportRepository {
   async save(report: Report): Promise<Result<void, AppError>> {
     this.byId.set(report.id, report);
     this.slugToId.set(report.slug, report.id);
+    this.writeSeq += 1;
+    this.lastWriteSeq.set(report.id, this.writeSeq);
     return ok(undefined);
   }
 

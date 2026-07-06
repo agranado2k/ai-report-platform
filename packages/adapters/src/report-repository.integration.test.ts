@@ -4,7 +4,6 @@
 import {
   applyScanResult,
   createFolder,
-  createReport,
   folderId,
   makeSlug,
   placeInFolder,
@@ -15,10 +14,18 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleFolderRepository } from "./folder-repository";
 import { DrizzleReportRepository } from "./report-repository";
-import { makeTestDb, type SeededIdentity, seedIdentity, type TestDb } from "./testing/pglite";
+import {
+  makeSampleReport,
+  makeTestDb,
+  SAMPLE_REPORT_ID,
+  SAMPLE_VERSION_ID,
+  type SeededIdentity,
+  seedIdentity,
+  type TestDb,
+} from "./testing/pglite";
 
-const RID = reportId("00000000-0000-4000-8000-0000000000a1");
-const VID = versionId("00000000-0000-4000-8000-0000000000b1");
+const RID = SAMPLE_REPORT_ID;
+const VID = SAMPLE_VERSION_ID;
 const SLUG = "abcde12345";
 
 describe("DrizzleReportRepository (pglite integration)", () => {
@@ -34,20 +41,7 @@ describe("DrizzleReportRepository (pglite integration)", () => {
   afterEach(() => tdb.close());
 
   function makeReport(id: typeof RID, vid: typeof VID, slugStr: string, title: string): Report {
-    const slug = makeSlug(slugStr);
-    if (!slug.ok) throw new Error("bad slug");
-    return createReport({
-      id,
-      orgId: ids.orgId,
-      folderId: ids.folderId,
-      slug: slug.value,
-      title,
-      versionId: vid,
-      contentHash: "a".repeat(64),
-      uploadedBy: ids.userId,
-      manifest: { entryDocument: "index.html", files: ["index.html"] },
-      sizeBytes: 11,
-    }).report;
+    return makeSampleReport({ id, versionId: vid, slug: slugStr, title }).report;
   }
 
   function newReport(): Report {
