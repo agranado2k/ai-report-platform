@@ -15,7 +15,8 @@ import { wireContext } from "../server/http.server";
 export const loader = handle({
   mode: "read",
   slug: true,
-  run: ({ actor, slug }) => getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
+  run: ({ actor, slug }) =>
+    getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
   toHttp: (result) => getAclToHttp(result),
 });
 

@@ -90,7 +90,12 @@ describe("handle() — read mode", () => {
   it("short-circuits to a problem response when slug resolution fails", async () => {
     const run = vi.fn();
     const action = handle(
-      { mode: "read", slug: true, run, toHttp: () => ({ status: 200, contentType: "x", body: {} }) },
+      {
+        mode: "read",
+        slug: true,
+        run,
+        toHttp: () => ({ status: 200, contentType: "x", body: {} }),
+      },
       {
         resolveActorForRead: async () => ok(readActor),
         resolveReportSlug: async () => err(validationError("bad slug")),
@@ -105,7 +110,11 @@ describe("handle() — read mode", () => {
 
   it("sets the Request-Id header on every response (goes through toResponse)", async () => {
     const action = handle(
-      { mode: "read", run: async () => ok(1), toHttp: () => ({ status: 200, contentType: "application/json", body: {} }) },
+      {
+        mode: "read",
+        run: async () => ok(1),
+        toHttp: () => ({ status: 200, contentType: "application/json", body: {} }),
+      },
       { resolveActorForRead: async () => ok(readActor) },
     );
     const res = await action({ request: req(), params: {}, context: {} });
@@ -207,7 +216,11 @@ describe("handle() — write mode", () => {
 describe("handle() — result type", () => {
   it("returns a real Fetch Response", async () => {
     const action = handle(
-      { mode: "read", run: async () => ok(1), toHttp: () => ({ status: 204, contentType: "application/json", body: undefined }) },
+      {
+        mode: "read",
+        run: async () => ok(1),
+        toHttp: () => ({ status: 204, contentType: "application/json", body: undefined }),
+      },
       { resolveActorForRead: async () => ok(readActor) },
     );
     const res = await action({ request: req(), params: {}, context: {} });

@@ -26,9 +26,7 @@ export interface HandleDeps {
   readonly resolveActorForRead: (
     args: LoaderFunctionArgs,
   ) => Promise<Result<ReadActor | null, AppError>>;
-  readonly resolveUploadActor: (
-    args: LoaderFunctionArgs,
-  ) => Promise<Result<UploadActor, AppError>>;
+  readonly resolveUploadActor: (args: LoaderFunctionArgs) => Promise<Result<UploadActor, AppError>>;
   readonly resolveReportSlug: (
     handle: string,
     reports: ReportRepository,
@@ -58,7 +56,9 @@ export interface WriteRunContext<HasSlug extends boolean = false, HasBody extend
   readonly args: ActionFunctionArgs;
   readonly actor: UploadActor;
   readonly slug: HasSlug extends true ? Slug : Slug | undefined;
-  readonly body: HasBody extends true ? Record<string, unknown> : Record<string, unknown> | undefined;
+  readonly body: HasBody extends true
+    ? Record<string, unknown>
+    : Record<string, unknown> | undefined;
 }
 
 /** A use-case callback may resolve synchronously (a validation guard returning
@@ -86,7 +86,9 @@ interface HandleWriteOptions<T, HasSlug extends boolean = false, HasBody extends
   ) => HttpResponse;
 }
 
-export type HandleOptions<T> = HandleReadOptions<T, boolean> | HandleWriteOptions<T, boolean, boolean>;
+export type HandleOptions<T> =
+  | HandleReadOptions<T, boolean>
+  | HandleWriteOptions<T, boolean, boolean>;
 
 export function handle<T, HasSlug extends boolean = false>(
   options: HandleReadOptions<T, HasSlug>,

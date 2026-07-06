@@ -41,7 +41,11 @@ const patchHandler = handle({
     const id = makeFolderId(String(args.params.id ?? ""));
     if (!id.ok) return id;
     const name = typeof body.name === "string" ? body.name : "";
-    return renameFolder({ folders: folderRepo() }, { orgId: actor.orgId }, { folderId: id.value, name });
+    return renameFolder(
+      { folders: folderRepo() },
+      { orgId: actor.orgId },
+      { folderId: id.value, name },
+    );
   },
   toHttp: (result) => renameFolderToHttp(result, wireContext()),
 });
