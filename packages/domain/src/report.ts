@@ -22,8 +22,9 @@ export interface Report {
   readonly liveVersionId: VersionId | null;
   readonly versions: readonly ReportVersion[];
   readonly deletedAt: number | null;
-  /** Sharing configuration (ADR-0056). Defaults to `public`; only loaded on
-   *  single-report reads (not in list summaries). */
+  /** Sharing configuration (ADR-0056). Defaults to `private` (`DEFAULT_ACL`,
+   *  owner-only; PR #127) — only loaded on single-report reads (not in list
+   *  summaries). */
   readonly acl: Acl;
 }
 
