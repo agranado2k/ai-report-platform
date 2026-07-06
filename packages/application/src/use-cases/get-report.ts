@@ -1,18 +1,10 @@
 // getReport — read a single Report by slug, scoped to the acting org (ADR-0038).
 // Pure orchestration over the ReportRepository (ADR-0024): load by slug → authz
 // (must exist, not be taken down, belong to the actor's org) → return it. No
-// mutation, no provisioning. Mirrors renameReport's load+authz, minus the write.
-import {
-  type AppError,
-  err,
-  notAllowed,
-  notFound,
-  type OrgId,
-  ok,
-  type Report,
-  type Result,
-  type Slug,
-} from "arp-domain";
+// mutation, no provisioning. The load+authz is the shared loadOwnedReport guard
+// (../load-owned.ts); this use case is just that guard.
+import type { AppError, OrgId, Report, Result, Slug } from "arp-domain";
+import { loadOwnedReport } from "../load-owned";
 import type { ReportRepository } from "../ports";
 
 export interface GetReportDeps {
@@ -30,9 +22,5 @@ export async function getReport(
   actor: GetReportActor,
   input: GetReportInput,
 ): Promise<Result<Report, AppError>> {
-  const found = await deps.reports.findBySlug(input.slug);
-  if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) return err(notFound("report not found"));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed("report is not in your org"));
-  return ok(found.value);
+  return loadOwnedReport(deps.reports, actor, input.slug);
 }
