@@ -2,6 +2,7 @@
 // `Report` (ADR-0036); one `Acl` per report, defaulting to `private` (owner-only). A pure value
 // object: no I/O. The argon2id password hash is supplied by the setAcl use case
 // (hashing is an adapter concern); the wire mapper never serializes it (ADR-0053 §12).
+import { isValidEmailFormat, normalizeEmailAddresses } from "./email-address";
 import { type AppError, validationError } from "./errors";
 import { err, ok, type Result } from "./result";
 import type { AclMode } from "./value-objects";
@@ -43,25 +44,6 @@ export function isPrivateAcl(acl: Acl): boolean {
   return acl.mode !== "public";
 }
 
-/** Minimal email check — non-empty local + domain with a dot. Light by design. */
-function isEmail(value: string): boolean {
-  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value);
-}
-
-/** Trim + lowercase + drop empties + dedupe (order-preserving). */
-function normalizeEmails(emails: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of emails) {
-    const e = raw.trim().toLowerCase();
-    if (e && !seen.has(e)) {
-      seen.add(e);
-      out.push(e);
-    }
-  }
-  return out;
-}
-
 export interface MakeAclInput {
   readonly mode: AclMode;
   /** Pre-hashed (argon2id) password — required for `password` mode. */
@@ -88,11 +70,11 @@ export function makeAcl(input: MakeAclInput): Result<Acl, AppError> {
       }
       return ok({ mode: "password", passwordHash: input.passwordHash });
     case "allowlist": {
-      const emails = normalizeEmails(input.allowedEmails ?? []);
+      const emails = normalizeEmailAddresses(input.allowedEmails ?? []);
       if (emails.length === 0) {
         return err(validationError("allowlist requires at least one email", "allowed_emails"));
       }
-      const bad = emails.find((e) => !isEmail(e));
+      const bad = emails.find((e) => !isValidEmailFormat(e));
       if (bad) {
         return err(validationError(`invalid email: ${bad}`, "allowed_emails"));
       }
