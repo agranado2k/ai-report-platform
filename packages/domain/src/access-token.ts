@@ -1,11 +1,12 @@
 // Access token — the app↔view sharing capability (ADR-0056). A compact,
 // HMAC-signed, slug-bound, exp-bounded token: the app mints it after authorizing
 // a private report (by Acl mode); the credential-free view origin verifies the
-// signature only (never holds Clerk creds). Pure computation given its inputs
-// (like the base62 external-id codec) — `nowSeconds` is injected for testability.
-import { createHmac, timingSafeEqual } from "node:crypto";
+// signature only (never holds Clerk creds). Built on the shared signed-token
+// codec (signed-token.ts) — this module owns only the `AccessClaims` shape,
+// its validation, and the slug-match check; sign/verify/expiry are the codec's.
+import { mintClaimsToken, readClaimsToken, type TokenClaims } from "./signed-token";
 
-export interface AccessClaims {
+export interface AccessClaims extends TokenClaims {
   readonly slug: string;
   readonly exp: number; // epoch seconds
   /** The `Acl` mode this token was minted under — the viewer rejects it if the report's
@@ -21,8 +22,23 @@ export interface AccessClaims {
   readonly owner?: boolean;
 }
 
-function sign(payload: string, secret: string): string {
-  return createHmac("sha256", secret).update(payload).digest("base64url");
+/** Narrow a parsed JSON payload into `AccessClaims`, or null if it doesn't look
+ *  like one. Mirrors the pre-codec-extraction validation exactly (same field
+ *  checks, same rejection of a mistyped `mode`/`email`/`owner`). */
+function parseAccessClaims(raw: unknown): AccessClaims | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const claims = raw as Partial<AccessClaims>;
+  if (typeof claims.slug !== "string" || typeof claims.exp !== "number") return null;
+  if (claims.mode !== undefined && typeof claims.mode !== "string") return null;
+  if (claims.email !== undefined && typeof claims.email !== "string") return null;
+  if (claims.owner !== undefined && typeof claims.owner !== "boolean") return null;
+  return {
+    slug: claims.slug,
+    exp: claims.exp,
+    ...(claims.mode !== undefined ? { mode: claims.mode } : {}),
+    ...(claims.email !== undefined ? { email: claims.email } : {}),
+    ...(claims.owner !== undefined ? { owner: claims.owner } : {}),
+  };
 }
 
 /** Mint a slug-bound token valid for `ttlSeconds` from `nowSeconds`. `mode` binds it to the
@@ -41,8 +57,7 @@ export function mintAccessToken(
     ...(extra.email ? { email: extra.email } : {}),
     ...(extra.owner ? { owner: true } : {}),
   };
-  const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
-  return `${payload}.${sign(payload, secret)}`;
+  return mintClaimsToken(claims, secret);
 }
 
 /** Verify + return the claims (incl. `email`), or null if the signature is invalid, it
@@ -53,27 +68,8 @@ export function readAccessToken(
   secret: string,
   nowSeconds: number,
 ): AccessClaims | null {
-  const dot = token.indexOf(".");
-  if (dot <= 0) return null;
-  const payload = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-
-  const expected = sign(payload, secret);
-  const sigBuf = Buffer.from(sig);
-  const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
-
-  let claims: AccessClaims;
-  try {
-    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessClaims;
-  } catch {
-    return null;
-  }
-  if (typeof claims?.slug !== "string" || typeof claims?.exp !== "number") return null;
-  if (claims.mode !== undefined && typeof claims.mode !== "string") return null;
-  if (claims.email !== undefined && typeof claims.email !== "string") return null;
-  if (claims.owner !== undefined && typeof claims.owner !== "boolean") return null;
-  if (claims.exp <= nowSeconds) return null;
+  const claims = readClaimsToken(token, secret, nowSeconds, parseAccessClaims);
+  if (!claims) return null;
   return claims.slug === expectedSlug ? claims : null;
 }
 
