@@ -159,7 +159,8 @@ export function describeReportRepositoryContract(
       expect(page2.ok && page2.value.hasMore).toBe(false);
       // No overlap between the pages.
       const page1Ids = page1.ok ? page1.value.items.map((i) => i.id) : [];
-      expect(page2.ok && page1Ids.includes(page2.value.items[0]?.id ?? "")).toBe(false);
+      const page2FirstId = page2.ok ? page2.value.items[0]?.id : undefined;
+      expect(page2FirstId !== undefined && page1Ids.includes(page2FirstId)).toBe(false);
     });
 
     it("searchByOrg endingBefore pages backward from a cursor", async () => {
