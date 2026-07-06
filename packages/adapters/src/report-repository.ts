@@ -82,7 +82,7 @@ function rowToVersion(row: VersionRow): ReportVersion {
 }
 
 /** Map the 1:1 `acls` row to the domain `Acl` (ADR-0056). No row ⇒ `public`. */
-export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
+function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
   if (!row) return PUBLIC_ACL;
   switch (row.mode) {
     case "password":

@@ -30,7 +30,9 @@ describeFolderRepositoryContract("in-memory", async () => {
     makeFolder(overrides = {}) {
       seq += 1;
       const built = createFolder({
-        id: overrides.id ?? folderId(`00000000-0000-4000-8000-${seq.toString().padStart(12, "0")}`),
+        // Hex like the adapter harness's fixture ids, so both contract runs
+        // order identically past seq 9.
+        id: overrides.id ?? folderId(`00000000-0000-4000-8000-${seq.toString(16).padStart(12, "0")}`),
         orgId: ORG_ID,
         parentId: overrides.parentId === undefined ? ROOT_FOLDER_ID : overrides.parentId,
         name: overrides.name ?? `Folder ${seq}`,
