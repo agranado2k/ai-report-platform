@@ -11,6 +11,7 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { createApiKey, listApiKeys, revokeApiKey } from "arp-application";
 import {
   AppHeader,
   Badge,
@@ -49,7 +50,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!actor.ok) throw errorToJson(actor.error);
   const endpoint = mcpEndpoint(args.request);
   if (!actor.value) return json({ keys: [], mcpEndpoint: endpoint });
-  const keys = await apiKeyStore().listForUser(actor.value.userId);
+  const keys = await listApiKeys({ apiKeys: apiKeyStore() }, { userId: actor.value.userId });
   if (!keys.ok) throw errorToJson(keys.error);
   return json({ keys: keys.value, mcpEndpoint: endpoint });
 }
@@ -65,22 +66,24 @@ export async function action(args: ActionFunctionArgs) {
 
   if (intent === "revoke") {
     const id = String(form.get("id") ?? "");
-    const revoked = await apiKeyStore().revoke(id, actor.value.userId);
+    const revoked = await revokeApiKey(
+      { apiKeys: apiKeyStore() },
+      { userId: actor.value.userId },
+      { id },
+    );
     if (!revoked.ok) return errorToJson(revoked.error);
     return json({ ok: true as const });
   }
 
   // Default intent: create.
-  const name = String(form.get("name") ?? "").trim();
-  if (!name) return json({ error: "Give your key a name." }, { status: 400 });
-  const created = await apiKeyStore().create({
-    actingUserId: actor.value.userId,
-    issuedInOrgId: actor.value.orgId,
-    name,
-    scopes: ["reports:write"],
-  });
+  const name = String(form.get("name") ?? "");
+  const created = await createApiKey(
+    { apiKeys: apiKeyStore() },
+    { userId: actor.value.userId, orgId: actor.value.orgId },
+    { name },
+  );
   if (!created.ok) return errorToJson(created.error);
-  return json({ ok: true as const, secret: created.value.token, name });
+  return json({ ok: true as const, secret: created.value.token, name: created.value.summary.name });
 }
 
 function formatDate(ms: number | null): string {
