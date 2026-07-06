@@ -14,10 +14,10 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
-import { loadOwnedFolder, loadOwnedReport } from "../load-owned";
+import { loadOwnedFolder, loadOwnedReport, type OwnedGuardMessages } from "../load-owned";
 import type { FolderRepository, ReportRepository } from "../ports";
 
-const TARGET_FOLDER_MESSAGES = {
+const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "target folder not found",
   notAllowed: "target folder is not in your org",
 };
