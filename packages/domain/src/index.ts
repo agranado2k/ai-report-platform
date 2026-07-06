@@ -3,6 +3,7 @@
 export * from "./access-token";
 export * from "./acl";
 export * from "./brand";
+export * from "./email-address";
 export * from "./errors";
 export * from "./events";
 export * from "./external-id";
