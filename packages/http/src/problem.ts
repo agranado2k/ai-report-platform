@@ -28,6 +28,10 @@ export function errorToHttp(error: AppError): HttpResponse {
       detail,
       code: p.code,
     },
+    // The one 405 wire shape (ADR-0040) carries its Allow header here — the
+    // single place that maps AppError → response, so every 405 site (API
+    // routes + the webhook/scan-drain method guards) renders identically.
+    ...(error.kind === "MethodNotAllowed" ? { headers: { Allow: error.allow } } : {}),
   };
 }
 
@@ -61,6 +65,8 @@ function problemFor(error: AppError): ProblemSpec {
       return { status: 402, code: "plan_limit_exceeded", title: "Plan limit exceeded" };
     case "RateLimited":
       return { status: 429, code: "rate_limited", title: "Rate limited" };
+    case "MethodNotAllowed":
+      return { status: 405, code: "method_not_allowed", title: "Method not allowed" };
     case "Unexpected":
       return { status: 500, code: "internal_error", title: "Internal server error" };
     // No `default`: when a new AppError kind is added (ADR-0040 plans TooManyFiles
