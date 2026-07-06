@@ -1,6 +1,10 @@
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { FakePasswordHasher, InMemoryReportRepository } from "../testing/in-memory";
+import {
+  FakePasswordHasher,
+  InMemoryGrantStore,
+  InMemoryReportRepository,
+} from "../testing/in-memory";
 import { setAcl } from "./set-acl";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -24,14 +28,18 @@ async function seed(reportOrg = ORG) {
     sizeBytes: 1,
   });
   await reports.save(report);
-  return { reports, hasher: new FakePasswordHasher() };
+  return {
+    reports,
+    hasher: new FakePasswordHasher(),
+    grants: new InMemoryGrantStore({ now: () => Date.now() }),
+  };
 }
 
 describe("setAcl use case (ADR-0056)", () => {
   it("requires the acl:write scope", async () => {
-    const { reports, hasher } = await seed();
+    const { reports, hasher, grants } = await seed();
     const r = await setAcl(
-      { reports, hasher },
+      { reports, hasher, grants },
       { orgId: ORG, scopes: [] },
       {
         slug: SLUG as never,
@@ -43,8 +51,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode hashes the plaintext and persists it (never stores plaintext)", async () => {
-    const { reports, hasher } = await seed();
-    const r = await setAcl({ reports, hasher }, ACTOR, {
+    const { reports, hasher, grants } = await seed();
+    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
       slug: SLUG as never,
       mode: "password",
       password: "hunter2",
@@ -59,15 +67,18 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode without a password is a ValidationError", async () => {
-    const { reports, hasher } = await seed();
-    const r = await setAcl({ reports, hasher }, ACTOR, { slug: SLUG as never, mode: "password" });
+    const { reports, hasher, grants } = await seed();
+    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "password",
+    });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 
   it("allowlist normalizes emails + carries the owner access TTL; empty list is a ValidationError", async () => {
-    const { reports, hasher } = await seed();
-    const ok = await setAcl({ reports, hasher }, ACTOR, {
+    const { reports, hasher, grants } = await seed();
+    const ok = await setAcl({ reports, hasher, grants }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["A@B.com", " a@b.com "],
@@ -78,7 +89,7 @@ describe("setAcl use case (ADR-0056)", () => {
       allowedEmails: ["a@b.com"],
       accessTtlSeconds: 86_400,
     });
-    const bad = await setAcl({ reports, hasher }, ACTOR, {
+    const bad = await setAcl({ reports, hasher, grants }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: [],
@@ -87,18 +98,24 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("sets public / org with no extra data", async () => {
-    const { reports, hasher } = await seed();
-    const r = await setAcl({ reports, hasher }, ACTOR, { slug: SLUG as never, mode: "public" });
+    const { reports, hasher, grants } = await seed();
+    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "public",
+    });
     expect(r.ok && r.value.acl).toEqual({ mode: "public" });
   });
 
   it("rejects a report in another org (NotAllowed) and an unknown slug (NotFound)", async () => {
-    const { reports, hasher } = await seed(orgId("00000000-0000-7000-8000-0000000000a2"));
-    const notMine = await setAcl({ reports, hasher }, ACTOR, { slug: SLUG as never, mode: "org" });
+    const { reports, hasher, grants } = await seed(orgId("00000000-0000-7000-8000-0000000000a2"));
+    const notMine = await setAcl({ reports, hasher, grants }, ACTOR, {
+      slug: SLUG as never,
+      mode: "org",
+    });
     expect(notMine.ok).toBe(false);
     if (!notMine.ok) expect(notMine.error.kind).toBe("NotAllowed");
 
-    const missing = await setAcl({ reports, hasher }, ACTOR, {
+    const missing = await setAcl({ reports, hasher, grants }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
       mode: "org",
     });

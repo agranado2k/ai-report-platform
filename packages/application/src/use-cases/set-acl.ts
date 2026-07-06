@@ -1,7 +1,9 @@
 // setAcl — set a Report's sharing Acl (ADR-0056). Pure orchestration (ADR-0024):
 // `acl:write` scope (ADR-0016) + org ownership (the shared loadOwnedReport
-// guard), hash a new password via the PasswordHasher port, then persist via
-// reports.setAcl. Returns the updated Report.
+// guard), hash a new password via the PasswordHasher port, persist via
+// reports.setAcl, then prune any now-stale `report_grants` rows (ADR-0056 "5e",
+// issue #137) via the GrantStore port — a durable grant must not outlive the
+// Acl that granted it. Returns the updated Report.
 import {
   type AclMode,
   type AppError,
@@ -16,13 +18,14 @@ import {
   validationError,
 } from "arp-domain";
 import { loadOwnedReport } from "../load-owned";
-import type { PasswordHasher, ReportRepository } from "../ports";
+import type { GrantStore, PasswordHasher, ReportRepository } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
 
 export interface SetAclDeps {
   readonly reports: ReportRepository;
   readonly hasher: PasswordHasher;
+  readonly grants: GrantStore;
 }
 
 export interface SetAclActor {
@@ -71,5 +74,38 @@ export async function setAcl(
 
   const saved = await deps.reports.setAcl(found.value.id, acl.value);
   if (!saved.ok) return saved;
+
+  const pruned = await pruneStaleGrants(deps.grants, found.value.id, found.value.acl, acl.value);
+  if (!pruned.ok) return pruned;
+
   return ok({ ...found.value, acl: acl.value });
+}
+
+/**
+ * Revoke `report_grants` rows the new Acl no longer authorizes (ADR-0056 "5e"):
+ * mode switched away from `allowlist` → revoke every grant; mode stays
+ * `allowlist` → revoke just the emails dropped from the roster. Any other
+ * transition (including allowlist → allowlist with only additions) leaves
+ * grants untouched — the previous grants are a strict superset restriction of
+ * the new allowlist, so a re-added email should NOT need to re-redeem a
+ * magic link.
+ */
+async function pruneStaleGrants(
+  grants: GrantStore,
+  reportId: Report["id"],
+  previousAcl: Report["acl"],
+  nextAcl: Report["acl"],
+): Promise<Result<void, AppError>> {
+  if (previousAcl.mode !== "allowlist") return ok(undefined);
+
+  if (nextAcl.mode !== "allowlist") {
+    return grants.revokeAll(reportId);
+  }
+
+  const removed = previousAcl.allowedEmails.filter((e) => !nextAcl.allowedEmails.includes(e));
+  for (const email of removed) {
+    const revoked = await grants.revoke(reportId, email);
+    if (!revoked.ok) return revoked;
+  }
+  return ok(undefined);
 }
