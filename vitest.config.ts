@@ -5,9 +5,16 @@ import { defineConfig } from "vitest/config";
 // packages are pure (ADR-024), so no environment or setup files are needed.
 // `apps/mcp` is included too: unlike the Remix apps (e2e-only), the MCP server's
 // REST-client + tool-mapping logic is pure and unit-testable (ADR-003).
+// `apps/app/app/server` also gets unit coverage for its transport-seam helpers
+// (the `handle()` combinator, etc.) — these are pure enough to test with
+// injected fakes, unlike the rest of the Remix app which stays e2e-only.
 export default defineConfig({
   test: {
-    include: ["packages/*/src/**/*.test.ts", "apps/mcp/src/**/*.test.ts"],
+    include: [
+      "packages/*/src/**/*.test.ts",
+      "apps/mcp/src/**/*.test.ts",
+      "apps/app/app/server/**/*.test.ts",
+    ],
     environment: "node",
   },
 });
