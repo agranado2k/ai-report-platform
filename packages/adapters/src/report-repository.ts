@@ -37,8 +37,14 @@ type ReportRow = typeof reports.$inferSelect;
 type VersionRow = typeof reportVersions.$inferSelect;
 
 // ── Pure mappers ────────────────────────────────────────────────────────────
+// Module-private: no consumer outside this file (they used to be exported
+// solely so report-repository.test.ts could reach past the ReportRepository
+// interface and assert on mapper output / generated SQL strings — that test
+// was deleted; behavior is covered through the public interface by
+// report-repository.integration.test.ts and the ReportRepository contract
+// suite, run against this adapter on pglite, ADR-0046).
 
-export function reportToRow(r: Report): typeof reports.$inferInsert {
+function reportToRow(r: Report): typeof reports.$inferInsert {
   return {
     id: r.id,
     orgId: r.orgId,
@@ -50,10 +56,7 @@ export function reportToRow(r: Report): typeof reports.$inferInsert {
   };
 }
 
-export function versionToRow(
-  reportRowId: string,
-  v: ReportVersion,
-): typeof reportVersions.$inferInsert {
+function versionToRow(reportRowId: string, v: ReportVersion): typeof reportVersions.$inferInsert {
   return {
     id: v.id,
     reportId: reportRowId,
@@ -66,7 +69,7 @@ export function versionToRow(
   };
 }
 
-export function rowToVersion(row: VersionRow): ReportVersion {
+function rowToVersion(row: VersionRow): ReportVersion {
   return {
     id: versionId(row.id),
     versionNo: row.versionNo,
@@ -80,7 +83,7 @@ export function rowToVersion(row: VersionRow): ReportVersion {
 
 /** Map the 1:1 `acls` row to the domain `Acl` (ADR-0056). No row ⇒ `private` (the
  *  private-by-default; sharing is an explicit opt-in). */
-export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
+function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
   if (!row) return DEFAULT_ACL;
   switch (row.mode) {
     case "private":
@@ -102,7 +105,7 @@ export function rowToAcl(row: typeof acls.$inferSelect | undefined): Acl {
   }
 }
 
-export function rowsToReport(report: ReportRow, versions: readonly VersionRow[], acl: Acl): Report {
+function rowsToReport(report: ReportRow, versions: readonly VersionRow[], acl: Acl): Report {
   return {
     id: reportId(report.id),
     orgId: orgId(report.orgId),
@@ -118,7 +121,7 @@ export function rowsToReport(report: ReportRow, versions: readonly VersionRow[],
 
 // scan_status is the only mutable version field post-insert (pending → verdict),
 // so a conflict must refresh it from the inserted row, not no-op.
-export function upsertVersions(db: Db, rows: (typeof reportVersions.$inferInsert)[]) {
+function upsertVersions(db: Db, rows: (typeof reportVersions.$inferInsert)[]) {
   return db
     .insert(reportVersions)
     .values(rows)

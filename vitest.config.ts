@@ -16,5 +16,10 @@ export default defineConfig({
       "apps/app/app/server/**/*.test.ts",
     ],
     environment: "node",
+    // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test
+    // in beforeEach. Each migration snapshot makes that setup heavier, and the
+    // integration + contract suites run many pglite instances in parallel —
+    // under worker contention the default 10s hook timeout trips spuriously.
+    hookTimeout: 30_000,
   },
 });

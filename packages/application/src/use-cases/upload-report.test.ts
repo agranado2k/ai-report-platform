@@ -1,24 +1,7 @@
 import { err, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import {
-  FakeBundleProcessor,
-  FakeHasher,
-  FakePlanLimiter,
-  InMemoryBlobStore,
-  InMemoryEventOutbox,
-  InMemoryIdempotencyStore,
-  InMemoryReportRepository,
-  PassThroughUnitOfWork,
-  RecordingScanQueue,
-  SequentialIdGenerator,
-  SequentialSlugFactory,
-} from "../testing/in-memory";
-import {
-  type UploadActor,
-  type UploadCommand,
-  type UploadReportDeps,
-  uploadReport,
-} from "./upload-report";
+import { makeAppTestHarness } from "../testing/harness";
+import { type UploadActor, type UploadCommand, uploadReport } from "./upload-report";
 
 const sv = (s: string) => {
   const r = makeSlug(s);
@@ -26,29 +9,10 @@ const sv = (s: string) => {
   return r.value;
 };
 
-function makeDeps() {
-  const reports = new InMemoryReportRepository();
-  const blobs = new InMemoryBlobStore();
-  const bundles = new FakeBundleProcessor();
-  const idempotency = new InMemoryIdempotencyStore();
-  const outbox = new InMemoryEventOutbox();
-  const scans = new RecordingScanQueue();
-  const planLimiter = new FakePlanLimiter();
-  const deps: UploadReportDeps = {
-    reports,
-    blobs,
-    bundles,
-    idempotency,
-    outbox,
-    scans,
-    planLimiter,
-    ids: new SequentialIdGenerator(),
-    slugs: new SequentialSlugFactory(),
-    hasher: new FakeHasher(),
-    uow: new PassThroughUnitOfWork(),
-  };
-  return { deps, reports, blobs, bundles, idempotency, outbox, scans, planLimiter };
-}
+// Exemplar conversion to the shared harness (mission: shared use-case test
+// harness) — was 11 hand-wired fakes; now one call, with named handles for
+// assertions preserved.
+const makeDeps = makeAppTestHarness;
 
 const actor = (over: Partial<UploadActor> = {}): UploadActor => ({
   userId: userId("u1"),
