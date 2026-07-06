@@ -12,7 +12,7 @@
 import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { provisionIdentity, type UploadActor } from "arp-application";
+import { principalToUploadActor, provisionIdentity, type UploadActor } from "arp-application";
 import {
   type AppError,
   err,
@@ -139,10 +139,7 @@ export async function resolveUploadActor(
     if (!resolved.value) {
       return err({ kind: "Unauthenticated", message: "invalid or revoked API key" });
     }
-    // The resolved principal's org Root folder is the Phase-1 write default
-    // (ADR-0048); scopes come from the key row (ADR-0016), not hardcoded.
-    const p = resolved.value;
-    return ok({ userId: p.userId, orgId: p.orgId, folderId: p.rootFolderId, scopes: p.scopes });
+    return ok(principalToUploadActor(resolved.value));
   }
 
   // Clerk session path (ADR-0048): a browser sign-in carries the email custom claim.
