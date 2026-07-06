@@ -1,6 +1,6 @@
 # ADR-0056: Report sharing & ACLs — app-authorized, viewer-verified access tokens
 
-- **Status**: Accepted
+- **Status**: Accepted — "owner = any member of the owning org" **amended by ADR-0059** (creator is owner, incl. the `/open` owner-token mint); P4 + P5's collaborator half **superseded by ADR-0060** (per-report write grants; P5's `AclChanged` event unaffected)
 - **Date**: 2026-06-24
 - **Deciders**: agranado2k
 - **Relates to / amends**: ADR-0038 (viewer access & serving — extends it from public-only to private modes), ADR-002 (PSL origin isolation), ADR-009 (folder-inherited grants), ADR-0036 (DDD — `Acl` ∈ `Report` aggregate, `Collaborator` ∈ `Folder`), ADR-0052 (External Ids — `grant_`), ADR-0053 (Stripe wire conventions), ADR-0040 (RFC-9457 errors), ADR-0016 (`acl:write` scope), ADR-0048/0054 (Clerk webhooks).
