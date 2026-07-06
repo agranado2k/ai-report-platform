@@ -41,7 +41,7 @@ Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they
 
 ### Reports & Folders
 
-**Owns**: `folders`, `reports`, `report_versions`, `acls`, `report_grants`, `report_write_grants` (and the superseded, unused `folder_collaborators` — ADR-0060 — pending a cleanup migration).
+**Owns**: `folders`, `reports`, `report_versions`, `acls`, `report_grants`, `report_write_grants` (lands with the write-grants build, ADR-0060) — and the superseded, unused `folder_collaborators` (ADR-0060), pending a cleanup migration.
 
 **Aggregates**:
 - `Folder` (root) — the folder tree. Org-scoped (no per-user owner, ADR-0059); the superseded `Collaborator` grant chain (ADR-009/0056 P4) never became behavioral code.
