@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-06-29
+## Current state — 2026-07-06
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `bebc86b` — Merge PR #123 (Forge & Ember redesign, final PR). |
+| **Last commit on main**| `89a5b7b` — Merge PR #131 (architecture-deepening wave, final PR; see 2026-07-06 entry). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/forge-ember-diary` (this redesign diary PR). |
+| **Active worktrees**   | `docs/diary-architecture-deepening` (this entry). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -24,6 +24,7 @@
 - **Final project name — resolved:** brand **Centaur**, full name **Centaur Spec** (domain centaurspec.com).
 - PSL submission — open the PR against `publicsuffix/list` to add `view.centaurspec.com` (2-6 wk SLA; ship without waiting).
 - R2 bucket versioning — `TODO` in `modules/r2/main.tf` (cloudflare provider didn't expose versioning as a resource arg; revisit on a provider bump or wrap via the R2 API).
+- **Should re-upload to a soft-deleted slug resurrect the report?** `uploadReport`'s reUpload path has no `deletedAt` filter, so it currently does (surfaced by the #128 review). Decide: intended behavior (document it in a code comment) or a bug (add the guard). Related: issue #132 (create-folder accepts a soft-deleted parent).
 
 ### Memory pointers for future-me
 
@@ -1764,3 +1765,45 @@ name out of user-facing copy + project docs and the safe identifiers (root packa
 The **technical identity stays `ai-report-platform`** — the GitHub repo, Neon `project_name`, git
 remote, local path, Terraform resources, and `arp-*` workspace packages — since renaming those breaks
 git/infra/CI/state. (See the domain glossary's "Product name" note.)
+
+### 2026-07-06 — Architecture deepening wave: /improve-codebase-architecture → PRs #128–#131
+
+Ran `/improve-codebase-architecture` over the whole codebase (three parallel explorer agents:
+hexagonal core / transport apps / test surface). The report — published via Centaur itself,
+https://view.centaurspec.com/ZWHv3H00uf (rebuilt self-contained after the first upload proved the
+viewer CSP correctly blocks CDN scripts) — surfaced 8 deepening candidates. The pattern: the deep
+modules were exemplary (MCP `ApiClient`, viewer access core, `arp-http`), but the glue *around* them
+was copy-pasted and untested. Implemented as four agent-authored PRs (one worktree each), all
+bot-reviewed LGTM and `/pr-iterate`'d to green:
+
+- **#128 — tenancy guard.** `loadOwnedReport`/`loadOwnedFolder` resolvers replace the ~11-site
+  copy-pasted load → not-found (incl. soft-delete) → org-check triple; the guard matrix is tested
+  once instead of ×7. Surfaced a latent bug — `create-folder` accepts a soft-deleted parent —
+  tracked as **issue #132**.
+- **#129 — sharing codec.** One signed-token codec behind the `Access token` + `Magic link`
+  (wire-format golden vectors written *before* refactoring; pass unchanged), and an `EmailAddress`
+  Value Object ending the 3× email-normalization duplication (the review-#114 drift class).
+  Glossary gains **Signed-token codec** and **EmailAddress**.
+- **#130 — route seam.** A `handle()` combinator owns the `/api/v1` choreography (actor resolution,
+  body parse, id decode, Problem mapping, Request-Id) — previously inlined ×10 with zero tests; 405
+  gets one wire shape (`MethodNotAllowed` in `problemFor`); the dashboard rejoins the one error
+  authority + validating id decoders; new use-case seams (`listFolders`, `listApiKeys`/`create`/
+  `revoke`, `getReportAcl`); the `authenticateApiKey` pass-through deleted in favor of a covered
+  `principalToUploadActor` helper; `parseCursorParams` + `secretMatches` rehomed to `arp-http`.
+- **#131 — test seams.** Port-contract suites run against BOTH the in-memory fake and the Drizzle
+  adapter on pglite — immediately caught and fixed a real fake/real ordering divergence that had
+  only been documented in a comment. `report-repository`'s SQL-string/mapper-export test deleted
+  (mappers re-privatised); `makeAppTestHarness()` added; `packages/headers` went from 0 tests to a
+  full ADR-013 characterization suite (+ injectable report-to URL). Merging main (#127's new
+  migration) tripped pglite `beforeEach` timeouts under parallel workers → vitest `hookTimeout` 30s.
+
+**Deliberately not done:** report candidate #8 (unify `ScanQueue`/`ScanWorkQueue`) — contradicts
+ADR-0045's deliberate source-of-truth/delivery split; revisit only if the `drainScans` reconciler
+grows with the real Scanner.
+
+Process notes: two of the four parallel agents cross-contaminated each other's worktrees with
+*uncommitted* edits (relative-path `cd` slips); caught via `git status`, all committed work was on
+the correct branches, strays verified as duplicates and dropped. Lesson encoded in the agent briefs:
+absolute paths + per-path staging, never `git add -A`. Flag per the update protocol: **PR #127
+(private-by-default ACL) merged without a diary entry** — the current-state block reflects it only
+incidentally (the #131 merge conflict); its own entry is still owed.
