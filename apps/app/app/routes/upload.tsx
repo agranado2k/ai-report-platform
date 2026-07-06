@@ -9,6 +9,7 @@ import { uploadReport } from "arp-application";
 import { AppHeader, Button, buttonClass, Card, Input, PageShell, Textarea } from "../components";
 import { resolveUploadActor } from "../server/auth.server";
 import { deps, viewOrigin } from "../server/container.server";
+import { errorToJson } from "../server/http.server";
 
 export const meta: MetaFunction = () => [{ title: "Upload a report — Centaur" }];
 
@@ -23,9 +24,10 @@ export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) {
     if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
-    // Any other actor-resolution failure (e.g. Clerk org provisioning) is a
-    // server-side problem — surface a generic 5xx, don't leak the kind/message.
-    return json({ error: "Couldn't verify your account. Please try again." }, { status: 500 });
+    // Any other actor-resolution failure (e.g. Clerk org provisioning) routes
+    // through the same problemFor/errorToHttp status authority the JSON API
+    // uses — Unexpected's message is already masked behind a generic detail.
+    return errorToJson(actor.error);
   }
 
   const result = await uploadReport(deps(), {
@@ -33,9 +35,7 @@ export async function action(args: ActionFunctionArgs) {
     upload: { filename: "index.html", bytes: new TextEncoder().encode(html) },
     title,
   });
-  if (!result.ok) {
-    return json({ error: `${result.error.kind}: ${result.error.message}` }, { status: 400 });
-  }
+  if (!result.ok) return errorToJson(result.error);
   const out = result.value;
   const { slug, version, scanStatus } = out.result;
 

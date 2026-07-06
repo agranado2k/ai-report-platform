@@ -2,6 +2,7 @@
 // every JSON API route (upload, list, …) so the transport translation lives in
 // one place; all policy/shape decisions stay in the pure arp-http mappers.
 
+import { json } from "@remix-run/node";
 import { type AppError, encodeExternalId, err, ok, type Result, validationError } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { errorToHttp, type HttpResponse, type WireContext } from "arp-http";
@@ -84,4 +85,22 @@ export function unauthenticated(): HttpResponse {
     kind: "Unauthenticated",
     message: "a signed-in session with an active organization is required",
   });
+}
+
+/**
+ * The dashboard (Remix `action`/`loader`) equivalent of `errorToHttp` — routes
+ * dashboard errors through the SAME problemFor/errorToHttp status authority the
+ * JSON API uses, instead of the ad hoc `kind === "ValidationError" ? 422 : 400`
+ * ternaries that used to collapse NotFound/NotAllowed/PlanLimitExceeded/etc. to
+ * a generic 400. Wraps the (already Unexpected-masked) detail message in the
+ * `{ error: string }` shape the dashboard's `actionData` already renders — it
+ * doesn't need the full RFC 9457 problem+json body, just the right status.
+ */
+export function errorToJson(error: AppError) {
+  const http = errorToHttp(error);
+  const detail = (http.body as { detail?: unknown }).detail;
+  return json(
+    { error: typeof detail === "string" ? detail : error.message },
+    { status: http.status },
+  );
 }

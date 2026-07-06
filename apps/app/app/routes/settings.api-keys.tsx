@@ -25,10 +25,9 @@ import {
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { apiKeyStore, appOrigin } from "../server/container.server";
+import { errorToJson } from "../server/http.server";
 
 export const meta: MetaFunction = () => [{ title: "API keys & MCP — Centaur" }];
-
-const GENERIC_500 = "Couldn't verify your account. Please try again.";
 
 /** The MCP server lives at `mcp.<apex>` (a sibling of this app at `app.<apex>`);
  *  derive its `/mcp` endpoint from the app origin so the Connect helper is right
@@ -47,11 +46,11 @@ export async function loader(args: LoaderFunctionArgs) {
   // document requests to sign-in). A signed-in user with no mirror yet simply
   // has no keys; provisioning happens on the first mint (the POST below).
   const actor = await resolveActorForRead(args);
-  if (!actor.ok) throw json({ error: GENERIC_500 }, { status: 500 });
+  if (!actor.ok) throw errorToJson(actor.error);
   const endpoint = mcpEndpoint(args.request);
   if (!actor.value) return json({ keys: [], mcpEndpoint: endpoint });
   const keys = await apiKeyStore().listForUser(actor.value.userId);
-  if (!keys.ok) throw json({ error: "Couldn't load your API keys." }, { status: 500 });
+  if (!keys.ok) throw errorToJson(keys.error);
   return json({ keys: keys.value, mcpEndpoint: endpoint });
 }
 
@@ -59,7 +58,7 @@ export async function action(args: ActionFunctionArgs) {
   const actor = await resolveUploadActor(args);
   if (!actor.ok) {
     if (actor.error.kind === "Unauthenticated") return redirect("/sign-in");
-    return json({ error: GENERIC_500 }, { status: 500 });
+    return errorToJson(actor.error);
   }
   const form = await args.request.formData();
   const intent = String(form.get("intent") ?? "");
@@ -67,7 +66,7 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "revoke") {
     const id = String(form.get("id") ?? "");
     const revoked = await apiKeyStore().revoke(id, actor.value.userId);
-    if (!revoked.ok) return json({ error: "Couldn't revoke that key." }, { status: 500 });
+    if (!revoked.ok) return errorToJson(revoked.error);
     return json({ ok: true as const });
   }
 
@@ -80,13 +79,7 @@ export async function action(args: ActionFunctionArgs) {
     name,
     scopes: ["reports:write"],
   });
-  if (!created.ok) {
-    // Most likely the server pepper isn't configured yet (fail-closed, ADR-0008).
-    return json(
-      { error: "Couldn't create the key. Check that API keys are enabled." },
-      { status: 500 },
-    );
-  }
+  if (!created.ok) return errorToJson(created.error);
   return json({ ok: true as const, secret: created.value.token, name });
 }
 
