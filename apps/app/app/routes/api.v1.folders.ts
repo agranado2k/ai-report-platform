@@ -5,10 +5,10 @@
 // parent_id so a client can rebuild the tree.
 import { createFolder, listFolders } from "arp-application";
 import { makeFolderId } from "arp-domain";
-import { createFolderToHttp, listFoldersToHttp } from "arp-http";
+import { createFolderToHttp, listFoldersToHttp, parseCursorParams } from "arp-http";
 import { deps, folderRepo } from "../server/container.server";
 import { handle } from "../server/handle.server";
-import { parseCursorParams, wireContext } from "../server/http.server";
+import { wireContext } from "../server/http.server";
 
 // GET /api/v1/folders — cursor-paginated folder list (ADR-0053): `limit`,
 // `starting_after`/`ending_before` (a folder_ id). parent_id links the tree.

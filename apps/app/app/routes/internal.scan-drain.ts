@@ -8,12 +8,11 @@
 // `fetch` claims jobs with FOR UPDATE SKIP LOCKED, so concurrent ticks split the
 // work rather than double-process, and the reconcile/processing is idempotent.
 
-import { timingSafeEqual } from "node:crypto";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { drainScans } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { defineEnv } from "arp-env";
-import { errorToHttp } from "arp-http";
+import { errorToHttp, secretMatches } from "arp-http";
 import { scanDrainDeps } from "../server/container.server";
 import { toResponse } from "../server/http.server";
 
@@ -31,13 +30,6 @@ function bearerToken(header: string | null): string | undefined {
   if (!header) return undefined;
   const [scheme, token] = header.split(" ");
   return scheme?.toLowerCase() === "bearer" && token ? token : undefined;
-}
-
-function secretMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  // timingSafeEqual requires equal lengths; a length mismatch is simply a miss.
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export async function action({ request }: ActionFunctionArgs) {

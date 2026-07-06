@@ -3,7 +3,7 @@
 // one place; all policy/shape decisions stay in the pure arp-http mappers.
 
 import { json } from "@remix-run/node";
-import { type AppError, encodeExternalId, err, ok, type Result, validationError } from "arp-domain";
+import { type AppError, encodeExternalId } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { errorToHttp, type HttpResponse, type WireContext } from "arp-http";
 import { activeTraceId } from "arp-observability";
@@ -38,40 +38,6 @@ export function toResponse(http: HttpResponse): Response {
  *  from the env (`live` key env → "prod", else "dev"). */
 export function wireContext(): WireContext {
   return { mode: defineEnv().API_KEY_ENV === "live" ? "prod" : "dev" };
-}
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-
-/**
- * Parse the cursor-pagination params (ADR-0053): `limit` (clamped 1..100, default
- * 20) + `starting_after`/`ending_before` decoded via the entity's `make*Id` (a
- * malformed cursor → 422). The single place the pagination rule lives.
- */
-export function parseCursorParams<Id>(
-  sp: URLSearchParams,
-  decode: (s: string) => Result<Id, AppError>,
-): Result<{ limit: number; startingAfter?: Id; endingBefore?: Id }, AppError> {
-  const raw = Number.parseInt(sp.get("limit") ?? "", 10);
-  const limit = Number.isFinite(raw) ? Math.min(MAX_LIMIT, Math.max(1, raw)) : DEFAULT_LIMIT;
-
-  const out: { limit: number; startingAfter?: Id; endingBefore?: Id } = { limit };
-  const after = sp.get("starting_after")?.trim();
-  const before = sp.get("ending_before")?.trim();
-  if (after && before) {
-    return err(validationError("pass only one of starting_after / ending_before", "cursor"));
-  }
-  if (after) {
-    const d = decode(after);
-    if (!d.ok) return d;
-    out.startingAfter = d.value;
-  }
-  if (before) {
-    const d = decode(before);
-    if (!d.ok) return d;
-    out.endingBefore = d.value;
-  }
-  return ok(out);
 }
 
 /**
