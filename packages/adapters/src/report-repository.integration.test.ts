@@ -62,11 +62,11 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     }
   });
 
-  it("setAcl upserts the Acl; findBySlug loads it (default public when unset, ADR-0056)", async () => {
+  it("setAcl upserts the Acl; findBySlug loads it (default private when unset, ADR-0056)", async () => {
     await repo.save(newReport());
-    // No acls row yet → default public.
+    // No acls row yet → default private (private-by-default).
     const before = await repo.findBySlug(makeSlugOrThrow(SLUG));
-    expect(before.ok && before.value?.acl).toEqual({ mode: "public" });
+    expect(before.ok && before.value?.acl).toEqual({ mode: "private" });
 
     // Set password mode → persisted + loaded.
     await repo.setAcl(RID, { mode: "password", passwordHash: "$argon2id$abc" });

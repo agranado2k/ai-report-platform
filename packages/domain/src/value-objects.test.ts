@@ -11,7 +11,7 @@ describe("value objects", () => {
 
   it("exposes the closed enumerations", () => {
     expect(SCAN_STATUSES).toEqual(["pending", "clean", "flagged", "blocked"]);
-    expect(ACL_MODES).toEqual(["public", "password", "org", "allowlist"]);
+    expect(ACL_MODES).toEqual(["private", "public", "password", "org", "allowlist"]);
     expect(GRANT_LEVELS).toEqual(["editor", "admin"]);
   });
 });

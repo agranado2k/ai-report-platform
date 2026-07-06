@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ACCESS_TTL_SECONDS,
+  DEFAULT_ACL,
   isPrivateAcl,
   MAX_ACCESS_TTL_SECONDS,
   makeAcl,
+  PRIVATE_ACL,
   PUBLIC_ACL,
 } from "./acl";
 import type { AclMode } from "./value-objects";
 
 describe("Acl (ADR-0056)", () => {
-  it("PUBLIC_ACL is the default and is not private", () => {
-    expect(PUBLIC_ACL).toEqual({ mode: "public" });
+  it("DEFAULT_ACL is private (private-by-default) — only public is non-private", () => {
+    expect(DEFAULT_ACL).toEqual({ mode: "private" });
+    expect(DEFAULT_ACL).toEqual(PRIVATE_ACL);
+    expect(isPrivateAcl(PRIVATE_ACL)).toBe(true);
     expect(isPrivateAcl(PUBLIC_ACL)).toBe(false);
   });
 
-  it("org / password / allowlist are private (need authorization)", () => {
+  it("private / org / password / allowlist are private (need authorization)", () => {
+    expect(isPrivateAcl({ mode: "private" })).toBe(true);
     expect(isPrivateAcl({ mode: "org" })).toBe(true);
     expect(isPrivateAcl({ mode: "password", passwordHash: "h" })).toBe(true);
     expect(
@@ -22,7 +27,8 @@ describe("Acl (ADR-0056)", () => {
     ).toBe(true);
   });
 
-  it("makeAcl builds public / org with no extra data", () => {
+  it("makeAcl builds private / public / org with no extra data", () => {
+    expect(makeAcl({ mode: "private" })).toEqual({ ok: true, value: { mode: "private" } });
     expect(makeAcl({ mode: "public" })).toEqual({ ok: true, value: { mode: "public" } });
     expect(makeAcl({ mode: "org" })).toEqual({ ok: true, value: { mode: "org" } });
   });

@@ -576,7 +576,7 @@ components:
           description: Resource type discriminator (ADR-0053). Present on the standalone GET /acl response; omitted when embedded in a report resource.
         mode:
           type: string
-          enum: [public, password, org, allowlist]
+          enum: [private, public, password, org, allowlist]
           description: Who may view the report (ADR-0056).
         allowed_emails:
           type: array
@@ -668,7 +668,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [public, password, org, allowlist]
+          enum: [private, public, password, org, allowlist]
         password:
           type: string
           description: Plaintext password (password mode only); hashed argon2id server-side, never stored or returned.

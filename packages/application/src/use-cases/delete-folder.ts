@@ -1,18 +1,18 @@
 // deleteFolder — soft-delete a Folder in the acting org (ADR-0036, Reports &
 // Folders). Pure orchestration over the Folder + Report repositories (ADR-0024):
-// load → authz → reject the Root → reject a non-empty folder (any subfolder or
-// any report placed here) → softDelete. "Block if non-empty" is the chosen
-// policy: the caller empties a folder (move its contents out) before deleting.
+// load+authz (the shared loadOwnedFolder guard) → reject the Root → reject a
+// non-empty folder (any subfolder or any report placed here) → softDelete.
+// "Block if non-empty" is the chosen policy: the caller empties a folder (move
+// its contents out) before deleting.
 import {
   type AppError,
   err,
   type FolderId,
-  notAllowed,
-  notFound,
   type OrgId,
   type Result,
   validationError,
 } from "arp-domain";
+import { loadOwnedFolder } from "../load-owned";
 import type { FolderRepository, ReportRepository } from "../ports";
 
 export interface DeleteFolderDeps {
@@ -31,10 +31,8 @@ export async function deleteFolder(
   actor: DeleteFolderActor,
   input: DeleteFolderInput,
 ): Promise<Result<void, AppError>> {
-  const found = await deps.folders.findById(input.folderId);
+  const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
   if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) return err(notFound("folder not found"));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed("folder is not in your org"));
   if (found.value.parentId === null) {
     return err(validationError("the Root folder cannot be deleted", "folderId"));
   }

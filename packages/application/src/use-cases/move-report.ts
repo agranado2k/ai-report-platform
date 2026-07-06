@@ -1,14 +1,12 @@
 // moveReport — move a Report into a different Folder within the acting org
 // (ADR-0036, Reports & Folders). Pure orchestration over the Report + Folder
 // repositories (ADR-0024). Authorization boundary: BOTH the report and the
-// target folder must belong to the actor's org. Persists via the report's save
-// (which now upserts folder_id).
+// target folder must belong to the actor's org — the shared loadOwnedReport /
+// loadOwnedFolder guard for each, the latter with target-folder message text.
+// Persists via the report's save (which now upserts folder_id).
 import {
   type AppError,
-  err,
   type FolderId,
-  notAllowed,
-  notFound,
   type OrgId,
   ok,
   placeInFolder,
@@ -16,7 +14,13 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { loadOwnedFolder, loadOwnedReport, type OwnedGuardMessages } from "../load-owned";
 import type { FolderRepository, ReportRepository } from "../ports";
+
+const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
+  notFound: "target folder not found",
+  notAllowed: "target folder is not in your org",
+};
 
 export interface MoveReportDeps {
   readonly reports: ReportRepository;
@@ -37,19 +41,16 @@ export async function moveReport(
   actor: MoveReportActor,
   input: MoveReportInput,
 ): Promise<Result<Report, AppError>> {
-  const found = await deps.reports.findBySlug(input.slug);
+  const found = await loadOwnedReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) return err(notFound("report not found"));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed("report is not in your org"));
 
-  const target = await deps.folders.findById(input.toFolderId);
+  const target = await loadOwnedFolder(
+    deps.folders,
+    actor,
+    input.toFolderId,
+    TARGET_FOLDER_MESSAGES,
+  );
   if (!target.ok) return target;
-  if (!target.value || target.value.deletedAt !== null) {
-    return err(notFound("target folder not found"));
-  }
-  if (target.value.orgId !== actor.orgId) {
-    return err(notAllowed("target folder is not in your org"));
-  }
 
   const moved = placeInFolder(found.value, input.toFolderId);
   const saved = await deps.reports.save(moved);
