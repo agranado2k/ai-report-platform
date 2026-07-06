@@ -10,6 +10,7 @@ export * from "./use-cases/delete-report";
 export * from "./use-cases/drain-scans";
 export * from "./use-cases/get-report";
 export * from "./use-cases/handle-user-deleted";
+export * from "./use-cases/list-folders";
 export * from "./use-cases/move-report";
 export * from "./use-cases/process-scan-result";
 export * from "./use-cases/provision-identity";

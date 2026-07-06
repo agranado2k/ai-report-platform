@@ -10,6 +10,7 @@ import {
   createFolder,
   deleteFolder,
   deleteReport,
+  listFolders,
   moveReport,
   renameFolder,
   renameReport,
@@ -80,9 +81,11 @@ export async function loader(args: LoaderFunctionArgs) {
   };
   if (!actor) return json(empty);
 
-  const foldersR = await folderRepo().listByOrg(actor.orgId);
+  // No pagination params → listFolders returns the WHOLE org folder tree in
+  // one unpaginated page (the sidebar needs every folder to build it).
+  const foldersR = await listFolders({ folders: folderRepo() }, { orgId: actor.orgId });
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  const folders: FolderNode[] = (foldersR.ok ? foldersR.value : []).map((f) => ({
+  const folders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
     id: folderIdToWire(f.id),
     parentId: f.parentId ? folderIdToWire(f.parentId) : null,
     name: f.name,

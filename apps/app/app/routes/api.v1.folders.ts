@@ -3,7 +3,7 @@
 // resolve the actor (no provisioning on a read) → list via the FolderRepository
 // → serialize through the pure arp-http mapper. The flat list carries
 // parent_id so a client can rebuild the tree.
-import { createFolder } from "arp-application";
+import { createFolder, listFolders } from "arp-application";
 import { makeFolderId } from "arp-domain";
 import { createFolderToHttp, listFoldersToHttp } from "arp-http";
 import { deps, folderRepo } from "../server/container.server";
@@ -17,7 +17,7 @@ export const loader = handle({
   run: ({ args, actor }) => {
     const cursor = parseCursorParams(new URL(args.request.url).searchParams, makeFolderId);
     if (!cursor.ok) return cursor; // malformed cursor → 422
-    return folderRepo().searchByOrg(actor.orgId, cursor.value);
+    return listFolders({ folders: folderRepo() }, { orgId: actor.orgId }, cursor.value);
   },
   toHttp: (result) => listFoldersToHttp(result, wireContext()),
 });
