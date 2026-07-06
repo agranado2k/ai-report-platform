@@ -29,13 +29,16 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0053 | [Full Stripe-style API conventions — object/list envelopes, cursor pagination, mode + Request-Id](0053-api-payload-shape.md) | Accepted (2026-06-23, amended same day: livemode→mode) |
 | 0054 | [User soft-delete via the Clerk user.deleted webhook (terminal, API-key revoke cascade)](0054-user-soft-delete.md) | Accepted (2026-06-23) |
 | 0055 | [OpenTelemetry observability — three pillars to Grafana Cloud](0055-opentelemetry-observability.md) | Accepted (2026-06-23) — amends ADR-0053 §5 |
-| 0056 | [Report sharing & ACLs — app-authorized, viewer-verified access tokens](0056-report-sharing-acls.md) | Accepted (2026-06-24) — extends ADR-0038 |
+| 0056 | [Report sharing & ACLs — app-authorized, viewer-verified access tokens](0056-report-sharing-acls.md) | Accepted (2026-06-24) — extends ADR-0038; "owner = any org member" amended by 0059; P4/P5 collaborators superseded by 0060 |
 | 0057 | [Transactional email via Resend (the allowlist magic link)](0057-transactional-email-resend.md) | Accepted (2026-06-26) — supports ADR-0056 |
 | 0058 | ["Forge & Ember" warm-dark design system](0058-forge-and-ember-design-system.md) | Accepted (2026-06-29) — amends ADR-0050 |
+| 0059 | [Per-user report ownership — the creator is the owner](0059-per-user-report-ownership.md) | Accepted (2026-07-06) — amends ADR-0056 |
+| 0060 | [Per-report write grants — supersedes folder collaborators](0060-per-report-write-grants.md) | Accepted (2026-07-06) — supersedes ADR-009 + ADR-0056 P4/P5 |
+| 0061 | [Organization types & membership — personal and team orgs](0061-organization-types-and-membership.md) | Accepted (2026-07-06) — activates ADR-005; requires 0059 first |
 
 ## Backlog (ADRs 1–30 from the spec)
 
-The 30 foundational ADRs (ADR-001 through ADR-030) live inside `docs/spec.html` (rev 7) and have not yet been extracted into individual files in this directory. Tracked as a housekeeping follow-up. **Extracted so far** (on first implementation): ADR-0008, ADR-0016 (both 2026-06-19) — now standalone files in the table above; ADR-0008 also amends the spec's original hashing/prefix scheme.
+The 30 foundational ADRs (ADR-001 through ADR-030) live inside `docs/spec.html` (rev 7) and have not yet been extracted into individual files in this directory. Tracked as a housekeeping follow-up. **Extracted so far** (on first implementation): ADR-0008, ADR-0016 (both 2026-06-19) — now standalone files in the table above; ADR-0008 also amends the spec's original hashing/prefix scheme. **Superseded in place**: ADR-009 (folder-inherited write grants) is superseded by ADR-0060 — the spec carries the supersession note at its next revision.
 
 ## Decisions recorded in the development diary (not ADRs)
 

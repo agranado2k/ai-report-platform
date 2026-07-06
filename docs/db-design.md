@@ -55,7 +55,8 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
 | Enum | Values |
 |---|---|
 | `plan` | `free`, `pro` |
-| `grant_level` | `editor`, `admin` |
+| `org_kind` | `personal`, `team` (ADR-0061; default `personal`; lands with the team-orgs build) |
+| `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `scan_job_status` | `queued`, `running`, `done`, `failed` |
 | `acl_mode` | `private`, `public`, `password`, `org`, `allowlist` |
@@ -76,6 +77,7 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
 | `id` | uuid PK | UUIDv7 |
 | `clerk_org_id` | text | unique; mirror of Clerk org |
 | `name` | text | |
+| `kind` | `org_kind` | `personal` / `team` (ADR-0061); default `personal`; lands with the team-orgs build |
 | `plan` | `plan` | default `free` |
 | `plan_limits_json` | jsonb | quota ceilings (`PlanLimits`, ADR-006) |
 | `created_at` / `updated_at` | timestamptz | |
@@ -125,7 +127,10 @@ Indexes: `key_prefix`, `acting_user_id`, `last_used_at`.
 
 Indexes: `org_id`, `(org_id, id DESC) WHERE deleted_at IS NULL` (cursor-paginated `searchByOrg`, keyset on the folder id, ADR-0053), `(org_id, parent_id, slug) WHERE deleted_at IS NULL` unique, and `(org_id, slug) WHERE parent_id IS NULL AND deleted_at IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048). Both exclude soft-deleted rows so a deleted folder doesn't keep its sibling-slug slot (recreating a same-named folder must succeed, ADR-0036).
 
-#### `folder_collaborators` — grants (Phase 2.5)
+#### `folder_collaborators` — **superseded, unused** (ADR-0060; was ADR-009 / ADR-0056 P4)
+
+Never gained behavioral code; per-report `report_write_grants` replaces the design. The table (and `grant_level`) stays in the schema until a cleanup migration drops it (expand/contract — not dropped in the ownership epic).
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
@@ -142,7 +147,8 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
-| `org_id` | uuid FK → orgs | |
+| `org_id` | uuid FK → orgs | tenancy home |
+| `owner_id` | uuid FK → users **ON DELETE RESTRICT** | the creating user = the `Owner` (ADR-0059); backfilled from the version-1 `uploaded_by_user`; NOT NULL after backfill (migration 0010) |
 | `folder_id` | uuid FK → folders | placement at create (ADR-0037); **mutable** — reassigned by the move-report operation (ADR-0036) |
 | `slug` | varchar(10) | immutable `nanoid(10)`; the public URL + capability (ADR-0038) |
 | `title` | text | |
@@ -150,7 +156,7 @@ Indexes: `folder_id`, `grantee_email`, `(folder_id, grantee_email)` unique.
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | takedown → soft delete |
 
-Indexes: `slug` unique, `(org_id, folder_id)`, `(org_id, id DESC) WHERE deleted_at IS NULL` (serves the cursor-paginated org-wide listing/search — `searchByOrg`, keyset on the report id, ADR-0053), `(org_id, updated_at DESC) WHERE deleted_at IS NULL` (retained for any `updated_at`-ordered access), `deleted_at` partial.
+Indexes: `slug` unique, `(org_id, folder_id)`, `(org_id, id DESC) WHERE deleted_at IS NULL` (serves the cursor-paginated org-wide listing/search — `searchByOrg`, keyset on the report id, ADR-0053), `(org_id, updated_at DESC) WHERE deleted_at IS NULL` (retained for any `updated_at`-ordered access), `owner_id` (ADR-0059), `deleted_at` partial.
 The `reports.live_version_id ↔ report_versions.report_id` cycle is broken by
 making `live_version_id` nullable and set after the first version commits.
 
@@ -194,6 +200,17 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | `expires_at` | timestamptz | `granted_at + acl.access_ttl_seconds`; the viewer checks `> now()` per request |
 
 PK `(report_id, email)` — one grant per allowlisted viewer; redeem upserts. Created on redeem; the viewer's per-request `isGranted` check is what makes revocation immediate (removing the email / switching mode deletes the row). `report_grants_expires_at_idx` supports the expired-row purge job.
+
+#### `report_write_grants` — per-report write grants (ADR-0060; lands with the write-grants build)
+| Column | Type | Notes |
+|---|---|---|
+| `report_id` | uuid FK → reports **ON DELETE CASCADE** | part of the PK |
+| `grantee_email` | text | normalized (`EmailAddress`); part of the PK |
+| `grantee_user_id` | uuid FK → users NULL | resolved lazily — set at grant time if the user exists, else matched by email at check time |
+| `granted_by` | uuid FK → users | the `Owner` who granted |
+| `granted_at` | timestamptz | |
+
+PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists until revoked), no `permission` level (one implicit level: rename + re-upload + move — ADR-0060), no surrogate id (wire-addressed as `(slug, email)`). View access is NOT conferred — the read capability stays with the `Acl`.
 
 ### Abuse & Moderation
 
