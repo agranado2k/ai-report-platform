@@ -81,7 +81,8 @@ describe("handle() — read mode", () => {
     const res = await action({ request: req(), params: { slug: "abc1234567" }, context: {} });
     expect(res.status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
-    const ctx = run.mock.calls[0]![0];
+    const ctx = run.mock.calls[0]?.[0];
+    if (!ctx) throw new Error("run was not called");
     expect(ctx.actor).toEqual(readActor);
     expect(ctx.slug).toBe("abc1234567");
     expect(toHttp).toHaveBeenCalledWith(await run.mock.results[0]?.value, ctx);
@@ -161,7 +162,8 @@ describe("handle() — write mode", () => {
       context: {},
     });
     expect(res.status).toBe(200);
-    const ctx = run.mock.calls[0]![0];
+    const ctx = run.mock.calls[0]?.[0];
+    if (!ctx) throw new Error("run was not called");
     expect(ctx.body).toEqual({ name: "x" });
     expect(ctx.actor).toEqual(writeActor);
   });
@@ -209,7 +211,7 @@ describe("handle() — write mode", () => {
 
     const res = await action({ request: req(), params: { slug: "zzz9999999" }, context: {} });
     expect(res.status).toBe(200);
-    expect(run.mock.calls[0]![0].slug).toBe("zzz9999999");
+    expect(run.mock.calls[0]?.[0].slug).toBe("zzz9999999");
   });
 });
 

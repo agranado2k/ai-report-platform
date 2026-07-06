@@ -49,6 +49,6 @@ export async function resolveViewableReport(
   // invariant (live_version_id is only set on a clean scan), but the gate asserts
   // it anyway — if a bug or data-integrity issue ever pointed liveVersionId at a
   // non-clean version, the viewer still refuses to serve untrusted content.
-  if (!liveVersion || liveVersion.scanStatus !== "clean") return ok({ kind: "notfound" });
+  if (liveVersion?.scanStatus !== "clean") return ok({ kind: "notfound" });
   return ok({ kind: "serve", report, liveVersion });
 }
