@@ -1,7 +1,8 @@
 // createFolder — create a Folder under a parent in the acting org (ADR-0036,
 // Reports & Folders). Pure orchestration over FolderRepository + IdGenerator
 // (ADR-0024). Invariants enforced here:
-//   - the parent must exist and belong to the actor's org (authz boundary);
+//   - the parent must exist, not be soft-deleted, and belong to the actor's org
+//     (the shared loadOwnedFolder tenancy guard — issue #132);
 //   - a parent is REQUIRED — the single org Root (parent_id NULL) is created at
 //     provisioning, never via this use case, so we can't mint a second Root;
 //   - max nesting depth 8 (docs/db-design.md, ADR-0037), Root = depth 0.
@@ -12,14 +13,18 @@ import {
   err,
   type Folder,
   type FolderId,
-  notAllowed,
-  notFound,
   type OrgId,
   ok,
   type Result,
   validationError,
 } from "arp-domain";
+import { loadOwnedFolder, type OwnedGuardMessages } from "../load-owned";
 import type { FolderRepository, IdGenerator } from "../ports";
+
+const PARENT_FOLDER_MESSAGES: OwnedGuardMessages = {
+  notFound: "parent folder not found",
+  notAllowed: "parent folder is not in your org",
+};
 
 /** Max folder nesting (Root = 0); the deepest folder is depth MAX_FOLDER_DEPTH. */
 export const MAX_FOLDER_DEPTH = 8;
@@ -44,12 +49,8 @@ export async function createFolder(
   actor: CreateFolderActor,
   input: CreateFolderInput,
 ): Promise<Result<Folder, AppError>> {
-  const parent = await deps.folders.findById(input.parentId);
+  const parent = await loadOwnedFolder(deps.folders, actor, input.parentId, PARENT_FOLDER_MESSAGES);
   if (!parent.ok) return parent;
-  if (!parent.value) return err(notFound("parent folder not found"));
-  if (parent.value.orgId !== actor.orgId) {
-    return err(notAllowed("parent folder is not in your org"));
-  }
 
   const depth = await parentDepth(deps.folders, parent.value);
   if (!depth.ok) return depth;
