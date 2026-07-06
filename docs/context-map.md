@@ -13,8 +13,8 @@ Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they
    ┌──────────────────────────┐   ┌──────────────────────────┐
    │     Reports & Folders     │   │     Abuse & Moderation    │
    │  reports · versions ·     │   │  scan-jobs · abuse-       │
-   │  folders · collaborators  │   │  reports · takedowns ·    │
-   │  · acls                   │   │  csp-reports              │
+   │  folders · acls ·         │   │  reports · takedowns ·    │
+   │  write-grants             │   │  csp-reports              │
    └──────────────────────────┘   └──────────────────────────┘
         ReportVersionUploaded ───────────▶  enqueue ScanJob
         ReportVersionScanned  ◀───────────  verdict → scan_status
@@ -41,17 +41,17 @@ Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they
 
 ### Reports & Folders
 
-**Owns**: `folders`, `folder_collaborators`, `reports`, `report_versions`, `acls`.
+**Owns**: `folders`, `reports`, `report_versions`, `acls`, `report_grants`, `report_write_grants` (and the superseded, unused `folder_collaborators` — ADR-0060 — pending a cleanup migration).
 
 **Aggregates**:
-- `Folder` (root) — the folder tree **plus its `Collaborator` grant chain** (`folder_collaborators`, each carrying a `Grant level` of `editor`/`admin`). The grant chain decides write permission; grantees are referenced by `UserId`/email via the shared kernel.
-- `Report` (root) — its `ReportVersion`s, its single `Acl`, its `live_version_id`, and the `scan_status` Value Object cached on each `ReportVersion`.
+- `Folder` (root) — the folder tree. Org-scoped (no per-user owner, ADR-0059); the superseded `Collaborator` grant chain (ADR-009/0056 P4) never became behavioral code.
+- `Report` (root) — its `ReportVersion`s, its single `Acl`, its **`Owner`** (`owner_id`, the creating user — ADR-0059), its `Write grant`s (ADR-0060), its `live_version_id`, and the `scan_status` Value Object cached on each `ReportVersion`.
 
-**Permission resolution**: `canWrite(user, folder)` is an Application-layer Specification owned by this context. It walks the `Folder` tree and its inherited `folder_collaborators` grants — no cross-context read is required, because the grant chain is part of the `Folder` aggregate. Composes as `IsOrgMember(folder.orgId) OR HasFolderGrantOnAncestor(folder, user)`.
+**Permission resolution** (ADR-0059/0060): report writes compose as `canWrite(report, user) = IsOwner(report, user) OR HasWriteGrant(report, user)` — an Application-layer check on the `Report` aggregate; `delete`/`set_acl`/grant management are owner-only. Folder operations stay `IsOrgMember(folder.orgId)`. Org membership alone confers list-metadata visibility, never content or write access.
 
-**Consumes**: `UserCreated` from Identity & Access — to resolve a pending `Collaborator` grant whose `grantee_user_id` was NULL (invited by email before sign-up) to a concrete `UserId` on first sign-in.
+**Consumes**: `UserCreated` from Identity & Access — optional optimization only (ADR-0060): backfill a pending `Write grant`'s `grantee_user_id`; grants are matched by normalized email at check time, so nothing blocks on the event.
 
-**Emits events**: `ReportVersionUploaded`, `ReportPublished` (fires whenever `live_version_id` moves — first publish or re-point; the welcome notifier checks whether it is the first), `AclChanged`, `CollaboratorGranted`. Consumed by Abuse & Moderation and by side effects (audit log, notifications, cache invalidation) in the Application layer.
+**Emits events**: `ReportVersionUploaded`, `ReportPublished` (fires whenever `live_version_id` moves — first publish or re-point; the welcome notifier checks whether it is the first), `AclChanged`, `CollaboratorGranted` (superseded by ADR-0060 — to be replaced by a write-grant event in `docs/events.md` when grants land). Consumed by Abuse & Moderation and by side effects (audit log, notifications, cache invalidation) in the Application layer.
 
 ### Abuse & Moderation
 

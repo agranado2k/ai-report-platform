@@ -8,12 +8,12 @@
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites), and the paused sharing/ACL (would add `set_acl`/`grant` MCP tools). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
 | **Last commit on main**| `89a5b7b` — Merge PR #131 (architecture-deepening wave, final PR; see 2026-07-06 entry). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/diary-architecture-deepening` (this entry). |
+| **Active worktrees**   | `docs/report-ownership-adrs` (ADR-0059/0060/0061 docs wave). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -1807,3 +1807,35 @@ the correct branches, strays verified as duplicates and dropped. Lesson encoded 
 absolute paths + per-path staging, never `git add -A`. Flag per the update protocol: **PR #127
 (private-by-default ACL) merged without a diary entry** — the current-state block reflects it only
 incidentally (the #131 merge conflict); its own entry is still owed.
+
+### 2026-07-06 — Ownership & shareability epic: ADR-0059/0060/0061 (docs wave), worktree `docs/report-ownership-adrs`
+
+A gap analysis of report ownership/sharing vs the target product model (private-to-the-*person* by
+default, org-wide sharing in company orgs, owner-granted write access) surfaced three misalignments:
+`org` ACL mode is a stub (settable, MCP-advertised, but `unlock.$slug.tsx` has no branch for it —
+ADR-0056 P2 never shipped); non-owner write grants have zero behavioral code (`folder_collaborators`
+is schema-only); and — the real design tension — **ownership is org-scoped** ("owner = any member of
+the owning org", ADR-0056), which turns every future team-org member into a full co-owner, the
+opposite of the target model. Three ADRs recorded (operator decisions: creator-is-owner; private =
+owner-only, admins get no content access; per-report write grants; `public` mode stays):
+
+- **ADR-0059 — per-user report ownership.** `reports.owner_id` (creator = owner, backfilled from the
+  version-1 uploader), writes owner-gated behind a `canWrite` seam, reads stay org-visible
+  (metadata), ACL GET owner-only, `/open` owner-token mint gates on `ownerId` (the security
+  keystone), folders stay org-scoped. Amends ADR-0056. Behavior-neutral today (all orgs
+  single-member) — must be fully deployed **before** the first multi-member org exists.
+- **ADR-0060 — per-report write grants.** `report_write_grants` keyed `(report_id, grantee_email)`,
+  lazy user resolution (no P5 event dependency), one implicit level (rename/re-upload/move; NOT
+  delete/set_acl/grants), `canWrite = isOwner OR hasWriteGrant`. **Supersedes ADR-009 + ADR-0056
+  P4/P5** (folder collaborators — never implemented; table stays until a cleanup migration). Spec
+  carries the ADR-009 supersession note at its next revision (flagged here per protocol; ADR-009 is
+  inline in `docs/spec.html`).
+- **ADR-0061 — org types & membership.** `orgs.kind` (`personal`/`team`), membership via Clerk
+  invitations mirrored through the existing webhook ACL, admins get membership management (and a
+  future ownership-transfer surface), never content superpowers. Scope decision now; build deferred.
+
+Also corrected in this wave: the current-state block called sharing/ACL "paused" — stale since P1
+(#100), the allowlist phase (#109 slices), and private-by-default (#127) all shipped; reworded.
+Delivery plan for the epic: docs (this PR) → GitHub issues (epic + 5 groups: hygiene, ownership
+foundation, org-mode enforcement, write grants, team-orgs scoping) → per-group implementation via
+spawned Sonnet agents in worktrees, `/tdd`, `/pr-iterate`.
