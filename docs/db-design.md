@@ -188,7 +188,7 @@ Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 | `password_hash` | text NULL | argon2id, password mode |
 | `allowed_emails` | jsonb NULL | allowlist mode |
 | `access_ttl_seconds` | integer NULL | owner-set access duration for allowlist grants (ADR-0056); null for other modes |
-| `csp_extras` | jsonb NULL | paid-plan per-report CSP opt-in |
+| `csp_extras` | jsonb NULL | **Reserved, currently unmapped** — no domain/adapter code reads or writes it. Held for the ADR-006 paid-plan per-report CSP opt-in; keep the column (do not drop) until that feature lands |
 | `updated_at` | timestamptz | |
 
 #### `report_grants` — durable, revocable allowlist access grants (ADR-0056, revocation-C)
