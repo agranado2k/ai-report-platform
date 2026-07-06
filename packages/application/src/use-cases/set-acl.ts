@@ -1,14 +1,13 @@
 // setAcl — set a Report's sharing Acl (ADR-0056). Pure orchestration (ADR-0024):
-// `acl:write` scope (ADR-0016) + org ownership, hash a new password via the
-// PasswordHasher port, then persist via reports.setAcl. Returns the updated Report.
+// `acl:write` scope (ADR-0016) + org ownership (the shared loadOwnedReport
+// guard), hash a new password via the PasswordHasher port, then persist via
+// reports.setAcl. Returns the updated Report.
 import {
   type AclMode,
   type AppError,
   err,
   insufficientScope,
   makeAcl,
-  notAllowed,
-  notFound,
   type OrgId,
   ok,
   type Report,
@@ -16,6 +15,7 @@ import {
   type Slug,
   validationError,
 } from "arp-domain";
+import { loadOwnedReport } from "../load-owned";
 import type { PasswordHasher, ReportRepository } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
@@ -48,10 +48,8 @@ export async function setAcl(
 ): Promise<Result<Report, AppError>> {
   if (!actor.scopes.includes(ACL_WRITE_SCOPE)) return err(insufficientScope(ACL_WRITE_SCOPE));
 
-  const found = await deps.reports.findBySlug(input.slug);
+  const found = await loadOwnedReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) return err(notFound("report not found"));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed("report is not in your org"));
 
   let passwordHash: string | undefined;
   if (input.mode === "password") {

@@ -1,19 +1,17 @@
 // renameFolder — change a Folder's display name in the acting org (ADR-0036,
-// Reports & Folders). Pure orchestration over FolderRepository (ADR-0024): load
-// → authz (must exist, not be deleted, belong to the actor's org) → apply the
-// domain rename transition (name only; slug stays stable) → persist via save.
+// Reports & Folders). Pure orchestration over FolderRepository (ADR-0024):
+// load+authz (the shared loadOwnedFolder guard) → apply the domain rename
+// transition (name only; slug stays stable) → persist via save.
 import {
   type AppError,
   renameFolder as applyRename,
-  err,
   type Folder,
   type FolderId,
-  notAllowed,
-  notFound,
   type OrgId,
   ok,
   type Result,
 } from "arp-domain";
+import { loadOwnedFolder } from "../load-owned";
 import type { FolderRepository } from "../ports";
 
 export interface RenameFolderDeps {
@@ -32,10 +30,8 @@ export async function renameFolder(
   actor: RenameFolderActor,
   input: RenameFolderInput,
 ): Promise<Result<Folder, AppError>> {
-  const found = await deps.folders.findById(input.folderId);
+  const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
   if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) return err(notFound("folder not found"));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed("folder is not in your org"));
 
   const renamed = applyRename(found.value, input.name);
   if (!renamed.ok) return renamed;
