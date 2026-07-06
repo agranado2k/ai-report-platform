@@ -13,7 +13,7 @@
 | **Last commit on main**| `91fc04d` — Merge PR #134 (fix: reject a soft-deleted parent folder in createFolder). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/report-ownership-adrs` (ADR-0059/0060/0061 docs wave). |
+| **Active worktrees**   | `docs/report-ownership-adrs` (ADR-0059/0060/0061 docs wave); `worktree/spike-editor-eval` (editor-selection spike, branch `chore/spike-editor-eval`). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -1839,3 +1839,37 @@ Also corrected in this wave: the current-state block called sharing/ACL "paused"
 Delivery plan for the epic: docs (this PR) → GitHub issues (epic + 5 groups: hygiene, ownership
 foundation, org-mode enforcement, write grants, team-orgs scoping) → per-group implementation via
 spawned Sonnet agents in worktrees, `/tdd`, `/pr-iterate`.
+### 2026-07-06 — Editing & comments epic kickoff; editor spike verdict: ProseMirror
+
+New epic scoped: **report versioning experience + authenticated editing + comments/annotations.**
+In-scope: a version history list + visual diff between versions; authenticated editing, including
+in-viewer editing directly on `view.centaurspec.com`; comments/annotations anchored to report content.
+**Explicitly deferred to future epics:** AI-assisted suggestions and live co-editing (Yjs collab was
+only smoke-tested in this spike, not scoped for delivery yet). One invariant holds across every surface
+this epic touches, no exceptions: **no anonymous writes** — not on the app, not on the in-viewer editing
+surface, not via the MCP server.
+
+Before committing to an editing stack, ran a **two-sandbox spike** comparing Plate.js vs ProseMirror
+against the real fixture (`spike/fixture/ai-readiness-report.html`) — two independent Sonnet-agent
+builds under `spike/plate/` and `spike/prosemirror/`, each with its own test suite, both **verified
+independently by the orchestrating agent** (ProseMirror 29/29, Plate 23/23) rather than taking either
+agent's self-report at face value.
+
+**Verdict: ProseMirror.** Rationale in one line: the two dimensions that matter most for this
+product — HTML fidelity on bespoke classes and export cleanliness, because the artifact we sell *is*
+the HTML — both went decisively to ProseMirror (Plate loses classes on any plugin-claimed tag, incl.
+`p.desc`, and its "static" export ballooned 86.8 KB → 390 KB with `data-slate-*` instrumentation left
+in); Plate's built-in suggestion-mode package saved real but one-time LOC (45 vs ProseMirror's
+hand-rolled 106) that doesn't offset the fidelity loss. Full scorecard, accepted costs (custom
+`tableNodes` for thead/tbody, generator-side auto-`<p>`-wrap normalization), and a v0 "Report HTML"
+node/mark vocabulary are in `spike/DECISION.md` — that file is the direct input to the next four ADRs
+(0059–0061 were claimed by the ownership wave above, so this epic starts at 0062):
+
+- **ADR-0062** — editing model & "Report HTML" schema (ratifies the v0 sketch in `spike/DECISION.md`).
+- **ADR-0063** — in-viewer editing on `view.centaurspec.com`, amending ADR-0038 (the viewer-origin
+  split); gated on a security review given the viewer's untrusted-content threat model.
+- **ADR-0064** — comments/annotations model (`canWrite` per ADR-0060's owner-or-write-grant seam).
+- **ADR-0065** — version history & visual diff.
+
+Active worktree: `worktree/spike-editor-eval` (branch `chore/spike-editor-eval`, this entry + the spike
+sandboxes). Not yet merged; the ADRs above are the next work.
