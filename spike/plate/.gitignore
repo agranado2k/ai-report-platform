@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# generated test artifacts (regenerable via npx vitest run)
+out/
