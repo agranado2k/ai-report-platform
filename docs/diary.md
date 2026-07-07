@@ -13,7 +13,7 @@
 | **Last commit on main**| `91fc04d` — Merge PR #134 (fix: reject a soft-deleted parent folder in createFolder). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `docs/report-ownership-adrs` (ADR-0059/0060/0061 docs wave); `worktree/spike-editor-eval` (editor-selection spike, branch `chore/spike-editor-eval`). |
+| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -1873,3 +1873,42 @@ node/mark vocabulary are in `spike/DECISION.md` — that file is the direct inpu
 
 Active worktree: `worktree/spike-editor-eval` (branch `chore/spike-editor-eval`, this entry + the spike
 sandboxes). Not yet merged; the ADRs above are the next work.
+
+### 2026-07-07 — ADR wave: editing epic decisions ratified (ADR-0062–0067)
+
+PR #144 (`chore/spike-editor-eval`) merged — the ProseMirror-vs-Plate.js spike verdict from the prior
+entry is now on `main`. This wave turns that verdict, plus the rest of the editing epic scoped
+2026-07-06, into six ADRs and their doc-integration.
+
+- **ADR-0062** — editing model & "Report HTML" schema. Ratifies `spike/DECISION.md`'s vocabulary as
+  binding: ProseMirror as the engine, the shell/body split, the v1 node/mark schema with a
+  generic attr-retention rule, the `_source.json` sidecar as a lossless companion to the canonical
+  HTML, edit-save as a normal upload through the existing ADR-0037 pipeline, and the `origin`
+  attribute added to `ReportVersionUploaded`.
+- **ADR-0063** — in-viewer editing. Amends ADR-0038: a second, tightly-scoped CSP profile on a new
+  authenticated `GET /<slug>/edit` route only — the public route is untouched. Auth via a scoped
+  edit token rhyming with ADR-0056's access-token codec. **Status gated on a `/security-review` pass
+  before the implementation PR ships.**
+- **ADR-0064** — comments & annotations. New **Authoring & Collaboration** bounded context; `Comment`
+  aggregate, two-part anchor (relative position + version-pinned fallback), `canWrite`-gated (not
+  read-only-viewer-commentable in v1), zero comment data on the public viewer route.
+- **ADR-0065** — version history & visual diff. New `GET /api/v1/reports/{slug}/versions` list +
+  `reports_list_versions` MCP tool; `prosemirror-changeset` diff over the ADR-0062 sidecar, with a
+  labeled DOM-diff fallback when a sidecar is missing. Builds on ADR-0062.
+- **ADR-0066** / **ADR-0067** — proposed-deferred stubs recording constraints only, not build
+  authorization: AI suggestion mode (pending-mark mechanism, `canWrite`-gated acceptance, no LLM
+  calls yet) and live co-editing (Yjs/`y-prosemirror`, spike-smoke-tested only; comment anchors are
+  built Yjs-relative-position-compatible now so this doesn't force a re-anchoring migration later).
+
+`spike/` (`DECISION.md`, `fixture/`, `plate/`, `prosemirror/`) deleted in this PR per ADR-0062 §8's
+acceptance criterion — history preserves it at commit `393ec98` (PR #144) for anyone who needs to
+re-run or re-read the sandboxes.
+
+Doc-integration done in this same PR: `docs/adr/INDEX.md` (rows for 0062–0067), `docs/domain-glossary.md`
+(new Authoring & Collaboration context section: `Comment`, `Annotation anchor`, `Thread`, `Editing
+session`; new Reports & Folders terms: `Report HTML schema`, `Presentation shell`, `Editable body`,
+`Edit token`), `docs/context-map.md` (fourth bounded context, event edges to Reports & Folders), and
+`docs/events.md` (`ReportVersionUploaded` gains `origin`; `CommentAdded`/`CommentResolved` added).
+
+Worktree: `worktree/adr-editing-epic` (branch `docs/adr-editing-epic`), this entry + the six ADR files
++ the doc-integration edits above. Not yet merged.

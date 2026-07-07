@@ -1,6 +1,6 @@
 # Context map
 
-Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they integrate. Term spellings follow `docs/domain-glossary.md`; event names follow `docs/events.md`.
+Per **ADR-0036** (Domain-Driven Design). The four bounded contexts and how they integrate — Authoring & Collaboration (ADR-0064) joined the original three. Term spellings follow `docs/domain-glossary.md`; event names follow `docs/events.md`.
 
 ```
                     ┌─────────────────────────────┐
@@ -15,10 +15,20 @@ Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they
    │  reports · versions ·     │   │  scan-jobs · abuse-       │
    │  folders · acls ·         │   │  reports · takedowns ·    │
    │  write-grants             │   │  csp-reports              │
-   └──────────────────────────┘   └──────────────────────────┘
+   └──────┬───────────────────┘   └──────────────────────────┘
+          │ ▲  CommentAdded / CommentResolved;
+          │ │  reads PM doc model (ADR-0062) to resolve anchors
+          ▼ │
+   ┌──────────────────────────┐
+   │ Authoring & Collaboration │
+   │  comments (Suggestion     │
+   │  deferred, ADR-0066)      │
+   └──────────────────────────┘
         ReportVersionUploaded ───────────▶  enqueue ScanJob
         ReportVersionScanned  ◀───────────  verdict → scan_status
         ReportTakenDown       ◀───────────  → Report.deleted_at
+        CommentAdded          ───────────▶  Reports & Folders (reserved, no consumer yet) · AuditLogger
+        CommentResolved       ───────────▶  AuditLogger
 ```
 
 ## Bounded contexts
@@ -64,6 +74,17 @@ Per **ADR-0036** (Domain-Driven Design). The three bounded contexts and how they
 **Depends on**: shared kernel; reads `Report.slug` to attach abuse reports.
 
 **Emits events**: `ReportVersionScanned`, `AbuseReported`, `ReportTakenDown`, `CspViolationReported`. `ReportVersionScanned` is consumed by Reports & Folders to set `ReportVersion.scan_status` (and auto-publish when `clean`). `ReportTakenDown` is consumed by Reports & Folders, which sets `Report.deleted_at` and queues R2 purges.
+
+### Authoring & Collaboration
+
+**Owns**: `comments` (the `Comment` aggregate, its `Annotation anchor`, and `Thread` shape, ADR-0064). A `Suggestion` aggregate (ADR-0066) is scoped to join this context later — **deferred, not built**.
+
+**Aggregates**:
+- `Comment` (root) — anchored to a location in a report's document, threaded one level, resolvable. Authorization reuses `canWrite` (ADR-0059/0060) rather than a new axis.
+
+**Depends on**: shared kernel (`UserId`, `OrgId`) only — no new shared-kernel types. Reads the Reports & Folders ProseMirror document model (ADR-0062) to resolve `Annotation anchor` positions; a read-path join across the context boundary, per "Read paths can join across context boundaries" below, not a write dependency.
+
+**Emits events**: `CommentAdded`, `CommentResolved` (ADR-0064 §6) — delivered via the same transactional outbox as every other event in the catalog. Consumed by Reports & Folders (reserved for future notification/audit fan-out, no behavior wired yet) and AuditLogger.
 
 ## Integration patterns
 

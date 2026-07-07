@@ -35,6 +35,12 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0059 | [Per-user report ownership — the creator is the owner](0059-per-user-report-ownership.md) | Accepted (2026-07-06) — amends ADR-0056 |
 | 0060 | [Per-report write grants — supersedes folder collaborators](0060-per-report-write-grants.md) | Accepted (2026-07-06) — supersedes ADR-009 + ADR-0056 P4/P5 |
 | 0061 | [Organization types & membership — personal and team orgs](0061-organization-types-and-membership.md) | Accepted (2026-07-06) — activates ADR-005; requires 0059 first |
+| 0062 | [Editing model & "Report HTML" schema](0062-editing-model-report-html-schema.md) | Accepted (2026-07-07) — ratifies the PR #144 spike verdict |
+| 0063 | [In-viewer editing on the viewer origin](0063-in-viewer-editing.md) | Accepted (2026-07-07) — amends ADR-0038, implementation gated on security review |
+| 0064 | [Comments & annotations](0064-comments-annotations.md) | Accepted (2026-07-07) — new Authoring & Collaboration bounded context |
+| 0065 | [Version history & visual diff](0065-version-history-visual-diff.md) | Accepted (2026-07-07) — builds on ADR-0062 |
+| 0066 | [AI suggestion mode](0066-ai-suggestions.md) | Proposed — deferred (AI suggestion mode) |
+| 0067 | [Live co-editing](0067-live-collaboration.md) | Proposed — deferred (live co-editing) |
 
 ## Backlog (ADRs 1–30 from the spec)
 
