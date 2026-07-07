@@ -81,7 +81,7 @@ The registry of canonical terms for Centaur Spec, per **ADR-0036** (Domain-Drive
 
 ## Shared kernel
 
-Terms used identically across all three contexts.
+Terms used identically across all four contexts.
 
 - **UserId** — branded type for **our** `User` identifier: the `users.id` UUIDv7 PK. Exposed on the wire (when exposed) as a `user_…` **External Id** (ADR-0052). This is NOT the Clerk id — that is a separate field/type, `ClerkUserId`.
 - **OrgId** — branded type for **our** `Org` identifier: the `orgs.id` UUIDv7 PK. Exposed as an `org_…` External Id (ADR-0052). NOT the Clerk id (`ClerkOrgId`).
