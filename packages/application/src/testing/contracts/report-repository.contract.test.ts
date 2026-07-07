@@ -17,6 +17,17 @@ function slugFor(n: number): string {
   return `rc${n.toString().padStart(8, "0")}`; // 10 chars, nanoid alphabet
 }
 
+// Zero-padded so lexicographic (string) compare == creation order — the fake's
+// keysetPage sorts on plain `id` string compare, mirroring the real adapter's
+// `ORDER BY id DESC` over a UUIDv7 (which is also lexicographically time-ordered).
+// One shared counter for every version id (both a report's v1 from makeReport
+// and any later nextVersionId() call) so cross-version ordering is consistent.
+let versionSeq = 0;
+function versionIdFixture(): ReturnType<typeof versionId> {
+  versionSeq += 1;
+  return versionId(`v${versionSeq.toString().padStart(10, "0")}`);
+}
+
 describeReportRepositoryContract("in-memory", async () => {
   const repo = new InMemoryReportRepository();
   let seq = 0;
@@ -24,6 +35,7 @@ describeReportRepositoryContract("in-memory", async () => {
   return {
     repo,
     orgId: ORG_ID,
+    nextVersionId: versionIdFixture,
     makeReport(overrides: ReportFixtureOverrides = {}) {
       seq += 1;
       const slugStr = overrides.slug ?? slugFor(seq);
@@ -35,7 +47,7 @@ describeReportRepositoryContract("in-memory", async () => {
         folderId: FOLDER_ID,
         slug: slug.value,
         title: overrides.title ?? `Report ${seq}`,
-        versionId: versionId(`contract-version-${seq}`),
+        versionId: versionIdFixture(),
         contentHash: "a".repeat(64),
         uploadedBy: UPLOADER_ID,
         manifest: { entryDocument: "index.html", files: ["index.html"] },

@@ -28,10 +28,15 @@ describeReportRepositoryContract("drizzle+pglite", async () => {
   const ids = await seedIdentity(tdb.ctx);
   const repo = new DrizzleReportRepository(tdb.ctx);
   let seq = 0;
+  let versionSeq = 0;
 
   return {
     repo,
     orgId: ids.orgId,
+    nextVersionId() {
+      versionSeq += 1;
+      return versionId(`30000000-0000-4000-8000-${versionSeq.toString(16).padStart(12, "0")}`);
+    },
     makeReport(overrides = {}) {
       seq += 1;
       const slugStr = overrides.slug ?? slugFor(seq);

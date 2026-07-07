@@ -8,12 +8,14 @@
 // implementation-specific wiring (an in-memory Map vs a real migrated
 // Postgres); this file only knows the ReportRepository port.
 import {
+  addVersion,
   applyScanResult,
   makeSlug,
   type OrgId,
   type Report,
   type ReportId,
   reportId,
+  type VersionId,
 } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReportRepository } from "../../ports";
@@ -39,6 +41,11 @@ export interface ReportRepositoryContractHarness {
    *  value each call, and are overridable so a test can build several
    *  distinguishable reports. */
   makeReport(overrides?: ReportFixtureOverrides): Report;
+  /** A fresh, valid-shaped VersionId — for a test appending a second/third
+   *  version via `addVersion` + `repo.save()` (both implementations need a
+   *  UUID-shaped id; the plain fake tolerates any string but the real Postgres
+   *  `uuid` column does not). */
+  nextVersionId(): VersionId;
   /** Release whatever the harness allocated (e.g. close a pglite db); a no-op
    *  for the in-memory fake. */
   teardown(): Promise<void>;
@@ -202,6 +209,59 @@ export function describeReportRepositoryContract(
       await h.repo.softDelete(r.id);
       const res = await h.repo.searchByOrg(h.orgId, { query: "Doomed search", limit: 10 });
       expect(res.ok && res.value.items).toHaveLength(0);
+    });
+
+    it("listVersions returns the report's versions newest-created first (ADR-0065)", async () => {
+      const report = h.makeReport({ slug: "rpt0000051", title: "Versioned" });
+      await h.repo.save(report);
+      const added = addVersion(report, {
+        versionId: h.nextVersionId(),
+        contentHash: "b".repeat(64),
+        uploadedBy: report.versions[0]!.uploadedBy,
+        manifest: { entryDocument: "index.html", files: ["index.html"] },
+        sizeBytes: 22,
+      });
+      if (!added.ok) throw new Error("addVersion failed");
+      await h.repo.save(added.value.report);
+
+      const page = await h.repo.listVersions(report.id, { limit: 10 });
+      expect(page.ok).toBe(true);
+      if (!page.ok) return;
+      expect(page.value.items.map((v) => v.versionNo)).toEqual([2, 1]);
+      expect(page.value.hasMore).toBe(false);
+      expect(page.value.items[1]?.origin).toBe("upload");
+      expect(page.value.items[1]?.sizeBytes).toBe(11);
+      expect(page.value.items[1]?.uploadedBy).toBe(report.versions[0]?.uploadedBy);
+      expect(typeof page.value.items[1]?.uploadedAt).toBe("number");
+    });
+
+    it("listVersions keyset-paginates newest-created first, honoring startingAfter", async () => {
+      let report = h.makeReport({ slug: "rpt0000052", title: "Many versions" });
+      await h.repo.save(report);
+      for (let i = 0; i < 3; i += 1) {
+        const added = addVersion(report, {
+          versionId: h.nextVersionId(),
+          contentHash: `c${i}`.repeat(16),
+          uploadedBy: report.versions[0]!.uploadedBy,
+          manifest: { entryDocument: "index.html", files: ["index.html"] },
+          sizeBytes: 33,
+        });
+        if (!added.ok) throw new Error("addVersion failed");
+        report = added.value.report;
+        await h.repo.save(report);
+      }
+      // 4 versions total (v1 from makeReport + 3 appended).
+      const page1 = await h.repo.listVersions(report.id, { limit: 2 });
+      expect(page1.ok && page1.value.items).toHaveLength(2);
+      expect(page1.ok && page1.value.hasMore).toBe(true);
+
+      const cursor = page1.ok ? page1.value.items[page1.value.items.length - 1]?.id : undefined;
+      const page2 = await h.repo.listVersions(report.id, { limit: 2, startingAfter: cursor });
+      expect(page2.ok && page2.value.items).toHaveLength(2);
+      expect(page2.ok && page2.value.hasMore).toBe(false);
+      const page1Ids = page1.ok ? page1.value.items.map((i) => i.id) : [];
+      const page2Ids = page2.ok ? page2.value.items.map((i) => i.id) : [];
+      expect(page2Ids.some((id) => page1Ids.includes(id))).toBe(false);
     });
   });
 }
