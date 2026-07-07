@@ -60,7 +60,7 @@ describe("renameReport use case", () => {
     expect(reloaded.ok && reloaded.value?.title).toBe("New Title");
   });
 
-  it("rejects a non-owner with NotAllowed (canWrite = isOwner this PR, ADR-0059)", async () => {
+  it("rejects a non-owner without a write grant with NotAllowed (canWrite, ADR-0059/0060)", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "bbbbbbbbbb"));
     const r = await renameReport(

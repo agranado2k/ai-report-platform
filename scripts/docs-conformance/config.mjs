@@ -44,7 +44,8 @@ export const events = [
   "ReportVersionUploaded",
   "ReportPublished",
   "AclChanged",
-  "CollaboratorGranted",
+  // CollaboratorGranted retired (ADR-0060, PR #150) — write grants shipped
+  // deliberately without a replacement event; the events.md row is a tombstone.
   "UserCreated",
   "ApiKeyUsed",
   "ApiKeyAnomalyDetected",

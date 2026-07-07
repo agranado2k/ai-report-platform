@@ -84,7 +84,7 @@ describe("moveReport use case", () => {
     expect(after.ok && after.value?.folderId).toBe(targetA.id);
   });
 
-  it("rejects a non-owner with NotAllowed (canWrite = isOwner this PR, ADR-0059)", async () => {
+  it("rejects a non-owner without a write grant with NotAllowed (canWrite, ADR-0059/0060)", async () => {
     const { reports, folders, targetA } = await setup();
     await reports.save(report(orgA, "bbbbbbbbbb"));
 

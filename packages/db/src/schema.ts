@@ -294,6 +294,9 @@ export const reportWriteGrants = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.reportId, t.granteeEmail] }),
+    // Unused by today's queries (all filter by report_id, the PK prefix) —
+    // reserved for the signup-time grantee_user_id backfill sweep (ADR-0060 §2,
+    // "grants for this email" lookup). Don't drop as dead.
     index("report_write_grants_grantee_email_idx").on(t.granteeEmail),
   ],
 );

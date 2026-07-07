@@ -4,7 +4,9 @@
 // exercised directly (the shared contract suite already covers the behavior
 // that must agree with the fake; this file adds Drizzle-specific coverage,
 // mirroring grant-store.integration.test.ts).
+import { reports } from "arp-db/schema";
 import { createReport, makeSlug, reportId, userId, versionId } from "arp-domain";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleReportRepository } from "./report-repository";
 import { makeTestDb, type SeededIdentity, seedIdentity, type TestDb } from "./testing/pglite";
@@ -50,14 +52,22 @@ describe("DrizzleWriteGrantStore (pglite integration, ADR-0060)", () => {
     expect(found.ok && found.value?.granteeUserId).toBeNull();
   });
 
-  it("cascades on report delete (report_id ON DELETE CASCADE)", async () => {
+  it("a grant SURVIVES soft-delete (deleted_at is an UPDATE, not a row delete)", async () => {
     await store.grant(RID, "a@b.com", ids.userId, null);
-    // Deleting the reports row directly (bypassing the soft-delete use case) proves
-    // the FK cascade, not app-level cleanup.
     const repo = new DrizzleReportRepository(tdb.ctx);
-    await repo.softDelete(RID); // soft-delete does NOT cascade — the grant must survive it
+    await repo.softDelete(RID);
     const stillThere = await store.listByReport(RID);
     expect(stillThere.ok && stillThere.value).toHaveLength(1);
+  });
+
+  it("cascades on a HARD report delete (report_id ON DELETE CASCADE)", async () => {
+    await store.grant(RID, "a@b.com", ids.userId, null);
+    // Delete the reports row directly (no use case hard-deletes today — this
+    // pins the FK for the future purge job; review #150 M-4: the old test only
+    // exercised soft-delete, so a CASCADE→RESTRICT regression passed silently).
+    await tdb.ctx.current().delete(reports).where(eq(reports.id, RID));
+    const gone = await store.listByReport(RID);
+    expect(gone.ok && gone.value).toHaveLength(0);
   });
 
   it("listByReport reflects a revoke immediately", async () => {

@@ -99,7 +99,7 @@ Terms used identically across all four contexts.
 
 Event names are the contract; their full catalog (emitter, subscribers, payload) lives in `docs/events.md`. Events are facts in past tense.
 
-- Reports & Folders emits: `ReportVersionUploaded`, `ReportPublished`, `AclChanged`, `CollaboratorGranted` (superseded by ADR-0060 — replaced by a per-report write-grant event when grants land).
+- Reports & Folders emits: `ReportVersionUploaded`, `ReportPublished`, `AclChanged`, `CollaboratorGranted` (retired, ADR-0060 — write grants shipped deliberately without a replacement event).
 - Identity & Access emits: `UserCreated`, `ApiKeyUsed`, `ApiKeyAnomalyDetected`.
 - Abuse & Moderation emits: `ReportVersionScanned`, `AbuseReported`, `ReportTakenDown`, `CspViolationReported`.
 - Authoring & Collaboration emits: `CommentAdded`, `CommentResolved`.
