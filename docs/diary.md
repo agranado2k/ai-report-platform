@@ -1912,3 +1912,42 @@ session`; new Reports & Folders terms: `Report HTML schema`, `Presentation shell
 
 Worktree: `worktree/adr-editing-epic` (branch `docs/adr-editing-epic`), this entry + the six ADR files
 + the doc-integration edits above. Not yet merged.
+
+### 2026-07-07 — ADR-0065 slice 1: version-history read endpoint implemented
+
+`GET /api/v1/reports/{slug}/versions` + the `reports_list_versions` MCP tool now exist end to end
+(domain → application → adapters → http → route → MCP), built strictly TDD (red-green-refactor per
+commit). Scope was deliberately the read surface only — the `prosemirror-changeset` visual diff from
+ADR-0065 §3 is a later slice, since the editor (ADR-0062/0063) that produces `_source.json` sidecars
+doesn't exist yet.
+
+- **Schema**: migration `0010` adds `report_versions.origin` (`version_origin` enum, `upload` |
+  `editor`, NOT NULL DEFAULT `upload`) — a brand-new enum type in the same migration as its column is
+  safe in one transaction (the drizzle-kit ADD VALUE gotcha, #127, only bites an *existing* enum).
+- **Domain**: `ReportVersion.origin` (defaults to `upload` at both `createReport`/`addVersion` so
+  every pre-existing call site is unaffected); `upload-report.ts` now passes `origin: "upload"`
+  explicitly. Also stamped `origin` onto the `ReportVersionUploaded` **event** — `docs/events.md` had
+  already documented this from the ADR-0062–0067 doc-integration wave, but the event type itself
+  hadn't caught up until this slice.
+- **New External Id codecs**: `makeVersionId`/`versionIdToWire` and `makeUserId`/`userIdToWire`
+  (`packages/domain/src/version-id.ts` / `user-id.ts`), mirroring `folder-id.ts` exactly. ADR-0052
+  reserved both prefixes but no endpoint had exposed either id on the wire before this.
+- **`ReportRepository.listVersions`**: a new lean `ReportVersionSummary` projection (parallel to
+  `ReportSummary` — no manifest/content hash), cursor-paginated keyset on the version id DESC
+  (ADR-0053), implemented + contract-tested against both `InMemoryReportRepository` and
+  `DrizzleReportRepository` on pglite (ADR-0046). `uploaded_at` lives on the projection, not the pure
+  domain `ReportVersion` — it's DB-stamped (`defaultNow()`), same rationale as `reports.created_at`
+  being absent from the `Report` aggregate.
+- **`listReportVersions` use case**: auth is *identical* to `getReport` (the same org-scoped
+  `loadOwnedReport` guard) — confirmed by reading the actual code rather than ADR-0059's aspirational
+  write-grantee carve-out, which turned out to **not be implemented yet** (`reports.owner_id` doesn't
+  exist in `schema.ts` despite `docs/db-design.md` already documenting it — flagged, not fixed, out of
+  scope for this slice).
+- **Wire**: `uploaded_at` renders as ISO-8601 (`format: date-time`) — no prior wire timestamp
+  convention to match, and ISO is unambiguous versus Stripe's epoch-seconds given the domain stores
+  epoch ms internally.
+- **Gate**: 565 unit/contract tests green (up from ~520), full `turbo typecheck` (11 packages) clean,
+  `biome ci` clean, `docs:check` clean. No Bruno regen script exists in this repo (grepped — no hits)
+  despite `CLAUDE.md`'s quick-reference implying one; `openapi.yaml` is hand-maintained.
+
+Worktree: `worktree/report-versions-endpoint` (branch `feat/report-versions-endpoint`). Not yet merged.
