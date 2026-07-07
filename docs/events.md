@@ -18,7 +18,7 @@ The canonical registry of domain events, per **ADR-0036** (Domain-Driven Design)
 
 | Event | Emitter (context) | Subscribers | Notes |
 |---|---|---|---|
-| `ReportVersionUploaded` | Reports & Folders (`UploadReportUseCase`) | enqueue `ScanJob` (Abuse & Moderation) · AuditLogger | Every upload — first upload and every re-upload. |
+| `ReportVersionUploaded` | Reports & Folders (`UploadReportUseCase`) | enqueue `ScanJob` (Abuse & Moderation) · AuditLogger | Every upload — first upload and every re-upload. Carries `origin: 'upload' \| 'editor'` (ADR-0062 §6, added for an edit-save's `ReportVersion`) — audit/analytics only, no consumer behavior change. |
 | `ReportPublished` | Reports & Folders (`PromoteVersionUseCase`) | CacheInvalidator (edge KV / CDN) · Notifier (welcome, **only if first publish**) · AuditLogger | Fires whenever `live_version_id` moves. Subsumes the old `LiveVersionChanged`. |
 | `AclChanged` | Reports & Folders (`UpdateAclUseCase`) | CacheInvalidator (viewer gate changed) | Sharing mode / password / allowlist change. |
 | `CollaboratorGranted` | Reports & Folders (`GrantFolderAccessUseCase`) | Notifier (email + magic link) · AuditLogger | **Superseded by ADR-0060** (folder collaborators never built) — to be replaced by a per-report write-grant event when grants land; this row and `scripts/docs-conformance/config.mjs` update together in that PR. |
@@ -29,6 +29,8 @@ The canonical registry of domain events, per **ADR-0036** (Domain-Driven Design)
 | `AbuseReported` | Abuse & Moderation (`ReportAbuseUseCase`) | TriageQueueWriter · AuditLogger (admin-scoped) | An `AbuseReport` was filed. |
 | `ReportTakenDown` | Abuse & Moderation (`TakedownReportUseCase`) | Reports & Folders (set `Report.deleted_at`) · BlobPurger (R2, delayed +24h) · Notifier (owner, 24h appeal) · AuditLogger | The takedown action. |
 | `CspViolationReported` | Abuse & Moderation (`/csp-report` ingest) | CspReportRepository · (weekly review aggregation) | Inbound browser CSP-violation report. |
+| `CommentAdded` | Authoring & Collaboration (`Comment` aggregate boundary) | AuditLogger | Emitted on comment creation; delivered via the existing transactional outbox. Reserved for future Reports & Folders notification/audit fan-out — no consumer wired there yet. ADR-0064 §6. |
+| `CommentResolved` | Authoring & Collaboration (`Comment` aggregate boundary) | AuditLogger | Emitted on comment resolve; same outbox delivery, no new transport. ADR-0064 §6. |
 
 ## Renames from earlier drafts
 

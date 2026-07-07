@@ -52,6 +52,8 @@ export const events = [
   "AbuseReported",
   "ReportTakenDown",
   "CspViolationReported",
+  "CommentAdded",
+  "CommentResolved",
 ];
 
 /** Gherkin tag vocabulary. Every .feature must carry exactly one phase tag. */
