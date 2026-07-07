@@ -1,10 +1,13 @@
 // GET/POST app.<domain>/unlock/{slug} — authorize a private report (ADR-0056) and
-// mint the view access token. The app holds the secret + the argon2id hash; the
-// credential-free view origin only verifies the token it mints here. P1 implements
-// `password`; P3 adds `allowlist` (email → one-time magic link → revocable grant).
+// mint the view access token. The app holds the secret + the argon2id hash (and,
+// for org mode, the Clerk session); the credential-free view origin only verifies
+// the token it mints here. P1 implements `password`; P2 adds `org` (same-org
+// session → redirect handshake, no form); P3 adds `allowlist` (email → one-time
+// magic link → revocable grant).
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { getReportAcl, redeemMagicLink, sendMagicLink } from "arp-application";
-import { makeSlug, mintAccessToken, type Slug } from "arp-domain";
+import { makeSlug, mintAccessToken, type Report, type Slug } from "arp-domain";
+import { getAuth } from "../server/auth.server";
 import {
   accessTokenSecret,
   appOrigin,
@@ -12,12 +15,13 @@ import {
   deps,
   emailSender,
   grantStore,
+  identityStore,
   nonceStore,
   passwordHasher,
   viewOrigin,
 } from "../server/container.server";
 
-const ACCESS_TTL_SECONDS = 900; // 15 min (password mode)
+const ACCESS_TTL_SECONDS = 900; // 15 min (password + org modes)
 
 // `slug` is always a validated nanoid (makeSlug) before it reaches here, so it's safe
 // to interpolate into the form action; no inline styles (the app-origin CSP, ADR-013/#65,
@@ -103,7 +107,8 @@ async function loadAcl(slug: Slug) {
   return found.ok ? found.value : null;
 }
 
-export async function loader({ params, request }: LoaderFunctionArgs) {
+export async function loader(args: LoaderFunctionArgs) {
+  const { params, request } = args;
   const slug = makeSlug(String(params.slug ?? ""));
   if (!slug.ok) return notice("Report not found.");
   const report = await loadAcl(slug.value);
@@ -119,7 +124,55 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   }
   if (report.acl.mode === "password") return passwordForm(slug.value);
   if (report.acl.mode === "allowlist") return allowlistLoader(slug.value, request);
+  if (report.acl.mode === "org") return orgUnlock(report, args);
+  // Unreachable today — every AclMode (private/public/password/allowlist/org) is
+  // handled above; kept as a defensive fallback for a future mode landing here
+  // before its branch does.
   return notice("This sharing mode isn’t available yet.");
+}
+
+// `org` mode (ADR-0056 P2): no form — a redirect handshake. Anonymous → /sign-in
+// (preserving the return URL, same convention as root.tsx's app-wide gate and
+// reports.$slug.open.tsx). Signed in but the session's active org doesn't match
+// the report's org → a plain 403 notice (no cross-org detail leaked beyond "you
+// need to be a member"). Same org → mint the mode-bound ~15-min access token,
+// like `password`, and redirect to the viewer.
+async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Response> {
+  const { userId: clerkUserId, orgId: clerkOrgId } = await getAuth(args);
+  if (!clerkUserId) return signInRedirect(args.request);
+  if (!clerkOrgId) return orgMembershipNotice();
+
+  const identity = await identityStore().findByClerk(clerkUserId, clerkOrgId);
+  if (!identity.ok) return notice("Something went wrong — try again.", 500);
+  if (!identity.value || identity.value.orgId !== report.orgId) return orgMembershipNotice();
+
+  const secret = accessTokenSecret();
+  if (!secret) return notice("Private viewing is not configured.");
+
+  const token = mintAccessToken(
+    report.slug,
+    ACCESS_TTL_SECONDS,
+    secret,
+    Math.floor(Date.now() / 1000),
+    { mode: "org" },
+  );
+  return redirectToView(report.slug, token, args.request);
+}
+
+const orgMembershipNotice = () =>
+  notice("You need to be a member of this report's organization to view it.", 403);
+
+// Preserve the intended destination via `redirect_url`, which Clerk's <SignIn>
+// honours post-auth (same convention as root.tsx's app-wide gate).
+function signInRedirect(request: Request): Response {
+  const { pathname, search } = new URL(request.url);
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?redirect_url=${encodeURIComponent(pathname + search)}`,
+      "cache-control": "no-store",
+    },
+  });
 }
 
 // Allowlist GET: a `?link=` query shows the confirm interstitial (redemption is POST-only, so
