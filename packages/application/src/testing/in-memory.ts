@@ -511,6 +511,7 @@ export class InMemoryIdentityStore implements IdentityStore {
   // don't go through the Clerk provisioning flow.
   private readonly emailByUserId = new Map<UserId, string>();
   private readonly userIdByEmail = new Map<string, UserId>(); // normalized email → userId
+  private readonly orgByClerkOrgId = new Map<string, OrgId>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -525,6 +526,10 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.byClerk.get(this.key(clerkUserId, clerkOrgId)) ?? null);
   }
 
+  async findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>> {
+    return ok(this.orgByClerkOrgId.get(clerkOrgId) ?? null);
+  }
+
   async createPersonalIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
@@ -535,6 +540,13 @@ export class InMemoryIdentityStore implements IdentityStore {
     if (this.deleted.has(input.clerkUserId)) {
       return err(notAllowed("this account has been deleted"));
     }
+    // Find-or-create like the real store; a re-provision refreshes the mirrored
+    // email (review #150 M-2 — grant matching must follow a changed address).
+    const existing = this.byClerk.get(this.key(input.clerkUserId, input.clerkOrgId));
+    if (existing) {
+      this.seedUser(existing.userId, input.email);
+      return ok(existing);
+    }
     this.seq += 1;
     const provisioned: ProvisionedIdentity = {
       userId: makeUserId(`user-${this.seq}`),
@@ -542,6 +554,7 @@ export class InMemoryIdentityStore implements IdentityStore {
       rootFolderId: makeFolderId(`folder-${this.seq}`),
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
+    this.orgByClerkOrgId.set(input.clerkOrgId, provisioned.orgId);
     this.seedUser(provisioned.userId, input.email);
     return ok(provisioned);
   }
@@ -568,6 +581,8 @@ export class InMemoryIdentityStore implements IdentityStore {
    *  write-grant tests) that need a resolvable user without a full Clerk
    *  provisioning round-trip. */
   seedUser(userId: UserId, email: string): void {
+    const prev = this.emailByUserId.get(userId);
+    if (prev) this.userIdByEmail.delete(prev.trim().toLowerCase());
     this.emailByUserId.set(userId, email);
     this.userIdByEmail.set(email.trim().toLowerCase(), userId);
   }

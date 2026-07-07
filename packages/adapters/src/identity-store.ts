@@ -11,6 +11,7 @@ import {
   normalizeEmailAddress,
   notAllowed,
   ok,
+  type OrgId,
   orgId,
   type Result,
   type UserId,
@@ -49,6 +50,20 @@ export class DrizzleIdentityStore implements IdentityStore {
     }
   }
 
+  async findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>> {
+    try {
+      const db = this.ctx.current();
+      const [o] = await db
+        .select({ id: orgs.id })
+        .from(orgs)
+        .where(eq(orgs.clerkOrgId, clerkOrgId))
+        .limit(1);
+      return ok(o ? orgId(o.id) : null);
+    } catch (e) {
+      return thrown("identity.findOrgByClerkOrgId", e);
+    }
+  }
+
   async createPersonalIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
@@ -74,10 +89,16 @@ export class DrizzleIdentityStore implements IdentityStore {
       const provisioned = await this.ctx.run(async () => {
         const db = this.ctx.current();
         // User: find-or-create (may already exist from another org — shared pool).
+        // On conflict, refresh the mirrored email: it feeds ADR-0060 write-grant
+        // matching, and a stale copy silently 403s a grantee whose Clerk primary
+        // email changed (review #150 M-2).
         await db
           .insert(users)
           .values({ id: uuidv7(), clerkUserId: input.clerkUserId, email: input.email })
-          .onConflictDoNothing();
+          .onConflictDoUpdate({
+            target: users.clerkUserId,
+            set: { email: input.email, updatedAt: new Date() },
+          });
         const [u] = await db
           .select({ id: users.id })
           .from(users)

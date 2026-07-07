@@ -142,9 +142,13 @@ async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Resp
   if (!clerkUserId) return signInRedirect(args.request);
   if (!clerkOrgId) return orgMembershipNotice();
 
-  const identity = await identityStore().findByClerk(clerkUserId, clerkOrgId);
-  if (!identity.ok) return notice("Something went wrong — try again.", 500);
-  if (!identity.value || identity.value.orgId !== report.orgId) return orgMembershipNotice();
+  // Membership is asserted by the Clerk-VERIFIED session org — we only map it
+  // to our internal OrgId. Do NOT require a mirrored users row here: that row
+  // is created on the write path, so demanding it would deny genuine members
+  // who have only ever viewed (review #150 H-1).
+  const memberOrg = await identityStore().findOrgByClerkOrgId(clerkOrgId);
+  if (!memberOrg.ok) return notice("Something went wrong — try again.", 500);
+  if (!memberOrg.value || memberOrg.value !== report.orgId) return orgMembershipNotice();
 
   const secret = accessTokenSecret();
   if (!secret) return notice("Private viewing is not configured.");
@@ -160,7 +164,11 @@ async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Resp
 }
 
 const orgMembershipNotice = () =>
-  notice("You need to be a member of this report's organization to view it.", 403);
+  notice(
+    "You need to be a member of this report's organization to view it. " +
+      "If you belong to more than one organization, switch your active organization and retry.",
+    403,
+  );
 
 // Preserve the intended destination via `redirect_url`, which Clerk's <SignIn>
 // honours post-auth (same convention as root.tsx's app-wide gate).

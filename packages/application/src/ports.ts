@@ -415,6 +415,14 @@ export interface IdentityStore {
     clerkUserId: string,
     clerkOrgId: string,
   ): Promise<Result<ProvisionedIdentity | null, AppError>>;
+  /**
+   * Our internal `OrgId` for a mirrored Clerk org, or null when the org isn't
+   * mirrored. The org-mode unlock decision (ADR-0056 P2) needs ONLY this:
+   * membership is asserted by the Clerk-verified session org — requiring a
+   * mirrored `users` row would wrongly deny members who have never written
+   * (the users row is created on the write path, review #150 H-1).
+   */
+  findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>>;
   /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity.
    *  MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal). */
   createPersonalIdentity(input: {
