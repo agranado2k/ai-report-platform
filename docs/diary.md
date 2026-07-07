@@ -13,7 +13,7 @@
 | **Last commit on main**| `91fc04d` — Merge PR #134 (fix: reject a soft-deleted parent folder in createFolder). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
+| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/sharing-completion` (branch `feat/sharing-completion`, ownership epic G2+G3 — org ACL mode enforcement + per-report write grants, ADR-0056 P2 / ADR-0060; closes #139/#140). `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -1912,3 +1912,51 @@ session`; new Reports & Folders terms: `Report HTML schema`, `Presentation shell
 
 Worktree: `worktree/adr-editing-epic` (branch `docs/adr-editing-epic`), this entry + the six ADR files
 + the doc-integration edits above. Not yet merged.
+
+### 2026-07-07 — Ownership & shareability epic: implementation wave (G1/G5 merged, G2+G3 this PR)
+
+The epic recorded 2026-06-17 (ADR-0059/0060/0061, PR #135 + review-fixes #136) is now shipping.
+Issues #137–#142 were filed to track the five delivery groups (G1–G5) plus the tracking epic #142;
+each group is a spawned agent in its own worktree.
+
+- **G5 — sharing/ACL hygiene (#137), merged PR #143.** Independent of ownership: `setAcl`'s
+  `report_grants` pruning-before-persist ordering (the 5e fix flagged by an earlier review) plus a
+  repo-wide lint-clean pass. No schema change.
+- **G1 — ownership foundation (#138), merged PR #146.** `Report.ownerId` (ADR-0059) — the creator,
+  not "any org member", is the owner. Migration `0010` (nullable `owner_id` → backfill from the v1
+  uploader → `NOT NULL` → index) applied and backfilled in prod via `migrate-db` (no drizzle-kit
+  one-transaction enum gotcha here — no enum involved, #127 doesn't apply). `load-owned.ts` split
+  into `loadOrgReport` (reads, org-scoped) / `loadOwnedReport` (owner-gated writes: delete, setAcl) /
+  `canWrite` + `loadWritableReport` (the seam for rename/re-upload/move — `isOwner` only in this PR,
+  ADR-0060 was scoped to extend it). The `/reports/{slug}/open` owner-token mint now gates on
+  `ownerId === actor.userId`, not org membership — the security keystone ADR-0059 §4 called out
+  (previously any org member could mint the 24h bypass-everything owner token). Review fix folded
+  in: the report resource's `acl` block is owner-conditional (`packages/http/src/write-response.ts`),
+  not blanket org-visible.
+- **G2 + G3 — this PR (branch `feat/sharing-completion`, closes #139 and #140).** Combined per the
+  operator's bigger-PRs directive (G2 ∥ G3 were independent after G1, but small enough to land
+  together). **G2 (ADR-0056 P2):** the `org` unlock branch in `unlock.$slug.tsx` — Clerk session →
+  resolve the mirrored identity → compare its org to the report's org → mint a mode-bound ~15-min
+  access token, same shape as `password`; anon → `/sign-in?redirect_url=…`; non-member → a plain 403
+  notice. **G3 (ADR-0060):** `report_write_grants` (migration `0011`, no enum) + `WriteGrantStore`
+  port (Drizzle + in-memory + port-contract suite, mirroring `GrantStore`) + `grantWrite` /
+  `revokeWrite` / `listWriteGrants` use cases (owner-only, `acl:write` scope) + the `canWrite`
+  extension (`isOwner OR hasWriteGrant`, matched by `granteeUserId` OR the actor's normalized email
+  via two new `IdentityStore` lookups, `findEmailByUserId` / `findUserIdByEmail`) at BOTH call sites
+  (`load-owned.ts`'s `loadWritableReport` and `upload-report.ts`'s inline re-upload check — the two
+  sites the G1 review flagged) + the single-report GET carve-out (`loadReadableReport`: org-visible
+  OR write-grantee) + `POST`/`DELETE`/`GET /api/v1/reports/{slug}/write-grants[/{email}]` +
+  `reports_grant_write` / `reports_revoke_write` / `reports_list_write_grants` MCP tools. Read-path
+  actors now carry `scopes` too (`resolveActorForRead` widened, `SELF_SCOPES` exported from
+  `provisionIdentity`) so `listWriteGrants` can enforce `acl:write` on a GET, matching its write
+  siblings — a small, deliberate widening of the read-actor shape beyond what G1 left it at.
+- **G4 — team organizations (#141)** remains scoping-first. Its hard gate (G1 deployed + backfilled
+  before any multi-member org can exist) is satisfied; G2+G3 landing gives it something to be useful
+  against, but the scoping work itself hasn't started.
+
+Discovered, not fixed (pre-existing, unrelated): `docs/api/openapi.yaml` has one YAML syntax quirk
+predating this PR (an unquoted plain scalar containing `: ` inside backticks on the `getReportAcl`
+200 response description, around the original file's line 291) — `js-yaml` chokes on it, though the
+repo's own `docs-conformance` check is token-presence lint, not a full parse, so it's gone unnoticed.
+Flagging here per the "flag the contradiction, don't paper over it" rule; left alone as out of scope
+for this PR.
