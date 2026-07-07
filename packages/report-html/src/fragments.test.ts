@@ -139,4 +139,29 @@ describe("fragment-level round-trips", () => {
       '<ul class="baseline"><li><p><span class="k">Role:</span> Founder</p></li></ul>',
     );
   });
+
+  it("round-trips tablewrap/table with thead + tbody (the spike's known gap, closed here)", () => {
+    const html =
+      '<div class="tablewrap"><table><thead><tr><th>Dimension</th><th>CTO</th></tr></thead>' +
+      "<tbody><tr><td>Primary unit of work</td><td>Decisions &amp; bets</td></tr>" +
+      "<tr><td>Failure mode</td><td>Wrong capital allocation</td></tr></tbody></table></div>";
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips a <th> carrying an inline style (e.g. column width)", () => {
+    const html =
+      '<div class="tablewrap"><table><thead><tr><th style="width:22%">Skill</th></tr></thead>' +
+      "<tbody><tr><td>TDD</td></tr></tbody></table></div>";
+    // See the jsdom CSSOM style-normalization note on the strong/em/a test
+    // above — same behavior, applies here too.
+    const expected = html.replace('style="width:22%"', 'style="width: 22%;"');
+    expect(serializeBody(parseBody(html))).toBe(expected);
+  });
+
+  it("round-trips inline marks (em) inside a table cell", () => {
+    const html =
+      '<div class="tablewrap"><table><thead><tr><th>Read this first</th></tr></thead>' +
+      "<tbody><tr><td>Larson · <em>Crafting Engineering Strategy</em></td></tr></tbody></table></div>";
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
 });

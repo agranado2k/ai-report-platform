@@ -14,6 +14,15 @@ import {
   sectionNode,
 } from "./schema/report-blocks.js";
 import { secNode } from "./schema/sec.js";
+import {
+  tableBodyNode,
+  tableCellNode,
+  tableHeadNode,
+  tableHeaderNode,
+  tableNode,
+  tableRowNode,
+  tablewrapNode,
+} from "./schema/table.js";
 
 let nodes = addListNodes(basicSchema.spec.nodes, "paragraph block*", "block");
 nodes = nodes.addToEnd("htmlBlock", htmlBlockNode);
@@ -23,7 +32,14 @@ nodes = nodes
   .addToEnd("card", cardNode)
   .addToEnd("checklist", checklistNode)
   .addToEnd("checklist_item", checklistItemNode)
-  .addToEnd("grid", gridNode);
+  .addToEnd("grid", gridNode)
+  .addToEnd("tablewrap", tablewrapNode)
+  .addToEnd("table", tableNode)
+  .addToEnd("table_head", tableHeadNode)
+  .addToEnd("table_body", tableBodyNode)
+  .addToEnd("table_row", tableRowNode)
+  .addToEnd("table_header", tableHeaderNode)
+  .addToEnd("table_cell", tableCellNode);
 // Retain class/style on every schema-basic node so bespoke classes on
 // otherwise-standard elements (e.g. `<h3 class="sub">`) degrade to
 // "preserved but uninterpreted" instead of being stripped.
