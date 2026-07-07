@@ -1,4 +1,4 @@
-import { DOMParser as PMDOMParser, DOMSerializer, Node as PMNode } from "prosemirror-model";
+import { DOMSerializer, DOMParser as PMDOMParser, Node as PMNode } from "prosemirror-model";
 import { getDomEnvironmentDocument } from "./dom-environment.js";
 import { reportSchema } from "./schema.js";
 

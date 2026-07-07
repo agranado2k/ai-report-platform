@@ -3,6 +3,7 @@ import { schema as basicSchema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 import { withClassStyle } from "./schema/attrs.js";
 import { chipMark } from "./schema/chip.js";
+import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { htmlBlockNode } from "./schema/generic-block.js";
 import { htmlInlineMark, kbdMark, pillMark } from "./schema/marks.js";
 import { withParagraphVariant } from "./schema/paragraph.js";
@@ -13,13 +14,12 @@ import {
   gridNode,
   sectionNode,
 } from "./schema/report-blocks.js";
-import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { secNode } from "./schema/sec.js";
 import {
   tableBodyNode,
   tableCellNode,
-  tableHeadNode,
   tableHeaderNode,
+  tableHeadNode,
   tableNode,
   tableRowNode,
   tablewrapNode,
@@ -61,7 +61,9 @@ for (const name of [
 }
 // `.desc`/`.lede`/`.sub` are recognized paragraph roles (ADR-0062 §3),
 // layered on top of the generic class retention above.
-nodes = nodes.update("paragraph", withParagraphVariant(nodes.get("paragraph")!));
+const paragraphSpec = nodes.get("paragraph");
+if (!paragraphSpec) throw new Error("schema-basic's paragraph node spec is missing");
+nodes = nodes.update("paragraph", withParagraphVariant(paragraphSpec));
 
 let marks = basicSchema.spec.marks;
 for (const name of ["link", "em", "strong"]) {

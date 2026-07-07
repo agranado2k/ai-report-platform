@@ -18,6 +18,7 @@
     "prosemirror-schema-list": "^1.5.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^28.0.3",
     "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
     "vitest": "^3.2.4"

@@ -38,7 +38,7 @@ describe("fragment-level round-trips", () => {
 
   it("round-trips strong/em/a, including an inline style on strong", () => {
     const html =
-      '<p>Built for <strong>Arthur Granado</strong> — Founder &amp; CTO of ' +
+      "<p>Built for <strong>Arthur Granado</strong> — Founder &amp; CTO of " +
       '<a href="https://uk.linkedin.com/in/agranado2k">House Numbers</a>, ex-Snyk. ' +
       'Horizons: <strong style="color:var(--now)">now</strong>, <em>next 12 months</em>.</p>';
     // jsdom (like a real browser) re-serializes the `style` attribute from

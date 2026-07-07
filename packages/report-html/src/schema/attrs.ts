@@ -1,4 +1,4 @@
-import type { DOMOutputSpec, MarkSpec, NodeSpec, ParseRule } from "prosemirror-model";
+import type { Attrs, DOMOutputSpec, MarkSpec, NodeSpec, TagParseRule } from "prosemirror-model";
 
 /**
  * Generic attr-retention rule (ADR-0062 §3): any class/attribute not claimed
@@ -6,6 +6,11 @@ import type { DOMOutputSpec, MarkSpec, NodeSpec, ParseRule } from "prosemirror-m
  * helper wraps an existing node/mark spec (one that already has a `toDOM`
  * producing `[tag, attrs?, ...children]`) so parsing also captures `class`
  * and `style`, and `toDOM` re-emits them unchanged.
+ *
+ * Only usable for `tag`-selector parse rules (every call site in this
+ * package: paragraph/heading/blockquote/code_block/link/em/strong/list
+ * nodes) — a `style`-selector rule's `getAttrs` takes a `string`, not an
+ * element, so it isn't a fit for this helper.
  */
 export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
   const originalToDOM = spec.toDOM as ((n: never) => DOMOutputSpec) | undefined;
@@ -13,9 +18,9 @@ export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
   return {
     ...spec,
     attrs: { ...(spec.attrs ?? {}), class: { default: null }, style: { default: null } },
-    parseDOM: (spec.parseDOM ?? []).map((rule: ParseRule) => ({
+    parseDOM: ((spec.parseDOM as TagParseRule[] | undefined) ?? []).map((rule) => ({
       ...rule,
-      getAttrs: (dom: HTMLElement) => {
+      getAttrs: (dom: HTMLElement): Attrs | false => {
         const base = rule.getAttrs ? rule.getAttrs(dom) : (rule.attrs ?? null);
         if (base === false) return false;
         return {
