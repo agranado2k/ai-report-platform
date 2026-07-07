@@ -3,12 +3,12 @@
 // `handle()` combinator: resolve the actor (write path → provisions) + the
 // slug → parse { folder_id } → run moveReport → serialize via the pure
 // arp-http mapper. The use case owns authz: the actor must pass the canWrite
-// seam for the report (owner today, ADR-0059) and the target folder must be
-// in the report's org.
+// seam for the report (owner OR write-grantee, ADR-0059/0060) and the target
+// folder must be in the report's org.
 import { moveReport } from "arp-application";
 import { makeFolderId } from "arp-domain";
 import { moveReportToHttp } from "arp-http";
-import { deps, folderRepo } from "../server/container.server";
+import { deps, folderRepo, identityStore, writeGrantStore } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 
@@ -24,7 +24,12 @@ export const action = handle({
     if (!toFolderId.ok) return toFolderId;
 
     return moveReport(
-      { reports: deps().reports, folders: folderRepo() },
+      {
+        reports: deps().reports,
+        folders: folderRepo(),
+        grants: writeGrantStore(),
+        identities: identityStore(),
+      },
       { orgId: actor.orgId, userId: actor.userId },
       { slug, toFolderId: toFolderId.value },
     );

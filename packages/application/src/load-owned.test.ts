@@ -15,13 +15,22 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   canWrite,
+  hasWriteGrant,
   loadOrgReport,
   loadOwnedFolder,
   loadOwnedReport,
+  loadReadableReport,
+  loadWritableReport,
   type TenancyActor,
+  type WriteGrantCheckDeps,
 } from "./load-owned";
 import type { FolderRepository, ReportRepository } from "./ports";
-import { InMemoryFolderRepository, InMemoryReportRepository } from "./testing/in-memory";
+import {
+  InMemoryFolderRepository,
+  InMemoryIdentityStore,
+  InMemoryReportRepository,
+  InMemoryWriteGrantStore,
+} from "./testing/in-memory";
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
@@ -204,18 +213,157 @@ describe("loadOwnedReport (owner-gated writes, ADR-0059 §2)", () => {
   });
 });
 
-describe("canWrite (the seam ADR-0060 extends with write grants)", () => {
-  it("the owner can write", () => {
-    expect(canWrite(report(orgA, "aaaaaaaaaa"), ownerActor)).toBe(true);
+function writeDeps(): WriteGrantCheckDeps {
+  return { grants: new InMemoryWriteGrantStore(), identities: new InMemoryIdentityStore() };
+}
+
+describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", () => {
+  it("the owner can write, with no grant needed", async () => {
+    const deps = writeDeps();
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), ownerActor, deps);
+    expect(r.ok && r.value).toBe(true);
   });
 
-  it("a same-org non-owner cannot write (this PR: canWrite = isOwner)", () => {
-    expect(canWrite(report(orgA, "aaaaaaaaaa"), colleagueActor)).toBe(false);
+  it("a same-org non-owner without a grant cannot write", async () => {
+    const deps = writeDeps();
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), colleagueActor, deps);
+    expect(r.ok && r.value).toBe(false);
   });
 
-  it("ownership is org-agnostic — the owner writes regardless of acting-org context", () => {
+  it("ownership is org-agnostic — the owner writes regardless of acting-org context", async () => {
     const ownerInOtherOrg: TenancyActor = { orgId: orgB, userId: owner };
-    expect(canWrite(report(orgA, "aaaaaaaaaa"), ownerInOtherOrg)).toBe(true);
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), ownerInOtherOrg, writeDeps());
+    expect(r.ok && r.value).toBe(true);
+  });
+
+  it("a cross-org grantee matched by granteeUserId can write (works cross-org)", async () => {
+    const grants = new InMemoryWriteGrantStore();
+    const grantee = { orgId: orgB, userId: otherUser };
+    const rpt = report(orgA, "aaaaaaaaaa");
+    await grants.grant(rpt.id, "grantee@x.com", owner, otherUser);
+    const deps: WriteGrantCheckDeps = { grants, identities: new InMemoryIdentityStore() };
+    const r = await canWrite(rpt, grantee, deps);
+    expect(r.ok && r.value).toBe(true);
+  });
+
+  it("a grantee resolved only by email (no granteeUserId yet) can write once their email resolves", async () => {
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    const grantee = { orgId: orgB, userId: otherUser };
+    const rpt = report(orgA, "aaaaaaaaaa");
+    await grants.grant(rpt.id, "grantee@x.com", owner, null); // not signed up at grant time
+    identities.seedUser(otherUser, "grantee@x.com"); // signs up later
+    const r = await canWrite(rpt, grantee, { grants, identities });
+    expect(r.ok && r.value).toBe(true);
+  });
+
+  it("hasWriteGrant propagates a grants-store repo error", async () => {
+    const rpt = report(orgA, "aaaaaaaaaa");
+    const failingGrants = {
+      async grant() {
+        return err({ kind: "Unexpected" as const, message: "db down" });
+      },
+      async revoke() {
+        return err({ kind: "Unexpected" as const, message: "db down" });
+      },
+      async listByReport() {
+        return err({ kind: "Unexpected" as const, message: "db down" });
+      },
+      async findFor() {
+        return err({ kind: "Unexpected" as const, message: "db down" });
+      },
+    };
+    const r = await hasWriteGrant(rpt.id, colleagueActor, {
+      grants: failingGrants,
+      identities: new InMemoryIdentityStore(),
+    });
+    expect(!r.ok && r.error).toEqual({ kind: "Unexpected", message: "db down" });
+  });
+});
+
+describe("loadWritableReport (rename / re-upload / move seam)", () => {
+  it("returns the report for the owner", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    const r = await loadWritableReport(reports, ownerActor, slug("aaaaaaaaaa"), writeDeps());
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
+
+  it("returns the report for a cross-org write-grantee", async () => {
+    const reports = new InMemoryReportRepository();
+    const seeded = report(orgA, "aaaaaaaaaa");
+    await reports.save(seeded);
+    const grants = new InMemoryWriteGrantStore();
+    await grants.grant(seeded.id, "grantee@x.com", owner, otherUser);
+    const r = await loadWritableReport(
+      reports,
+      { orgId: orgB, userId: otherUser },
+      slug("aaaaaaaaaa"),
+      {
+        grants,
+        identities: new InMemoryIdentityStore(),
+      },
+    );
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
+
+  it("rejects a non-owner, non-grantee with NotAllowed (write-access message)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    const r = await loadWritableReport(reports, colleagueActor, slug("aaaaaaaaaa"), writeDeps());
+    expect(!r.ok && r.error).toEqual({
+      kind: "NotAllowed",
+      message: "you do not have write access to this report",
+    });
+  });
+
+  it("rejects an unknown slug with NotFound", async () => {
+    const reports = new InMemoryReportRepository();
+    const r = await loadWritableReport(reports, ownerActor, slug("zzzzzzzzzz"), writeDeps());
+    expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "report not found" });
+  });
+});
+
+describe("loadReadableReport (GET seam: org-visible + grantee metadata carve-out)", () => {
+  it("returns the report for a same-org actor", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    const r = await loadReadableReport(reports, ownerActor, slug("aaaaaaaaaa"), writeDeps());
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
+
+  it("a same-org non-owner can read metadata too (reads stay org-visible, ADR-0059 §3)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    const r = await loadReadableReport(reports, colleagueActor, slug("aaaaaaaaaa"), writeDeps());
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
+
+  it("a cross-org write-grantee can read the report's metadata (ADR-0060 §4 carve-out)", async () => {
+    const reports = new InMemoryReportRepository();
+    const seeded = report(orgA, "aaaaaaaaaa");
+    await reports.save(seeded);
+    const grants = new InMemoryWriteGrantStore();
+    await grants.grant(seeded.id, "grantee@x.com", owner, otherUser);
+    const r = await loadReadableReport(
+      reports,
+      { orgId: orgB, userId: otherUser },
+      slug("aaaaaaaaaa"),
+      { grants, identities: new InMemoryIdentityStore() },
+    );
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
+
+  it("rejects a cross-org non-grantee with NotAllowed", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    const r = await loadReadableReport(
+      reports,
+      { orgId: orgB, userId: otherUser },
+      slug("aaaaaaaaaa"),
+      writeDeps(),
+    );
+    expect(!r.ok && r.error).toEqual({ kind: "NotAllowed", message: "report is not in your org" });
   });
 });
 

@@ -13,7 +13,9 @@ import {
   InMemoryBlobStore,
   InMemoryEventOutbox,
   InMemoryIdempotencyStore,
+  InMemoryIdentityStore,
   InMemoryReportRepository,
+  InMemoryWriteGrantStore,
   PassThroughUnitOfWork,
   RecordingScanQueue,
   SequentialIdGenerator,
@@ -29,6 +31,9 @@ export interface AppTestHarness {
   readonly outbox: InMemoryEventOutbox;
   readonly scans: RecordingScanQueue;
   readonly planLimiter: FakePlanLimiter;
+  /** Write grants (ADR-0060) — the canWrite seam's reUpload call site. */
+  readonly grants: InMemoryWriteGrantStore;
+  readonly identities: InMemoryIdentityStore;
 }
 
 /** The subset of {@link AppTestHarness} a caller may override — one seam at a
@@ -36,7 +41,15 @@ export interface AppTestHarness {
 export type AppTestHarnessOverrides = Partial<
   Pick<
     AppTestHarness,
-    "reports" | "blobs" | "bundles" | "idempotency" | "outbox" | "scans" | "planLimiter"
+    | "reports"
+    | "blobs"
+    | "bundles"
+    | "idempotency"
+    | "outbox"
+    | "scans"
+    | "planLimiter"
+    | "grants"
+    | "identities"
   >
 >;
 
@@ -46,7 +59,7 @@ export type AppTestHarnessOverrides = Partial<
  * `uow` are always fresh deterministic fakes (SequentialIdGenerator,
  * SequentialSlugFactory, FakeHasher, PassThroughUnitOfWork) — they have no
  * assertable state a test would want to override or inspect independently of
- * `deps`, unlike the seven named handles below.
+ * `deps`, unlike the named handles below.
  */
 export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): AppTestHarness {
   const reports = overrides.reports ?? new InMemoryReportRepository();
@@ -56,6 +69,8 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const outbox = overrides.outbox ?? new InMemoryEventOutbox();
   const scans = overrides.scans ?? new RecordingScanQueue();
   const planLimiter = overrides.planLimiter ?? new FakePlanLimiter();
+  const grants = overrides.grants ?? new InMemoryWriteGrantStore();
+  const identities = overrides.identities ?? new InMemoryIdentityStore();
 
   const deps: UploadReportDeps = {
     reports,
@@ -65,11 +80,24 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     outbox,
     scans,
     planLimiter,
+    grants,
+    identities,
     ids: new SequentialIdGenerator(),
     slugs: new SequentialSlugFactory(),
     hasher: new FakeHasher(),
     uow: new PassThroughUnitOfWork(),
   };
 
-  return { deps, reports, blobs, bundles, idempotency, outbox, scans, planLimiter };
+  return {
+    deps,
+    reports,
+    blobs,
+    bundles,
+    idempotency,
+    outbox,
+    scans,
+    planLimiter,
+    grants,
+    identities,
+  };
 }

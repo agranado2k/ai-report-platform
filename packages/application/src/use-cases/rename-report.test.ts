@@ -10,8 +10,17 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { InMemoryReportRepository } from "../testing/in-memory";
+import {
+  InMemoryIdentityStore,
+  InMemoryReportRepository,
+  InMemoryWriteGrantStore,
+} from "../testing/in-memory";
 import { renameReport } from "./rename-report";
+
+const writeDeps = () => ({
+  grants: new InMemoryWriteGrantStore(),
+  identities: new InMemoryIdentityStore(),
+});
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const owner = userId("00000000-0000-7000-8000-0000000000d1");
@@ -42,7 +51,7 @@ describe("renameReport use case", () => {
   it("renames a report in the same org and persists the title", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "aaaaaaaaaa"));
-    const r = await renameReport({ reports }, ownerActor, {
+    const r = await renameReport({ reports, ...writeDeps() }, ownerActor, {
       slug: slug("aaaaaaaaaa"),
       title: "New Title",
     });
@@ -55,7 +64,7 @@ describe("renameReport use case", () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "bbbbbbbbbb"));
     const r = await renameReport(
-      { reports },
+      { reports, ...writeDeps() },
       { orgId: orgA, userId: otherUser },
       { slug: slug("bbbbbbbbbb"), title: "X" },
     );
@@ -67,14 +76,17 @@ describe("renameReport use case", () => {
 
   it("rejects an unknown report with NotFound", async () => {
     const reports = new InMemoryReportRepository();
-    const r = await renameReport({ reports }, ownerActor, { slug: slug("cccccccccc"), title: "X" });
+    const r = await renameReport({ reports, ...writeDeps() }, ownerActor, {
+      slug: slug("cccccccccc"),
+      title: "X",
+    });
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
   it("rejects an empty title with ValidationError", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "dddddddddd"));
-    const r = await renameReport({ reports }, ownerActor, {
+    const r = await renameReport({ reports, ...writeDeps() }, ownerActor, {
       slug: slug("dddddddddd"),
       title: "  ",
     });

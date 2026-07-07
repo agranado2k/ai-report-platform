@@ -9,18 +9,24 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { deleteReport, getReport, renameReport } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { deleteReportToHttp, errorToHttp, getReportToHttp, renameReportToHttp } from "arp-http";
-import { deps } from "../server/container.server";
+import { deps, identityStore, writeGrantStore } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { toResponse, wireContext } from "../server/http.server";
 
-// GET — read a single report by slug, scoped to the acting org. resolveActorForRead
-// resolves the org WITHOUT provisioning (GETs stay safe); no session / no org → 401.
-// A report outside the actor's org reads as NotAllowed (the use case owns authz).
+// GET — read a single report by slug: org-visible, PLUS the cross-org
+// write-grantee metadata carve-out (ADR-0060 §4). resolveActorForRead resolves
+// the org WITHOUT provisioning (GETs stay safe); no session / no org → 401.
+// A report neither in the actor's org nor write-granted to them reads as
+// NotAllowed (the use case owns authz).
 export const loader = handle({
   mode: "read",
   slug: true,
   run: ({ actor, slug }) =>
-    getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
+    getReport(
+      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
+      { orgId: actor.orgId, userId: actor.userId },
+      { slug },
+    ),
   // The acl block is owner-conditional (ADR-0059 §3) — thread the viewer through.
   toHttp: (result, { actor }) => getReportToHttp(result, wireContext(), { userId: actor.userId }),
 });
@@ -52,7 +58,7 @@ const patchHandler = handle({
   run: ({ actor, slug, body }) => {
     const title = typeof body.title === "string" ? body.title : "";
     return renameReport(
-      { reports: deps().reports },
+      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
       { orgId: actor.orgId, userId: actor.userId },
       { slug, title },
     );
