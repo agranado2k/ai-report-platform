@@ -61,7 +61,7 @@ Per **ADR-0036** (Domain-Driven Design). The four bounded contexts and how they 
 
 **Consumes**: `UserCreated` from Identity & Access — optional optimization only (ADR-0060): backfill a pending `Write grant`'s `grantee_user_id`; grants are matched by normalized email at check time, so nothing blocks on the event.
 
-**Emits events**: `ReportVersionUploaded`, `ReportPublished` (fires whenever `live_version_id` moves — first publish or re-point; the welcome notifier checks whether it is the first), `AclChanged`, `CollaboratorGranted` (superseded by ADR-0060 — to be replaced by a write-grant event in `docs/events.md` when grants land). Consumed by Abuse & Moderation and by side effects (audit log, notifications, cache invalidation) in the Application layer.
+**Emits events**: `ReportVersionUploaded`, `ReportPublished` (fires whenever `live_version_id` moves — first publish or re-point; the welcome notifier checks whether it is the first), `AclChanged`, `CollaboratorGranted` (retired, ADR-0060 — write grants shipped in PR #150 deliberately without a replacement event; see the tombstone row in `docs/events.md`). Consumed by Abuse & Moderation and by side effects (audit log, notifications, cache invalidation) in the Application layer.
 
 ### Abuse & Moderation
 

@@ -12,7 +12,12 @@
 import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { principalToUploadActor, provisionIdentity, type UploadActor } from "arp-application";
+import {
+  principalToUploadActor,
+  provisionIdentity,
+  SELF_SCOPES,
+  type UploadActor,
+} from "arp-application";
 import {
   type AppError,
   err,
@@ -183,27 +188,41 @@ export async function resolveUploadActor(
   });
 }
 
+/** The read-path actor's shape (ADR-0060 §3): `userId`/`orgId` PLUS `scopes` —
+ *  needed so a read-only, owner-gated use case (`listWriteGrants`) can still
+ *  enforce the `acl:write` scope on a GET, same as its write siblings. */
+type ReadResolvedActor = Pick<UploadActor, "userId" | "orgId" | "scopes">;
+
 /**
  * Resolve the acting principal for a READ (the dashboard list, the API-keys
  * settings page) WITHOUT the write-path side effects. Unlike `resolveUploadActor`,
  * this never provisions: it looks up the already-mirrored identity (`findByClerk`)
- * and returns its `userId`/`orgId`, or `null` when there's no credential / the user
- * isn't mirrored yet (a brand-new user who hasn't uploaded — their list is simply
- * empty). Keeps GET loaders safe/idempotent: no Clerk org or DB rows are created on
- * a read. `userId` is exposed (not just `orgId`) so read loaders that key off the
- * acting user — e.g. listing that user's API keys — needn't take the write path.
+ * and returns its `userId`/`orgId`/`scopes`, or `null` when there's no credential /
+ * the user isn't mirrored yet (a brand-new user who hasn't uploaded — their list is
+ * simply empty). Keeps GET loaders safe/idempotent: no Clerk org or DB rows are
+ * created on a read. `userId` is exposed (not just `orgId`) so read loaders that key
+ * off the acting user — e.g. listing that user's API keys — needn't take the write
+ * path.
  */
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
-): Promise<Result<Pick<UploadActor, "userId" | "orgId"> | null, AppError>> {
-  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the principal. An
-  // unmatched key reads as `null` (empty list), consistent with no-session reads.
+): Promise<Result<ReadResolvedActor | null, AppError>> {
+  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the principal
+  // (scopes pass through from the key row — an owner's key without `acl:write`
+  // stays unable to read write-grant config, ADR-0060 §3). An unmatched key
+  // reads as `null` (empty list), consistent with no-session reads.
   const token = apiKeyToken(args);
   if (token) {
     const resolved = await apiKeyStore().verify(token);
     if (!resolved.ok) return resolved;
     return ok(
-      resolved.value ? { userId: resolved.value.userId, orgId: resolved.value.orgId } : null,
+      resolved.value
+        ? {
+            userId: resolved.value.userId,
+            orgId: resolved.value.orgId,
+            scopes: resolved.value.scopes,
+          }
+        : null,
     );
   }
 
@@ -223,12 +242,14 @@ export async function resolveActorForRead(
  * OAuth token may carry NO active org; the user still has a personal org (the one
  * the write path provisioned on first upload, ADR-0048). Resolve it so reads see the
  * same org writes attribute to, WITHOUT provisioning on a GET. Returns `null` when
- * the user has no org / mirror yet (never uploaded) → empty list.
+ * the user has no org / mirror yet (never uploaded) → empty list. Session/OAuth
+ * reads aren't API-key-scoped, so they carry the same `SELF_SCOPES` the write path
+ * grants (ADR-0060 §3 — a browser/MCP-OAuth caller has full access on both paths).
  */
 async function lookupMirroredActor(
   clerkUserId: string,
   activeOrgId: string | null,
-): Promise<Result<Pick<UploadActor, "userId" | "orgId"> | null, AppError>> {
+): Promise<Result<ReadResolvedActor | null, AppError>> {
   const deps = provisionDeps();
   let clerkOrgId = activeOrgId;
   if (!clerkOrgId) {
@@ -240,7 +261,11 @@ async function lookupMirroredActor(
 
   const found = await deps.identities.findByClerk(clerkUserId, clerkOrgId);
   if (!found.ok) return found; // infra failure (DB outage) → propagate (→ 500)
-  return ok(found.value ? { userId: found.value.userId, orgId: found.value.orgId } : null);
+  return ok(
+    found.value
+      ? { userId: found.value.userId, orgId: found.value.orgId, scopes: SELF_SCOPES }
+      : null,
+  );
 }
 
 /** Read the `email` custom claim off a Clerk session token, if present + plausible. */

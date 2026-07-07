@@ -2,7 +2,8 @@
 // (the contract). Grouped by bounded context (ADR-0036). Ids are UUIDv7 set
 // app-side (no DB default). Column names are explicit snake_case. FK policy:
 // ON DELETE RESTRICT by default; CASCADE only on report_versions→reports,
-// acls→reports, report_grants→reports, scan_jobs→report_versions (db-design.md → Conventions).
+// acls→reports, report_grants→reports, report_write_grants→reports,
+// scan_jobs→report_versions (db-design.md → Conventions).
 
 import { sql } from "drizzle-orm";
 import {
@@ -271,6 +272,36 @@ export const reportGrants = pgTable(
   (t) => [
     primaryKey({ columns: [t.reportId, t.email] }),
     index("report_grants_expires_at_idx").on(t.expiresAt), // purge job
+  ],
+);
+
+// Per-report write grants (ADR-0060) — the owner explicitly grants rename /
+// re-upload / move to a specific person by email; supersedes the never-built
+// folder_collaborators design. One row per (report, grantee email); no expiry
+// (persists until revoked), no permission level (one implicit level). Works
+// cross-org — the grantee is typically outside the report's org, so this
+// table carries no org_id. grantee_user_id is resolved lazily: set
+// opportunistically at grant time when the user already exists, else matched
+// by normalized email at check time (see WriteGrantStore.findFor).
+export const reportWriteGrants = pgTable(
+  "report_write_grants",
+  {
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => reports.id, { onDelete: "cascade" }),
+    granteeEmail: text("grantee_email").notNull(),
+    granteeUserId: uuid("grantee_user_id").references(() => users.id, { onDelete: "restrict" }),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    grantedAt: tstz("granted_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.reportId, t.granteeEmail] }),
+    // Unused by today's queries (all filter by report_id, the PK prefix) —
+    // reserved for the signup-time grantee_user_id backfill sweep (ADR-0060 §2,
+    // "grants for this email" lookup). Don't drop as dead.
+    index("report_write_grants_grantee_email_idx").on(t.granteeEmail),
   ],
 );
 

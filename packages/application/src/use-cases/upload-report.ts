@@ -22,7 +22,7 @@ import {
   type VersionId,
   type VersionManifest,
 } from "arp-domain";
-import { canWrite } from "../load-owned";
+import { canWrite, type WriteGrantCheckDeps } from "../load-owned";
 import type {
   BlobStore,
   BundleProcessor,
@@ -41,7 +41,7 @@ import type {
 const ROUTE = "POST /api/v1/reports";
 const WRITE_SCOPE = "reports:write";
 
-export interface UploadReportDeps {
+export interface UploadReportDeps extends WriteGrantCheckDeps {
   readonly reports: ReportRepository;
   readonly blobs: BlobStore;
   readonly bundles: BundleProcessor;
@@ -219,10 +219,13 @@ async function reUpload(
   // deletedAt is intentionally NOT filtered here (unlike loadWritableReport):
   // whether re-upload should resurrect a soft-deleted slug is an OPEN QUESTION
   // in docs/diary.md — switching to the guard would silently decide it as "no".
-  // The canWrite seam (ADR-0059 §2; ADR-0060 extends it with write grants) —
-  // replaces the old inline org check for re-upload.
-  if (!canWrite(found.value, actor))
-    return err(notAllowed("you do not have write access to this report"));
+  // The canWrite seam (ADR-0059 §2 / ADR-0060 §4: isOwner OR hasWriteGrant) —
+  // replaces the old inline org check for re-upload. This is the SECOND
+  // canWrite call site (the first is loadWritableReport, for rename/move) —
+  // flagged by the G1 review as needing to move together.
+  const allowed = await canWrite(found.value, actor, deps);
+  if (!allowed.ok) return allowed;
+  if (!allowed.value) return err(notAllowed("you do not have write access to this report"));
   return addVersion(found.value, {
     versionId: deps.ids.versionId(),
     contentHash: bundle.contentHash,

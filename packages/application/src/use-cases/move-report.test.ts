@@ -12,8 +12,18 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { InMemoryFolderRepository, InMemoryReportRepository } from "../testing/in-memory";
+import {
+  InMemoryFolderRepository,
+  InMemoryIdentityStore,
+  InMemoryReportRepository,
+  InMemoryWriteGrantStore,
+} from "../testing/in-memory";
 import { moveReport } from "./move-report";
+
+const writeDeps = () => ({
+  grants: new InMemoryWriteGrantStore(),
+  identities: new InMemoryIdentityStore(),
+});
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
@@ -64,7 +74,7 @@ describe("moveReport use case", () => {
     const { reports, folders, targetA } = await setup();
     await reports.save(report(orgA, "aaaaaaaaaa"));
 
-    const r = await moveReport({ reports, folders }, ownerActor, {
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("aaaaaaaaaa"),
       toFolderId: targetA.id,
     });
@@ -74,12 +84,12 @@ describe("moveReport use case", () => {
     expect(after.ok && after.value?.folderId).toBe(targetA.id);
   });
 
-  it("rejects a non-owner with NotAllowed (canWrite = isOwner this PR, ADR-0059)", async () => {
+  it("rejects a non-owner without a write grant with NotAllowed (canWrite, ADR-0059/0060)", async () => {
     const { reports, folders, targetA } = await setup();
     await reports.save(report(orgA, "bbbbbbbbbb"));
 
     const r = await moveReport(
-      { reports, folders },
+      { reports, folders, ...writeDeps() },
       { orgId: orgA, userId: otherUser },
       {
         slug: slug("bbbbbbbbbb"),
@@ -96,7 +106,7 @@ describe("moveReport use case", () => {
     const { reports, folders, targetB } = await setup();
     await reports.save(report(orgA, "cccccccccc"));
 
-    const r = await moveReport({ reports, folders }, ownerActor, {
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("cccccccccc"),
       toFolderId: targetB.id, // org B's folder
     });
@@ -108,7 +118,7 @@ describe("moveReport use case", () => {
 
   it("rejects an unknown report (NotFound)", async () => {
     const { reports, folders, targetA } = await setup();
-    const r = await moveReport({ reports, folders }, ownerActor, {
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("zzzzzzzzzz"),
       toFolderId: targetA.id,
     });
@@ -119,7 +129,7 @@ describe("moveReport use case", () => {
     const { reports, folders } = await setup();
     await reports.save(report(orgA, "dddddddddd"));
 
-    const r = await moveReport({ reports, folders }, ownerActor, {
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("dddddddddd"),
       toFolderId: folderId("00000000-0000-7000-8000-00000000dead"),
     });
@@ -135,7 +145,7 @@ describe("moveReport use case", () => {
     };
     await folders.save(deleted);
 
-    const r = await moveReport({ reports, folders }, ownerActor, {
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("eeeeeeeeee"),
       toFolderId: deleted.id,
     });
@@ -148,7 +158,7 @@ describe("moveReport use case", () => {
     const before = await reports.findBySlug(slug("ffffffffff"));
     const beforeCount = before.ok && before.value ? before.value.versions.length : -1;
 
-    await moveReport({ reports, folders }, ownerActor, {
+    await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
       slug: slug("ffffffffff"),
       toFolderId: targetA.id,
     });

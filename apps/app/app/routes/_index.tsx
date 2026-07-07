@@ -35,7 +35,7 @@ import {
   StatusBadge,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { deps, folderRepo } from "../server/container.server";
+import { deps, folderRepo, identityStore, writeGrantStore } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 import { log } from "../server/log.server";
 
@@ -167,7 +167,12 @@ export async function action(args: ActionFunctionArgs) {
     const toFolderId = makeFolderId(rawTo);
     if (!toFolderId.ok) return errorToJson(toFolderId.error);
     const r = await moveReport(
-      { reports: deps().reports, folders: folderRepo() },
+      {
+        reports: deps().reports,
+        folders: folderRepo(),
+        grants: writeGrantStore(),
+        identities: identityStore(),
+      },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, toFolderId: toFolderId.value },
     );
@@ -180,7 +185,7 @@ export async function action(args: ActionFunctionArgs) {
     const title = String(form.get("title") ?? "");
     if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
     const r = await renameReport(
-      { reports: deps().reports },
+      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, title },
     );

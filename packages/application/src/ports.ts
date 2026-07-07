@@ -171,6 +171,58 @@ export interface GrantStore {
   revokeAll(reportId: ReportId): Promise<Result<void, AppError>>;
 }
 
+/**
+ * A per-report write grant (ADR-0060) — the owner-granted permission to rename,
+ * re-upload, or move a specific report. No surrogate id (wire-addressed as
+ * `(slug, email)`); no expiry (persists until revoked); one implicit level.
+ */
+export interface WriteGrant {
+  readonly reportId: ReportId;
+  /** Normalized (`EmailAddress`) — the canonical key alongside `reportId`. */
+  readonly granteeEmail: string;
+  /** Resolved lazily: set opportunistically at grant time when the user already
+   *  exists, else null and matched by email at check time. */
+  readonly granteeUserId: UserId | null;
+  readonly grantedBy: UserId;
+  /** Epoch ms. */
+  readonly grantedAt: number;
+}
+
+/**
+ * Durable per-report write grants (ADR-0060) over `report_write_grants`.
+ * Modeled on `GrantStore` — email-keyed, upsert-in-place, revoke-by-row-delete.
+ * Unlike `GrantStore` there is no expiry and no view-access semantics; this
+ * store backs the `canWrite` seam's `hasWriteGrant` check (rename/re-upload/
+ * move), which works cross-org. Emails are matched **normalized**; the store
+ * does this defensively so callers needn't pre-normalize.
+ */
+export interface WriteGrantStore {
+  /** Create or refresh a grant for (report, email). `granteeUserId` is the
+   *  opportunistic resolution at grant time (null when the grantee hasn't
+   *  signed up yet). */
+  grant(
+    reportId: ReportId,
+    email: string,
+    grantedBy: UserId,
+    granteeUserId: UserId | null,
+  ): Promise<Result<void, AppError>>;
+  /** Revoke a single grantee's write access. */
+  revoke(reportId: ReportId, email: string): Promise<Result<void, AppError>>;
+  /** Every write grant on a report (owner-only listing). */
+  listByReport(reportId: ReportId): Promise<Result<readonly WriteGrant[], AppError>>;
+  /**
+   * Whether `actor` holds a write grant on `reportId` — matched by
+   * `granteeUserId = actor.userId` OR normalized-email equality with
+   * `actor.email` (ADR-0060 §2: the grantee may not have signed up at grant
+   * time, so email is the durable match key). `email` is omitted when the
+   * caller couldn't resolve one (never happens for a real signed-in actor).
+   */
+  findFor(
+    reportId: ReportId,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<WriteGrant | null, AppError>>;
+}
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
 export interface FolderRepository {
@@ -390,6 +442,14 @@ export interface IdentityStore {
     clerkUserId: string,
     clerkOrgId: string,
   ): Promise<Result<ProvisionedIdentity | null, AppError>>;
+  /**
+   * Our internal `OrgId` for a mirrored Clerk org, or null when the org isn't
+   * mirrored. The org-mode unlock decision (ADR-0056 P2) needs ONLY this:
+   * membership is asserted by the Clerk-verified session org — requiring a
+   * mirrored `users` row would wrongly deny members who have never written
+   * (the users row is created on the write path, review #150 H-1).
+   */
+  findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>>;
   /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity.
    *  MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal). */
   createPersonalIdentity(input: {
@@ -404,6 +464,22 @@ export interface IdentityStore {
    * when no LIVE user matched — idempotent: replays / unknown ids are a no-op.
    */
   softDeleteByClerkId(clerkUserId: string): Promise<Result<UserId | null, AppError>>;
+  /**
+   * The mirrored user's email, by our internal `UserId` (ADR-0060 §2 — the
+   * `canWrite` seam's write-grant matching needs the ACTING user's email to
+   * compare against a grant's `grantee_email` when `grantee_user_id` is still
+   * null). Reuses the mirrored `users` row rather than a live Clerk lookup —
+   * no extra external round-trip on every write/read check. Null when the
+   * user id is unknown (shouldn't happen for a resolved actor).
+   */
+  findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>>;
+  /**
+   * Our internal `UserId` for an already-mirrored user with this email, or
+   * null if none exists yet (ADR-0060 §2 — `grantWrite`'s opportunistic
+   * `grantee_user_id` resolution: set it now if the grantee already has an
+   * account, else leave it null and match by email at check time).
+   */
+  findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>>;
 }
 
 /**

@@ -44,7 +44,8 @@ export const events = [
   "ReportVersionUploaded",
   "ReportPublished",
   "AclChanged",
-  "CollaboratorGranted",
+  // CollaboratorGranted retired (ADR-0060, PR #150) — write grants shipped
+  // deliberately without a replacement event; the events.md row is a tombstone.
   "UserCreated",
   "ApiKeyUsed",
   "ApiKeyAnomalyDetected",
@@ -155,6 +156,15 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
+  "report-write-grants": {
+    title: "Per-report write grants",
+    phase: "@phase-2",
+    status: "wip",
+  },
+  // cross-org-collaboration.feature describes the ADR-009 folder_collaborators
+  // design, superseded by ADR-0060 (report-write-grants.feature, above) — kept
+  // catalogued rather than deleted (the feature file itself still exists,
+  // untouched, pending a future cleanup pass).
   "list-report-versions": {
     title: "List a report's version history",
     phase: "@phase-2",

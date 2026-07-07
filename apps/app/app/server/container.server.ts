@@ -18,6 +18,7 @@ import {
   DrizzleReportRepository,
   DrizzleScanQueue,
   DrizzleUnitOfWork,
+  DrizzleWriteGrantStore,
   getBoss,
   HtmlBundleProcessor,
   NanoidSlugFactory,
@@ -35,9 +36,11 @@ import type {
   EmailSender,
   GrantStore,
   HandleUserDeletedDeps,
+  IdentityStore,
   NonceStore,
   ProvisionIdentityDeps,
   UploadReportDeps,
+  WriteGrantStore,
 } from "arp-application";
 import { defineEnv } from "arp-env";
 
@@ -110,11 +113,28 @@ export function grantStore(): GrantStore {
   return _grants;
 }
 
+let _writeGrants: DrizzleWriteGrantStore | undefined;
+/** The write-grant store (ADR-0060) — per-report rename/re-upload/move grants;
+ *  backs the canWrite seam's hasWriteGrant check + the grant/revoke/list use cases. */
+export function writeGrantStore(): WriteGrantStore {
+  if (!_writeGrants) _writeGrants = new DrizzleWriteGrantStore(context());
+  return _writeGrants;
+}
+
 let _clock: SystemClock | undefined;
 /** The system clock — epoch ms; backs grant expiry on magic-link redeem. */
 export function clock(): Clock {
   if (!_clock) _clock = new SystemClock();
   return _clock;
+}
+
+let _identities: DrizzleIdentityStore | undefined;
+/** The identity store (ADR-0048/0060) — Clerk-identity mirroring PLUS the
+ *  internal-UserId ↔ email lookups the write-grant seam needs. Memoized once
+ *  and shared by `deps()`, `provisionDeps()`, and `userWebhookDeps()`. */
+export function identityStore(): IdentityStore {
+  if (!_identities) _identities = new DrizzleIdentityStore(context());
+  return _identities;
 }
 
 export function deps(): UploadReportDeps {
@@ -141,6 +161,8 @@ export function deps(): UploadReportDeps {
     slugs: new NanoidSlugFactory(),
     hasher: new Sha256Hasher(),
     uow: new DrizzleUnitOfWork(ctx),
+    grants: writeGrantStore(),
+    identities: identityStore(),
   };
   return _deps;
 }
@@ -188,7 +210,7 @@ export function provisionDeps(): ProvisionIdentityDeps {
   if (_provisionDeps) return _provisionDeps;
   const env = defineEnv();
   _provisionDeps = {
-    identities: new DrizzleIdentityStore(context()),
+    identities: identityStore(),
     clerkOrgs: ClerkBackendOrgProvisioner.fromSecretKey(env.CLERK_SECRET_KEY),
   };
   return _provisionDeps;
@@ -199,7 +221,7 @@ export function provisionDeps(): ProvisionIdentityDeps {
  * (soft-delete) + the ApiKeyStore (revoke cascade).
  */
 export function userWebhookDeps(): HandleUserDeletedDeps {
-  return { identities: new DrizzleIdentityStore(context()), apiKeys: apiKeyStore() };
+  return { identities: identityStore(), apiKeys: apiKeyStore() };
 }
 
 /**

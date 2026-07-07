@@ -260,4 +260,38 @@ describe("ApiClient writes", () => {
     });
     expect("password" in sent).toBe(false); // absent fields omitted
   });
+
+  it("grantWrite POSTs /write-grants with the email", async () => {
+    const { fn, calls } = stub(json({ object: "write_grant", email: "grantee@x.com" }, 201));
+    const r = await client(fn).grantWrite("abc12345", "grantee@x.com");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/write-grants");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ email: "grantee@x.com" });
+  });
+
+  it("revokeWrite DELETEs /write-grants/{email} (URL-encoded)", async () => {
+    const { fn, calls } = stub(new Response(null, { status: 204 }));
+    const r = await client(fn).revokeWrite("abc12345", "a+b@x.com");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/abc12345/write-grants/a%2Bb%40x.com",
+    );
+  });
+
+  it("listWriteGrants GETs the write-grants list envelope", async () => {
+    const { fn, calls } = stub(
+      json({
+        object: "list",
+        data: [{ object: "write_grant", email: "a@b.com" }],
+        has_more: false,
+      }),
+    );
+    const r = await client(fn).listWriteGrants("abc12345");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.data).toHaveLength(1);
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/write-grants");
+  });
 });

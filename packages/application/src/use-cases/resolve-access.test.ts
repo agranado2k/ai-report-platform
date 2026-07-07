@@ -88,6 +88,39 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     expect(await decide(PW, { cookie: allowToken }, { grants })).toEqual({ kind: "unlock" });
   });
 
+  // ── org mode (ADR-0056 P2 / ADR-0060) ─────────────────────────────────────
+  // The unlock loader mints an `org`-mode token ONLY after confirming the
+  // Clerk session's mirrored org matches the report's org; resolveAccessDecision
+  // itself doesn't re-check membership — same division of labor as `password`
+  // (the app authorizes, the viewer verifies a signature, ADR-0056 §1).
+  it("org mode: no token → unlock (redirect to the app's org handshake)", async () => {
+    expect(await decide({ mode: "org" }, {})).toEqual({ kind: "unlock" });
+  });
+
+  it("org mode: a valid ?access hand-off mints the grant (sets the unlock cookie)", async () => {
+    const token = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "org" });
+    expect(await decide({ mode: "org" }, { query: token })).toEqual({
+      kind: "grant",
+      token,
+      maxAgeSeconds: 900,
+    });
+  });
+
+  it("org mode: a valid unlock cookie → serve", async () => {
+    const token = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "org" });
+    expect(await decide({ mode: "org" }, { cookie: token })).toEqual({ kind: "serve" });
+  });
+
+  it("org mode: a token minted under a different mode → unlock (mode-bound, no cross-mode bypass)", async () => {
+    const pwToken = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "password" });
+    expect(await decide({ mode: "org" }, { cookie: pwToken })).toEqual({ kind: "unlock" });
+  });
+
+  it("org mode: an org token does not unlock a password report either (mode-bound both ways)", async () => {
+    const orgToken = mintAccessToken(SLUG, 900, SECRET, NOW, { mode: "org" });
+    expect(await decide(PW, { cookie: orgToken })).toEqual({ kind: "unlock" });
+  });
+
   // ── private (owner-only) mode (ADR-0056) ──────────────────────────────────
   it("private report: owner token serves; everyone else → unlock", async () => {
     const PRIV: Acl = { mode: "private" };
