@@ -19,10 +19,12 @@ import type {
   Report,
   ReportId,
   Result,
+  ScanStatus,
   Slug,
   TerminalScanStatus,
   UserId,
   VersionId,
+  VersionOrigin,
 } from "arp-domain";
 
 /**
@@ -66,6 +68,24 @@ export interface CursorPage<T> {
 export type ReportPage = CursorPage<ReportSummary>;
 export type FolderPage = CursorPage<Folder>;
 
+/**
+ * A lightweight read projection of a ReportVersion for the version-history list
+ * (ADR-0065) — deliberately NOT the full `ReportVersion` (no manifest/content
+ * hash), mirroring `ReportSummary`'s "lean projection, not the full aggregate"
+ * pattern. `uploadedAt` is a DB-stamped audit fact (like `reports.created_at`),
+ * which is why it lives here rather than on the pure domain `ReportVersion`.
+ */
+export interface ReportVersionSummary {
+  readonly id: VersionId;
+  readonly versionNo: number;
+  readonly uploadedBy: UserId;
+  readonly uploadedAt: number; // epoch ms
+  readonly scanStatus: ScanStatus;
+  readonly sizeBytes: number;
+  readonly origin: VersionOrigin;
+}
+export type VersionPage = CursorPage<ReportVersionSummary>;
+
 // ── Reports & Folders persistence ─────────────────────────────────────────
 export interface ReportRepository {
   findBySlug(slug: Slug): Promise<Result<Report | null, AppError>>;
@@ -83,6 +103,13 @@ export interface ReportRepository {
   /** Upsert the report's `Acl` (ADR-0056) into the 1:1 `acls` row. The caller has
    *  validated org ownership + the `acl:write` scope and hashed any password. */
   setAcl(id: ReportId, acl: Acl): Promise<Result<void, AppError>>;
+  /** Cursor-paginated version history for one report (newest-created first),
+   *  keyset on the version id (ADR-0053, ADR-0065). The caller has already
+   *  validated the report's existence + org ownership (loadOwnedReport). */
+  listVersions(
+    reportId: ReportId,
+    q: CursorParams<VersionId>,
+  ): Promise<Result<VersionPage, AppError>>;
 }
 
 /**

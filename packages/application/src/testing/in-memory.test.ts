@@ -108,6 +108,7 @@ describe("InMemoryEventOutbox", () => {
         reportId: reportId("r1"),
         versionId: versionId("v1"),
         versionNo: 1,
+        origin: "upload",
       },
     ]);
     await outbox.enqueue([

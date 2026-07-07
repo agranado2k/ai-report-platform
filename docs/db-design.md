@@ -58,6 +58,7 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
 | `org_kind` | `personal`, `team` (ADR-0061; default `personal`; lands with the team-orgs build) |
 | `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
+| `version_origin` | `upload`, `editor` (ADR-0062 §6, ADR-0065; default `upload`) |
 | `scan_job_status` | `queued`, `running`, `done`, `failed` |
 | `acl_mode` | `private`, `public`, `password`, `org`, `allowlist` |
 | `idempotency_state` | `in_flight`, `completed` |
@@ -172,6 +173,7 @@ making `live_version_id` nullable and set after the first version commits.
 | `uploaded_by_user` | uuid FK → users | |
 | `scan_status` | `scan_status` | default `pending`; **denormalized cache** of the `ScanJob` verdict, updated on `ReportVersionScanned` |
 | `uploaded_at` | timestamptz | |
+| `origin` | `version_origin` | `upload` \| `editor` (ADR-0062 §6, ADR-0065); default `upload`, NOT NULL. Every row is `upload` today — the in-app editor doesn't exist yet (migration 0011) |
 
 Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 

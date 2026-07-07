@@ -199,6 +199,7 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBun
         uploadedBy: cmd.actor.userId,
         manifest: manifestOf(bundle),
         sizeBytes: bundle.sizeBytes,
+        origin: "upload", // this pipeline is the plain upload path (ADR-0065)
       }),
     ),
   );
@@ -231,5 +232,6 @@ async function reUpload(
     uploadedBy: actor.userId,
     manifest: manifestOf(bundle),
     sizeBytes: bundle.sizeBytes,
+    origin: "upload", // this pipeline is the plain upload path (ADR-0065)
   });
 }

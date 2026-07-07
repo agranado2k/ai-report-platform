@@ -165,6 +165,11 @@ export const features = {
   // design, superseded by ADR-0060 (report-write-grants.feature, above) — kept
   // catalogued rather than deleted (the feature file itself still exists,
   // untouched, pending a future cleanup pass).
+  "list-report-versions": {
+    title: "List a report's version history",
+    phase: "@phase-2",
+    status: "wip",
+  },
   "cross-org-collaboration": {
     title: "Cross-org collaboration via grants",
     phase: "@phase-2.5",

@@ -22,4 +22,14 @@ describe("makeUserId / userIdToWire", () => {
     const wire = userIdToWire(userId(uuid)).replace("user_", "folder_");
     expect(makeUserId(wire).ok).toBe(false);
   });
+
+  it("rejects a non-id value with a ValidationError", () => {
+    const r = makeUserId("not-an-id");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("ValidationError");
+  });
+
+  it("rejects an empty string", () => {
+    expect(makeUserId("").ok).toBe(false);
+  });
 });

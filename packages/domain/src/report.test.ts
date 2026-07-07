@@ -44,7 +44,13 @@ describe("createReport", () => {
     expect(report.versions[0]?.scanStatus).toBe("pending");
     expect(report.liveVersionId).toBeNull();
     expect(events).toEqual([
-      { type: "ReportVersionUploaded", reportId: "r1", versionId: "v1", versionNo: 1 },
+      {
+        type: "ReportVersionUploaded",
+        reportId: "r1",
+        versionId: "v1",
+        versionNo: 1,
+        origin: "upload",
+      },
     ]);
   });
 
@@ -56,6 +62,28 @@ describe("createReport", () => {
 
   it("sets the creator as the owner (ADR-0059)", () => {
     expect(newReport().ownerId).toBe(userId("u1"));
+  });
+
+  it("defaults the first version's origin to 'upload' when omitted (ADR-0065)", () => {
+    expect(newReport().versions[0]?.origin).toBe("upload");
+  });
+
+  it("honors an explicit origin on create, and stamps it on the ReportVersionUploaded event", () => {
+    const { report, events } = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      origin: "editor",
+    });
+    expect(report.versions[0]?.origin).toBe("editor");
+    expect(events[0]?.type === "ReportVersionUploaded" && events[0]?.origin).toBe("editor");
   });
 });
 
@@ -76,6 +104,7 @@ describe("addVersion", () => {
       expect(result.value.report.versions[1]?.scanStatus).toBe("pending");
       expect(result.value.report.liveVersionId).toBe("v1"); // unchanged until v2 scans clean
       expect(result.value.events[0]?.type).toBe("ReportVersionUploaded");
+      expect(result.value.report.versions[1]?.origin).toBe("upload"); // default (ADR-0065)
     }
   });
 

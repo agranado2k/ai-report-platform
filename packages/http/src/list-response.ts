@@ -2,10 +2,10 @@
 // and GET /api/v1/folders. Pure — turn the use-case Result into a 200 Stripe-style
 // list envelope (`{ object: "list", data: [...], has_more }`) or an
 // application/problem+json error. Field names snake_case; internal org id never sent.
-import type { FolderPage, ReportPage } from "arp-application";
+import type { FolderPage, ReportPage, VersionPage } from "arp-application";
 import type { AppError, Result } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
-import { folderBody, listBody, reportBody, type WireContext } from "./resource";
+import { folderBody, listBody, reportBody, versionBody, type WireContext } from "./resource";
 
 /** GET /api/v1/reports (cursor-paginated + searchable) — 200 list envelope. */
 export function searchReportsToHttp(
@@ -36,6 +36,24 @@ export function listFoldersToHttp(
     contentType: "application/json",
     body: listBody(
       items.map((f) => folderBody(f, ctx)),
+      hasMore,
+    ),
+  };
+}
+
+/** GET /api/v1/reports/{slug}/versions (cursor-paginated) — 200 list envelope
+ *  (ADR-0065), newest-created first. */
+export function listReportVersionsToHttp(
+  result: Result<VersionPage, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const { items, hasMore } = result.value;
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: listBody(
+      items.map((v) => versionBody(v, ctx)),
       hasMore,
     ),
   };

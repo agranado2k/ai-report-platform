@@ -112,6 +112,18 @@ export class ApiClient {
     return this.request<unknown>("DELETE", `/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
+  /** List a report's version history (ADR-0065) — cursor-paginated, newest-created
+   *  first; each item has id (version_…), version_no, uploaded_by (user_…),
+   *  uploaded_at, scan_status, size_bytes, origin. */
+  listReportVersions(slug: string, params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+    const qs = new URLSearchParams();
+    appendCursor(qs, params);
+    const query = qs.toString();
+    return this.get<ListEnvelope>(
+      `/api/v1/reports/${encodeURIComponent(slug)}/versions${query ? `?${query}` : ""}`,
+    );
+  }
+
   /** Read a report's sharing acl — `{ object: "acl", mode, allowed_emails?, access_ttl_seconds? }`. */
   getReportAcl(slug: string): Promise<ApiResult<Record<string, unknown>>> {
     return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);

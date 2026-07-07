@@ -1913,6 +1913,85 @@ session`; new Reports & Folders terms: `Report HTML schema`, `Presentation shell
 Worktree: `worktree/adr-editing-epic` (branch `docs/adr-editing-epic`), this entry + the six ADR files
 + the doc-integration edits above. Not yet merged.
 
+### 2026-07-07 — ADR-0065 slice 1: version-history read endpoint implemented
+
+`GET /api/v1/reports/{slug}/versions` + the `reports_list_versions` MCP tool now exist end to end
+(domain → application → adapters → http → route → MCP), built strictly TDD (red-green-refactor per
+commit). Scope was deliberately the read surface only — the `prosemirror-changeset` visual diff from
+ADR-0065 §3 is a later slice, since the editor (ADR-0062/0063) that produces `_source.json` sidecars
+doesn't exist yet.
+
+- **Schema**: migration `0010` adds `report_versions.origin` (`version_origin` enum, `upload` |
+  `editor`, NOT NULL DEFAULT `upload`) — a brand-new enum type in the same migration as its column is
+  safe in one transaction (the drizzle-kit ADD VALUE gotcha, #127, only bites an *existing* enum).
+- **Domain**: `ReportVersion.origin` (defaults to `upload` at both `createReport`/`addVersion` so
+  every pre-existing call site is unaffected); `upload-report.ts` now passes `origin: "upload"`
+  explicitly. Also stamped `origin` onto the `ReportVersionUploaded` **event** — `docs/events.md` had
+  already documented this from the ADR-0062–0067 doc-integration wave, but the event type itself
+  hadn't caught up until this slice.
+- **New External Id codecs**: `makeVersionId`/`versionIdToWire` and `makeUserId`/`userIdToWire`
+  (`packages/domain/src/version-id.ts` / `user-id.ts`), mirroring `folder-id.ts` exactly. ADR-0052
+  reserved both prefixes but no endpoint had exposed either id on the wire before this.
+- **`ReportRepository.listVersions`**: a new lean `ReportVersionSummary` projection (parallel to
+  `ReportSummary` — no manifest/content hash), cursor-paginated keyset on the version id DESC
+  (ADR-0053), implemented + contract-tested against both `InMemoryReportRepository` and
+  `DrizzleReportRepository` on pglite (ADR-0046). `uploaded_at` lives on the projection, not the pure
+  domain `ReportVersion` — it's DB-stamped (`defaultNow()`), same rationale as `reports.created_at`
+  being absent from the `Report` aggregate.
+- **`listReportVersions` use case**: auth is *identical* to `getReport` (the same org-scoped
+  `loadOwnedReport` guard) — confirmed by reading the actual code rather than ADR-0059's aspirational
+  write-grantee carve-out, which turned out to **not be implemented yet** (`reports.owner_id` doesn't
+  exist in `schema.ts` despite `docs/db-design.md` already documenting it — flagged, not fixed, out of
+  scope for this slice).
+- **Wire**: `uploaded_at` renders as ISO-8601 (`format: date-time`) — no prior wire timestamp
+  convention to match, and ISO is unambiguous versus Stripe's epoch-seconds given the domain stores
+  epoch ms internally.
+- **Gate**: 565 unit/contract tests green (up from ~520), full `turbo typecheck` (11 packages) clean,
+  `biome ci` clean, `docs:check` clean. No Bruno regen script exists in this repo (grepped — no hits)
+  despite `CLAUDE.md`'s quick-reference implying one; `openapi.yaml` is hand-maintained.
+
+Worktree: `worktree/report-versions-endpoint` (branch `feat/report-versions-endpoint`). Not yet merged.
+
+### 2026-07-07 — rebased slice 1 onto PR #146 (ADR-0059 ownership foundation)
+
+PR #146 (`feat/report-ownership`) landed on `main` while this slice was in flight: `reports.owner_id`
+(migration `0010_reports_owner_id`), the `loadOrgReport`/`loadOwnedReport` split in `load-owned.ts`
+(reads stay org-scoped; owner-gated writes are a separate guard), and the `canWrite` seam. Rebased
+`feat/report-versions-endpoint` onto it, commit by commit (`git rebase origin/main`).
+
+- **Migration renumber**: our `0010_abandoned_bloodstorm.sql` (the `report_versions.origin` enum +
+  column) collided with `0010_reports_owner_id.sql`. Resolved by regenerating rather than hand-renaming:
+  reset `packages/db/drizzle/meta/{_journal,0010_snapshot}.json` to main's post-#146 state, then ran
+  `drizzle-kit generate --name=report_versions_origin` against the rebased schema, which produced
+  `0011_report_versions_origin.sql` with byte-identical SQL to the original. `docs/db-design.md`'s
+  migration-number reference for `origin` updated 0010 → 0011 to match.
+- **`user-id.ts` / `user-id.test.ts` / `report.test.ts` conflicts**: both branches independently added
+  the same `makeUserId`/`userIdToWire` codec and the same `Report.ownerId` / version-`origin` test
+  cases (parallel work, same day). Reconciled as unions — merged doc comment covering both `owner` and
+  `uploaded_by` wire consumers; kept all test cases from both sides (no behavior lost either way).
+- **Auth semantics reconciled (ADR-0065 §1, "identical to single-report GET")**: our
+  `listReportVersions` was written against the pre-#146 world where `loadOwnedReport` was the only
+  guard and *was* org-scoped. Post-#146, `loadOwnedReport` now means something different — owner-only,
+  requiring `actor.userId` — so leaving the call as-is would have silently narrowed version listing to
+  the owner only, breaking parity with `getReport`. Switched `listReportVersions` to call the new
+  `loadOrgReport` (org-scoped reads, `{orgId}`-only actor) instead, matching `getReport`'s *actual*
+  post-#146 implementation exactly. Confirmed by reading `get-report.ts`: it also does not yet
+  implement ADR-0059 §3's "write-grantee metadata carve-out" — `ADR-0060` write grants are still
+  schema-only (`report_grants` table exists, no `hasWriteGrant` in code) — so there is nothing for
+  `listReportVersions` to carve out either. This mirrors the "flagged, not fixed, out of scope" note
+  from this slice's original entry above: the aspirational ADR-0059 §3 carve-out remains unimplemented
+  on both endpoints; when it lands on `getReport` it must land on `listReportVersions` in the same
+  change (comment added at both call sites to that effect). Behavior otherwise unchanged: an org
+  member reads version history, a cross-org actor gets `NotAllowed`, missing/soft-deleted reads
+  `NotFound` — same three cases `get-report.test.ts` covers, and `list-report-versions.test.ts`
+  already asserted exactly this shape (no test changes needed, only the implementation and its
+  comments).
+- **Gate** (full, from the worktree root, post-rebase): `biome ci .` clean, `turbo typecheck` (11
+  packages) clean, `vitest run` — 97 files / 589 tests green (up from 565 pre-rebase, PR #146's own
+  suite included), `docs:check` clean.
+
+Still the same worktree/branch as above; not yet merged.
+
 ### 2026-07-07 — Ownership & shareability epic: implementation wave (G1/G5 merged, G2+G3 this PR)
 
 The epic recorded 2026-06-17 (ADR-0059/0060/0061, PR #135 + review-fixes #136) is now shipping.
@@ -1938,7 +2017,7 @@ each group is a spawned agent in its own worktree.
   together). **G2 (ADR-0056 P2):** the `org` unlock branch in `unlock.$slug.tsx` — Clerk session →
   resolve the mirrored identity → compare its org to the report's org → mint a mode-bound ~15-min
   access token, same shape as `password`; anon → `/sign-in?redirect_url=…`; non-member → a plain 403
-  notice. **G3 (ADR-0060):** `report_write_grants` (migration `0011`, no enum) + `WriteGrantStore`
+  notice. **G3 (ADR-0060):** `report_write_grants` (migration `0012` — renumbered from `0011` after the parallel ADR-0065 epic took that slot on main, no enum) + `WriteGrantStore`
   port (Drizzle + in-memory + port-contract suite, mirroring `GrantStore`) + `grantWrite` /
   `revokeWrite` / `listWriteGrants` use cases (owner-only, `acl:write` scope) + the `canWrite`
   extension (`isOwner OR hasWriteGrant`, matched by `granteeUserId` OR the actor's normalized email

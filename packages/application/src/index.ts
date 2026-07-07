@@ -17,6 +17,7 @@ export * from "./use-cases/grant-write";
 export * from "./use-cases/handle-user-deleted";
 export * from "./use-cases/list-api-keys";
 export * from "./use-cases/list-folders";
+export * from "./use-cases/list-report-versions";
 export * from "./use-cases/list-write-grants";
 export * from "./use-cases/move-report";
 export * from "./use-cases/process-scan-result";

@@ -1,5 +1,5 @@
 {
-  "id": "0bdb19b3-9d8a-45ce-90d9-3aa9253cd288",
+  "id": "79cadfac-23f2-44a6-b136-31b460dd6d12",
   "prevId": "973ae90e-5858-4e28-9887-6cc86f459cc0",
   "version": "7",
   "dialect": "postgresql",
@@ -1374,6 +1374,14 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "version_origin",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'upload'"
         }
       },
       "indexes": {
@@ -1458,114 +1466,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.report_write_grants": {
-      "name": "report_write_grants",
-      "schema": "",
-      "columns": {
-        "report_id": {
-          "name": "report_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grantee_email": {
-          "name": "grantee_email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grantee_user_id": {
-          "name": "grantee_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "report_write_grants_grantee_email_idx": {
-          "name": "report_write_grants_grantee_email_idx",
-          "columns": [
-            {
-              "expression": "grantee_email",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "report_write_grants_report_id_reports_id_fk": {
-          "name": "report_write_grants_report_id_reports_id_fk",
-          "tableFrom": "report_write_grants",
-          "tableTo": "reports",
-          "columnsFrom": [
-            "report_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "report_write_grants_grantee_user_id_users_id_fk": {
-          "name": "report_write_grants_grantee_user_id_users_id_fk",
-          "tableFrom": "report_write_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "grantee_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "report_write_grants_granted_by_users_id_fk": {
-          "name": "report_write_grants_granted_by_users_id_fk",
-          "tableFrom": "report_write_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "granted_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "report_write_grants_report_id_grantee_email_pk": {
-          "name": "report_write_grants_report_id_grantee_email_pk",
-          "columns": [
-            "report_id",
-            "grantee_email"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -2092,6 +1992,14 @@
         "clean",
         "flagged",
         "blocked"
+      ]
+    },
+    "public.version_origin": {
+      "name": "version_origin",
+      "schema": "public",
+      "values": [
+        "upload",
+        "editor"
       ]
     }
   },

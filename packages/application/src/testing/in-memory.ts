@@ -37,6 +37,7 @@ import type {
   BundleProcessor,
   ClerkOrgProvisioner,
   Clock,
+  CursorParams,
   EmailMessage,
   EmailSender,
   EventOutbox,
@@ -60,12 +61,14 @@ import type {
   ReportRepository,
   ReportSearchQuery,
   ReportSummary,
+  ReportVersionSummary,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
   ScanWorkQueue,
   SlugFactory,
   UnitOfWork,
+  VersionPage,
   WriteGrant,
   WriteGrantStore,
 } from "../ports";
@@ -145,6 +148,12 @@ export class InMemoryReportRepository implements ReportRepository {
   // `ORDER BY updated_at DESC` including re-save reordering.
   private readonly lastWriteSeq = new Map<string, number>();
   private writeSeq = 0;
+  // Version `uploaded_at` is DB-stamped (defaultNow()), not part of the pure
+  // domain ReportVersion — mirrors the real adapter's INSERT-time timestamp: a
+  // version id gets its stamp once, on first save, and keeps it across re-saves
+  // (a scan-status refresh does not touch uploaded_at, same as the real upsert).
+  private readonly versionUploadedAt = new Map<string, number>();
+  private uploadSeq = 0;
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -200,6 +209,12 @@ export class InMemoryReportRepository implements ReportRepository {
     this.slugToId.set(report.slug, report.id);
     this.writeSeq += 1;
     this.lastWriteSeq.set(report.id, this.writeSeq);
+    for (const v of report.versions) {
+      if (!this.versionUploadedAt.has(v.id)) {
+        this.uploadSeq += 1;
+        this.versionUploadedAt.set(v.id, this.uploadSeq);
+      }
+    }
     return ok(undefined);
   }
 
@@ -213,6 +228,23 @@ export class InMemoryReportRepository implements ReportRepository {
     const r = this.byId.get(id);
     if (r) this.byId.set(id, { ...r, acl });
     return ok(undefined);
+  }
+
+  async listVersions(
+    reportId: ReportId,
+    q: CursorParams<VersionId>,
+  ): Promise<Result<VersionPage, AppError>> {
+    const report = this.byId.get(reportId);
+    const summaries: ReportVersionSummary[] = (report?.versions ?? []).map((v) => ({
+      id: v.id,
+      versionNo: v.versionNo,
+      uploadedBy: v.uploadedBy,
+      uploadedAt: this.versionUploadedAt.get(v.id) ?? 0,
+      scanStatus: v.scanStatus,
+      sizeBytes: v.sizeBytes,
+      origin: v.origin,
+    }));
+    return ok(keysetPage(summaries, q));
   }
 }
 

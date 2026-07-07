@@ -1,8 +1,20 @@
-import type { FolderPage, ReportPage } from "arp-application";
+import type { FolderPage, ReportPage, VersionPage } from "arp-application";
 import type { Folder, Slug } from "arp-domain";
-import { err, folderId, folderIdToWire, ok, orgId, reportId, reportIdToWire } from "arp-domain";
+import {
+  err,
+  folderId,
+  folderIdToWire,
+  ok,
+  orgId,
+  reportId,
+  reportIdToWire,
+  userId,
+  userIdToWire,
+  versionId,
+  versionIdToWire,
+} from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { listFoldersToHttp, searchReportsToHttp } from "./list-response";
+import { listFoldersToHttp, listReportVersionsToHttp, searchReportsToHttp } from "./list-response";
 
 const CTX = { mode: "prod" as const };
 const slug = (s: string): Slug => s as Slug;
@@ -10,6 +22,8 @@ const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
 const R1 = "00000000-0000-7000-8000-0000000000c1";
+const V1 = "00000000-0000-7000-8000-0000000000e1";
+const U1 = "00000000-0000-7000-8000-0000000000d1";
 
 describe("listFoldersToHttp (Stripe list envelope, ADR-0053)", () => {
   it("maps a folder page to {object:list, data, has_more} with folder resources", () => {
@@ -122,6 +136,54 @@ describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
   it("maps an error to a problem response", () => {
     const res = searchReportsToHttp(err({ kind: "Unexpected", message: "boom" }), CTX);
     expect(res.status).toBe(500);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("listReportVersionsToHttp (ADR-0065 list envelope)", () => {
+  it("maps a version page to {object:list, data, has_more} with version resources", () => {
+    const page: VersionPage = {
+      items: [
+        {
+          id: versionId(V1),
+          versionNo: 2,
+          uploadedBy: userId(U1),
+          uploadedAt: 1_700_000_000_000,
+          scanStatus: "clean",
+          sizeBytes: 1234,
+          origin: "upload",
+        },
+      ],
+      hasMore: true,
+    };
+    const res = listReportVersionsToHttp(ok(page), CTX);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      object: "list",
+      has_more: true,
+      data: [
+        {
+          object: "version",
+          id: versionIdToWire(versionId(V1)),
+          version_no: 2,
+          uploaded_by: userIdToWire(userId(U1)),
+          uploaded_at: new Date(1_700_000_000_000).toISOString(),
+          scan_status: "clean",
+          size_bytes: 1234,
+          origin: "upload",
+          mode: "prod",
+        },
+      ],
+    });
+    const wire = JSON.stringify(res.body);
+    expect(wire).not.toContain(V1); // bare uuid never appears — only version_…
+    expect(wire).not.toContain(U1); // bare uuid never appears — only user_…
+  });
+
+  it("maps an error to a problem response", () => {
+    const res = listReportVersionsToHttp(err({ kind: "NotFound", message: "nope" }), CTX);
+    expect(res.status).toBe(404);
     expect(res.contentType).toBe("application/problem+json");
   });
 });
