@@ -18,8 +18,10 @@ import { deps } from "./container.server";
 import { toResponse, unauthenticated } from "./http.server";
 import { resolveReportSlug } from "./report-handle.server";
 
-/** The read-path actor shape (no write-only fields like `folderId`/`scopes`). */
-export type ReadActor = Pick<UploadActor, "userId" | "orgId">;
+/** The read-path actor shape (no write-only fields like `folderId`). `scopes`
+ *  IS carried (ADR-0060 §3) so a read-only, owner-gated use case
+ *  (`listWriteGrants`) can still enforce the `acl:write` scope on a GET. */
+export type ReadActor = Pick<UploadActor, "userId" | "orgId" | "scopes">;
 
 /** The resolvers `handle()` depends on — injected so tests can fake them. */
 export interface HandleDeps {

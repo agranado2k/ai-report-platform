@@ -17,7 +17,7 @@ const anOrgId = orgId("00000000-0000-7000-8000-0000000000a1");
 const aUserId = userId("00000000-0000-7000-8000-0000000000u1");
 const aFolderId = folderId("00000000-0000-7000-8000-0000000000f1");
 
-const readActor: ReadActor = { userId: aUserId, orgId: anOrgId };
+const readActor: ReadActor = { userId: aUserId, orgId: anOrgId, scopes: ["reports:read"] };
 const writeActor: UploadActor = {
   userId: aUserId,
   orgId: anOrgId,

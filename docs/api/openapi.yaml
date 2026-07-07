@@ -333,6 +333,103 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/reports/{slug}/write-grants:
+    get:
+      operationId: listWriteGrants
+      tags: [Reports]
+      summary: List a report's write grants
+      description: >
+        List everyone the owner has granted write access (rename/re-upload/move)
+        on the report identified by `slug` (ADR-0060). Requires the `acl:write`
+        scope and is OWNER-ONLY — share config is the owner's business, same gate
+        as GET /acl.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      responses:
+        '200':
+          description: A list envelope of write_grant resources.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WriteGrantList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: grantWrite
+      tags: [Reports]
+      summary: Grant write access to a report
+      description: >
+        Grant another person the ability to rename, re-upload, or move the report
+        identified by `slug` — NOT delete/set_acl/manage grants, which stay
+        owner-only (ADR-0060). Requires the `acl:write` scope and is OWNER-ONLY.
+        Works CROSS-ORG: the grantee is typically outside the report's org and
+        needn't have signed up yet — `grantee_user_id` resolves opportunistically
+        now if they already have an account, else the grant matches by email once
+        they do. Re-granting the same email upserts in place. Confers NO view
+        access by itself (share viewing separately via `set_acl`).
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GrantWriteRequest' }
+      responses:
+        '201':
+          description: The created/refreshed write_grant resource.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WriteGrant' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/write-grants/{email}:
+    delete:
+      operationId: revokeWrite
+      tags: [Reports]
+      summary: Revoke a report's write grant
+      description: >
+        Revoke a previously granted write access (ADR-0060). Requires the
+        `acl:write` scope and is OWNER-ONLY. Idempotent — revoking an email with
+        no grant still 204s. `email` is URL-encoded and normalized
+        (case/whitespace-insensitive) before the lookup.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - name: email
+          in: path
+          required: true
+          schema: { type: string, format: email }
+          description: The grantee's email (URL-encoded).
+      responses:
+        '204': { description: Revoked (or no grant existed — idempotent). }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/reports/{slug}:
     get:
       operationId: getReport
@@ -340,8 +437,9 @@ paths:
       summary: Get a report
       description: >
         Fetch a single report by slug (ADR-0038). The report must belong to your
-        org (reads stay org-visible, ADR-0059 §3). Returns the full report
-        resource — the list summary plus `owner` and `acl`.
+        org, OR you must hold a write grant on it (a cross-org grantee's
+        metadata carve-out, ADR-0059 §3 / ADR-0060 §4). Returns the full report
+        resource — the list summary plus `owner` and (owner-only) `acl`.
       security:
         - apiKey: []
       parameters:
@@ -712,6 +810,49 @@ components:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Target folder id; must belong to the report's org.
+
+    WriteGrant:
+      description: >
+        A per-report write grant (ADR-0060) — lets `email` rename, re-upload, or
+        move the report. No surrogate id: wire-addressed by `(slug, email)`, not
+        a prefixed id.
+      type: object
+      required: [object, email, granted_by, granted_at]
+      properties:
+        object: { type: string, enum: [write_grant] }
+        email:
+          type: string
+          format: email
+          description: The grantee's normalized email.
+        granted_by:
+          type: string
+          description: The granting owner's `user_…` External Id (ADR-0052).
+        granted_at:
+          type: string
+          format: date-time
+          description: When the grant was created (or last refreshed by a re-grant).
+
+    WriteGrantList:
+      description: A list of a report's write grants (ADR-0053 list envelope).
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: { type: string, enum: [list] }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/WriteGrant' }
+        has_more:
+          type: boolean
+          description: Always false today — write grants aren't paginated (a small, per-report roster).
+
+    GrantWriteRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          description: The grantee's email address.
 
     Problem:
       description: RFC 9457 Problem Details (ADR-0040).

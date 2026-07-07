@@ -1,8 +1,10 @@
+import type { WriteGrant } from "arp-application";
 import type { Folder, Report, Slug } from "arp-domain";
 import {
   err,
   folderId,
   folderIdToWire,
+  insufficientScope,
   ok,
   orgId,
   reportId,
@@ -18,9 +20,12 @@ import {
   deleteReportToHttp,
   getAclToHttp,
   getReportToHttp,
+  grantWriteToHttp,
+  listWriteGrantsToHttp,
   moveReportToHttp,
   renameFolderToHttp,
   renameReportToHttp,
+  revokeWriteToHttp,
   setAclToHttp,
 } from "./write-response";
 
@@ -206,6 +211,75 @@ describe("folder resource mappers (ADR-0053)", () => {
   it("getAclToHttp NotFound → problem passthrough", () => {
     const res = getAclToHttp(err({ kind: "NotFound", message: "no report" }));
     expect(res.status).toBe(404);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("write-grant resource mappers (ADR-0060)", () => {
+  const grant: WriteGrant = {
+    reportId: reportId(R1),
+    granteeEmail: "grantee@x.com",
+    granteeUserId: null,
+    grantedBy: userId(U1),
+    grantedAt: 1_700_000_000_000,
+  };
+
+  it("grantWriteToHttp → 201 with the write_grant resource, no surrogate id", () => {
+    const res = grantWriteToHttp(ok(grant));
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      object: "write_grant",
+      email: "grantee@x.com",
+      granted_by: userIdToWire(userId(U1)),
+      granted_at: new Date(1_700_000_000_000).toISOString(),
+    });
+  });
+
+  it("grantWriteToHttp NotAllowed (non-owner) → 403 problem", () => {
+    const res = grantWriteToHttp(
+      err({ kind: "NotAllowed", message: "you do not own this report" }),
+    );
+    expect(res.status).toBe(403);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+
+  it("revokeWriteToHttp → 204 no body", () => {
+    const res = revokeWriteToHttp(ok(undefined));
+    expect(res.status).toBe(204);
+    expect(res.body).toBeUndefined();
+  });
+
+  it("listWriteGrantsToHttp → 200 list envelope of write_grant resources", () => {
+    const second: WriteGrant = {
+      ...grant,
+      granteeEmail: "second@x.com",
+      granteeUserId: userId(U1),
+    };
+    const res = listWriteGrantsToHttp(ok([grant, second]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      object: "list",
+      has_more: false,
+      data: [
+        {
+          object: "write_grant",
+          email: "grantee@x.com",
+          granted_by: userIdToWire(userId(U1)),
+          granted_at: new Date(1_700_000_000_000).toISOString(),
+        },
+        {
+          object: "write_grant",
+          email: "second@x.com",
+          granted_by: userIdToWire(userId(U1)),
+          granted_at: new Date(1_700_000_000_000).toISOString(),
+        },
+      ],
+    });
+  });
+
+  it("listWriteGrantsToHttp InsufficientScope → 403 problem", () => {
+    const res = listWriteGrantsToHttp(err(insufficientScope("acl:write")));
+    expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
   });
 });

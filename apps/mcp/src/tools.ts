@@ -141,6 +141,23 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_list_write_grants",
+    {
+      title: "List who can write a report",
+      description:
+        "List everyone the owner has granted write access (rename/re-upload/move) on a report " +
+        "(ADR-0060) — returns a list of { object:'write_grant', email, granted_by, granted_at }. " +
+        "Read-only and OWNER-ONLY: only the user who created the report can see its write-grant " +
+        "roster. Distinct from reports_get_acl (that's VIEW access; this is WRITE access).",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => toToolResult(await client.listWriteGrants(args.slug)),
+  );
+
+  server.registerTool(
     "folders_list",
     {
       title: "List folders",
@@ -180,9 +197,9 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Upload a report",
       description:
         "Create a report from an HTML document, or re-upload a new version of an existing " +
-        "one (re-upload is owner-gated, ADR-0059 — only the report's owner can update it). " +
-        "Returns the slug + permanent view URL. To set/change the title afterwards use " +
-        "reports_update. Title is not set here.",
+        "one (re-upload requires write access, ADR-0059/0060 — the report's owner or a " +
+        "write grantee). Returns the slug + permanent view URL. To set/change the title " +
+        "afterwards use reports_update. Title is not set here.",
       inputSchema: {
         html: z.string().describe("The report's full HTML document."),
         update_slug: z
@@ -215,8 +232,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Rename a report",
       description:
-        "Change a report's title. Owner-gated (ADR-0059): only the report's owner can rename it. " +
-        "Find its slug with reports_search first.",
+        "Change a report's title. Requires write access (ADR-0059/0060): the report's owner or " +
+        "a write grantee. Find its slug with reports_search first.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
         title: z.string().describe("The new title."),
@@ -231,8 +248,9 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Move a report",
       description:
-        "Move a report into a different folder. Owner-gated (ADR-0059): only the report's owner " +
-        "can move it. Use folders_list to find the folder id.",
+        "Move a report into a different folder. Requires write access (ADR-0059/0060): the " +
+        "report's owner or a write grantee. The destination folder must be in the REPORT's org. " +
+        "Use folders_list to find the folder id.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
         folder_id: z.string().describe("The destination folder_ id (from folders_list)."),
@@ -285,6 +303,43 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
           accessTtlSeconds: args.access_ttl_seconds,
         }),
       ),
+  );
+
+  server.registerTool(
+    "reports_grant_write",
+    {
+      title: "Grant someone write access to a report",
+      description:
+        "Grant another person the ability to rename, re-upload, or move a specific report — " +
+        "NOT delete/set_acl/manage grants, which stay owner-only (ADR-0060). OWNER-ONLY; " +
+        "requires the `acl:write` scope. Works CROSS-ORG — the grantee is typically outside " +
+        "your org (they don't need to have signed up yet; the grant matches by email once they " +
+        "do). Confers NO view access by itself — share viewing separately with reports_set_acl " +
+        "if they also need to open it in the viewer.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        email: z.string().describe("The grantee's email address."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.grantWrite(args.slug, args.email)),
+  );
+
+  server.registerTool(
+    "reports_revoke_write",
+    {
+      title: "Revoke someone's write access to a report",
+      description:
+        "Revoke a previously granted write access (ADR-0060). OWNER-ONLY; requires the " +
+        "`acl:write` scope. Idempotent — revoking an email with no grant still succeeds. Use " +
+        "reports_list_write_grants first to see who currently has write access.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        email: z.string().describe("The grantee's email address to revoke."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.revokeWrite(args.slug, args.email)),
   );
 
   server.registerTool(

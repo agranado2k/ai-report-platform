@@ -141,6 +141,29 @@ export class ApiClient {
     });
   }
 
+  /** Grant write access (rename/re-upload/move) on a report to someone by email
+   *  (ADR-0060). Owner-only; requires the `acl:write` scope. */
+  grantWrite(slug: string, email: string): Promise<ApiResult<Record<string, unknown>>> {
+    return this.request<Record<string, unknown>>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/write-grants`,
+      { json: { email } },
+    );
+  }
+
+  /** Revoke a write grant (idempotent — succeeds even if the grantee never had one). */
+  revokeWrite(slug: string, email: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>(
+      "DELETE",
+      `/api/v1/reports/${encodeURIComponent(slug)}/write-grants/${encodeURIComponent(email)}`,
+    );
+  }
+
+  /** List everyone with write access on a report (owner-only). */
+  listWriteGrants(slug: string): Promise<ApiResult<ListEnvelope>> {
+    return this.get<ListEnvelope>(`/api/v1/reports/${encodeURIComponent(slug)}/write-grants`);
+  }
+
   createFolder(params: {
     readonly name: string;
     readonly parentId: string;

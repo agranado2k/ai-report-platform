@@ -13,8 +13,12 @@ export interface ProvisionIdentityDeps {
 }
 
 /** The scopes a session-authenticated user holds on their own org (ADR-0039): full
- *  control of their own reports, including sharing config (`acl:write`, ADR-0056). */
-const SELF_SCOPES = ["reports:write", "acl:write"];
+ *  control of their own reports, including sharing config (`acl:write`, ADR-0056).
+ *  Exported so the read-path actor resolver (`resolveActorForRead`) can grant the
+ *  same scopes to a session/OAuth read — a browser/MCP-OAuth caller isn't
+ *  API-key-scoped, so it holds full access on both the read and write path
+ *  (ADR-0060 §3 — `listWriteGrants` needs `acl:write` on the read path too). */
+export const SELF_SCOPES = ["reports:write", "acl:write"];
 
 /** Display name for a user's personal org, derived from their email local-part. */
 function personalOrgName(email: string): string {

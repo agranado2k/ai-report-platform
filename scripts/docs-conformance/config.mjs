@@ -155,6 +155,15 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
+  "report-write-grants": {
+    title: "Per-report write grants",
+    phase: "@phase-2",
+    status: "wip",
+  },
+  // cross-org-collaboration.feature describes the ADR-009 folder_collaborators
+  // design, superseded by ADR-0060 (report-write-grants.feature, above) — kept
+  // catalogued rather than deleted (the feature file itself still exists,
+  // untouched, pending a future cleanup pass).
   "cross-org-collaboration": {
     title: "Cross-org collaboration via grants",
     phase: "@phase-2.5",
