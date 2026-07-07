@@ -16,6 +16,10 @@ import type { TerminalScanStatus } from "./value-objects";
 export interface Report {
   readonly id: ReportId;
   readonly orgId: OrgId;
+  /** The user who created the report — its owner, in every org type (ADR-0059).
+   *  Writes are owner-gated (via the canWrite seam); org_id stays the
+   *  tenancy / quota / listing scope. */
+  readonly ownerId: UserId;
   readonly folderId: FolderId;
   readonly slug: Slug;
   readonly title: string;
@@ -61,6 +65,7 @@ export function createReport(p: CreateReportParams): Emission {
   const report: Report = {
     id: p.id,
     orgId: p.orgId,
+    ownerId: p.uploadedBy, // the creator is the owner (ADR-0059)
     folderId: p.folderId,
     slug: p.slug,
     title: p.title,

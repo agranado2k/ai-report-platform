@@ -7,6 +7,7 @@ import {
   orgId,
   reportId,
   reportIdToWire,
+  userId,
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
@@ -28,11 +29,13 @@ const F1 = "00000000-0000-7000-8000-000000000001";
 const F2 = "00000000-0000-7000-8000-000000000002";
 const O1 = "00000000-0000-7000-8000-0000000000aa";
 const R1 = "00000000-0000-7000-8000-0000000000c1";
+const U1 = "00000000-0000-7000-8000-0000000000d1";
 const V1 = "00000000-0000-7000-8000-0000000000v1".replace(/v/g, "1");
 
 const report = (title: string, folder = F1): Report => ({
   id: reportId(R1),
   orgId: orgId(O1),
+  ownerId: userId(U1),
   folderId: folderId(folder),
   slug: slug("aaaaaaaaaa"),
   title,
