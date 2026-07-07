@@ -1,11 +1,81 @@
 import type { Attrs, DOMOutputSpec, MarkSpec, NodeSpec, TagParseRule } from "prosemirror-model";
 
 /**
+ * SECURITY (PR #151 review, Fix 2 — CSS exfiltration): any retained `style`
+ * attribute value passes straight through `toDOM` into a real DOM attribute
+ * on the trusted app.<domain> origin (ADR-0062 §9). `url(...)` /
+ * `image-set(...)` (both fetch a resource — an attacker-controlled URL there
+ * leaks e.g. viewport size, referrer, or timing to a third party the moment
+ * the doc renders) and `expression(...)` (legacy IE script execution) are
+ * stripped by dropping the *whole declaration* they appear in, not just the
+ * function call (dropping only the call would leave a dangling/broken
+ * declaration). `@import` is stripped the same way since it can load an
+ * entire attacker stylesheet. Sibling declarations in the same value (e.g.
+ * `color:var(--now)` next to a stripped `background:url(...)`) survive
+ * untouched — this is what keeps the round-trip fidelity suite green.
+ */
+const DANGEROUS_STYLE_FN_RE = /url\s*\(|image-set\s*\(|expression\s*\(/i;
+const IMPORT_STATEMENT_RE = /@import[^;]*;?/gi;
+
+export function sanitizeStyle(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const withoutImports = raw.replace(IMPORT_STATEMENT_RE, "");
+  const declarations = withoutImports
+    .split(";")
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0 && !DANGEROUS_STYLE_FN_RE.test(d));
+  return declarations.length > 0 ? declarations.join("; ") : null;
+}
+
+/**
+ * SECURITY (PR #151 review, Fix 1 — javascript: href): a `javascript:` (or
+ * `vbscript:`, or `data:text/html`) URL retained on a `<a href>` is a live
+ * XSS primitive the moment a user clicks the rendered link on the trusted
+ * app.<domain> origin — ProseMirror only escapes text content, not retained
+ * attribute values. Control characters are stripped before matching the
+ * scheme prefix since browsers ignore them there too (a classic filter
+ * bypass is embedding a tab/newline inside the word, e.g. `jav\tascript:`).
+ */
+const DANGEROUS_URL_SCHEME_RE = /^(javascript|vbscript):/i;
+const DANGEROUS_DATA_HTML_RE = /^data:\s*text\/html/i;
+
+export function isDangerousUrl(value: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — stripping control chars that browsers also ignore when parsing a URL scheme, to close the classic embedded-control-char filter bypass.
+  const normalized = value.replace(/[\x00-\x20\x7f]/g, "");
+  return DANGEROUS_URL_SCHEME_RE.test(normalized) || DANGEROUS_DATA_HTML_RE.test(normalized);
+}
+
+/**
+ * Wraps a mark spec whose parsed attrs include `href` (only `link`, here) so
+ * a dangerous URL scheme (see `isDangerousUrl`) causes the parse rule to
+ * reject the match (`getAttrs` returning `false`) rather than retain it —
+ * the `<a>` tag is dropped and its text content survives unmarked, same as
+ * any other tag the schema doesn't recognize.
+ */
+export function withSafeHref<T extends MarkSpec>(spec: T): T {
+  return {
+    ...spec,
+    parseDOM: ((spec.parseDOM as TagParseRule[] | undefined) ?? []).map((rule) => ({
+      ...rule,
+      getAttrs: (dom: HTMLElement): Attrs | false => {
+        const base = rule.getAttrs ? rule.getAttrs(dom) : (rule.attrs ?? {});
+        if (base === false) return false;
+        const href = (base as Record<string, unknown> | null)?.href;
+        if (typeof href === "string" && isDangerousUrl(href)) return false;
+        return (base ?? {}) as Attrs;
+      },
+    })),
+  } as T;
+}
+
+/**
  * Generic attr-retention rule (ADR-0062 §3): any class/attribute not claimed
  * by a named node/mark is preserved verbatim rather than dropped. This
  * helper wraps an existing node/mark spec (one that already has a `toDOM`
  * producing `[tag, attrs?, ...children]`) so parsing also captures `class`
- * and `style`, and `toDOM` re-emits them unchanged.
+ * and `style`, and `toDOM` re-emits them unchanged. `style` is sanitized on
+ * the way in (see `sanitizeStyle`) — the load-bearing fix for Fix 2, since
+ * this is the retention path most bespoke chip/card colors go through.
  *
  * Only usable for `tag`-selector parse rules (every call site in this
  * package: paragraph/heading/blockquote/code_block/link/em/strong/list
@@ -26,7 +96,7 @@ export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
         return {
           ...(base || {}),
           class: dom.getAttribute ? dom.getAttribute("class") : null,
-          style: dom.getAttribute ? dom.getAttribute("style") : null,
+          style: sanitizeStyle(dom.getAttribute ? dom.getAttribute("style") : null),
         };
       },
     })),

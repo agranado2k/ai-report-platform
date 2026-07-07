@@ -1,4 +1,5 @@
 import type { NodeSpec } from "prosemirror-model";
+import { sanitizeStyle } from "./attrs.js";
 
 /**
  * Custom table node specs (ADR-0062 §3, §7 accepted cost) — `prosemirror-
@@ -79,8 +80,10 @@ export const tableHeaderNode: NodeSpec = {
   parseDOM: [
     {
       tag: "th",
+      // style is sanitized on the way in (Fix 2, PR #151 review) — see
+      // sanitizeStyle's doc comment in attrs.ts for what's stripped/why.
       getAttrs(dom: HTMLElement) {
-        return { style: dom.getAttribute("style") };
+        return { style: sanitizeStyle(dom.getAttribute("style")) };
       },
     },
   ],
@@ -97,8 +100,10 @@ export const tableCellNode: NodeSpec = {
   parseDOM: [
     {
       tag: "td",
+      // style is sanitized on the way in (Fix 2, PR #151 review) — see
+      // sanitizeStyle's doc comment in attrs.ts for what's stripped/why.
       getAttrs(dom: HTMLElement) {
-        return { style: dom.getAttribute("style") };
+        return { style: sanitizeStyle(dom.getAttribute("style")) };
       },
     },
   ],

@@ -1,4 +1,5 @@
 import type { MarkSpec } from "prosemirror-model";
+import { sanitizeStyle } from "./attrs.js";
 
 /** `pill` mark (ADR-0062 §3) — `<span class="pill">`. No variant/attrs. */
 export const pillMark: MarkSpec = {
@@ -30,7 +31,12 @@ export const htmlInlineMark: MarkSpec = {
       tag: "span",
       priority: 20,
       getAttrs(dom: HTMLElement) {
-        return { class: dom.getAttribute("class"), style: dom.getAttribute("style") };
+        // style is sanitized on the way in (Fix 2, PR #151 review) — see
+        // sanitizeStyle's doc comment in attrs.ts for what's stripped/why.
+        return {
+          class: dom.getAttribute("class"),
+          style: sanitizeStyle(dom.getAttribute("style")),
+        };
       },
     },
   ],

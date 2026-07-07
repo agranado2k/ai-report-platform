@@ -1,7 +1,7 @@
 import { Schema } from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
-import { withClassStyle } from "./schema/attrs.js";
+import { withClassStyle, withSafeHref } from "./schema/attrs.js";
 import { chipMark } from "./schema/chip.js";
 import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { htmlBlockNode } from "./schema/generic-block.js";
@@ -68,7 +68,11 @@ nodes = nodes.update("paragraph", withParagraphVariant(paragraphSpec));
 let marks = basicSchema.spec.marks;
 for (const name of ["link", "em", "strong"]) {
   const spec = marks.get(name);
-  if (spec) marks = marks.update(name, withClassStyle(spec));
+  if (!spec) continue;
+  // link's href is sanitized (Fix 1, PR #151 review) before the generic
+  // class/style retention wrap — see withSafeHref's doc comment in attrs.ts.
+  const safe = name === "link" ? withSafeHref(spec) : spec;
+  marks = marks.update(name, withClassStyle(safe));
 }
 marks = marks
   .addToEnd("chip", chipMark)
