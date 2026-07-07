@@ -25,6 +25,7 @@ import {
 export const planEnum = pgEnum("plan", ["free", "pro"]);
 export const grantLevelEnum = pgEnum("grant_level", ["editor", "admin"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "clean", "flagged", "blocked"]);
+export const versionOriginEnum = pgEnum("version_origin", ["upload", "editor"]);
 export const scanJobStatusEnum = pgEnum("scan_job_status", ["queued", "running", "done", "failed"]);
 export const aclModeEnum = pgEnum("acl_mode", [
   "private",
@@ -202,6 +203,9 @@ export const reportVersions = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     scanStatus: scanStatusEnum("scan_status").notNull().default("pending"),
     uploadedAt: tstz("uploaded_at").notNull().defaultNow(),
+    // How this version was produced (ADR-0062 §6, surfaced by ADR-0065). Every row
+    // is 'upload' today — the in-app editor doesn't exist yet (slice 3 writes 'editor').
+    origin: versionOriginEnum("origin").notNull().default("upload"),
   },
   (t) => [
     index("report_versions_report_id_idx").on(t.reportId),
