@@ -83,6 +83,9 @@ const FAILING_REPORTS: ReportRepository = {
   async setAcl() {
     return err({ kind: "Unexpected", message: "db down" });
   },
+  async listVersions() {
+    return err({ kind: "Unexpected", message: "db down" });
+  },
 };
 
 const FAILING_FOLDERS: FolderRepository = {
