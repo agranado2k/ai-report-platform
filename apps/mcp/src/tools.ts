@@ -123,6 +123,39 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_list_versions",
+    {
+      title: "List a report's version history",
+      description:
+        "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list " +
+        "({object:'list', data, has_more}), newest-created first; each item has id " +
+        "(version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, " +
+        "size_bytes, and origin ('upload' | 'editor'). Read-only. Page with starting_after.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+        starting_after: z
+          .string()
+          .optional()
+          .describe("Cursor: a version_ id; returns items AFTER it (page forward)."),
+        ending_before: z
+          .string()
+          .optional()
+          .describe("Cursor: a version_ id; returns items BEFORE it (page back)."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) =>
+      toToolResult(
+        await client.listReportVersions(args.slug, {
+          limit: args.limit,
+          startingAfter: args.starting_after,
+          endingBefore: args.ending_before,
+        }),
+      ),
+  );
+
+  server.registerTool(
     "reports_get_acl",
     {
       title: "Get a report's sharing settings",

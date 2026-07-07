@@ -11,7 +11,7 @@ import type { ReportVersion, VersionManifest } from "./report-version";
 import type { Result } from "./result";
 import { err, ok } from "./result";
 import type { Slug } from "./slug";
-import type { TerminalScanStatus } from "./value-objects";
+import type { TerminalScanStatus, VersionOrigin } from "./value-objects";
 
 export interface Report {
   readonly id: ReportId;
@@ -49,6 +49,9 @@ export interface CreateReportParams {
   readonly uploadedBy: UserId;
   readonly manifest: VersionManifest;
   readonly sizeBytes: number;
+  /** How this version was produced (ADR-0065). Defaults to `upload` — every call
+   *  site today is a plain upload; the editor (ADR-0062) will pass `editor`. */
+  readonly origin?: VersionOrigin;
 }
 
 /** Create a new Report with its first ReportVersion (version 1, pending scan). */
@@ -61,6 +64,7 @@ export function createReport(p: CreateReportParams): Emission {
     scanStatus: "pending",
     manifest: p.manifest,
     sizeBytes: p.sizeBytes,
+    origin: p.origin ?? "upload",
   };
   const report: Report = {
     id: p.id,
@@ -79,6 +83,7 @@ export function createReport(p: CreateReportParams): Emission {
     reportId: p.id,
     versionId: p.versionId,
     versionNo: 1,
+    origin: firstVersion.origin,
   };
   return { report, events: [event] };
 }
@@ -89,6 +94,8 @@ export interface AddVersionParams {
   readonly uploadedBy: UserId;
   readonly manifest: VersionManifest;
   readonly sizeBytes: number;
+  /** How this version was produced (ADR-0065). Defaults to `upload`. */
+  readonly origin?: VersionOrigin;
 }
 
 /**
@@ -108,6 +115,7 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     scanStatus: "pending",
     manifest: p.manifest,
     sizeBytes: p.sizeBytes,
+    origin: p.origin ?? "upload",
   };
   const updated: Report = { ...report, versions: [...report.versions, version] };
   const event: ReportVersionUploaded = {
@@ -115,6 +123,7 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     reportId: report.id,
     versionId: p.versionId,
     versionNo: nextNo,
+    origin: version.origin,
   };
   return ok({ report: updated, events: [event] });
 }

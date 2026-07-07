@@ -5,13 +5,15 @@
 // drive promotion.
 
 import type { ReportId, VersionId } from "./brand";
-import type { TerminalScanStatus } from "./value-objects";
+import type { TerminalScanStatus, VersionOrigin } from "./value-objects";
 
 export interface ReportVersionUploaded {
   readonly type: "ReportVersionUploaded";
   readonly reportId: ReportId;
   readonly versionId: VersionId;
   readonly versionNo: number;
+  /** ADR-0062 §6 — audit/analytics only, no consumer behavior change. */
+  readonly origin: VersionOrigin;
 }
 
 export interface ReportVersionScanned {

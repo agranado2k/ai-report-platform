@@ -18,3 +18,9 @@ export type AclMode = (typeof ACL_MODES)[number];
 
 export const GRANT_LEVELS = ["editor", "admin"] as const;
 export type GrantLevel = (typeof GRANT_LEVELS)[number];
+
+/** How a `ReportVersion` was produced (ADR-0062 §6, surfaced by ADR-0065): `upload`
+ *  is a plain file/zip upload; `editor` is a save from the in-app ProseMirror editor
+ *  (ADR-0062) — not yet buildable, so every version is `upload` today. */
+export const VERSION_ORIGINS = ["upload", "editor"] as const;
+export type VersionOrigin = (typeof VERSION_ORIGINS)[number];

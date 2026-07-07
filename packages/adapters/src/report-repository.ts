@@ -3,10 +3,13 @@
 // mapping is factored into pure functions so it can be unit-tested without a DB;
 // the actual queries are integration-tested against the Neon branch (ADR-0019).
 import type {
+  CursorParams,
   ReportPage,
   ReportRepository,
   ReportSearchQuery,
   ReportSummary,
+  ReportVersionSummary,
+  VersionPage,
 } from "arp-application";
 import { acls, reports, reportVersions } from "arp-db/schema";
 import {
@@ -28,6 +31,7 @@ import {
   userId,
   type VersionId,
   type VersionManifest,
+  type VersionOrigin,
   versionId,
 } from "arp-domain";
 import { and, asc, desc, eq, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
@@ -67,6 +71,7 @@ function versionToRow(reportRowId: string, v: ReportVersion): typeof reportVersi
     contentHash: v.contentHash,
     uploadedByUser: v.uploadedBy,
     scanStatus: v.scanStatus,
+    origin: v.origin,
   };
 }
 
@@ -79,6 +84,21 @@ function rowToVersion(row: VersionRow): ReportVersion {
     scanStatus: row.scanStatus as ScanStatus,
     manifest: row.manifestJson as VersionManifest,
     sizeBytes: row.sizeBytes,
+    origin: row.origin as VersionOrigin,
+  };
+}
+
+/** Project a `report_versions` row into the lean `ReportVersionSummary` (ADR-0065)
+ *  — no manifest/content hash, `uploaded_at` read straight from the DB stamp. */
+function rowToVersionSummary(row: VersionRow): ReportVersionSummary {
+  return {
+    id: versionId(row.id),
+    versionNo: row.versionNo,
+    uploadedBy: userId(row.uploadedByUser),
+    uploadedAt: row.uploadedAt.getTime(),
+    scanStatus: row.scanStatus as ScanStatus,
+    sizeBytes: row.sizeBytes,
+    origin: row.origin as VersionOrigin,
   };
 }
 
@@ -315,6 +335,35 @@ export class DrizzleReportRepository implements ReportRepository {
       return ok(undefined);
     } catch (e) {
       return err2("setAcl", e);
+    }
+  }
+
+  async listVersions(
+    reportIdVal: ReportId,
+    q: CursorParams<VersionId>,
+  ): Promise<Result<VersionPage, AppError>> {
+    // Cursor-paginated version history (ADR-0053/ADR-0065): keyset on the version
+    // id (UUIDv7), DESC = newest-created first — same shape as searchByOrg above.
+    try {
+      const db = this.ctx.current();
+      const filters = [eq(reportVersions.reportId, reportIdVal)];
+      const back = q.endingBefore !== undefined;
+      if (q.startingAfter) filters.push(lt(reportVersions.id, q.startingAfter));
+      if (q.endingBefore) filters.push(gt(reportVersions.id, q.endingBefore));
+
+      const rows = await db
+        .select()
+        .from(reportVersions)
+        .where(and(...filters))
+        .orderBy(back ? asc(reportVersions.id) : desc(reportVersions.id))
+        .limit(q.limit + 1); // +1 to detect has_more
+
+      const hasMore = rows.length > q.limit;
+      const slice = rows.slice(0, q.limit);
+      const page = back ? slice.reverse() : slice; // always present newest-first
+      return ok({ items: page.map(rowToVersionSummary), hasMore });
+    } catch (e) {
+      return err2("listReportVersions", e);
     }
   }
 }

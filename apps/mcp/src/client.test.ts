@@ -61,6 +61,25 @@ describe("ApiClient", () => {
     expect(calls[0]?.method).toBe("GET");
   });
 
+  it("listReportVersions GETs /api/v1/reports/{slug}/versions (slug encoded) with cursor params", async () => {
+    const { fn, calls } = stub(json({ object: "list", data: [], has_more: false }));
+    const client = new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+    const r = await client.listReportVersions("ab/cd", { limit: 5, startingAfter: "version_abc" });
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.has_more).toBe(false);
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/ab%2Fcd/versions?limit=5&starting_after=version_abc",
+    );
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.authorization).toBe("Bearer arp_live_x");
+  });
+
   it("listFolders GETs /api/v1/folders and omits the auth header when none is set", async () => {
     const { fn, calls } = stub(json({ folders: [] }));
     const client = new ApiClient({

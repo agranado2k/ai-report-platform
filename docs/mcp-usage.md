@@ -51,6 +51,7 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 |------|------|------|
 | `reports_search` | read | Find reports by title/slug text (paginated). Omit `q` to list all. |
 | `reports_get` | read | Fetch one report by slug (slug, title, is_published, folder_id). |
+| `reports_list_versions` | read | List a report's version history, newest-created first (version_no, uploaded_by, uploaded_at, scan_status, size_bytes, origin). |
 | `folders_list` | read | The folder tree (id, name, parent id). |
 | `reports_upload` | create | Create a report from HTML, or re-upload a new version of an existing slug. Returns the slug + permanent `view_url`. |
 | `reports_update` | mutate | Rename a report's title. |
