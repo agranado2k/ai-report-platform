@@ -50,14 +50,17 @@ export function folderBody(f: Folder, ctx: WireContext) {
 }
 
 /** A `version` resource (ADR-0065) — the ReportVersionSummary projection on the
- *  wire: both the version's `version_` id and the uploader's `user_` id. */
+ *  wire: both the version's `version_` id and the uploader's `user_` id.
+ *  `uploaded_at` renders as an ISO-8601 string (no existing timestamp wire field
+ *  to match; ISO is unambiguous vs Stripe's epoch-seconds, given `uploadedAt` is
+ *  epoch ms internally). */
 export function versionBody(v: ReportVersionSummary, ctx: WireContext) {
   return {
     object: "version" as const,
     id: versionIdToWire(v.id),
     version_no: v.versionNo,
     uploaded_by: userIdToWire(v.uploadedBy),
-    uploaded_at: v.uploadedAt,
+    uploaded_at: new Date(v.uploadedAt).toISOString(),
     scan_status: v.scanStatus,
     size_bytes: v.sizeBytes,
     origin: v.origin,

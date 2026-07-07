@@ -168,7 +168,7 @@ describe("listReportVersionsToHttp (ADR-0065 list envelope)", () => {
           id: versionIdToWire(versionId(V1)),
           version_no: 2,
           uploaded_by: userIdToWire(userId(U1)),
-          uploaded_at: 1_700_000_000_000,
+          uploaded_at: new Date(1_700_000_000_000).toISOString(),
           scan_status: "clean",
           size_bytes: 1234,
           origin: "upload",
