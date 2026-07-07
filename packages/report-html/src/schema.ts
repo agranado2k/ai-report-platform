@@ -13,6 +13,7 @@ import {
   gridNode,
   sectionNode,
 } from "./schema/report-blocks.js";
+import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { secNode } from "./schema/sec.js";
 import {
   tableBodyNode,
@@ -39,7 +40,10 @@ nodes = nodes
   .addToEnd("table_body", tableBodyNode)
   .addToEnd("table_row", tableRowNode)
   .addToEnd("table_header", tableHeaderNode)
-  .addToEnd("table_cell", tableCellNode);
+  .addToEnd("table_cell", tableCellNode)
+  .addToEnd("details", detailsNode)
+  .addToEnd("summary", summaryNode)
+  .addToEnd("resrow", resrowNode);
 // Retain class/style on every schema-basic node so bespoke classes on
 // otherwise-standard elements (e.g. `<h3 class="sub">`) degrade to
 // "preserved but uninterpreted" instead of being stripped.

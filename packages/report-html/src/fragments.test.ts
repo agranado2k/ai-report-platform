@@ -164,4 +164,37 @@ describe("fragment-level round-trips", () => {
       "<tbody><tr><td>Larson · <em>Crafting Engineering Strategy</em></td></tr></tbody></table></div>";
     expect(serializeBody(parseBody(html))).toBe(html);
   });
+
+  it("round-trips a bare details/summary pair", () => {
+    const html = "<details><summary>More</summary><p>Hidden content.</p></details>";
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips an open details/summary pair", () => {
+    const html = '<details open="open"><summary>More</summary><p>Hidden content.</p></details>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips resrow inside a resgroup (details.resgroup card + summary + resrow)", () => {
+    // ADR-0062 §3 doesn't specify dedicated nodes/attrs for a resrow's
+    // children (rt/rmeta/rd/rtags/ref) — the fixture never gives them
+    // anything beyond a class, so they fall to the generic attr-retention
+    // catch-all (judgment call, see report-blocks.ts). Each one holds bare
+    // inline content directly, so each also picks up the auto-<p>-wrap
+    // invariant (ADR-0062 §7) — classes and text still survive intact.
+    const html =
+      '<details class="resgroup card" open="open"><summary>📚 Books</summary>' +
+      '<div class="resrow"><div><div class="rt">Title</div>' +
+      '<div class="rmeta">Author · <span class="ref">example.com</span></div>' +
+      '<div class="rd">Description.</div></div>' +
+      '<div class="rtags"><span class="chip chip-cto">CTO</span></div></div></details>';
+    const roundtripped = serializeBody(parseBody(html));
+    expect(roundtripped).toBe(
+      '<details class="resgroup card" open="open"><summary>📚 Books</summary>' +
+        '<div class="resrow"><div><div class="rt"><p>Title</p></div>' +
+        '<div class="rmeta"><p>Author · <span class="ref">example.com</span></p></div>' +
+        '<div class="rd"><p>Description.</p></div></div>' +
+        '<div class="rtags"><p><span class="chip chip-cto">CTO</span></p></div></div></details>',
+    );
+  });
 });
