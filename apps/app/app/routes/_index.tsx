@@ -24,6 +24,7 @@ import {
   cx,
   DocumentIcon,
   EditableReportTitle,
+  EditIcon,
   EmptyState,
   FolderIcon,
   type FolderNode,
@@ -371,6 +372,16 @@ export default function Index() {
                     className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
                   >
                     <DocumentIcon className="h-4 w-4" />
+                  </a>
+                  {/* Editor MVP entry point (ADR-0062): owner-gated in the route
+                      itself (loadWritableReport) — a non-owner following this
+                      link is redirected home, same fail-closed posture as /open. */}
+                  <a
+                    href={`/reports/${r.slug}/edit`}
+                    aria-label={`Edit ${r.title}`}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
+                  >
+                    <EditIcon className="h-4 w-4" />
                   </a>
                   <div className="min-w-0 flex-1">
                     <EditableReportTitle slug={r.slug} title={r.title} />

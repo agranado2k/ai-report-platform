@@ -12,6 +12,7 @@ export {
   CheckIcon,
   CopyIcon,
   DocumentIcon,
+  EditIcon,
   FolderIcon,
   KeyIcon,
   MoreIcon,
