@@ -29,5 +29,5 @@ export const action = handle({
       { slug, toFolderId: toFolderId.value },
     );
   },
-  toHttp: (result) => moveReportToHttp(result, wireContext()),
+  toHttp: (result, { actor }) => moveReportToHttp(result, wireContext(), { userId: actor.userId }),
 });

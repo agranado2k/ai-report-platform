@@ -21,7 +21,8 @@ export const loader = handle({
   slug: true,
   run: ({ actor, slug }) =>
     getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
-  toHttp: (result) => getReportToHttp(result, wireContext()),
+  // The acl block is owner-conditional (ADR-0059 §3) — thread the viewer through.
+  toHttp: (result, { actor }) => getReportToHttp(result, wireContext(), { userId: actor.userId }),
 });
 
 export async function action(args: ActionFunctionArgs) {
@@ -56,5 +57,6 @@ const patchHandler = handle({
       { slug, title },
     );
   },
-  toHttp: (result) => renameReportToHttp(result, wireContext()),
+  toHttp: (result, { actor }) =>
+    renameReportToHttp(result, wireContext(), { userId: actor.userId }),
 });

@@ -46,5 +46,5 @@ export const action = handle({
       { slug, mode: rawMode as AclMode, password, allowedEmails, accessTtlSeconds },
     );
   },
-  toHttp: (result) => setAclToHttp(result, wireContext()),
+  toHttp: (result, { actor }) => setAclToHttp(result, wireContext(), { userId: actor.userId }),
 });

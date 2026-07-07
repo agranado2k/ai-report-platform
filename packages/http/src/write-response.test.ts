@@ -56,6 +56,10 @@ const reportResource = (title: string, folder = F1) => ({
   owner: userIdToWire(userId(U1)),
   acl: { mode: "public" },
 });
+/** The report's owner viewing their own report — sees the acl block. */
+const OWNER = { userId: userId(U1) };
+/** A same-org colleague — sees the resource WITHOUT the acl block (ADR-0059 §3). */
+const COLLEAGUE = { userId: userId("00000000-0000-7000-8000-0000000000d2") };
 
 const folder = (name: string): Folder => ({
   id: folderId(F2),
@@ -76,22 +80,43 @@ const folderResource = (name: string) => ({
 
 describe("report resource mappers (ADR-0053)", () => {
   it("moveReportToHttp → 200 with the moved report resource", () => {
-    const res = moveReportToHttp(ok(report("Moved")), CTX);
+    const res = moveReportToHttp(ok(report("Moved")), CTX, OWNER);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(reportResource("Moved"));
     expect(JSON.stringify(res.body)).not.toContain(O1);
   });
 
   it("renameReportToHttp → 200 with the renamed report resource", () => {
-    const res = renameReportToHttp(ok(report("Renamed")), CTX);
+    const res = renameReportToHttp(ok(report("Renamed")), CTX, OWNER);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(reportResource("Renamed"));
   });
 
-  it("getReportToHttp → 200 with the report resource", () => {
-    const res = getReportToHttp(ok(report("A Title")), CTX);
+  it("getReportToHttp → 200 with the report resource (owner sees the acl)", () => {
+    const res = getReportToHttp(ok(report("A Title")), CTX, OWNER);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(reportResource("A Title"));
+  });
+
+  it("getReportToHttp for a NON-owner org member omits the acl block (ADR-0059 §3)", () => {
+    const r = report("A Title");
+    const withAllowlist: Report = {
+      ...r,
+      acl: { mode: "allowlist", allowedEmails: ["secret@example.com"], accessTtlSeconds: 3600 },
+    };
+    const res = getReportToHttp(ok(withAllowlist), CTX, COLLEAGUE);
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty("acl");
+    // owner stays org-visible (ADR-0059 §6) …
+    expect(res.body).toHaveProperty("owner", userIdToWire(userId(U1)));
+    // … but the share config never leaks to a colleague.
+    expect(JSON.stringify(res.body)).not.toContain("secret@example.com");
+  });
+
+  it("getReportToHttp with no viewer identity omits the acl block (fail closed)", () => {
+    const res = getReportToHttp(ok(report("A Title")), CTX);
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty("acl");
   });
 
   it("getReportToHttp NotFound → 404 problem", () => {
@@ -111,7 +136,7 @@ describe("report resource mappers (ADR-0053)", () => {
       ...report("Shared"),
       acl: { mode: "password", passwordHash: "$argon2id$secret" },
     };
-    const res = setAclToHttp(ok(pw), CTX);
+    const res = setAclToHttp(ok(pw), CTX, OWNER);
     expect(res.status).toBe(200);
     expect((res.body as { acl: unknown }).acl).toEqual({ mode: "password" });
     expect(JSON.stringify(res.body)).not.toContain("argon2id");
@@ -123,7 +148,7 @@ describe("report resource mappers (ADR-0053)", () => {
       ...report("Shared"),
       acl: { mode: "allowlist", allowedEmails: ["a@b.com", "c@d.io"], accessTtlSeconds: 86_400 },
     };
-    const res = setAclToHttp(ok(al), CTX);
+    const res = setAclToHttp(ok(al), CTX, OWNER);
     expect((res.body as { acl: unknown }).acl).toEqual({
       mode: "allowlist",
       allowed_emails: ["a@b.com", "c@d.io"],

@@ -600,14 +600,21 @@ components:
     Report:
       description: >
         A single `report` resource (ADR-0056, ADR-0059) — the ReportSummary projection
-        plus its `acl` and `owner`. Returned by the single-report endpoints
-        (get/move/rename/set_acl); list endpoints return the acl-free ReportSummary.
+        plus its `owner` and, for the owner only, its `acl`. Returned by the
+        single-report endpoints (get/move/rename/set_acl); list endpoints return the
+        acl-free ReportSummary.
       allOf:
         - $ref: '#/components/schemas/ReportSummary'
         - type: object
-          required: [acl, owner]
+          required: [owner]
           properties:
-            acl: { $ref: '#/components/schemas/Acl' }
+            acl:
+              allOf:
+                - $ref: '#/components/schemas/Acl'
+              description: >
+                Present ONLY when the caller is the report's owner (ADR-0059 §3) —
+                share config (incl. allowlist emails) is the owner's business. Org
+                members receive the resource without this block.
             owner:
               type: string
               description: >

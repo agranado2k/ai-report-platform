@@ -109,9 +109,11 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       title: "Get a report",
       description:
         "Fetch a single report by its slug — returns slug, title, is_published, folder_id, and " +
-        "owner (the owning user's user_… id, ADR-0059). Read-only. Use it to confirm a report " +
-        "exists / check its current title or folder before an update, move, or delete. A slug " +
-        "that isn't yours (or doesn't exist) returns not-found.",
+        "owner (the owning user's user_… id, ADR-0059); the acl block is included only when " +
+        "you are the report's owner (use reports_get_acl for share config). Read-only. Use it " +
+        "to confirm a report exists / check its current title or folder before an update, " +
+        "move, or delete. A missing slug returns not-found; a report outside your org returns " +
+        "forbidden.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id (from reports_search)."),
       },
