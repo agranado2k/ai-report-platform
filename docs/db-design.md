@@ -173,7 +173,7 @@ making `live_version_id` nullable and set after the first version commits.
 | `uploaded_by_user` | uuid FK → users | |
 | `scan_status` | `scan_status` | default `pending`; **denormalized cache** of the `ScanJob` verdict, updated on `ReportVersionScanned` |
 | `uploaded_at` | timestamptz | |
-| `origin` | `version_origin` | `upload` \| `editor` (ADR-0062 §6, ADR-0065); default `upload`, NOT NULL. Every row is `upload` today — the in-app editor doesn't exist yet (migration 0010) |
+| `origin` | `version_origin` | `upload` \| `editor` (ADR-0062 §6, ADR-0065); default `upload`, NOT NULL. Every row is `upload` today — the in-app editor doesn't exist yet (migration 0011) |
 
 Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 
