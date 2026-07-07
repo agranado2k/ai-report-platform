@@ -3,8 +3,9 @@
 // adapter (ADR-0038) built from the `handle()` combinator: resolve the actor
 // (read → no provision) + the slug → parse the cursor params → run the use case
 // → serialize via arp-http. Auth is IDENTICAL to GET /api/v1/reports/{slug} —
-// listReportVersions reuses the same loadOwnedReport guard, so a report outside
-// the actor's org reads as not-found/not-allowed exactly like the single-report GET.
+// listReportVersions reuses the same loadOrgReport guard (ADR-0059 §3), so a
+// report outside the actor's org reads as not-found/not-allowed exactly like
+// the single-report GET.
 import { listReportVersions } from "arp-application";
 import { makeVersionId } from "arp-domain";
 import { listReportVersionsToHttp, parseCursorParams } from "arp-http";

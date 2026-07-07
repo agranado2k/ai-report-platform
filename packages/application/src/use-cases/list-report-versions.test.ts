@@ -1,7 +1,8 @@
 // listReportVersions use case (ADR-0065). Auth mirrors getReport exactly (the
-// same org-scoped loadOwnedReport guard) — happy path, cross-org, not-found, and
-// soft-deleted are the same three/four cases as get-report.test.ts. Pagination
-// mirrors search-reports.test.ts's cursor assertions.
+// same org-scoped loadOrgReport guard, ADR-0059 §3) — happy path, cross-org,
+// not-found, and soft-deleted are the same three/four cases as
+// get-report.test.ts. Pagination mirrors search-reports.test.ts's cursor
+// assertions.
 import {
   addVersion,
   createReport,

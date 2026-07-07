@@ -1951,3 +1951,43 @@ doesn't exist yet.
   despite `CLAUDE.md`'s quick-reference implying one; `openapi.yaml` is hand-maintained.
 
 Worktree: `worktree/report-versions-endpoint` (branch `feat/report-versions-endpoint`). Not yet merged.
+
+### 2026-07-07 — rebased slice 1 onto PR #146 (ADR-0059 ownership foundation)
+
+PR #146 (`feat/report-ownership`) landed on `main` while this slice was in flight: `reports.owner_id`
+(migration `0010_reports_owner_id`), the `loadOrgReport`/`loadOwnedReport` split in `load-owned.ts`
+(reads stay org-scoped; owner-gated writes are a separate guard), and the `canWrite` seam. Rebased
+`feat/report-versions-endpoint` onto it, commit by commit (`git rebase origin/main`).
+
+- **Migration renumber**: our `0010_abandoned_bloodstorm.sql` (the `report_versions.origin` enum +
+  column) collided with `0010_reports_owner_id.sql`. Resolved by regenerating rather than hand-renaming:
+  reset `packages/db/drizzle/meta/{_journal,0010_snapshot}.json` to main's post-#146 state, then ran
+  `drizzle-kit generate --name=report_versions_origin` against the rebased schema, which produced
+  `0011_report_versions_origin.sql` with byte-identical SQL to the original. `docs/db-design.md`'s
+  migration-number reference for `origin` updated 0010 → 0011 to match.
+- **`user-id.ts` / `user-id.test.ts` / `report.test.ts` conflicts**: both branches independently added
+  the same `makeUserId`/`userIdToWire` codec and the same `Report.ownerId` / version-`origin` test
+  cases (parallel work, same day). Reconciled as unions — merged doc comment covering both `owner` and
+  `uploaded_by` wire consumers; kept all test cases from both sides (no behavior lost either way).
+- **Auth semantics reconciled (ADR-0065 §1, "identical to single-report GET")**: our
+  `listReportVersions` was written against the pre-#146 world where `loadOwnedReport` was the only
+  guard and *was* org-scoped. Post-#146, `loadOwnedReport` now means something different — owner-only,
+  requiring `actor.userId` — so leaving the call as-is would have silently narrowed version listing to
+  the owner only, breaking parity with `getReport`. Switched `listReportVersions` to call the new
+  `loadOrgReport` (org-scoped reads, `{orgId}`-only actor) instead, matching `getReport`'s *actual*
+  post-#146 implementation exactly. Confirmed by reading `get-report.ts`: it also does not yet
+  implement ADR-0059 §3's "write-grantee metadata carve-out" — `ADR-0060` write grants are still
+  schema-only (`report_grants` table exists, no `hasWriteGrant` in code) — so there is nothing for
+  `listReportVersions` to carve out either. This mirrors the "flagged, not fixed, out of scope" note
+  from this slice's original entry above: the aspirational ADR-0059 §3 carve-out remains unimplemented
+  on both endpoints; when it lands on `getReport` it must land on `listReportVersions` in the same
+  change (comment added at both call sites to that effect). Behavior otherwise unchanged: an org
+  member reads version history, a cross-org actor gets `NotAllowed`, missing/soft-deleted reads
+  `NotFound` — same three cases `get-report.test.ts` covers, and `list-report-versions.test.ts`
+  already asserted exactly this shape (no test changes needed, only the implementation and its
+  comments).
+- **Gate** (full, from the worktree root, post-rebase): `biome ci .` clean, `turbo typecheck` (11
+  packages) clean, `vitest run` — 97 files / 589 tests green (up from 565 pre-rebase, PR #146's own
+  suite included), `docs:check` clean.
+
+Still the same worktree/branch as above; not yet merged.
