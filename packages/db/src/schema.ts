@@ -150,6 +150,13 @@ export const reports = pgTable(
     folderId: uuid("folder_id")
       .notNull()
       .references(() => folders.id, { onDelete: "restrict" }),
+    // The creator is the owner, in every org type (ADR-0059) — a permission
+    // concept, not a tenancy change (org_id stays the tenancy/quota/listing
+    // scope). Migration 0010 backfills this from report_versions.uploaded_by_user
+    // at version_no = 1, then sets NOT NULL.
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     slug: varchar("slug", { length: 10 }).notNull(),
     title: text("title").notNull(),
     // Nullable + set after the first version commits — breaks the
@@ -165,6 +172,7 @@ export const reports = pgTable(
   (t) => [
     uniqueIndex("reports_slug_uniq").on(t.slug),
     index("reports_org_folder_idx").on(t.orgId, t.folderId),
+    index("reports_owner_id_idx").on(t.ownerId),
     // Serves the cursor-paginated org-wide listing/search (searchByOrg, ADR-0053):
     // keyset on (org_id, id DESC) over live reports — id < cursor ORDER BY id DESC
     // stays O(page). Supersedes the updated_at ordering for search.
