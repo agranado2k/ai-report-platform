@@ -127,6 +127,21 @@ describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () =>
     expect(logged).toHaveLength(0);
   });
 
+  it("the no-secret fall-through is still owner-gated — a non-owner can't resolve a slug", async () => {
+    const reports = await seededReports("dddddddddd");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: COLLEAGUE },
+      rawHandle: "dddddddddd",
+      viewOrigin: VIEW,
+      secret: undefined,
+    });
+    // The ownership gate runs BEFORE the no-secret branch (review #146): without
+    // it, any authenticated user could turn a report_… id into its capability
+    // slug via the redirect Location — for public mode the slug IS the capability.
+    expect(location).toBe("/");
+  });
+
   it("the minted token expires after 24h", async () => {
     const reports = await seededReports("eeeeeeeeee");
     const { deps } = makeDeps(reports);

@@ -45,14 +45,17 @@ export async function ownerOpenLocation(
   const slug = await resolveReportSlug(req.rawHandle, deps.reports);
   if (!slug.ok) return "/";
 
-  // Private viewing not configured (previews/dev): fall through to the gated viewer.
-  if (!req.secret) return `${req.viewOrigin}/${slug.value}`;
-
   // THE OWNERSHIP GATE (ADR-0059 §4): loadOwnedReport returns the report ONLY
   // when the acting user owns it — org-scoped getReport is NOT sufficient
   // here. Any failure → dashboard; we never reveal whether the report exists.
+  // Runs BEFORE the no-secret fall-through so a non-owner can never use /open
+  // to resolve a report_… id into its capability slug (review #146).
   const report = await loadOwnedReport(deps.reports, req.actor, slug.value);
   if (!report.ok) return "/";
+
+  // Private viewing not configured (previews/dev): fall through to the gated
+  // viewer — owner-only, per the gate above.
+  if (!req.secret) return `${req.viewOrigin}/${slug.value}`;
 
   const nowSeconds = Math.floor(deps.now() / 1000);
   const token = mintAccessToken(slug.value, OWNER_TTL_SECONDS, req.secret, nowSeconds, {

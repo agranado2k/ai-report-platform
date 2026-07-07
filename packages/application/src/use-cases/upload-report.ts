@@ -215,6 +215,9 @@ async function reUpload(
   const found = await deps.reports.findBySlug(slugR.value);
   if (!found.ok) return found;
   if (!found.value) return err(notFound("report not found"));
+  // deletedAt is intentionally NOT filtered here (unlike loadWritableReport):
+  // whether re-upload should resurrect a soft-deleted slug is an OPEN QUESTION
+  // in docs/diary.md — switching to the guard would silently decide it as "no".
   // The canWrite seam (ADR-0059 §2; ADR-0060 extends it with write grants) —
   // replaces the old inline org check for re-upload.
   if (!canWrite(found.value, actor))
