@@ -2,7 +2,10 @@
 
 export * from "./access-token";
 export * from "./acl";
+export * from "./anchor";
 export * from "./brand";
+export * from "./comment";
+export * from "./comment-id";
 export * from "./email-address";
 export * from "./errors";
 export * from "./events";
