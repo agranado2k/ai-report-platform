@@ -12,6 +12,8 @@ import type {
   AppError,
   ClerkOrgId,
   ClerkUserId,
+  Comment,
+  CommentId,
   DomainEvent,
   Folder,
   FolderId,
@@ -110,6 +112,28 @@ export interface ReportRepository {
     reportId: ReportId,
     q: CursorParams<VersionId>,
   ): Promise<Result<VersionPage, AppError>>;
+}
+
+// ── Authoring & Collaboration (ADR-0064) ───────────────────────────────────
+export type CommentPage = CursorPage<Comment>;
+
+/** Persists the `Comment` aggregate (ADR-0020 repository pattern, ADR-0064). One
+ *  row per comment (root or reply) — `Comment` itself is already the lean shape
+ *  (no separate summary projection needed, unlike ReportSummary/ReportVersionSummary). */
+export interface CommentRepository {
+  findById(id: CommentId): Promise<Result<Comment | null, AppError>>;
+  /** Upsert by id (create on first save; resolve/other transitions re-save). */
+  save(comment: Comment): Promise<Result<void, AppError>>;
+  /** Cursor-paginated comments for one report (newest-created first, ADR-0053),
+   *  keyset on the comment id. Includes both roots and replies — the caller
+   *  threads them into Threads client-side via `parentCommentId`. */
+  listByReport(
+    reportId: ReportId,
+    q: CursorParams<CommentId>,
+  ): Promise<Result<CommentPage, AppError>>;
+  /** Hard-delete a comment (and, via the DB's self-FK CASCADE, its replies when
+   *  it's a root — ADR-0064, schema.ts's FK-policy note). */
+  delete(id: CommentId): Promise<Result<void, AppError>>;
 }
 
 /**
@@ -385,6 +409,8 @@ export interface IdGenerator {
   reportId(): ReportId;
   versionId(): VersionId;
   folderId(): FolderId;
+  /** ADR-0064 (Authoring & Collaboration) — new `Comment` aggregate ids. */
+  commentId(): CommentId;
   /** An opaque, unguessable id for a magic-link nonce (ADR-0056); not a domain id.
    *  Unforgeability rests on the link's HMAC + the store's single-use GETDEL, not on
    *  this id's entropy, so a time-ordered uuidv7 is sufficient. */

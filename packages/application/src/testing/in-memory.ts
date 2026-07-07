@@ -6,10 +6,13 @@
 import {
   type Acl,
   type AppError,
+  type Comment,
+  type CommentId,
   type DomainEvent,
   err,
   type Folder,
   type FolderId,
+  commentId as makeCommentId,
   folderId as makeFolderId,
   orgId as makeOrgId,
   reportId as makeReportId,
@@ -37,6 +40,8 @@ import type {
   BundleProcessor,
   ClerkOrgProvisioner,
   Clock,
+  CommentPage,
+  CommentRepository,
   CursorParams,
   EmailMessage,
   EmailSender,
@@ -248,6 +253,39 @@ export class InMemoryReportRepository implements ReportRepository {
   }
 }
 
+/** In-memory CommentRepository (ADR-0064). `delete` mirrors the real adapter's
+ *  self-FK CASCADE: deleting a root also deletes its replies. */
+export class InMemoryCommentRepository implements CommentRepository {
+  private readonly byId = new Map<string, Comment>();
+
+  async findById(id: CommentId): Promise<Result<Comment | null, AppError>> {
+    return ok(this.byId.get(id) ?? null);
+  }
+
+  async save(comment: Comment): Promise<Result<void, AppError>> {
+    this.byId.set(comment.id, comment);
+    return ok(undefined);
+  }
+
+  async listByReport(
+    reportId: ReportId,
+    q: CursorParams<CommentId>,
+  ): Promise<Result<CommentPage, AppError>> {
+    const matched = [...this.byId.values()].filter((c) => c.reportId === reportId);
+    return ok(keysetPage(matched, q));
+  }
+
+  async delete(id: CommentId): Promise<Result<void, AppError>> {
+    this.byId.delete(id);
+    // Self-FK CASCADE (schema.ts's comments.parent_comment_id): deleting a root
+    // deletes its replies too.
+    for (const c of [...this.byId.values()]) {
+      if (c.parentCommentId === id) this.byId.delete(c.id);
+    }
+    return ok(undefined);
+  }
+}
+
 const blobKey = (reportId: ReportId, versionId: VersionId, path: string) =>
   `${reportId}/${versionId}/${path}`;
 
@@ -427,6 +465,7 @@ export class SequentialIdGenerator implements IdGenerator {
   private r = 0;
   private v = 0;
   private f = 0;
+  private c = 0;
   reportId(): ReportId {
     this.r += 1;
     return makeReportId(`r${this.r}`);
@@ -438,6 +477,10 @@ export class SequentialIdGenerator implements IdGenerator {
   folderId(): FolderId {
     this.f += 1;
     return makeFolderId(`f${this.f}`);
+  }
+  commentId(): CommentId {
+    this.c += 1;
+    return makeCommentId(`c${this.c}`);
   }
   private n = 0;
   nonceId(): string {
