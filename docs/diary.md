@@ -2139,3 +2139,68 @@ wave; this slice made the code match them.
   during the auth-seam rebase fix); `npm run docs:check` clean.
 
 Worktree: `worktree/comments` (branch `feat/comments`). Not yet merged.
+
+### 2026-07-07 — ADR-0062 editor MVP: sidecar write path + saveEditedVersion + in-dashboard editor
+
+Built on top of the merged ADR-0062–0067 doc wave and `arp-report-html` (PR #148): the first working
+slice of the in-app editor. Scope was deliberately vertical — write path, one new use case, one route,
+one entry point — not the full suggestion/diff/co-editing roadmap those later ADRs cover.
+
+- **Sidecar write path (`packages/application/src/use-cases/upload-report.ts`)**: extended
+  `UploadCommand` with optional `origin?: VersionOrigin` and `sourceDoc?: Record<string, unknown>`
+  (deliberately NOT a `PMDocJson` import from `arp-report-html` — the application layer stays free of
+  the ProseMirror dependency, ADR-024). When `sourceDoc` is set, a `_source.json` blob is appended to
+  what's WRITTEN to R2 (`filesToWrite`) but never touches `manifestOf(bundle)`, which is built from
+  `bundle.files` alone — the manifest is the allowlist the (future) asset-serving surface would honor,
+  and the sidecar must never appear in it. Security-critical test:
+  `upload-report.test.ts` → `"SECURITY: an editor save's _source.json sidecar reaches the blob store
+  but is excluded from the version manifest…"` — asserts both halves (`blobs.readObject` finds it;
+  `manifest.files` doesn't list it) in one test. A research pass over `apps/view` confirmed the viewer
+  today only ever serves one hardcoded path (`manifest.entryDocument`) — no route accepts an arbitrary
+  sub-path yet — so this is currently belt-and-braces against a *future* asset route, not a live hole;
+  still required by ADR-0062 §4 and worth having in place before that route exists.
+- **`saveEditedVersion` (new use case, `save-edited-version.ts`)**: a thin wrapper over `uploadReport`
+  rather than a second pipeline — ADR-0062 §5 is explicit that edit-save reuses the ADR-0037 pipeline
+  verbatim, and `uploadReport`'s `reUpload` branch already has everything needed (R2-first/commit-last,
+  idempotency, scan enqueue, the `canWrite` ownership gate). `saveEditedVersion` always drives
+  `uploadReport` via `updateSlug` (there is no create path — an editor session always opens an existing
+  report first) with `origin: "editor"`. **Idempotency key**: left as `uploadReport`'s existing derived
+  key (`hash(user ∥ route ∥ content_hash ∥ target)`) unchanged, since this wrapper calls the same
+  function — meaning an editor-save and a plain re-upload of byte-identical content to the same slug
+  share one idempotency namespace. Judgment call, documented in the wrapper's doc comment: correct
+  today (double-submitting Save dedupes, which is what you want), flagged in case editor-saves and API
+  uploads ever need independent namespaces.
+- **Editor route (`apps/app/app/routes/reports.$slug.edit.tsx`)**: loader opens the live-or-newest
+  version, reads `_source.json` when present (lossless reopen) else best-effort `parseBody`s the split
+  body HTML; the POST action re-reads the report fresh (not the loader's snapshot), re-derives the
+  shell from the CURRENT editable version's HTML, serializes the posted PM doc via `serializeBody`,
+  `reinjectShell`s it back into a whole document, and calls `saveEditedVersion`. Auth on both loader and
+  action is `loadWritableReport` — the same `canWrite` gate `uploadReport`'s `reUpload` branch uses —
+  mirroring re-upload's authorization exactly, per the slice brief (the brief's literal
+  `loadOwnedReport` reference was the owner-only delete/setAcl seam; the one that actually matches
+  re-upload's behavior is `loadWritableReport`, so that's what both the loader and action use).
+- **Client-only ProseMirror editor**: `apps/app/app/editor/editor-state.ts` (pure — no DOM;
+  `createEditorState`/`docJson`/`editorPlugins`, no toolbar per MVP scope — Mod-b/Mod-i/undo-redo +
+  ProseMirror's `baseKeymap`) and `apps/app/app/components/ReportEditor.tsx` (the `useEffect`-mounted
+  `EditorView`, since Remix SSR must never construct a real DOM). New `apps/app` deps:
+  `prosemirror-view`/`-state`/`-keymap`/`-commands`/`-history` + `arp-report-html` (workspace).
+  `vitest.config.ts` gained one more scoped include, `apps/app/app/editor/**/*.test.ts` — same
+  rationale as the existing `apps/app/app/server` carve-out (root config's own comment): ProseMirror's
+  state/transform layer needs no DOM, so it's cheap to unit-test even though the rest of the Remix UI
+  stays e2e-only (the mounted `EditorView` itself is NOT unit-tested — deferred to Playwright).
+- **Entry point**: an Edit (pencil) icon-link next to each dashboard row's existing Open link
+  (`_index.tsx`), routing to `/reports/:slug/edit`; owner-gating happens in the route itself, so a
+  non-owner following a stale link is redirected home exactly like `/open`.
+- **e2e**: `tests/e2e/features/edit-report-in-dashboard.feature` (`@phase-2`, `status: "full"` in
+  `scripts/docs-conformance/config.mjs`) — happy path (open → edit → save → origin "editor" in both the
+  version and `GET .../versions`), the sidecar-never-public property, and the unauthenticated-save /
+  non-owner-open denials. No Bruno/openapi change: the save flow is an internal Remix action on
+  `apps/app`, not a new `/api/v1` route (stated explicitly against the ADR-026 doc-trigger matrix).
+  README's `.feature` file count bumped 29 → 30.
+- **Not touched, on purpose**: `apps/view`, comments code, `packages/db` migrations (none needed — the
+  sidecar is a same-prefix R2 object, ADR-0062 §4), the viewer CSP.
+- **Gate**: `biome ci .` clean (one pre-existing warning in the report-html fixture, unrelated),
+  `turbo typecheck` (12 packages) clean, `vitest run` — 103 files / 632 tests green (up from 101/623
+  pre-slice), `docs:check` clean.
+
+Worktree: `worktree/editor-mvp` (branch `feat/editor-mvp`). Not yet merged.
