@@ -297,9 +297,10 @@ paths:
       description: >
         Configure who may view the report identified by `slug` (ADR-0056): `public`
         (anyone with the link), `password` (argon2id-hashed), `org` (same-org viewers),
-        or `allowlist` (specific emails). Requires the `acl:write` scope; the report
-        must belong to your org. Returns the report with its updated `acl` (the password
-        hash is never returned).
+        or `allowlist` (specific emails). Requires the `acl:write` scope; the caller
+        must be authorized to manage this report's sharing (org-scoped today;
+        owner-only under ADR-0059). Returns the report with its updated `acl` (the
+        password hash is never returned).
       security:
         - apiKey: []
       parameters:

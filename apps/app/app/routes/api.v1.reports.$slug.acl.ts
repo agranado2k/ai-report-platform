@@ -6,7 +6,7 @@
 import { getReport, setAcl } from "arp-application";
 import { ACL_MODES, type AclMode, err, validationError } from "arp-domain";
 import { getAclToHttp, setAclToHttp } from "arp-http";
-import { deps, passwordHasher } from "../server/container.server";
+import { deps, grantStore, passwordHasher } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 
@@ -37,7 +37,7 @@ export const action = handle({
       typeof body.access_ttl_seconds === "number" ? body.access_ttl_seconds : undefined;
 
     return setAcl(
-      { reports: deps().reports, hasher: passwordHasher() },
+      { reports: deps().reports, hasher: passwordHasher(), grants: grantStore() },
       { orgId: actor.orgId, scopes: actor.scopes },
       { slug, mode: rawMode as AclMode, password, allowedEmails, accessTtlSeconds },
     );

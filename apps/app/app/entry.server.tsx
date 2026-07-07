@@ -16,7 +16,7 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext,
+  _loadContext: AppLoadContext,
 ) {
   const prohibitOutOfOrderStreaming =
     isBotRequest(request.headers.get("user-agent")) || remixContext.isSpaMode;
