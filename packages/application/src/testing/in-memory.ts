@@ -66,6 +66,8 @@ import type {
   ScanWorkQueue,
   SlugFactory,
   UnitOfWork,
+  WriteGrant,
+  WriteGrantStore,
 } from "../ports";
 
 /** In-memory keyset paginator (ADR-0053) over id DESC (newest-created first),
@@ -504,6 +506,11 @@ export class InMemoryIdentityStore implements IdentityStore {
   private readonly byClerk = new Map<string, ProvisionedIdentity>();
   /** Clerk user ids that have been soft-deleted (ADR-0054) — terminal. */
   private readonly deleted = new Set<string>();
+  // Internal-UserId ↔ email mirror (ADR-0060 §2's write-grant matching seam) —
+  // populated on provisioning, or directly via seedUser() for fixtures that
+  // don't go through the Clerk provisioning flow.
+  private readonly emailByUserId = new Map<UserId, string>();
+  private readonly userIdByEmail = new Map<string, UserId>(); // normalized email → userId
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -535,6 +542,7 @@ export class InMemoryIdentityStore implements IdentityStore {
       rootFolderId: makeFolderId(`folder-${this.seq}`),
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
+    this.seedUser(provisioned.userId, input.email);
     return ok(provisioned);
   }
 
@@ -546,6 +554,72 @@ export class InMemoryIdentityStore implements IdentityStore {
     if (!entry) return ok(null); // unknown id — no-op
     this.deleted.add(clerkUserId); // idempotent — preserves the original deletion
     return ok(entry[1].userId);
+  }
+
+  async findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>> {
+    return ok(this.emailByUserId.get(userId) ?? null);
+  }
+
+  async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
+    return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
+  }
+
+  /** Test-only seam: register a user's email directly, for fixtures (e.g.
+   *  write-grant tests) that need a resolvable user without a full Clerk
+   *  provisioning round-trip. */
+  seedUser(userId: UserId, email: string): void {
+    this.emailByUserId.set(userId, email);
+    this.userIdByEmail.set(email.trim().toLowerCase(), userId);
+  }
+}
+
+/** In-memory per-report write grants (ADR-0060) — mirrors DrizzleWriteGrantStore's
+ *  upsert/delete-by-key + dual userId-or-email match semantics. */
+export class InMemoryWriteGrantStore implements WriteGrantStore {
+  private readonly grants = new Map<string, WriteGrant>(); // `${reportId}|${normalizedEmail}`
+
+  private key(reportId: ReportId, email: string): string {
+    return `${reportId}|${email.trim().toLowerCase()}`;
+  }
+
+  async grant(
+    reportId: ReportId,
+    email: string,
+    grantedBy: UserId,
+    granteeUserId: UserId | null,
+  ): Promise<Result<void, AppError>> {
+    const normalized = email.trim().toLowerCase();
+    this.grants.set(this.key(reportId, email), {
+      reportId,
+      granteeEmail: normalized,
+      granteeUserId,
+      grantedBy,
+      grantedAt: Date.now(),
+    });
+    return ok(undefined);
+  }
+
+  async revoke(reportId: ReportId, email: string): Promise<Result<void, AppError>> {
+    this.grants.delete(this.key(reportId, email));
+    return ok(undefined);
+  }
+
+  async listByReport(reportId: ReportId): Promise<Result<readonly WriteGrant[], AppError>> {
+    return ok(
+      [...this.grants.entries()].filter(([k]) => k.startsWith(`${reportId}|`)).map(([, v]) => v),
+    );
+  }
+
+  async findFor(
+    reportId: ReportId,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<WriteGrant | null, AppError>> {
+    const byEmail = actor.email ? this.grants.get(this.key(reportId, actor.email)) : undefined;
+    if (byEmail) return ok(byEmail);
+    for (const [k, g] of this.grants) {
+      if (k.startsWith(`${reportId}|`) && g.granteeUserId === actor.userId) return ok(g);
+    }
+    return ok(null);
   }
 }
 

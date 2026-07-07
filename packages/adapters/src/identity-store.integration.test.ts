@@ -136,4 +136,35 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(reprovision.ok).toBe(false);
     if (!reprovision.ok) expect(reprovision.error.kind).toBe("NotAllowed");
   });
+
+  // ── Write-grant email lookups (ADR-0060 §2) ──────────────────────────────
+  it("findEmailByUserId returns the mirrored email; null for an unknown id", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    const found = await store.findEmailByUserId(created.value.userId);
+    expect(found.ok && found.value).toBe("ann@example.com");
+
+    const unknown = await store.findEmailByUserId(
+      "00000000-0000-7000-8000-00000000dead" as typeof created.value.userId,
+    );
+    expect(unknown.ok && unknown.value).toBeNull();
+  });
+
+  it("findUserIdByEmail resolves case-insensitively; null when no user has that email", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    const found = await store.findUserIdByEmail("  ANN@Example.com  ");
+    expect(found.ok && found.value).toBe(created.value.userId);
+
+    const none = await store.findUserIdByEmail("nobody@example.com");
+    expect(none.ok && none.value).toBeNull();
+  });
+
+  it("findUserIdByEmail does not resolve a soft-deleted user", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    await store.softDeleteByClerkId(CU);
+    const found = await store.findUserIdByEmail("ann@example.com");
+    expect(found.ok && found.value).toBeNull();
+  });
 });

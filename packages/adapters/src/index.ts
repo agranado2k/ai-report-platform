@@ -29,3 +29,4 @@ export * from "./services/hasher";
 export * from "./services/ids";
 export * from "./services/slugs";
 export * from "./unit-of-work";
+export * from "./write-grant-store";

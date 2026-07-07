@@ -8,6 +8,7 @@ import {
   type AppError,
   err,
   folderId,
+  normalizeEmailAddress,
   notAllowed,
   ok,
   orgId,
@@ -135,6 +136,42 @@ export class DrizzleIdentityStore implements IdentityStore {
       return ok(row ? userId(row.id) : null);
     } catch (e) {
       return thrown("identity.softDeleteByClerkId", e);
+    }
+  }
+
+  async findEmailByUserId(uid: UserId): Promise<Result<string | null, AppError>> {
+    try {
+      const [row] = await this.ctx
+        .current()
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, uid))
+        .limit(1);
+      return ok(row?.email ?? null);
+    } catch (e) {
+      return thrown("identity.findEmailByUserId", e);
+    }
+  }
+
+  async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
+    try {
+      // Case-insensitive match — `users.email` is the raw Clerk email (not
+      // pre-normalized on write), while the caller's email is always the
+      // normalized EmailAddress (ADR-0060 §2's grant-matching contract).
+      const [row] = await this.ctx
+        .current()
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            sql`lower(${users.email}) = ${normalizeEmailAddress(email)}`,
+            isNull(users.deletedAt),
+          ),
+        )
+        .limit(1);
+      return ok(row ? userId(row.id) : null);
+    } catch (e) {
+      return thrown("identity.findUserIdByEmail", e);
     }
   }
 
