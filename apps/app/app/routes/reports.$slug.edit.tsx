@@ -28,7 +28,7 @@ import { AppHeader, Button, buttonClass, Card, PageShell } from "../components";
 import { ReportEditor } from "../components/ReportEditor";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { deps, identityStore, writeGrantStore } from "../server/container.server";
-import { errorToJson } from "../server/http.server";
+import { errorToJson, rejectNonJsonContentType } from "../server/http.server";
 
 /** The version an editor session opens: the live version when one has been
  *  published, else the newest by `version_no` (a fresh upload that hasn't
@@ -84,6 +84,13 @@ export async function action(args: ActionFunctionArgs) {
   if (args.request.method !== "POST") {
     return json({ error: "method not allowed" }, { status: 405 });
   }
+
+  // SECURITY (PR #151 review, Fix 4): reject a non-JSON Content-Type with 415
+  // before any parsing or auth work — see rejectNonJsonContentType's doc
+  // comment in http.server.ts for why (belt-and-braces on top of
+  // SameSite=Lax, which is the primary cross-site defense here).
+  const contentTypeRejection = rejectNonJsonContentType(args.request);
+  if (contentTypeRejection) return contentTypeRejection;
 
   const actor = await resolveUploadActor(args);
   if (!actor.ok) return errorToJson(actor.error);

@@ -70,3 +70,25 @@ export function errorToJson(error: AppError) {
     { status: http.status },
   );
 }
+
+/**
+ * SECURITY (PR #151 review, Fix 4): guards a JSON-body write action against a
+ * non-`application/json` Content-Type, rejecting with 415 BEFORE the body is
+ * ever parsed. SameSite=Lax cookies are this app's primary cross-site
+ * defense (a cross-origin form/fetch can't ride the session cookie on a
+ * state-changing POST at all); this is belt-and-braces on top of that — a
+ * plain HTML `<form>` (or `navigator.sendBeacon`) CAN issue a same-site-
+ * looking cross-origin POST with `Content-Type: text/plain` or
+ * `application/x-www-form-urlencoded` (never `application/json`, without a
+ * CORS preflight the browser would block), so rejecting anything but JSON
+ * closes that residual JSON-CSRF avenue for routes that only ever expect a
+ * JSON body (e.g. the report editor's save action).
+ *
+ * Returns the 415 `Response` to short-circuit the action with, or `null`
+ * when the request is JSON and the caller should proceed to parse it.
+ */
+export function rejectNonJsonContentType(request: Request): Response | null {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.toLowerCase().includes("application/json")) return null;
+  return errorToJson({ kind: "UnsupportedMediaType", message: "expected application/json" });
+}
