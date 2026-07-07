@@ -2,8 +2,9 @@
 // (ADR-0036, Reports & Folders). Thin transport adapter, built from the
 // `handle()` combinator: resolve the actor (write path → provisions) + the
 // slug → parse { folder_id } → run moveReport → serialize via the pure
-// arp-http mapper. The use case validates that the report and the target
-// folder both belong to the actor's org.
+// arp-http mapper. The use case owns authz: the actor must pass the canWrite
+// seam for the report (owner today, ADR-0059) and the target folder must be
+// in the report's org.
 import { moveReport } from "arp-application";
 import { makeFolderId } from "arp-domain";
 import { moveReportToHttp } from "arp-http";
@@ -24,7 +25,7 @@ export const action = handle({
 
     return moveReport(
       { reports: deps().reports, folders: folderRepo() },
-      { orgId: actor.orgId },
+      { orgId: actor.orgId, userId: actor.userId },
       { slug, toFolderId: toFolderId.value },
     );
   },

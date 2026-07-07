@@ -1,25 +1,30 @@
-// moveReport — move a Report into a different Folder within the acting org
-// (ADR-0036, Reports & Folders). Pure orchestration over the Report + Folder
-// repositories (ADR-0024). Authorization boundary: BOTH the report and the
-// target folder must belong to the actor's org — the shared loadOwnedReport /
-// loadOwnedFolder guard for each, the latter with target-folder message text.
-// Persists via the report's save (which now upserts folder_id).
+// moveReport — move a Report into a different Folder (ADR-0036, Reports &
+// Folders). Pure orchestration over the Report + Folder repositories
+// (ADR-0024). Authorization boundary (ADR-0059 §2): the actor must pass the
+// `canWrite` seam for the report (owner today; owner-or-grantee under
+// ADR-0060), and the target folder must belong to the REPORT's org — not the
+// actor's, since a future cross-org grantee moves a report within the org
+// that hosts it. Persists via the report's save (which upserts folder_id).
 import {
   type AppError,
   type FolderId,
-  type OrgId,
   ok,
   placeInFolder,
   type Report,
   type Result,
   type Slug,
 } from "arp-domain";
-import { loadOwnedFolder, loadOwnedReport, type OwnedGuardMessages } from "../load-owned";
+import {
+  loadOwnedFolder,
+  loadWritableReport,
+  type OwnedGuardMessages,
+  type TenancyActor,
+} from "../load-owned";
 import type { FolderRepository, ReportRepository } from "../ports";
 
 const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "target folder not found",
-  notAllowed: "target folder is not in your org",
+  notAllowed: "target folder is not in the report's org",
 };
 
 export interface MoveReportDeps {
@@ -27,9 +32,7 @@ export interface MoveReportDeps {
   readonly folders: FolderRepository;
 }
 
-export interface MoveReportActor {
-  readonly orgId: OrgId;
-}
+export type MoveReportActor = TenancyActor;
 
 export interface MoveReportInput {
   readonly slug: Slug;
@@ -41,12 +44,15 @@ export async function moveReport(
   actor: MoveReportActor,
   input: MoveReportInput,
 ): Promise<Result<Report, AppError>> {
-  const found = await loadOwnedReport(deps.reports, actor, input.slug);
+  const found = await loadWritableReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
 
+  // The target folder is checked against the REPORT's org (ADR-0059 §2) —
+  // behavior-neutral today (the owner is same-org by construction), but the
+  // correct rule once cross-org write grants exist.
   const target = await loadOwnedFolder(
     deps.folders,
-    actor,
+    { orgId: found.value.orgId },
     input.toFolderId,
     TARGET_FOLDER_MESSAGES,
   );

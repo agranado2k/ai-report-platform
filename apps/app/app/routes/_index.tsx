@@ -168,7 +168,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!toFolderId.ok) return errorToJson(toFolderId.error);
     const r = await moveReport(
       { reports: deps().reports, folders: folderRepo() },
-      { orgId: actor.value.orgId },
+      { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, toFolderId: toFolderId.value },
     );
     if (!r.ok) return errorToJson(r.error);
@@ -181,7 +181,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
     const r = await renameReport(
       { reports: deps().reports },
-      { orgId: actor.value.orgId },
+      { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, title },
     );
     if (!r.ok) return errorToJson(r.error);
@@ -196,7 +196,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
     const r = await deleteReport(
       { reports: deps().reports },
-      { orgId: actor.value.orgId },
+      { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value },
     );
     if (!r.ok) return errorToJson(r.error);

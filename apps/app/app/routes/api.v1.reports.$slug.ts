@@ -4,7 +4,7 @@
 // Thin transport adapter (ADR-0038), built from the `handle()` combinator: it
 // resolves the actor (read path → no provision; write path → provisions) + the
 // slug, runs the use case, and serializes via the pure arp-http mappers. The use
-// cases own org-ownership authz.
+// cases own authz: GET is org-scoped; PATCH/DELETE are ownership-gated (ADR-0059).
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { deleteReport, getReport, renameReport } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
@@ -36,7 +36,11 @@ const deleteHandler = handle({
   mode: "write",
   slug: true,
   run: ({ actor, slug }) =>
-    deleteReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
+    deleteReport(
+      { reports: deps().reports },
+      { orgId: actor.orgId, userId: actor.userId },
+      { slug },
+    ),
   toHttp: (result) => deleteReportToHttp(result),
 });
 
@@ -46,7 +50,11 @@ const patchHandler = handle({
   parseBody: true,
   run: ({ actor, slug, body }) => {
     const title = typeof body.title === "string" ? body.title : "";
-    return renameReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug, title });
+    return renameReport(
+      { reports: deps().reports },
+      { orgId: actor.orgId, userId: actor.userId },
+      { slug, title },
+    );
   },
   toHttp: (result) => renameReportToHttp(result, wireContext()),
 });

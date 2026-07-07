@@ -22,6 +22,7 @@ import {
   type VersionId,
   type VersionManifest,
 } from "arp-domain";
+import { canWrite } from "../load-owned";
 import type {
   BlobStore,
   BundleProcessor,
@@ -214,9 +215,10 @@ async function reUpload(
   const found = await deps.reports.findBySlug(slugR.value);
   if (!found.ok) return found;
   if (!found.value) return err(notFound("report not found"));
-  // canWrite (Phase 1: same org; folder grants land with collaboration).
-  if (found.value.orgId !== actor.orgId)
-    return err(notAllowed("not allowed to update this report"));
+  // The canWrite seam (ADR-0059 §2; ADR-0060 extends it with write grants) —
+  // replaces the old inline org check for re-upload.
+  if (!canWrite(found.value, actor))
+    return err(notAllowed("you do not have write access to this report"));
   return addVersion(found.value, {
     versionId: deps.ids.versionId(),
     contentHash: bundle.contentHash,

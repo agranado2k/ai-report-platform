@@ -1,6 +1,8 @@
-// setAcl — set a Report's sharing Acl (ADR-0056). Pure orchestration (ADR-0024):
-// `acl:write` scope (ADR-0016) + org ownership (the shared loadOwnedReport
-// guard), hash a new password via the PasswordHasher port, prune any now-stale
+// setAcl — set a Report's sharing Acl (ADR-0056). OWNER-ONLY, permanently
+// (ADR-0059 §2 — share config is the owner's business; deliberately NOT on the
+// canWrite seam). Pure orchestration (ADR-0024): `acl:write` scope (ADR-0016)
+// + ownership (the shared loadOwnedReport owner guard), hash a new password
+// via the PasswordHasher port, prune any now-stale
 // `report_grants` rows (ADR-0056 "5e", issue #137) via the GrantStore port —
 // a durable grant must not outlive the Acl that granted it — then persist via
 // reports.setAcl. Returns the updated Report.
@@ -10,14 +12,13 @@ import {
   err,
   insufficientScope,
   makeAcl,
-  type OrgId,
   ok,
   type Report,
   type Result,
   type Slug,
   validationError,
 } from "arp-domain";
-import { loadOwnedReport } from "../load-owned";
+import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { GrantStore, PasswordHasher, ReportRepository } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
@@ -28,8 +29,7 @@ export interface SetAclDeps {
   readonly grants: GrantStore;
 }
 
-export interface SetAclActor {
-  readonly orgId: OrgId;
+export interface SetAclActor extends TenancyActor {
   readonly scopes: readonly string[];
 }
 

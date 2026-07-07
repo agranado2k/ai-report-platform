@@ -9,7 +9,7 @@
 // (packages/adapters/src/set-acl-grant-pruning.contract.test.ts) — pruning is
 // security-relevant (the viewer's live `isGranted` check trusts the grant row,
 // not the Acl), so both authoring sides must agree.
-import type { OrgId, ReportId, Slug } from "arp-domain";
+import type { OrgId, ReportId, Slug, UserId } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GrantStore, PasswordHasher, ReportRepository } from "../../ports";
 import { setAcl } from "../../use-cases/set-acl";
@@ -18,8 +18,10 @@ export interface SetAclGrantPruningHarness {
   readonly reports: ReportRepository;
   readonly grants: GrantStore;
   readonly hasher: PasswordHasher;
-  /** The org that owns the pre-seeded report (matches the actor used below). */
+  /** The org hosting the pre-seeded report (matches the actor used below). */
   readonly orgId: OrgId;
+  /** The pre-seeded report's OWNER — setAcl is owner-gated (ADR-0059). */
+  readonly userId: UserId;
   /** The pre-seeded report's id + slug — every test drives `setAcl` against it. */
   readonly reportId: ReportId;
   readonly slug: Slug;
@@ -28,8 +30,8 @@ export interface SetAclGrantPruningHarness {
   teardown(): Promise<void>;
 }
 
-function actorFor(orgId: OrgId) {
-  return { orgId, scopes: ["acl:write"] };
+function actorFor(orgId: OrgId, userId: UserId) {
+  return { orgId, userId, scopes: ["acl:write"] };
 }
 
 async function isLive(store: GrantStore, reportId: ReportId, email: string): Promise<boolean> {
@@ -59,7 +61,7 @@ export function describeSetAclGrantPruningContract(
 
     it("mode switch allowlist → password revokes every grant for the report", async () => {
       const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
-      const allow = await setAcl(deps, actorFor(h.orgId), {
+      const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
         allowedEmails: ["a@b.com", "c@d.io"],
@@ -72,7 +74,7 @@ export function describeSetAclGrantPruningContract(
       expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
       expect(await isLive(h.grants, h.reportId, "c@d.io")).toBe(true);
 
-      const switched = await setAcl(deps, actorFor(h.orgId), {
+      const switched = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "password",
         password: "hunter22",
@@ -84,7 +86,7 @@ export function describeSetAclGrantPruningContract(
 
     it("allowlist stays but a removed email's grant is revoked; kept emails are untouched", async () => {
       const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
-      const allow = await setAcl(deps, actorFor(h.orgId), {
+      const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
         allowedEmails: ["a@b.com", "c@d.io"],
@@ -96,7 +98,7 @@ export function describeSetAclGrantPruningContract(
       expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
       expect(await isLive(h.grants, h.reportId, "c@d.io")).toBe(true);
 
-      const narrowed = await setAcl(deps, actorFor(h.orgId), {
+      const narrowed = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
         allowedEmails: ["c@d.io"],
@@ -108,7 +110,7 @@ export function describeSetAclGrantPruningContract(
 
     it("allowlist widening (additions only) leaves existing grants untouched", async () => {
       const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
-      const allow = await setAcl(deps, actorFor(h.orgId), {
+      const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
         allowedEmails: ["a@b.com"],
@@ -117,7 +119,7 @@ export function describeSetAclGrantPruningContract(
       await h.grants.grant(h.reportId, "a@b.com", Date.now() + 60_000);
       expect(await isLive(h.grants, h.reportId, "a@b.com")).toBe(true);
 
-      const widened = await setAcl(deps, actorFor(h.orgId), {
+      const widened = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
         allowedEmails: ["a@b.com", "c@d.io"],
@@ -129,13 +131,13 @@ export function describeSetAclGrantPruningContract(
 
     it("a non-allowlist → non-allowlist switch never touches grants", async () => {
       const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
-      const pub = await setAcl(deps, actorFor(h.orgId), { slug: h.slug, mode: "public" });
+      const pub = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "public" });
       expect(pub.ok).toBe(true);
       // A grant that (by hypothesis) shouldn't exist while public — proves the
       // switch below doesn't blindly revoke/revokeAll on every call.
       await h.grants.grant(h.reportId, "stray@example.com", Date.now() + 60_000);
 
-      const org = await setAcl(deps, actorFor(h.orgId), { slug: h.slug, mode: "org" });
+      const org = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "org" });
       expect(org.ok).toBe(true);
       expect(await isLive(h.grants, h.reportId, "stray@example.com")).toBe(true); // untouched
     });

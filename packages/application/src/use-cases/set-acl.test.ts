@@ -8,8 +8,10 @@ import {
 import { setAcl } from "./set-acl";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
+const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
+const OTHER_USER = userId("00000000-0000-7000-8000-0000000000d2");
 const SLUG = "aaaaaaaaaa";
-const ACTOR = { orgId: ORG, scopes: ["acl:write"] };
+const ACTOR = { orgId: ORG, userId: OWNER, scopes: ["acl:write"] };
 
 async function seed(reportOrg = ORG) {
   const reports = new InMemoryReportRepository();
@@ -23,7 +25,7 @@ async function seed(reportOrg = ORG) {
     title: "T",
     versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
     contentHash: "h".repeat(64),
-    uploadedBy: userId("00000000-0000-7000-8000-0000000000d1"),
+    uploadedBy: OWNER,
     manifest: { entryDocument: "index.html", files: ["index.html"] },
     sizeBytes: 1,
   });
@@ -40,7 +42,7 @@ describe("setAcl use case (ADR-0056)", () => {
     const { reports, hasher, grants } = await seed();
     const r = await setAcl(
       { reports, hasher, grants },
-      { orgId: ORG, scopes: [] },
+      { orgId: ORG, userId: OWNER, scopes: [] },
       {
         slug: SLUG as never,
         mode: "org",
@@ -152,14 +154,20 @@ describe("setAcl use case (ADR-0056)", () => {
     });
   });
 
-  it("rejects a report in another org (NotAllowed) and an unknown slug (NotFound)", async () => {
-    const { reports, hasher, grants } = await seed(orgId("00000000-0000-7000-8000-0000000000a2"));
-    const notMine = await setAcl({ reports, hasher, grants }, ACTOR, {
-      slug: SLUG as never,
-      mode: "org",
-    });
+  it("rejects a non-owner (NotAllowed, ADR-0059: setAcl is owner-only) and an unknown slug (NotFound)", async () => {
+    const { reports, hasher, grants } = await seed();
+    const notMine = await setAcl(
+      { reports, hasher, grants },
+      { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
+      {
+        slug: SLUG as never,
+        mode: "org",
+      },
+    );
     expect(notMine.ok).toBe(false);
-    if (!notMine.ok) expect(notMine.error.kind).toBe("NotAllowed");
+    if (!notMine.ok) {
+      expect(notMine.error).toEqual({ kind: "NotAllowed", message: "you do not own this report" });
+    }
 
     const missing = await setAcl({ reports, hasher, grants }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
