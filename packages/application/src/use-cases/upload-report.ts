@@ -117,17 +117,43 @@ export async function uploadReport(
   const bundle = processed.value;
 
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
+  //
+  // SECURITY/CORRECTNESS (PR #151 review, Fix 3): `bundle.contentHash` alone
+  // is a hash of the serialized HTML BYTES, not of the ProseMirror doc that
+  // produced them. Two editor saves can serialize to byte-identical HTML
+  // while carrying genuinely different `sourceDoc` JSON (e.g. an edit that
+  // doesn't change the rendered markup) — without folding sourceDoc into the
+  // key/fingerprint, the second save would be misidentified as an idempotent
+  // replay of the first and its `_source.json` sidecar would silently never
+  // be written, breaking ADR-0062 §4 losslessness. Folding a stable hash of
+  // the canonicalized sourceDoc JSON into BOTH the derived key input and the
+  // fingerprint (only when `cmd.sourceDoc` is present — a plain upload/
+  // re-upload has none, and keeps its exact prior behavior) fixes this: a
+  // different doc ⇒ a different key ⇒ "proceed", not "replay"; the SAME doc
+  // resubmitted still hashes identically ⇒ still replays (the correct
+  // double-submit dedup).
   const target = cmd.updateSlug ? `slug:${cmd.updateSlug}` : `folder:${cmd.actor.folderId}`;
+  const sourceDocFingerprint = cmd.sourceDoc
+    ? deps.hasher.hash(canonicalJson(cmd.sourceDoc))
+    : null;
   const ref = {
     actingUserId: cmd.actor.userId,
     route: ROUTE,
-    // Derived key = hash(user ∥ route ∥ content_hash ∥ target), ADR-0039. The
-    // \n separator can't occur in the segments, so no concat-collision.
+    // Derived key = hash(user ∥ route ∥ content_hash ∥ target [∥ sourceDoc_hash]),
+    // ADR-0039 + Fix 3 above. The \n separator can't occur in the segments,
+    // so no concat-collision.
     key:
       cmd.idempotencyKey ??
-      deps.hasher.hash([cmd.actor.userId, ROUTE, bundle.contentHash, target].join("\n")),
+      deps.hasher.hash(
+        [cmd.actor.userId, ROUTE, bundle.contentHash, target, sourceDocFingerprint ?? ""].join(
+          "\n",
+        ),
+      ),
   };
-  const begun = await deps.idempotency.begin(ref, `${bundle.contentHash}:${target}`);
+  const fingerprint = sourceDocFingerprint
+    ? `${bundle.contentHash}:${target}:${sourceDocFingerprint}`
+    : `${bundle.contentHash}:${target}`;
+  const begun = await deps.idempotency.begin(ref, fingerprint);
   if (!begun.ok) return begun; // reuse w/ different body → 422
   if (begun.value.outcome === "in_flight")
     return err({ kind: "IdempotencyInFlight", message: "request in flight" });
@@ -184,6 +210,25 @@ export async function uploadReport(
   if (!scan.ok) return scan;
 
   return ok({ result, replayed: false, reportId: report.id, versionId: newVersion.id });
+}
+
+/** Deterministic JSON encoding of a value — object keys sorted recursively so
+ *  two structurally-equal `sourceDoc` values always hash the same regardless
+ *  of key insertion order (Fix 3, see the idempotency comment above). */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeysDeep(value));
+}
+
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
 }
 
 function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
