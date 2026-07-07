@@ -214,10 +214,12 @@ export function describeReportRepositoryContract(
     it("listVersions returns the report's versions newest-created first (ADR-0065)", async () => {
       const report = h.makeReport({ slug: "rpt0000051", title: "Versioned" });
       await h.repo.save(report);
+      const uploader = report.versions[0]?.uploadedBy;
+      if (!uploader) throw new Error("fixture has no v1");
       const added = addVersion(report, {
         versionId: h.nextVersionId(),
         contentHash: "b".repeat(64),
-        uploadedBy: report.versions[0]!.uploadedBy,
+        uploadedBy: uploader,
         manifest: { entryDocument: "index.html", files: ["index.html"] },
         sizeBytes: 22,
       });
@@ -238,11 +240,13 @@ export function describeReportRepositoryContract(
     it("listVersions keyset-paginates newest-created first, honoring startingAfter", async () => {
       let report = h.makeReport({ slug: "rpt0000052", title: "Many versions" });
       await h.repo.save(report);
+      const uploader = report.versions[0]?.uploadedBy;
+      if (!uploader) throw new Error("fixture has no v1");
       for (let i = 0; i < 3; i += 1) {
         const added = addVersion(report, {
           versionId: h.nextVersionId(),
           contentHash: `c${i}`.repeat(16),
-          uploadedBy: report.versions[0]!.uploadedBy,
+          uploadedBy: uploader,
           manifest: { entryDocument: "index.html", files: ["index.html"] },
           sizeBytes: 33,
         });
