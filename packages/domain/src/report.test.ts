@@ -53,6 +53,10 @@ describe("createReport", () => {
     expect(v?.manifest).toEqual({ entryDocument: "index.html", files: ["index.html"] });
     expect(v?.sizeBytes).toBe(11);
   });
+
+  it("sets the creator as the owner (ADR-0059)", () => {
+    expect(newReport().ownerId).toBe(userId("u1"));
+  });
 });
 
 describe("addVersion", () => {

@@ -7,6 +7,7 @@ import { FakePasswordHasher, InMemoryGrantStore, InMemoryReportRepository } from
 import { describeSetAclGrantPruningContract } from "./set-acl-grant-pruning.contract";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
+const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
 const REPORT = reportId("00000000-0000-7000-8000-0000000000c1");
 
 describeSetAclGrantPruningContract("in-memory", async () => {
@@ -21,7 +22,7 @@ describeSetAclGrantPruningContract("in-memory", async () => {
     title: "T",
     versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
     contentHash: "h".repeat(64),
-    uploadedBy: userId("00000000-0000-7000-8000-0000000000d1"),
+    uploadedBy: OWNER,
     manifest: { entryDocument: "index.html", files: ["index.html"] },
     sizeBytes: 1,
   });
@@ -33,6 +34,7 @@ describeSetAclGrantPruningContract("in-memory", async () => {
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
     hasher: new FakePasswordHasher(),
     orgId: ORG,
+    userId: OWNER,
     reportId: REPORT,
     slug: slug.value,
     async teardown() {},

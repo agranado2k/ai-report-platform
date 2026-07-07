@@ -48,6 +48,7 @@ function reportToRow(r: Report): typeof reports.$inferInsert {
   return {
     id: r.id,
     orgId: r.orgId,
+    ownerId: r.ownerId,
     folderId: r.folderId,
     slug: r.slug,
     title: r.title,
@@ -109,6 +110,7 @@ function rowsToReport(report: ReportRow, versions: readonly VersionRow[], acl: A
   return {
     id: reportId(report.id),
     orgId: orgId(report.orgId),
+    ownerId: userId(report.ownerId),
     folderId: folderId(report.folderId),
     slug: report.slug as Slug,
     title: report.title,

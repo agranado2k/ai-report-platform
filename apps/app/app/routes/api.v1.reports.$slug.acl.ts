@@ -1,22 +1,26 @@
-// GET  /api/v1/reports/{slug}/acl — read a report's sharing Acl (ADR-0056), org-scoped.
-// POST /api/v1/reports/{slug}/acl — set it. Thin transport adapter, built from the
-// `handle()` combinator: resolve the actor (read → no provision; write → `acl:write`)
-// + the slug → parse → run the use case → serialize via arp-http. The use cases own
-// org-ownership authz + hash any password.
-import { getReport, setAcl } from "arp-application";
+// GET  /api/v1/reports/{slug}/acl — read a report's sharing Acl (ADR-0056),
+// OWNER-ONLY (ADR-0059 §3: allowlist emails + share config are the owner's
+// business — org members see only list metadata).
+// POST /api/v1/reports/{slug}/acl — set it (owner-only + `acl:write`).
+// Thin transport adapter, built from the `handle()` combinator: resolve the
+// actor (read → no provision; write → provisions) + the slug → parse → run the
+// use case → serialize via arp-http. The use cases own the ownership authz +
+// hash any password. (The public /unlock flow uses the separate, deliberately
+// unauthenticated `getReportAcl` use case — NOT this route.)
+import { getAcl, setAcl } from "arp-application";
 import { ACL_MODES, type AclMode, err, validationError } from "arp-domain";
 import { getAclToHttp, setAclToHttp } from "arp-http";
 import { deps, grantStore, passwordHasher } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 
-// GET — read the current acl. resolveActorForRead resolves the org WITHOUT provisioning;
-// a report outside the actor's org reads as not-found/not-allowed (getReport owns authz).
+// GET — read the current acl, owner-only (getAcl owns authz via the
+// loadOwnedReport owner guard; a non-owner gets 403 NotAllowed).
 export const loader = handle({
   mode: "read",
   slug: true,
   run: ({ actor, slug }) =>
-    getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
+    getAcl({ reports: deps().reports }, { orgId: actor.orgId, userId: actor.userId }, { slug }),
   toHttp: (result) => getAclToHttp(result),
 });
 
@@ -38,9 +42,9 @@ export const action = handle({
 
     return setAcl(
       { reports: deps().reports, hasher: passwordHasher(), grants: grantStore() },
-      { orgId: actor.orgId, scopes: actor.scopes },
+      { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
       { slug, mode: rawMode as AclMode, password, allowedEmails, accessTtlSeconds },
     );
   },
-  toHttp: (result) => setAclToHttp(result, wireContext()),
+  toHttp: (result, { actor }) => setAclToHttp(result, wireContext(), { userId: actor.userId }),
 });

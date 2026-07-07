@@ -39,6 +39,7 @@ describeSetAclGrantPruningContract("drizzle+pglite", async () => {
     grants: new DrizzleGrantStore(tdb.ctx),
     hasher: new FakePasswordHasher(),
     orgId: ids.orgId,
+    userId: ids.userId,
     reportId: RID,
     slug: slug.value,
     async teardown() {

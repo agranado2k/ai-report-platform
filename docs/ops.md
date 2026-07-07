@@ -14,6 +14,13 @@ merge self-heals it — **no human in the loop**. Safe because `migration-check`
 validates every migration on the PR (an ephemeral Neon branch) before it reaches
 `main`.
 
+**Deploy-window note for NOT NULL column adds** (e.g. migration `0010`
+`reports.owner_id`, ADR-0059): between the migration applying and the new build
+going live, inserts from a still-running old build (which doesn't set the
+column) violate the constraint and fail loudly. Acceptable under this project's
+merge-then-deploy flow (the window is seconds); if a longer window ever matters,
+split into expand (nullable + backfill) and contract (SET NOT NULL) PRs.
+
 A **`workflow_dispatch`** trigger remains as a manual escape hatch — to recover
 immediately without waiting for the next push:
 

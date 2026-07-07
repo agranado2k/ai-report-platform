@@ -2,7 +2,8 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { Acl, AppError, Folder, Report, Result } from "arp-domain";
+import type { Acl, AppError, Folder, Report, Result, UserId } from "arp-domain";
+import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import { folderBody, reportBody, type WireContext } from "./resource";
 
@@ -18,10 +19,20 @@ function aclToWire(acl: Acl) {
     : { mode: acl.mode };
 }
 
+/** The acting user, for owner-conditional serialization (ADR-0059 §3). */
+export interface ReportViewer {
+  readonly userId: UserId;
+}
+
 /** A Report aggregate → the `report` resource body. Single-report responses carry
- *  the `acl` block (loaded with the aggregate); list summaries do not (ADR-0056). */
-function reportResource(r: Report, ctx: WireContext) {
-  return {
+ *  the `owner` (a `user_…` External Id, ADR-0059 §6 — so the dashboard can
+ *  distinguish "yours" from "org") and, ONLY when the viewer IS the owner, the
+ *  `acl` block — share config (incl. allowlist emails) is the owner's business
+ *  (ADR-0059 §3), so org members (and future ADR-0060 write-grantees) never
+ *  receive it. No viewer ⇒ fail closed (no acl). List summaries carry neither
+ *  (ADR-0056). */
+function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer) {
+  const base = {
     ...reportBody(
       {
         id: r.id,
@@ -32,35 +43,68 @@ function reportResource(r: Report, ctx: WireContext) {
       },
       ctx,
     ),
-    acl: aclToWire(r.acl),
+    owner: userIdToWire(r.ownerId),
   };
+  return viewer !== undefined && viewer.userId === r.ownerId
+    ? { ...base, acl: aclToWire(r.acl) }
+    : base;
 }
 
 /** POST /api/v1/reports/{slug}/move — 200 with the moved report resource. */
-export function moveReportToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
+export function moveReportToHttp(
+  result: Result<Report, AppError>,
+  ctx: WireContext,
+  viewer?: ReportViewer,
+): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: reportResource(result.value, ctx, viewer),
+  };
 }
 
 /** PATCH /api/v1/reports/{slug} — 200 with the renamed report resource. */
 export function renameReportToHttp(
   result: Result<Report, AppError>,
   ctx: WireContext,
+  viewer?: ReportViewer,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: reportResource(result.value, ctx, viewer),
+  };
 }
 
 /** GET /api/v1/reports/{slug} — 200 with the report resource, or a problem. */
-export function getReportToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
+export function getReportToHttp(
+  result: Result<Report, AppError>,
+  ctx: WireContext,
+  viewer?: ReportViewer,
+): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: reportResource(result.value, ctx, viewer),
+  };
 }
 
-/** POST /api/v1/reports/{slug}/acl — 200 with the report resource + its new acl. */
-export function setAclToHttp(result: Result<Report, AppError>, ctx: WireContext): HttpResponse {
+/** POST /api/v1/reports/{slug}/acl — 200 with the report resource + its new acl
+ *  (the caller is the owner by construction — setAcl is owner-gated). */
+export function setAclToHttp(
+  result: Result<Report, AppError>,
+  ctx: WireContext,
+  viewer?: ReportViewer,
+): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: reportResource(result.value, ctx) };
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: reportResource(result.value, ctx, viewer),
+  };
 }
 
 /** The `Acl` as a standalone `object: "acl"` resource (ADR-0053/0056) — the focused

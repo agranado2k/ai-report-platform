@@ -107,14 +107,30 @@ describe("uploadReport", () => {
     if (r.ok) expect(r.value.result).toMatchObject({ slug: "slug000001", version: 2 });
   });
 
-  it("rejects a cross-org re-upload (403)", async () => {
+  it("rejects a re-upload by a non-owner (403, ADR-0059 canWrite = isOwner)", async () => {
     const { deps } = makeDeps();
-    await uploadReport(deps, cmd()); // org o1 creates slug000001
+    await uploadReport(deps, cmd()); // u1 creates (and owns) slug000001
+    const r = await uploadReport(
+      deps,
+      cmd({ actor: actor({ userId: userId("u2") }), updateSlug: "slug000001" }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toEqual({
+        kind: "NotAllowed",
+        message: "you do not have write access to this report",
+      });
+    }
+  });
+
+  it("the owner can re-upload regardless of acting-org context (ownership is org-agnostic)", async () => {
+    const { deps } = makeDeps();
+    await uploadReport(deps, cmd()); // u1 creates (and owns) slug000001
     const r = await uploadReport(
       deps,
       cmd({ actor: actor({ orgId: orgId("o2") }), updateSlug: "slug000001" }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.kind).toBe("NotAllowed");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.result).toMatchObject({ slug: "slug000001", version: 2 });
   });
 });

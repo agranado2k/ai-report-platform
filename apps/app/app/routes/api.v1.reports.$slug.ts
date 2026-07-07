@@ -4,7 +4,7 @@
 // Thin transport adapter (ADR-0038), built from the `handle()` combinator: it
 // resolves the actor (read path → no provision; write path → provisions) + the
 // slug, runs the use case, and serializes via the pure arp-http mappers. The use
-// cases own org-ownership authz.
+// cases own authz: GET is org-scoped; PATCH/DELETE are ownership-gated (ADR-0059).
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { deleteReport, getReport, renameReport } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
@@ -21,7 +21,8 @@ export const loader = handle({
   slug: true,
   run: ({ actor, slug }) =>
     getReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
-  toHttp: (result) => getReportToHttp(result, wireContext()),
+  // The acl block is owner-conditional (ADR-0059 §3) — thread the viewer through.
+  toHttp: (result, { actor }) => getReportToHttp(result, wireContext(), { userId: actor.userId }),
 });
 
 export async function action(args: ActionFunctionArgs) {
@@ -36,7 +37,11 @@ const deleteHandler = handle({
   mode: "write",
   slug: true,
   run: ({ actor, slug }) =>
-    deleteReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug }),
+    deleteReport(
+      { reports: deps().reports },
+      { orgId: actor.orgId, userId: actor.userId },
+      { slug },
+    ),
   toHttp: (result) => deleteReportToHttp(result),
 });
 
@@ -46,7 +51,12 @@ const patchHandler = handle({
   parseBody: true,
   run: ({ actor, slug, body }) => {
     const title = typeof body.title === "string" ? body.title : "";
-    return renameReport({ reports: deps().reports }, { orgId: actor.orgId }, { slug, title });
+    return renameReport(
+      { reports: deps().reports },
+      { orgId: actor.orgId, userId: actor.userId },
+      { slug, title },
+    );
   },
-  toHttp: (result) => renameReportToHttp(result, wireContext()),
+  toHttp: (result, { actor }) =>
+    renameReportToHttp(result, wireContext(), { userId: actor.userId }),
 });

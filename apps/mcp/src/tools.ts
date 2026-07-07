@@ -108,9 +108,12 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Get a report",
       description:
-        "Fetch a single report by its slug — returns slug, title, is_published, and folder_id. " +
-        "Read-only. Use it to confirm a report exists / check its current title or folder before " +
-        "an update, move, or delete. A slug that isn't yours (or doesn't exist) returns not-found.",
+        "Fetch a single report by its slug — returns slug, title, is_published, folder_id, and " +
+        "owner (the owning user's user_… id, ADR-0059); the acl block is included only when " +
+        "you are the report's owner (use reports_get_acl for share config). Read-only. Use it " +
+        "to confirm a report exists / check its current title or folder before an update, " +
+        "move, or delete. A missing slug returns not-found; a report outside your org returns " +
+        "forbidden.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id (from reports_search)."),
       },
@@ -125,9 +128,10 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       title: "Get a report's sharing settings",
       description:
         "Read a report's sharing acl — returns { object:'acl', mode, and for allowlist the " +
-        "allowed_emails + access_ttl_seconds }. Read-only. mode is one of private (owner-only, the " +
-        "default) | public | password | org | allowlist. Use it before reports_set_acl to see the " +
-        "current sharing state.",
+        "allowed_emails + access_ttl_seconds }. Read-only and OWNER-ONLY (ADR-0059): only the " +
+        "user who created the report can read its share config. mode is one of private " +
+        "(owner-only, the default) | public | password | org | allowlist. Use it before " +
+        "reports_set_acl to see the current sharing state.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
       },
@@ -176,7 +180,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Upload a report",
       description:
         "Create a report from an HTML document, or re-upload a new version of an existing " +
-        "one. Returns the slug + permanent view URL. To set/change the title afterwards use " +
+        "one (re-upload is owner-gated, ADR-0059 — only the report's owner can update it). " +
+        "Returns the slug + permanent view URL. To set/change the title afterwards use " +
         "reports_update. Title is not set here.",
       inputSchema: {
         html: z.string().describe("The report's full HTML document."),
@@ -209,7 +214,9 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     "reports_update",
     {
       title: "Rename a report",
-      description: "Change a report's title. Find its slug with reports_search first.",
+      description:
+        "Change a report's title. Owner-gated (ADR-0059): only the report's owner can rename it. " +
+        "Find its slug with reports_search first.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
         title: z.string().describe("The new title."),
@@ -223,7 +230,9 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     "reports_move",
     {
       title: "Move a report",
-      description: "Move a report into a different folder. Use folders_list to find the folder id.",
+      description:
+        "Move a report into a different folder. Owner-gated (ADR-0059): only the report's owner " +
+        "can move it. Use folders_list to find the folder id.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id."),
         folder_id: z.string().describe("The destination folder_ id (from folders_list)."),
@@ -238,7 +247,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Set a report's sharing settings",
       description:
-        "Set how a report is shared (ADR-0056). mode: 'private' (owner-only — only you can view, " +
+        "Set how a report is shared (ADR-0056). OWNER-ONLY (ADR-0059): only the user who created " +
+        "the report can change its sharing. mode: 'private' (owner-only — only you can view, " +
         "the default for new reports), 'public' (anyone with the link), 'password' (requires " +
         "`password`), 'allowlist' (only `allowed_emails` — each is emailed a one-time magic link; " +
         "optional `access_ttl_seconds` sets how long their access lasts), or 'org'. REPLACES the " +
@@ -282,7 +292,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Delete a report",
       description:
-        "Delete a report (the viewer then returns 410 Gone). Destructive — confirm intent first.",
+        "Delete a report (the viewer then returns 410 Gone). OWNER-ONLY (ADR-0059): only the " +
+        "user who created the report can delete it. Destructive — confirm intent first.",
       inputSchema: { slug: z.string().describe("The report's slug.") },
       annotations: DESTROY,
     },
