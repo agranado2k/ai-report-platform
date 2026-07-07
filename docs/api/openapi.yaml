@@ -64,8 +64,10 @@ paths:
       summary: Upload or re-upload a report (content-only)
       description: >
         Content-only upload (ADR-0037). A bare upload creates a new Report
-        (slug + first ReportVersion); with `update_slug` it adds a new
-        ReportVersion to an existing Report and changes nothing else. Supplying
+        (slug + first ReportVersion — the uploader becomes its owner, ADR-0059);
+        with `update_slug` it adds a new ReportVersion to an existing Report and
+        changes nothing else (ownership-gated: only the owner may re-upload;
+        write grants extend this under ADR-0060). Supplying
         `title`, `folder_path`, or `acl` in the body on a re-upload returns 422
         (those are dedicated operations). The response is 201 with
         `scan_status: pending`; the version is promoted to live asynchronously
@@ -235,8 +237,10 @@ paths:
       summary: Move a report to a different folder
       description: >
         Reassign the report identified by `slug` to the folder `folder_id`
-        (ADR-0036). Both the report and the target folder must belong to your
-        org. The slug and the report's versions are unchanged.
+        (ADR-0036). Ownership-gated (ADR-0059): the caller must be the report's
+        owner (write grants extend this under ADR-0060), and the target folder
+        must belong to the REPORT's org. The slug and the report's versions are
+        unchanged.
       security:
         - apiKey: []
       parameters:
@@ -271,8 +275,9 @@ paths:
       description: >
         Return the current sharing ACL for the report identified by `slug` (ADR-0056) as a
         standalone `{ object: "acl", mode, … }` resource — `allowed_emails` + `access_ttl_seconds`
-        are present only for `allowlist` mode; the password hash is never returned. Org-scoped;
-        a report outside your org reads as not-found.
+        are present only for `allowlist` mode; the password hash is never returned. OWNER-ONLY
+        (ADR-0059): allowlist emails and share config are the owner's business — a non-owner
+        (even same-org) gets 403.
       security:
         - apiKey: []
       parameters:
@@ -288,6 +293,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Acl' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
@@ -297,10 +303,10 @@ paths:
       description: >
         Configure who may view the report identified by `slug` (ADR-0056): `public`
         (anyone with the link), `password` (argon2id-hashed), `org` (same-org viewers),
-        or `allowlist` (specific emails). Requires the `acl:write` scope; the caller
-        must be authorized to manage this report's sharing (org-scoped today;
-        owner-only under ADR-0059). Returns the report with its updated `acl` (the
-        password hash is never returned).
+        or `allowlist` (specific emails). Requires the `acl:write` scope and is
+        OWNER-ONLY (ADR-0059): only the user who created the report may manage its
+        sharing. Returns the report with its updated `acl` (the password hash is
+        never returned).
       security:
         - apiKey: []
       parameters:
@@ -334,7 +340,8 @@ paths:
       summary: Get a report
       description: >
         Fetch a single report by slug (ADR-0038). The report must belong to your
-        org. Returns the same summary shape as the list endpoint.
+        org (reads stay org-visible, ADR-0059 §3). Returns the full report
+        resource — the list summary plus `owner` and `acl`.
       security:
         - apiKey: []
       parameters:
@@ -358,8 +365,9 @@ paths:
       tags: [Reports]
       summary: Rename a report
       description: >
-        Change a report's display title (ADR-0038). The report must belong to
-        your org. The slug is permanent and unaffected.
+        Change a report's display title (ADR-0038). Ownership-gated (ADR-0059):
+        the caller must be the report's owner (write grants extend this under
+        ADR-0060). The slug is permanent and unaffected.
       security:
         - apiKey: []
       parameters:
@@ -390,9 +398,9 @@ paths:
       tags: [Reports]
       summary: Delete a report
       description: >
-        Soft-delete a report (ADR-0038). The report must belong to your org. The
-        viewer then returns 410 Gone; the slug + bytes are retained for the
-        appeal/purge window.
+        Soft-delete a report (ADR-0038). OWNER-ONLY (ADR-0059): only the user who
+        created the report may delete it. The viewer then returns 410 Gone; the
+        slug + bytes are retained for the appeal/purge window.
       security:
         - apiKey: []
       parameters:
@@ -591,15 +599,21 @@ components:
 
     Report:
       description: >
-        A single `report` resource (ADR-0056) — the ReportSummary projection plus its
-        `acl`. Returned by the single-report endpoints (get/move/rename/set_acl); list
-        endpoints return the acl-free ReportSummary.
+        A single `report` resource (ADR-0056, ADR-0059) — the ReportSummary projection
+        plus its `acl` and `owner`. Returned by the single-report endpoints
+        (get/move/rename/set_acl); list endpoints return the acl-free ReportSummary.
       allOf:
         - $ref: '#/components/schemas/ReportSummary'
         - type: object
-          required: [acl]
+          required: [acl, owner]
           properties:
             acl: { $ref: '#/components/schemas/Acl' }
+            owner:
+              type: string
+              description: >
+                The owning user's `user_…` External Id (ADR-0052, ADR-0059) — the user
+                who created the report. Writes are ownership-gated; org members see the
+                report in lists but only the owner may delete it or manage its sharing.
 
     FolderList:
       description: A cursor-paginated list of folders (ADR-0053 list envelope).
@@ -690,7 +704,7 @@ components:
         folder_id:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
-          description: Target folder id; must belong to your org.
+          description: Target folder id; must belong to the report's org.
 
     Problem:
       description: RFC 9457 Problem Details (ADR-0040).

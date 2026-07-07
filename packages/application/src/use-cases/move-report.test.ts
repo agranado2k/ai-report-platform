@@ -64,14 +64,10 @@ describe("moveReport use case", () => {
     const { reports, folders, targetA } = await setup();
     await reports.save(report(orgA, "aaaaaaaaaa"));
 
-    const r = await moveReport(
-      { reports, folders },
-      ownerActor,
-      {
-        slug: slug("aaaaaaaaaa"),
-        toFolderId: targetA.id,
-      },
-    );
+    const r = await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("aaaaaaaaaa"),
+      toFolderId: targetA.id,
+    });
     expect(r.ok).toBe(true);
 
     const after = await reports.findBySlug(slug("aaaaaaaaaa"));
@@ -100,14 +96,10 @@ describe("moveReport use case", () => {
     const { reports, folders, targetB } = await setup();
     await reports.save(report(orgA, "cccccccccc"));
 
-    const r = await moveReport(
-      { reports, folders },
-      ownerActor,
-      {
-        slug: slug("cccccccccc"),
-        toFolderId: targetB.id, // org B's folder
-      },
-    );
+    const r = await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("cccccccccc"),
+      toFolderId: targetB.id, // org B's folder
+    });
     expect(!r.ok && r.error).toEqual({
       kind: "NotAllowed",
       message: "target folder is not in the report's org",
@@ -116,14 +108,10 @@ describe("moveReport use case", () => {
 
   it("rejects an unknown report (NotFound)", async () => {
     const { reports, folders, targetA } = await setup();
-    const r = await moveReport(
-      { reports, folders },
-      ownerActor,
-      {
-        slug: slug("zzzzzzzzzz"),
-        toFolderId: targetA.id,
-      },
-    );
+    const r = await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("zzzzzzzzzz"),
+      toFolderId: targetA.id,
+    });
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
@@ -131,14 +119,10 @@ describe("moveReport use case", () => {
     const { reports, folders } = await setup();
     await reports.save(report(orgA, "dddddddddd"));
 
-    const r = await moveReport(
-      { reports, folders },
-      ownerActor,
-      {
-        slug: slug("dddddddddd"),
-        toFolderId: folderId("00000000-0000-7000-8000-00000000dead"),
-      },
-    );
+    const r = await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("dddddddddd"),
+      toFolderId: folderId("00000000-0000-7000-8000-00000000dead"),
+    });
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
@@ -151,11 +135,10 @@ describe("moveReport use case", () => {
     };
     await folders.save(deleted);
 
-    const r = await moveReport(
-      { reports, folders },
-      ownerActor,
-      { slug: slug("eeeeeeeeee"), toFolderId: deleted.id },
-    );
+    const r = await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("eeeeeeeeee"),
+      toFolderId: deleted.id,
+    });
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
@@ -165,11 +148,10 @@ describe("moveReport use case", () => {
     const before = await reports.findBySlug(slug("ffffffffff"));
     const beforeCount = before.ok && before.value ? before.value.versions.length : -1;
 
-    await moveReport(
-      { reports, folders },
-      ownerActor,
-      { slug: slug("ffffffffff"), toFolderId: targetA.id },
-    );
+    await moveReport({ reports, folders }, ownerActor, {
+      slug: slug("ffffffffff"),
+      toFolderId: targetA.id,
+    });
 
     const after = await reports.findBySlug(slug("ffffffffff"));
     expect(after.ok && after.value?.folderId).toBe(targetA.id);

@@ -3,6 +3,7 @@
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
 import type { Acl, AppError, Folder, Report, Result } from "arp-domain";
+import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import { folderBody, reportBody, type WireContext } from "./resource";
 
@@ -19,7 +20,9 @@ function aclToWire(acl: Acl) {
 }
 
 /** A Report aggregate → the `report` resource body. Single-report responses carry
- *  the `acl` block (loaded with the aggregate); list summaries do not (ADR-0056). */
+ *  the `acl` block (loaded with the aggregate) and the `owner` (a `user_…`
+ *  External Id, ADR-0059 §6 — so the dashboard can distinguish "yours" from
+ *  "org"); list summaries carry neither (ADR-0056). */
 function reportResource(r: Report, ctx: WireContext) {
   return {
     ...reportBody(
@@ -32,6 +35,7 @@ function reportResource(r: Report, ctx: WireContext) {
       },
       ctx,
     ),
+    owner: userIdToWire(r.ownerId),
     acl: aclToWire(r.acl),
   };
 }

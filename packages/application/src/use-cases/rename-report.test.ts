@@ -42,11 +42,10 @@ describe("renameReport use case", () => {
   it("renames a report in the same org and persists the title", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "aaaaaaaaaa"));
-    const r = await renameReport(
-      { reports },
-      ownerActor,
-      { slug: slug("aaaaaaaaaa"), title: "New Title" },
-    );
+    const r = await renameReport({ reports }, ownerActor, {
+      slug: slug("aaaaaaaaaa"),
+      title: "New Title",
+    });
     expect(r.ok && r.value.title).toBe("New Title");
     const reloaded = await reports.findBySlug(slug("aaaaaaaaaa"));
     expect(reloaded.ok && reloaded.value?.title).toBe("New Title");
@@ -68,22 +67,17 @@ describe("renameReport use case", () => {
 
   it("rejects an unknown report with NotFound", async () => {
     const reports = new InMemoryReportRepository();
-    const r = await renameReport(
-      { reports },
-      ownerActor,
-      { slug: slug("cccccccccc"), title: "X" },
-    );
+    const r = await renameReport({ reports }, ownerActor, { slug: slug("cccccccccc"), title: "X" });
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
   it("rejects an empty title with ValidationError", async () => {
     const reports = new InMemoryReportRepository();
     await reports.save(report(orgA, "dddddddddd"));
-    const r = await renameReport(
-      { reports },
-      ownerActor,
-      { slug: slug("dddddddddd"), title: "  " },
-    );
+    const r = await renameReport({ reports }, ownerActor, {
+      slug: slug("dddddddddd"),
+      title: "  ",
+    });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
   });
 });

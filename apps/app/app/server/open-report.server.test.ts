@@ -7,14 +7,14 @@ import {
   folderId,
   makeSlug,
   orgId,
+  readAccessToken,
   reportId,
   type Slug,
   userId,
-  readAccessToken,
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { ownerOpenLocation, OWNER_TTL_SECONDS } from "./open-report.server";
+import { OWNER_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
@@ -138,7 +138,11 @@ describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () =>
     });
     const token = decodeURIComponent(location.split("?access=")[1] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
-    expect(readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS - 1)).not.toBeNull();
-    expect(readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS + 1)).toBeNull();
+    expect(
+      readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS - 1),
+    ).not.toBeNull();
+    expect(
+      readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS + 1),
+    ).toBeNull();
   });
 });

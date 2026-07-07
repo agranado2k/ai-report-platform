@@ -17,4 +17,5 @@ export * from "./report-version";
 export * from "./result";
 export * from "./signed-token";
 export * from "./slug";
+export * from "./user-id";
 export * from "./value-objects";

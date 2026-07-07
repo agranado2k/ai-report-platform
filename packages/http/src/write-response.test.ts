@@ -8,6 +8,7 @@ import {
   reportId,
   reportIdToWire,
   userId,
+  userIdToWire,
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
@@ -52,6 +53,7 @@ const reportResource = (title: string, folder = F1) => ({
   is_published: true,
   folder_id: folderIdToWire(folderId(folder)),
   mode: "prod",
+  owner: userIdToWire(userId(U1)),
   acl: { mode: "public" },
 });
 
