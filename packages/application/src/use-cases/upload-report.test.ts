@@ -133,4 +133,52 @@ describe("uploadReport", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.result).toMatchObject({ slug: "slug000001", version: 2 });
   });
+
+  it("an editor save (origin: 'editor') is recorded on the new ReportVersion", async () => {
+    const { deps, reports } = makeDeps();
+    await uploadReport(deps, cmd()); // creates slug000001, origin 'upload'
+    const r = await uploadReport(deps, cmd({ updateSlug: "slug000001", origin: "editor" }));
+    expect(r.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    const v2 = found.ok ? found.value?.versions.find((v) => v.versionNo === 2) : undefined;
+    expect(v2?.origin).toBe("editor");
+  });
+
+  it(
+    "SECURITY: an editor save's _source.json sidecar reaches the blob store but is " +
+      "excluded from the version manifest (never publicly servable at view.<domain>/<slug>/_source.json)",
+    async () => {
+      const { deps, reports, blobs } = makeDeps();
+      await uploadReport(deps, cmd()); // creates slug000001 (r1/v1)
+      const sourceDoc = { type: "doc", content: [{ type: "paragraph" }] };
+      const r = await uploadReport(
+        deps,
+        cmd({ updateSlug: "slug000001", origin: "editor", sourceDoc }),
+      );
+      expect(r.ok).toBe(true);
+
+      const found = await reports.findBySlug(sv("slug000001"));
+      const v2 = found.ok ? found.value?.versions.find((v) => v.versionNo === 2) : undefined;
+      // The manifest — what the viewer is allowed to serve by path — never lists the sidecar.
+      expect(v2?.manifest.files).not.toContain("_source.json");
+      expect(v2?.manifest.files).toEqual(["index.html"]);
+
+      // Yet the blob store DID receive it, at the same version prefix.
+      const sidecar = await blobs.readObject(reportId("r1"), versionId("v2"), "_source.json");
+      expect(sidecar.ok).toBe(true);
+      expect(sidecar.ok && sidecar.value?.path).toBe("_source.json");
+      const decoded =
+        sidecar.ok && sidecar.value
+          ? JSON.parse(new TextDecoder().decode(sidecar.value.bytes))
+          : null;
+      expect(decoded).toEqual(sourceDoc);
+    },
+  );
+
+  it("a plain upload/re-upload with no sourceDoc writes no sidecar at all", async () => {
+    const { deps, blobs } = makeDeps();
+    await uploadReport(deps, cmd()); // r1/v1, no sourceDoc
+    const sidecar = await blobs.readObject(reportId("r1"), versionId("v1"), "_source.json");
+    expect(sidecar.ok && sidecar.value).toBeNull();
+  });
 });

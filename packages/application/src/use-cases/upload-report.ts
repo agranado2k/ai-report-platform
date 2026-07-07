@@ -21,6 +21,7 @@ import {
   type UserId,
   type VersionId,
   type VersionManifest,
+  type VersionOrigin,
 } from "arp-domain";
 import { canWrite, type WriteGrantCheckDeps } from "../load-owned";
 import type {
@@ -68,6 +69,23 @@ export interface UploadCommand {
   readonly idempotencyKey?: string;
   readonly updateSlug?: string; // re-upload
   readonly title?: string; // create only
+  /** How this version was produced (ADR-0062 §6 / ADR-0065). Defaults to
+   *  `upload` — every /api/v1/reports call site is a plain upload; the
+   *  editor's saveEditedVersion wrapper sets `editor`. */
+  readonly origin?: VersionOrigin;
+  /**
+   * The ProseMirror document JSON (ADR-0062 §4) — persisted as the
+   * `_source.json` lossless sidecar alongside the version's blobs. Opaque
+   * `Record<string, unknown>` here (not a `PMDocJson` import from
+   * arp-report-html): the application layer stays free of the ProseMirror
+   * dependency (ADR-024) and only ever treats this as bytes to store.
+   * SECURITY-CRITICAL: this sidecar is written to the blob store but is
+   * deliberately NOT added to the version's `VersionManifest` — the viewer
+   * serves version content by manifest-listed path, and the sidecar must
+   * never be publicly fetchable (view.<domain>/<slug>/_source.json).
+   * Undefined ⇒ no sidecar is written (a plain upload/re-upload).
+   */
+  readonly sourceDoc?: Record<string, unknown>;
 }
 
 export interface UploadResult {
@@ -125,15 +143,19 @@ export async function uploadReport(
 
   // 5. Resolve create vs re-upload, run the domain transition.
   const emission = await (cmd.updateSlug
-    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle)
+    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle, cmd.origin)
     : create(deps, cmd, bundle));
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
   if (!newVersion) return err({ kind: "Unexpected", message: "no version after transition" });
 
-  // 6. Blobs first (R2-first; commit-last, ADR-0037 §5).
-  const put = await deps.blobs.putVersionBundle(report.id, newVersion.id, bundle.files);
+  // 6. Blobs first (R2-first; commit-last, ADR-0037 §5). The `_source.json`
+  //    sidecar (ADR-0062 §4), when present, is appended to what's WRITTEN but
+  //    is never added to `bundle.files` / the manifest (built below from
+  //    `bundle.files` alone) — see the SECURITY-CRITICAL note on `sourceDoc`.
+  const filesToWrite = cmd.sourceDoc ? [...bundle.files, sidecarFile(cmd.sourceDoc)] : bundle.files;
+  const put = await deps.blobs.putVersionBundle(report.id, newVersion.id, filesToWrite);
   if (!put.ok) return put;
 
   // 7. Atomic commit: report + outbox + idempotency record (ADR-0037 §5, ADR-0039).
@@ -180,9 +202,23 @@ function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
   return ok(b as unknown as UploadResult);
 }
 
-/** The version manifest persisted with the row: entry document + file paths. */
+/** The version manifest persisted with the row: entry document + file paths.
+ *  NEVER includes the `_source.json` sidecar (ADR-0062 §4) — see `sourceDoc`
+ *  on `UploadCommand`; the sidecar is written to the blob store separately
+ *  (step 6) and must stay outside this allowlist. */
 function manifestOf(bundle: ProcessedBundle): VersionManifest {
   return { entryDocument: bundle.entryDocument, files: bundle.files.map((f) => f.path) };
+}
+
+/** The ProseMirror doc JSON, encoded as the `_source.json` sidecar blob
+ *  (ADR-0062 §4) — deliberately never a member of `bundle.files` / the
+ *  manifest (see `manifestOf`). */
+function sidecarFile(doc: Record<string, unknown>) {
+  return {
+    path: "_source.json",
+    contentType: "application/json",
+    bytes: new TextEncoder().encode(JSON.stringify(doc)),
+  };
 }
 
 function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBundle) {
@@ -199,7 +235,7 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBun
         uploadedBy: cmd.actor.userId,
         manifest: manifestOf(bundle),
         sizeBytes: bundle.sizeBytes,
-        origin: "upload", // this pipeline is the plain upload path (ADR-0065)
+        origin: cmd.origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
       }),
     ),
   );
@@ -210,6 +246,7 @@ async function reUpload(
   updateSlug: string,
   actor: UploadActor,
   bundle: ProcessedBundle,
+  origin: VersionOrigin | undefined,
 ) {
   const slugR = makeSlug(updateSlug);
   if (!slugR.ok) return slugR;
@@ -232,6 +269,6 @@ async function reUpload(
     uploadedBy: actor.userId,
     manifest: manifestOf(bundle),
     sizeBytes: bundle.sizeBytes,
-    origin: "upload", // this pipeline is the plain upload path (ADR-0065)
+    origin: origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
   });
 }
