@@ -60,4 +60,37 @@ describe("fragment-level round-trips", () => {
     const html = '<div class="future-thing"><p>content</p></div>';
     expect(serializeBody(parseBody(html))).toBe(html);
   });
+
+  it("round-trips p.desc, a paragraph role distinct from a bare <p>", () => {
+    const html = '<p class="desc">In the AI age the CTO is judged on three calls per year.</p>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+
+    // "Paragraph role distinct from a bare <p>" (ADR-0062 §3) means desc is
+    // recognized as first-class schema vocabulary via a `variant` attr, not
+    // merely round-tripped as an opaque, unrecognized `class` string
+    // indistinguishable from e.g. `<p class="future-thing">`.
+    const doc = parseBody(html) as { content: [{ attrs: { variant: string | null } }] };
+    expect(doc.content[0].attrs.variant).toBe("desc");
+  });
+
+  it("round-trips p.lede", () => {
+    const html = '<p class="lede">Every recommendation is tagged so you can triage in seconds.</p>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips p.sub", () => {
+    const html = '<p class="sub">Built for <strong>Arthur Granado</strong>.</p>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips sec/secnum — a section heading carrying the numbered label as an attribute", () => {
+    const html = '<h2 class="sec"><span class="secnum">1</span>Executive summary</h2>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+
+    // secnum is a node attribute (ADR-0062 §3), not indistinguishable
+    // inline content — addressable for e.g. a future "renumber" feature.
+    const doc = parseBody(html) as { content: [{ type: string; attrs: { secnum: string } }] };
+    expect(doc.content[0].type).toBe("sec");
+    expect(doc.content[0].attrs.secnum).toBe("1");
+  });
 });

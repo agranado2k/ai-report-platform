@@ -1,5 +1,5 @@
-import { JSDOM } from "jsdom";
 import { DOMParser as PMDOMParser, DOMSerializer, Node as PMNode } from "prosemirror-model";
+import { getDomEnvironmentDocument } from "./dom-environment.js";
 import { reportSchema } from "./schema.js";
 
 /**
@@ -11,13 +11,6 @@ import { reportSchema } from "./schema.js";
  */
 export type PMDocJson = Record<string, unknown>;
 
-// A single detached jsdom document, reused across calls. jsdom (not the
-// vitest/browser DOM) so this package is framework-free and works headlessly
-// in Node for both tests and any future server-side use; the app's own
-// editor UI will run the same schema against the real browser DOM.
-const jsdomWindow = new JSDOM("").window;
-const jsdomDocument = jsdomWindow.document;
-
 /**
  * Parse a report body HTML string (the editable-body half of the
  * shell/body split, ADR-0062 §2) into a ProseMirror doc, using the
@@ -25,7 +18,8 @@ const jsdomDocument = jsdomWindow.document;
  * sidecar shape persisted at `_source.json` (ADR-0062 §4).
  */
 export function parseBody(bodyHtml: string): PMDocJson {
-  const container = jsdomDocument.createElement("div");
+  const document = getDomEnvironmentDocument();
+  const container = document.createElement("div");
   container.innerHTML = bodyHtml;
   const doc = PMDOMParser.fromSchema(reportSchema).parse(container);
   return doc.toJSON() as PMDocJson;
@@ -35,10 +29,11 @@ export function parseBody(bodyHtml: string): PMDocJson {
  * Serialize a ProseMirror doc (as JSON) back to a report body HTML string.
  */
 export function serializeBody(doc: PMDocJson): string {
+  const document = getDomEnvironmentDocument();
   const node = PMNode.fromJSON(reportSchema, doc);
   const serializer = DOMSerializer.fromSchema(reportSchema);
-  const fragment = serializer.serializeFragment(node.content, { document: jsdomDocument });
-  const container = jsdomDocument.createElement("div");
+  const fragment = serializer.serializeFragment(node.content, { document });
+  const container = document.createElement("div");
   container.appendChild(fragment);
   return container.innerHTML;
 }
