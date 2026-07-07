@@ -1,4 +1,4 @@
-# ADR-0065: Version history & visual diff
+# ADR-0065: ReportVersion history & visual diff
 
 - **Status**: Accepted
 - **Date**: 2026-07-07
@@ -47,7 +47,7 @@ ADR-0038's `?v=N` access model is untouched by this ADR — the new `/versions` 
 
 ## Considered options
 
-- **Version discovery**: new dedicated `/versions` list endpoint *(chosen)* vs embedding the full version list on single-report GET (rejected — bloats the common-case report fetch with history most callers don't need; ADR-0053's `ReportSummary` projection principle argues against it) vs client-side `?v=N` enumeration (rejected — no way to know the upper bound, and it's the exact gap this ADR closes).
+- **ReportVersion discovery**: new dedicated `/versions` list endpoint *(chosen)* vs embedding the full version list on single-report GET (rejected — bloats the common-case report fetch with history most callers don't need; ADR-0053's `ReportSummary` projection principle argues against it) vs client-side `?v=N` enumeration (rejected — no way to know the upper bound, and it's the exact gap this ADR closes).
 - **Diff mechanism**: `prosemirror-changeset` over PM doc JSON *(chosen, spike-proven)* vs raw-HTML text diff for all versions (rejected — line/character-level HTML diff is unreadable for a content reviewer and was never spike-tested for readability) vs re-parsing HTML into PM doc JSON on every diff request even when a sidecar exists (rejected — throws away exactly the lossless structure ADR-0062 introduced the sidecar to preserve).
 - **Fallback for sidecar-less versions**: best-effort DOM diff, clearly labeled *(chosen)* vs refusing to diff at all when either side lacks a sidecar (rejected — externally-uploaded reports are common and a total refusal is a worse UX than a labeled lower-fidelity view) vs silently treating it the same as the structured diff (rejected — misrepresents fidelity to the user).
 
