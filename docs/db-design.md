@@ -9,9 +9,9 @@ wins — fix this doc and flag it.
 Bounded contexts (ADR-0036): **Reports & Folders** owns the content that belongs
 to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
 `folder_collaborators`); **Identity & Access** owns `orgs`, `users`, `api_keys`;
-**Abuse & Moderation** owns `scan_jobs`, `abuse_reports`, `csp_reports`. `outbox`
-/ `audit_log` are cross-cutting infrastructure. The only shared-kernel ids are
-`UserId`/`OrgId`.
+**Abuse & Moderation** owns `scan_jobs`, `abuse_reports`, `csp_reports`;
+**Authoring & Collaboration** (ADR-0064) owns `comments`. `outbox` / `audit_log`
+are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId`.
 
 ## Conventions
 
@@ -30,9 +30,13 @@ to each `Org` (`folders`, `reports`, `report_versions`, `acls`,
   `plan_limits_json`, `scopes`, `findings`, `meta_json`, `allowed_emails`,
   `csp_extras`). Anything we filter or aggregate on gets a real column.
 - **Foreign keys**: `ON DELETE RESTRICT` by default; `ON DELETE CASCADE` only on
-  `report_versions → reports`, `acls → reports`, `report_grants → reports`, and
-  `scan_jobs → report_versions`. The app soft-deletes; cascades defend against
-  accidental hard-deletes via migrations (and keep the
+  `report_versions → reports`, `acls → reports`, `report_grants → reports`,
+  `scan_jobs → report_versions`, `comments → reports`, and `comments →
+  comments` (the self-FK `parent_comment_id` — JUDGMENT CALL, ADR-0064: a
+  thread's replies are owned by its root the same way versions are owned by
+  their report, so deleting the root cascades its replies rather than leaving
+  them FK-orphaned under the RESTRICT default). The app soft-deletes; cascades
+  defend against accidental hard-deletes via migrations (and keep the
   `reports → report_versions → scan_jobs` chain consistent under a hard purge).
 - **Nullability**: every column is `NOT NULL` unless its Notes say `NULL`. All FK
   columns (e.g. `report_versions.report_id`, `scan_jobs.report_version_id`,
@@ -213,6 +217,22 @@ PK `(report_id, email)` — one grant per allowlisted viewer; redeem upserts. Cr
 | `granted_at` | timestamptz | |
 
 PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists until revoked), no `permission` level (one implicit level: rename + re-upload + move — ADR-0060), no surrogate id (wire-addressed as `(slug, email)`). View access is NOT conferred — the read capability stays with the `Acl`.
+
+### Authoring & Collaboration
+
+#### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `report_id` | uuid FK → reports **ON DELETE CASCADE** | the report this comment/thread belongs to |
+| `author_user_id` | uuid FK → users | who wrote it |
+| `parent_comment_id` | uuid FK → comments NULL, **ON DELETE CASCADE** | NULL = root (starts a Thread); set = a reply. Single-level threading enforced at the application layer (ADR-0064 Decision 2), not a self-join depth constraint. The self-FK is CASCADE — see the Conventions FK-policy note above |
+| `body` | text | bounded to 2000 chars at the domain layer (JUDGMENT CALL — ADR-0064 says "bounded... a short annotation," no number given) |
+| `anchor_json` | jsonb | the `Anchor` value object (ADR-0064 §2a): `{ version_pinned: { version_id, text_quote }, relative? }` — `relative` is an opaque, optional Yjs-relative-position slot the editor slice will populate later |
+| `resolved_at` | timestamptz NULL | NULL = open; set = resolved (idempotent transition — resolving twice doesn't change it) |
+| `created_at` | timestamptz | |
+
+Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. No `updated_at` — `body`/`anchor_json` aren't editable in this slice (only `resolved_at` mutates, via `save()`'s upsert).
 
 ### Abuse & Moderation
 
