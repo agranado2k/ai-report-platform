@@ -83,6 +83,7 @@ export function createReport(p: CreateReportParams): Emission {
     reportId: p.id,
     versionId: p.versionId,
     versionNo: 1,
+    origin: firstVersion.origin,
   };
   return { report, events: [event] };
 }
@@ -122,6 +123,7 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     reportId: report.id,
     versionId: p.versionId,
     versionNo: nextNo,
+    origin: version.origin,
   };
   return ok({ report: updated, events: [event] });
 }

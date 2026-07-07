@@ -44,7 +44,13 @@ describe("createReport", () => {
     expect(report.versions[0]?.scanStatus).toBe("pending");
     expect(report.liveVersionId).toBeNull();
     expect(events).toEqual([
-      { type: "ReportVersionUploaded", reportId: "r1", versionId: "v1", versionNo: 1 },
+      {
+        type: "ReportVersionUploaded",
+        reportId: "r1",
+        versionId: "v1",
+        versionNo: 1,
+        origin: "upload",
+      },
     ]);
   });
 
@@ -62,8 +68,8 @@ describe("createReport", () => {
     expect(newReport().versions[0]?.origin).toBe("upload");
   });
 
-  it("honors an explicit origin on create", () => {
-    const { report } = createReport({
+  it("honors an explicit origin on create, and stamps it on the ReportVersionUploaded event", () => {
+    const { report, events } = createReport({
       id: reportId("r1"),
       orgId: orgId("o1"),
       folderId: folderId("f1"),
@@ -77,6 +83,7 @@ describe("createReport", () => {
       origin: "editor",
     });
     expect(report.versions[0]?.origin).toBe("editor");
+    expect(events[0]?.type === "ReportVersionUploaded" && events[0]?.origin).toBe("editor");
   });
 });
 
