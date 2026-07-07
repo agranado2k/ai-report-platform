@@ -365,6 +365,21 @@ describe("loadReadableReport (GET seam: org-visible + grantee metadata carve-out
     );
     expect(!r.ok && r.error).toEqual({ kind: "NotAllowed", message: "report is not in your org" });
   });
+
+  it("the OWNER reads regardless of acting-org context — read/write symmetry (review #150)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "aaaaaaaaaa"));
+    // Owner acting under a different active org: canWrite is owner-first and
+    // org-agnostic, so the GET seam must be too — otherwise a multi-org owner
+    // could rename a report they cannot GET.
+    const r = await loadReadableReport(
+      reports,
+      { orgId: orgB, userId: owner },
+      slug("aaaaaaaaaa"),
+      writeDeps(),
+    );
+    expect(r.ok && r.value.title).toBe("A Title");
+  });
 });
 
 describe("loadOwnedFolder", () => {

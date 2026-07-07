@@ -175,10 +175,10 @@ export async function loadWritableReport(
 }
 
 /** Load a Report by slug for the GET seam (ADR-0059 §3 / ADR-0060 §4): must
- *  exist, not be soft-deleted, and EITHER belong to the actor's org OR the
- *  actor holds a write grant on it — the metadata carve-out that lets a
- *  cross-org grantee confirm what they can write before renaming/re-
- *  uploading/moving it. */
+ *  exist, not be soft-deleted, and the actor is its OWNER, OR in its org, OR
+ *  holds a write grant on it — the carve-outs that let the owner read from any
+ *  acting-org context and a cross-org grantee confirm what they can write
+ *  before renaming/re-uploading/moving it. */
 export async function loadReadableReport(
   reports: ReportRepository,
   actor: TenancyActor,
@@ -188,6 +188,10 @@ export async function loadReadableReport(
 ): Promise<Result<Report, AppError>> {
   const found = await loadLiveReport(reports, slug, messages);
   if (!found.ok) return found;
+  // Owner-first, org-agnostic — symmetric with canWrite (an owner acting under
+  // a different active org must not be able to rename what they can't GET;
+  // review #150, epic #142 "owner always reads+writes").
+  if (found.value.ownerId === actor.userId) return ok(found.value);
   if (found.value.orgId === actor.orgId) return ok(found.value);
   const grantee = await hasWriteGrant(found.value.id, actor, deps);
   if (!grantee.ok) return grantee;
