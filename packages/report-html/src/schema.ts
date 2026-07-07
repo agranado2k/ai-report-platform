@@ -1,19 +1,41 @@
 import { Schema } from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
+import { addListNodes } from "prosemirror-schema-list";
 import { withClassStyle } from "./schema/attrs.js";
 import { chipMark } from "./schema/chip.js";
 import { htmlBlockNode } from "./schema/generic-block.js";
 import { htmlInlineMark, kbdMark, pillMark } from "./schema/marks.js";
 import { withParagraphVariant } from "./schema/paragraph.js";
+import {
+  cardNode,
+  checklistItemNode,
+  checklistNode,
+  gridNode,
+  sectionNode,
+} from "./schema/report-blocks.js";
 import { secNode } from "./schema/sec.js";
 
-let nodes = basicSchema.spec.nodes;
+let nodes = addListNodes(basicSchema.spec.nodes, "paragraph block*", "block");
 nodes = nodes.addToEnd("htmlBlock", htmlBlockNode);
-nodes = nodes.addToEnd("sec", secNode);
+nodes = nodes
+  .addToEnd("section", sectionNode)
+  .addToEnd("sec", secNode)
+  .addToEnd("card", cardNode)
+  .addToEnd("checklist", checklistNode)
+  .addToEnd("checklist_item", checklistItemNode)
+  .addToEnd("grid", gridNode);
 // Retain class/style on every schema-basic node so bespoke classes on
 // otherwise-standard elements (e.g. `<h3 class="sub">`) degrade to
 // "preserved but uninterpreted" instead of being stripped.
-for (const name of ["paragraph", "heading", "blockquote", "code_block"]) {
+for (const name of [
+  "paragraph",
+  "heading",
+  "blockquote",
+  "code_block",
+  "bullet_list",
+  "ordered_list",
+  "list_item",
+]) {
   const spec = nodes.get(name);
   if (spec) nodes = nodes.update(name, withClassStyle(spec));
 }

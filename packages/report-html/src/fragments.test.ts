@@ -93,4 +93,50 @@ describe("fragment-level round-trips", () => {
     expect(doc.content[0].type).toBe("sec");
     expect(doc.content[0].attrs.secnum).toBe("1");
   });
+
+  it("round-trips section, retaining its id (anchor target for the sidebar TOC)", () => {
+    const html = '<section id="summary"><p>Body text.</p></section>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips card", () => {
+    const html = '<div class="card"><h4>Title</h4><p class="desc">Body text.</p></div>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips a card with multiple co-occurring classes (e.g. pillar variants)", () => {
+    const html = '<div class="card pillar pillar-A"><p class="desc">Text.</p></div>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips checklist, holding bare inline content per <li> (no auto-wrap — it's a list item)", () => {
+    const html =
+      '<ul class="checklist"><li>Chip Huyen · <em>AI Engineering</em></li>' +
+      "<li>Will Larson · <em>Crafting Engineering Strategy</em></li></ul>";
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips grid with a g3 column variant", () => {
+    const html =
+      '<div class="grid g3"><div class="card"><p>A</p></div><div class="card"><p>B</p></div></div>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips grid with a g2 column variant", () => {
+    const html =
+      '<div class="grid g2"><div class="card"><p>A</p></div><div class="card"><p>B</p></div></div>';
+    expect(serializeBody(parseBody(html))).toBe(html);
+  });
+
+  it("round-trips a generic bullet list (e.g. .baseline, .toc, .reflist — no dedicated node)", () => {
+    // list_item's content model (inherited from prosemirror-schema-list,
+    // same as `paragraph block*`) wraps bare inline content in a <p>, same
+    // as the generic block catch-all (ADR-0062 §7) — pinned here rather
+    // than in auto-wrap.test.ts since it's specific to how list items work.
+    const html = '<ul class="baseline"><li><span class="k">Role:</span> Founder</li></ul>';
+    const roundtripped = serializeBody(parseBody(html));
+    expect(roundtripped).toBe(
+      '<ul class="baseline"><li><p><span class="k">Role:</span> Founder</p></li></ul>',
+    );
+  });
 });
