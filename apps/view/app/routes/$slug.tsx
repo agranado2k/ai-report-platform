@@ -8,6 +8,7 @@ import { resolveAccessDecision, resolveViewableReport } from "arp-application";
 import { makeSlug } from "arp-domain";
 import { viewHeaders } from "arp-headers/view";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
+import { parseVersionQuery } from "../server/version-query";
 
 // The unlock cookie (ADR-0056): a per-report capability the viewer issues to itself
 // after verifying the app's `?access` hand-off — NOT an app/Clerk credential, so the
@@ -71,7 +72,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // Unknown/invalid slug is indistinguishable from blocked content → 404.
   if (!slug.ok) throw errorResponse(404, "Not found");
 
-  const outcome = await resolveViewableReport(slug.value, reports);
+  // ?v=N (issue #155, ADR-0038 §3): resolve a specific ReportVersion by ordinal
+  // instead of the live version. Absent/malformed `v` parses to `undefined`
+  // (parseVersionQuery), which resolveViewableReport treats identically to no
+  // `v=` at all — the live-serving default is unchanged. The requested version
+  // passes through the EXACT SAME scan-status state machine as the live path
+  // (clean → serve, pending → scanning, flagged → 451, blocked/unknown → 404) —
+  // see view-report.ts's resolveRequestedVersion.
+  const url = new URL(request.url);
+  const requestedVersionNo = parseVersionQuery(url.searchParams.get("v"));
+
+  const outcome = await resolveViewableReport(slug.value, reports, requestedVersionNo);
   if (!outcome.ok) throw errorResponse(500, "Lookup failed");
   switch (outcome.value.kind) {
     case "deleted":
@@ -84,13 +95,15 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       throw errorResponse(404, "Not found");
   }
 
-  // Clean live version → enforce the Acl (ADR-0056) before serving.
-  const { report, liveVersion } = outcome.value;
+  // Clean version (live, or the requested ?v=N ordinal) → enforce the Acl
+  // (ADR-0056) before serving. Same `report.acl`, same resolveAccessDecision call
+  // regardless of which version was resolved above — ?v=N is not a separate gate,
+  // it's the identical gate applied to a different version (ADR-0038 §3).
+  const { report, version } = outcome.value;
 
   // The app authorizes private reports; the viewer only verifies a slug-bound token
   // (from the `?access` hand-off or a prior unlock cookie). Public reports serve directly.
   const { secret, appOrigin } = viewerAccessConfig();
-  const url = new URL(request.url);
   // Async + grant-aware: for `allowlist`, a valid token is only honored while its
   // `report_grants` row is live (revocation-C) — the per-request check (ADR-0056).
   const decided = await resolveAccessDecision(
@@ -121,11 +134,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     headers.set("cache-control", "no-store");
     return new Response(null, { status: 303, headers });
   }
-  const blob = await blobs.readObject(
-    report.id,
-    liveVersion.id,
-    liveVersion.manifest.entryDocument,
-  );
+  const blob = await blobs.readObject(report.id, version.id, version.manifest.entryDocument);
   if (!blob.ok) throw errorResponse(500, "Read failed");
   if (!blob.value) throw errorResponse(404, "Not found");
 
