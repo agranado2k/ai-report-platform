@@ -2551,3 +2551,28 @@ on an app route that imports report-html — the exact check that would have cau
 split report-html's server-only DOM helper so a DOM-backend problem can't crash DOM-free routes like
 `/open`. Also this session: Vercel free-tier daily deploy quota (100/day, HTTP 402) blocked CI and prod
 recovery repeatedly → upgraded to Pro.
+
+### 2026-07-08 — Viewer ?v=N version serving implemented (issue #155)
+
+ADR-0038 §3 always specified `?v=N` access to non-live versions ("same ACL + same scan-status state
+machine as the live URL"), and ADR-0065 §5 / the #156 versions-page "View" links assumed it worked —
+but `apps/view/$slug.tsx` never read the param and always served the live version. Closed the gap:
+
+- `parseVersionQuery` (pure): strict `^\d+$`; missing/malformed → absent → serve live (unchanged
+  default). Deliberately no 404 on malformed input — avoids a parse-vs-not oracle; out-of-range 0/negative
+  is a resolver-layer 404, kept in one place.
+- `resolveViewableReport` gains an optional `requestedVersionNo`: resolves the `ReportVersion` with that
+  `versionNo` and maps its OWN `scan_status` through the **identical** table the live path uses — clean →
+  serve, pending → scanning holding page, flagged → 451, blocked/unknown-N → reason-opaque 404 (no
+  version-count leak). Takedown → 410 at any N. The ACL gate (`resolveAccessDecision`) is applied AFTER,
+  unchanged — `?v=N` is the same gate on a different version, not a bypass (per ADR-0038 §3's note that the
+  ordinal grants nothing beyond the slug capability).
+- Headers/CSP/noindex identical to live. No change to the live-serving path when `v` is absent.
+
+Fully TDD (version-query parser + resolver scan-status matrix: clean N, pending→scanning, flagged→451,
+blocked→404, out-of-range→404, takedown-at-any-N, non-clean-liveVersionId defense-in-depth) — that unit
+matrix is the actual regression net. The pre-existing `view-version-by-ordinal.feature` (registered on
+main) is spec-only Gherkin, like every `.feature` in the repo (no step defs under `tests/e2e/steps/` yet)
+— living documentation, not executed e2e. No ADR change needed — this makes code match ADR-0038's existing
+contract; ADR-0065 §5's "?v=N unchanged" stays accurate (0065 didn't touch it). Fixes the dead "View"
+links the #156 version-history page shipped.
