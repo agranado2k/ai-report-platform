@@ -1,7 +1,8 @@
 // Integration tests for DrizzleIdentityStore against real Postgres (pglite),
 // reusing the #52 harness. No seedIdentity — these create the trio from scratch.
-import { eq } from "drizzle-orm";
+
 import { folders, orgs } from "arp-db/schema";
+import { eq } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleIdentityStore } from "./identity-store";
@@ -220,8 +221,8 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       expect(created.ok).toBe(true);
       if (!created.ok) return;
 
-      const [row] = await tdb
-        .ctx.current()
+      const [row] = await tdb.ctx
+        .current()
         .select({ kind: orgs.kind })
         .from(orgs)
         .where(eq(orgs.id, created.value.orgId));
@@ -256,8 +257,8 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       expect(bob.value.userId).not.toBe(alice.value.userId);
 
       // Still exactly one orgs row for the team org, and it's still kind 'team'.
-      const rows = await tdb
-        .ctx.current()
+      const rows = await tdb.ctx
+        .current()
         .select({ id: orgs.id, kind: orgs.kind })
         .from(orgs)
         .where(eq(orgs.id, alice.value.orgId));

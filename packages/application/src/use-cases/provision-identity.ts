@@ -4,7 +4,7 @@
 // ports (ADR-0024): the policy — derive the org key from the email's domain
 // (ADR-0068 §1), then join-or-create the right Clerk org and find-or-create the
 // mirror — lives here; all I/O is behind the ports.
-import { type AppError, ok, resolveOrgKey, type Result } from "arp-domain";
+import { type AppError, ok, type Result, resolveOrgKey } from "arp-domain";
 import type { ClerkIdentity, ClerkOrgProvisioner, IdentityStore } from "../ports";
 import type { UploadActor } from "./upload-report";
 

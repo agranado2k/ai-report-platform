@@ -258,13 +258,12 @@ describe("ClerkBackendOrgProvisioner", () => {
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).ensureMembership(
-        "org_team",
-        "user_new",
-      );
+      const r = await new ClerkBackendOrgProvisioner(api).ensureMembership("org_team", "user_new");
 
       expect(r.ok).toBe(true);
-      expect(calls).toEqual([{ organizationId: "org_team", userId: "user_new", role: "org:member" }]);
+      expect(calls).toEqual([
+        { organizationId: "org_team", userId: "user_new", role: "org:member" },
+      ]);
     });
 
     it("is idempotent — an already-a-member user is a no-op success, no duplicate call", async () => {

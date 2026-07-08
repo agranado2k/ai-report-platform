@@ -15,8 +15,9 @@
 // corporate domain (e.g. "acme.co.uk") is keyed by the FULL domain string, not
 // an eTLD+1 guess — this matches the Clerk org identifier 1:1 with the email
 // domain and keeps the rule a one-line addition per new provider.
-import type { AppError } from "./errors";
+
 import { makeEmailAddress } from "./email-address";
+import type { AppError } from "./errors";
 import { ok, type Result } from "./result";
 import type { OrgKind } from "./value-objects";
 
