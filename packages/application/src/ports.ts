@@ -18,6 +18,7 @@ import type {
   Folder,
   FolderId,
   OrgId,
+  OrgKind,
   Report,
   ReportId,
   Result,
@@ -476,13 +477,24 @@ export interface IdentityStore {
    * (the users row is created on the write path, review #150 H-1).
    */
   findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>>;
-  /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity.
-   *  MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal). */
-  createPersonalIdentity(input: {
+  /**
+   * Create the User + Org (Plan `free`) + Root folder for a fresh identity, OR —
+   * when `clerkOrgId` already names an existing mirrored Org (a domain's team org
+   * a new colleague is JIT-joining, ADR-0068 §3) — join it: the Org insert is a
+   * find-or-create keyed on `clerkOrgId` (existing Org row wins; `kind` is set
+   * only on first creation), while the User row is always find-or-created for
+   * THIS call's `clerkUserId`. `kind` records which the CALLER already resolved
+   * via `resolveOrgKey` (ADR-0068 §1) — this port does not re-derive it. Renamed
+   * from `createPersonalIdentity` (ADR-0068): it now covers BOTH the original
+   * personal-org creation and a team-org join, same mirroring mechanics.
+   * MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal).
+   */
+  createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
     readonly orgName: string;
+    readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>>;
   /**
    * Soft-delete our mirrored user (stamp `deleted_at`) for a Clerk `user.deleted`
@@ -520,9 +532,35 @@ export interface ClerkOrgProvisioner {
    * Resolve the user's existing personal org WITHOUT creating one (read path,
    * ADR-0048): the org the write path would reuse, or null if the user has none.
    * Lets reads see the same org writes attribute to even when the session carries
-   * no active org (e.g. a browser sign-in that never selected one).
+   * no active org (e.g. a browser sign-in that never selected one). Under the
+   * one-user-one-org invariant (ADR-0068 §1) this ALSO resolves a team-org
+   * member's sole org — the name predates team orgs but the mechanics (oldest
+   * membership, read-only) are kind-agnostic.
    */
   findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>>;
+  /**
+   * Resolve an EXISTING team org for a corporate email domain (ADR-0068 §3), or
+   * null when nobody at that domain has signed up yet. The adapter derives
+   * whatever Clerk-specific identifier it needs (e.g. a slug) FROM `domain`
+   * internally — this port speaks in plain email domains, not Clerk slugs.
+   * Read-only — never creates (mirrors `findPersonalOrg`'s read/write split).
+   */
+  findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>>;
+  /**
+   * Create a brand-new team org for a corporate domain (ADR-0068 §3) — the
+   * FIRST sign-up at that domain. `domain` is both the org's display name and
+   * the input to the adapter's deterministic Clerk-identifier derivation (so a
+   * later joiner's `findTeamOrgByDomain` finds this same org). Resolves to the
+   * new Clerk org id.
+   */
+  createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>>;
+  /**
+   * Add `clerkUserId` as a member of an EXISTING Clerk org (ADR-0068 §3 — every
+   * sign-up after a team org's first joins this way). Idempotent: an
+   * already-a-member user is a no-op success, not an error (concurrency-safe
+   * like `createPersonalOrg`'s check-then-act dedupe).
+   */
+  ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>>;
 }
 
 // ── API keys (ADR-0008 / ADR-0016) — programmatic auth alongside Clerk sessions ─

@@ -11,6 +11,7 @@ import {
   normalizeEmailAddress,
   notAllowed,
   type OrgId,
+  type OrgKind,
   ok,
   orgId,
   type Result,
@@ -64,11 +65,12 @@ export class DrizzleIdentityStore implements IdentityStore {
     }
   }
 
-  async createPersonalIdentity(input: {
+  async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
     readonly orgName: string;
+    readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     try {
       // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054). A
@@ -105,13 +107,17 @@ export class DrizzleIdentityStore implements IdentityStore {
           .where(eq(users.clerkUserId, input.clerkUserId))
           .limit(1);
 
-        // Org: find-or-create by clerk_org_id (Plan defaults to `free`).
+        // Org: find-or-create by clerk_org_id (Plan defaults to `free`). `kind`
+        // is set only on first creation (ADR-0068 §3) — a JIT join to an
+        // existing team org hits the onConflictDoNothing branch and the
+        // existing row's kind (set by whoever created it) is left untouched.
         await db
           .insert(orgs)
           .values({
             id: uuidv7(),
             clerkOrgId: input.clerkOrgId,
             name: input.orgName,
+            kind: input.kind,
             planLimitsJson: {},
           })
           .onConflictDoNothing();
@@ -138,7 +144,7 @@ export class DrizzleIdentityStore implements IdentityStore {
       });
       return ok(provisioned);
     } catch (e) {
-      return thrown("identity.createPersonalIdentity", e);
+      return thrown("identity.createIdentity", e);
     }
   }
 
