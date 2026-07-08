@@ -13,9 +13,9 @@
 // page load and the save action.
 import { type ActionFunctionArgs, json, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
-import { loadWritableReport, saveEditedVersion } from "arp-application";
+import { listComments, loadWritableReport, saveEditedVersion } from "arp-application";
 import type { ReportVersion } from "arp-domain";
-import { makeSlug } from "arp-domain";
+import { makeSlug, versionIdToWire } from "arp-domain";
 import {
   type PMDocJson,
   parseBody,
@@ -23,11 +23,14 @@ import {
   serializeBody,
   splitShell,
 } from "arp-report-html";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AppHeader, Button, buttonClass, Card, PageShell } from "../components";
-import { ReportEditor } from "../components/ReportEditor";
+import { CommentSidebar } from "../components/CommentSidebar";
+import { type EditorSelection, ReportEditor } from "../components/ReportEditor";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { deps, identityStore, writeGrantStore } from "../server/container.server";
+import type { CommentDto } from "../server/comment-dto.server";
+import { commentToDto } from "../server/comment-dto.server";
+import { commentRepo, deps, identityStore, writeGrantStore } from "../server/container.server";
 import { errorToJson, rejectNonJsonContentType } from "../server/http.server";
 
 /** The version an editor session opens: the live version when one has been
@@ -77,7 +80,42 @@ export async function loader(args: LoaderFunctionArgs) {
       ? (JSON.parse(new TextDecoder().decode(sidecar.value.bytes)) as PMDocJson)
       : parseBody(bodyHtml);
 
-  return json({ slug: report.slug, title: report.title, doc, versionNo: version.versionNo });
+  // Comments sidebar (ADR-0064): listed server-side via the SAME listComments
+  // use case the /api/v1 route calls — per the task brief, NOT a client-side
+  // self-call to our own API. JUDGMENT CALL: fetches the first page only (up
+  // to list-comments.ts's MAX_LIMIT=100) — no "load more" pagination UI in
+  // this slice. Best-effort: a listComments failure never blocks opening the
+  // editor, it just shows an empty sidebar.
+  const commentsPage = await listComments(
+    { reports: deps().reports, comments: commentRepo() },
+    { orgId: actor.value.orgId },
+    { slug: slugR.value, limit: 100 },
+  );
+  const rawComments = commentsPage.ok ? commentsPage.value.items : [];
+
+  // Best-effort author email enrichment (IdentityStore.findEmailByUserId) —
+  // one lookup per UNIQUE author, not per comment; a failed/missing lookup
+  // just falls back to the raw author id (CommentSidebar's concern).
+  const uniqueAuthorIds = [...new Set(rawComments.map((c) => c.authorUserId))];
+  const emailEntries = await Promise.all(
+    uniqueAuthorIds.map(async (id) => {
+      const emailResult = await identityStore().findEmailByUserId(id);
+      return [id, emailResult.ok ? emailResult.value : null] as const;
+    }),
+  );
+  const emailByAuthor = new Map(emailEntries);
+  const comments: CommentDto[] = rawComments.map((c) =>
+    commentToDto(c, emailByAuthor.get(c.authorUserId) ?? null),
+  );
+
+  return json({
+    slug: report.slug,
+    title: report.title,
+    doc,
+    versionNo: version.versionNo,
+    versionId: versionIdToWire(version.id),
+    comments,
+  });
 }
 
 export async function action(args: ActionFunctionArgs) {
@@ -147,10 +185,11 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function EditReport() {
-  const { slug, title, doc, versionNo } = useLoaderData<typeof loader>();
+  const { slug, title, doc, versionNo, versionId, comments } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
   const [dirty, setDirty] = useState(false);
+  const [selection, setSelection] = useState<EditorSelection | null>(null);
 
   const onSave = () => {
     fetcher.submit(JSON.stringify({ doc: docRef.current }), {
@@ -171,8 +210,16 @@ export default function EditReport() {
             ? "Unsaved changes"
             : "";
 
+  // Highlight-decoration input for ReportEditor — only comments that carry a
+  // `relative` slot are candidates; resolvableCommentRanges (in ReportEditor)
+  // further filters to ones that still fit inside the current doc's bounds.
+  const highlightable = useMemo(
+    () => comments.map((c) => ({ id: c.id, anchor: { relative: c.anchor.relative } })),
+    [comments],
+  );
+
   return (
-    <PageShell className="max-w-4xl">
+    <PageShell className="max-w-6xl">
       <AppHeader
         title={`Editing “${title}”`}
         actions={
@@ -192,17 +239,28 @@ export default function EditReport() {
       <p className="mb-4 text-xs text-subtle">
         <code className="font-mono">{slug}</code> · editing from v{versionNo}
       </p>
-      <Card className="p-6">
-        <ReportEditor
-          key={slug}
-          initialDoc={doc as PMDocJson}
-          onChange={(next) => {
-            docRef.current = next;
-            setDirty(true);
-          }}
-          className="report-editor prose min-h-[24rem] focus:outline-none"
+      <div className="grid gap-6 md:grid-cols-[1fr_320px]">
+        <Card className="p-6">
+          <ReportEditor
+            key={slug}
+            initialDoc={doc as PMDocJson}
+            comments={highlightable}
+            onChange={(next) => {
+              docRef.current = next;
+              setDirty(true);
+            }}
+            onSelectionChange={setSelection}
+            className="report-editor prose min-h-[24rem] focus:outline-none"
+          />
+        </Card>
+        <CommentSidebar
+          slug={slug}
+          versionId={versionId}
+          comments={comments}
+          pendingSelection={selection}
+          onSubmittedSelection={() => setSelection(null)}
         />
-      </Card>
+      </div>
     </PageShell>
   );
 }

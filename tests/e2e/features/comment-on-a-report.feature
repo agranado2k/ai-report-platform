@@ -55,3 +55,15 @@ Feature: Comment on a report
     Given a root comment exists on "abc1234567"
     When I view the public viewer page for "abc1234567"
     Then the response contains no comment data
+
+  @wip
+  Scenario: Add, reply, and resolve a comment from the dashboard editor's sidebar
+    Given I have "abc1234567" open in the in-dashboard editor
+    When I select a span of text in the document and click "Comment"
+    And I write a comment body and submit it
+    Then the comment appears in the sidebar as an open Thread
+    And the selected text is rendered with a highlight decoration in the editor
+    When I open the Thread and submit a reply
+    Then the reply appears nested under the root comment
+    When I click "Resolve" on the root comment
+    Then the Thread shows as resolved in the sidebar

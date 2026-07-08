@@ -16,7 +16,7 @@
 | `apps/`                           | `apps/app` + `apps/view` Remix apps (Phase 0c)           |
 | `packages/`                       | `domain` · `application` · `adapters` · `db` · etc. (Phase 0c) |
 | `tests/e2e/infrastructure/`       | 13 Gherkin features gating Phase 1 (Phase 0d)            |
-| `tests/e2e/features/`             | 32 use-case `.feature` files; Phase-1 worked, later phases `@wip` |
+| `tests/e2e/features/`             | 34 use-case `.feature` files; Phase-1 worked, later phases `@wip` |
 | `docs/api/openapi.yaml`           | OpenAPI 3.1 contract for the upload/serve API (ADR-027)  |
 | `scripts/docs-conformance/`       | Dependency-free harness that gates spec/use-case well-formedness (ADR-0041) |
 | `.claude/`                        | Skills + hooks for TDD / docs / worktrees (Phase 0e)     |

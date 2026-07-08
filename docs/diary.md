@@ -2221,3 +2221,107 @@ API/MCP-only (fast-follow). **(6)** the two-member e2e fixture is hand-provision
 reconstruction steps owed in the e2e docs). Worktree `docs/adr-0068-g4-scope-decisions`. The G4
 build follows ADR-0068's build order: provisioning (domain rule + public-provider list) →
 membership mirroring → fixture-backed e2e → share UX / transfer as later slices.
+
+### 2026-07-08 — Editor comment UI (dashboard sidebar) + the viewer edit deep-link (ADR-0063 Decision 3 fallback)
+
+Two independent slices landed together in one worktree: (1) a comment sidebar
+in the in-dashboard editor, consuming the ADR-0064 comments vertical shipped
+in PR #152 without touching its contracts, and (2) `GET /<slug>/edit` on
+`apps/view` — the documented dashboard-origin fallback from ADR-0063 Decision
+3, shipped now as the INTERIM answer while the full in-viewer editing route
+stays gated on its `/security-review` pass.
+
+- **Anchor capture** (`apps/app/app/editor/anchor.ts`): `buildSelectionAnchor`
+  turns the editor's current selection (`from`/`to`/`text` + the open
+  `versionId`) into an ADR-0064 §2a Anchor payload — always the version-pinned
+  fallback, plus an optional `relative` `{from,to}` slot. JUDGMENT CALL,
+  flagged inline: `relative` here is a plain PM-position pair against the
+  CURRENTLY-OPEN doc, NOT yet edit-stable or Yjs-relative (ADR-0067's shape
+  doesn't exist yet) — the domain's `relative` slot is `unknown` specifically
+  so a v1 caller can populate it this way and a later collaboration layer can
+  replace it without a domain change.
+- **Highlight decorations** (`apps/app/app/editor/comment-decorations.ts`):
+  `resolvableCommentRanges` (pure, unit-tested for in/out-of-bounds/malformed
+  cases) plus a ProseMirror `commentHighlightsPlugin` — seeded via
+  `tr.setMeta(commentHighlightsKey, ranges)` whenever the comments list
+  changes; an ordinary typing transaction carries no such meta, so the
+  existing `DecorationSet` re-maps itself through ProseMirror's own position
+  mapping instead. Best-effort per ADR-0064 §2a: an edit that pushes a range
+  out of bounds just stops highlighting it — the comment stays listed,
+  version-pinned. Wired into `editorPlugins()` and `ReportEditor.tsx` (new
+  `comments`/`onSelectionChange` props, a `viewRef` to dispatch decoration
+  updates from a `comments`-keyed effect independent of the mount effect).
+- **Sidebar + wiring**: `reports.$slug.edit.tsx`'s loader now also exposes
+  `versionId` (wire-encoded, previously absent — needed to anchor a NEW
+  comment) and `comments` (server-side `listComments` call, per the task
+  brief's "not a client HTTP self-call" instruction — best-effort: a
+  `listComments` failure never blocks opening the editor, just shows an empty
+  sidebar). Author email is enriched via `IdentityStore.findEmailByUserId`,
+  one lookup per unique author. Mutations (add/reply/resolve — NOT delete,
+  see below) go through a new co-located resource route,
+  `reports.$slug.comments.ts`, a thin wrapper over the SAME
+  `addComment`/`replyToComment`/`resolveComment` use cases the `/api/v1`
+  comments routes call — no new authorization rule. Its request-body guard
+  (`parseCommentIntent`, `apps/app/app/server/comment-intent.server.ts`) and
+  its Comment→client DTO mapping (`commentToDto`,
+  `apps/app/app/server/comment-dto.server.ts`) are both pure and unit-tested,
+  mirroring the `apps/app/app/server` carve-out's existing rationale
+  (`handle.server.ts`/`http.server.ts`). The resource route reuses the edit
+  route's `rejectNonJsonContentType` JSON-only guard (same CSRF rationale).
+  `CommentSidebar.tsx` renders Threads (root + single-level replies), an
+  inline composer that only appears while there's a non-empty selection, a
+  reply box per thread, and a Resolve button — Forge & Ember tokens
+  (Badge/Button/Card/Textarea), no new styling primitives.
+  **JUDGMENT CALL**: `deleteComment` is NOT wired into the sidebar — the task
+  brief's scope is explicitly add/reply/resolve; the use case and its
+  `/api/v1` route already exist for a future moderation surface.
+  **JUDGMENT CALL**: no "load more" pagination — the loader requests the
+  first 100 comments (`list-comments.ts`'s `MAX_LIMIT`) and stops there.
+  Remix's default fetcher-triggers-revalidation behavior refreshes the edit
+  route's loader (and therefore the sidebar + highlights) after every
+  add/reply/resolve, with no manual refetch code.
+- **Tests**: `anchor.test.ts`, `comment-decorations.test.ts` (pure range
+  resolution + the plugin's decoration-set/re-mapping behavior),
+  `comment-intent.server.test.ts`, `comment-dto.server.test.ts` — all
+  headless, matching the repo's "UI mounting stays e2e territory" convention
+  (`ReportEditor.tsx`/`CommentSidebar.tsx` themselves are not unit-tested).
+  `comment-on-a-report.feature` gained one `@wip`-tagged UI scenario
+  (add/reply/resolve/highlight from the sidebar) alongside its existing
+  API-level scenarios.
+- **Viewer deep-link** (`apps/view/app/routes/$slug.edit.tsx`): a pure,
+  unauthenticated 302 to `{APP_ORIGIN}/reports/{slug}/edit` — no JS, no HTML
+  body, no session concept added to `view.<domain>`. Fails closed (503) when
+  `APP_ORIGIN` is unset rather than guessing at a same-origin fallback; a
+  malformed slug is 404'd (shape-validated via `makeSlug` before it ever
+  reaches a `Location` header — not an auth check, there is none here, just
+  refusing to build a redirect URL from an arbitrary path segment). Verified
+  before writing this: `apps/view/app/routes/` has no catch-all route today
+  (`_index.tsx`, `$slug.tsx`, `health.tsx` only), so `/<slug>/edit` collides
+  with nothing — the task brief's assumption held. Does NOT touch `$slug.tsx`
+  (untouched, byte-for-byte) or its header tests. The pure URL-building step
+  (`buildEditRedirectLocation`, `apps/view/app/server/edit-redirect.ts`) is
+  unit-tested — a new carve-out added to `vitest.config.ts`
+  (`apps/view/app/server/**/*.test.ts`), mirroring the `apps/app/app/server`/
+  `apps/app/app/editor` precedent; `apps/view` otherwise still has NO
+  unit-test tier (its Remix routes stay e2e-only, matching `$slug.tsx`/
+  `health.tsx` today). e2e: a new `view-edit-deep-link.feature`
+  (`@phase-2 @wip`, registered in `scripts/docs-conformance/config.mjs`) —
+  Playwright isn't wired for either viewer-app route today, same as the rest
+  of the `@wip` catalog. `docs/api/openapi.yaml` gained a `/{slug}/edit` entry
+  under the existing `Viewer` tag (which already documents `/{slug}` "for
+  contract completeness") — no Bruno regen (no `/api/v1` route added; no
+  `.bru` files exist in this repo at all yet, confirmed before skipping this).
+  README's `.feature` file count corrected 32 → 34 (33 pre-existing on disk,
+  one 34th added here — the count was already one stale before this slice,
+  same drift pattern noted in the 2026-07-07 comments entry, fixed in
+  passing).
+- **Untouched, as scoped**: `packages/domain`, the comment use
+  cases/repository/HTTP mappers/`/api/v1` routes (consumed, not modified), any
+  migration, `docs/events.md` (no new event), `apps/view/app/routes/$slug.tsx`
+  and its header stack.
+- **Gate**: `pnpm install` clean; `biome ci .` clean (the one pre-existing
+  `noDescendingSpecificity` warning in the report-html fixture, unrelated,
+  same as noted 2026-07-07); `turbo typecheck` (12 packages) clean;
+  `vitest run` — 126 files / 824 tests green; `npm run docs:check` clean.
+
+Worktree: `worktree/comment-ui` (branch `feat/comment-ui`). Not yet merged.

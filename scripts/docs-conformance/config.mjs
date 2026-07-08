@@ -180,6 +180,11 @@ export const features = {
     phase: "@phase-2",
     status: "full",
   },
+  "view-edit-deep-link": {
+    title: "Viewer's /<slug>/edit deep-links to the dashboard editor",
+    phase: "@phase-2",
+    status: "wip",
+  },
   "cross-org-collaboration": {
     title: "Cross-org collaboration via grants",
     phase: "@phase-2.5",
