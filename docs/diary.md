@@ -2326,6 +2326,92 @@ stays gated on its `/security-review` pass.
 
 Worktree: `worktree/comment-ui` (branch `feat/comment-ui`). Not yet merged.
 
+### 2026-07-08 — G4 build: domain-keyed team orgs (ADR-0068, issue #141, epic #142)
+
+Implemented ADR-0068's build order in one PR (TDD throughout):
+
+- **§1 domain rule**: `packages/domain/src/org-key.ts` — `resolveOrgKey(email)`, a pure Value
+  Object. An explicit `PUBLIC_PROVIDER_DOMAINS` set (gmail/googlemail/outlook/hotmail/live/yahoo/
+  icloud/me/proton.me/protonmail/aol/gmx) → `personal` org keyed by the full normalized address;
+  every other domain → `team` org keyed by the domain. Exact whole-domain matching only — no
+  substring/suffix — so `notgmail.com` and an unlisted public-provider subdomain (e.g.
+  `mail.yahoo.co.jp`) are both their own `team` domains, and a two-level-TLD domain (`acme.co.uk`)
+  is keyed by the FULL string, not an eTLD+1 guess. 19 unit tests including the boundary cases.
+- **§2 `orgs.kind` migration**: new `org_kind` enum (`personal`|`team`) + `orgs.kind NOT NULL
+  DEFAULT 'personal'`, migration `0014` (0013 was already claimed by the comments epic on
+  `origin/main` by the time this PR branched). Default keeps every existing org behavior-neutral.
+- **§3 JIT join-or-create provisioning**: `ClerkOrgProvisioner` (adapters) grows
+  `findTeamOrgByDomain` / `createTeamOrg` / `ensureMembership` — the port speaks in plain email
+  domains; the adapter derives a Clerk-safe slug internally (dots → hyphens) so a domain like
+  `housenumbers.io` always resolves to the same Clerk org via `getOrganization({slug})`.
+  `ensureMembership` is idempotent (membership-list check-then-act, plus a 422-from-Clerk fallback
+  for the rare concurrent double-join). `IdentityStore.createPersonalIdentity` is renamed to
+  `createIdentity` and takes an explicit `kind: OrgKind` — its org upsert was ALREADY a
+  find-or-create keyed on `clerk_org_id` (existing row wins on conflict), so a second colleague
+  joining a domain's team org mirrors a distinct `User` under the SAME `Org` + Root folder with no
+  change to that mechanic, just the added `kind` on first creation. `provisionIdentity` derives the
+  org key up front and branches: an already-active session org is trusted as-is (one-user-one-org
+  invariant); otherwise personal keeps the unchanged `createPersonalOrg` path, team finds-or-joins
+  the domain org. All 825 workspace tests green after the change (pglite integration covers a
+  second colleague joining the same team org: same `Org`/root folder, distinct `User`).
+- **§4 membership mirroring — evaluated, deliberately NOT wired**: this store has no local
+  membership join table (`users`/`orgs` are independent mirror rows); every authorization gate
+  that matters (`orgUnlock`, JIT provisioning) checks Clerk's LIVE session/API, not a cache. Wiring
+  `organizationMembership.deleted` also wouldn't durably remove a member anyway — under
+  domain-keyed JIT join-or-create, a removed member who signs in again silently re-derives and
+  rejoins the SAME team org (an ADR-0068-accepted trade-off) — persistent removal needs a
+  "don't-auto-rejoin" mechanism this epic doesn't build. Documented inline in `webhooks.clerk.ts`
+  rather than shipping a placebo handler; `user.deleted` (ADR-0054) is unchanged.
+- **Copy fix**: `orgMembershipNotice` in `unlock.$slug.tsx` no longer says "switch your active
+  organization and retry" — there is no switching under one-org-per-user.
+- **§6 fixture-backed e2e**: `tests/e2e/support/clerk-session.ts` grows `mintTestSessionFor`/
+  `mintSecondTestSession` for the hand-provisioned `silver+clerk_test@agranado.com` (a Clerk
+  `+clerk_test` test-mode address, code `424242`; domain `agranado.com` is off the public-provider
+  list → a `team` org). New `tests/e2e/smoke/team-org-upload.feature(.steps.ts)` — signs in as the
+  second identity and uploads, exercising the team-org join-or-create branch against REAL Clerk +
+  infra (first live verification of ADR-0068 §3 beyond unit/adapter tests); wired into the existing
+  `@auth` gate, no new CI secrets. `tests/e2e/README.md` (new) documents both fixtures'
+  identifiers/expected-org/reconstruction steps (the accepted ADR-017 exception). The two
+  `@phase-2 @wip` scenarios in `sharing-modes.feature`/`report-write-grants.feature` stay `@wip`:
+  the second identity existing is necessary but not sufficient — discovered that NEITHER file has
+  any step definitions at all, and `playwright.config.ts`'s `testDir` doesn't collect
+  `tests/e2e/features/**` yet (a pre-existing gap predating this PR, visible in that file's own
+  comments and `.github/workflows/e2e.yml`'s). Noted precisely inline rather than faking coverage;
+  authoring the full step-definition layer for the product `.feature` files is separate, sizeable
+  follow-up work.
+- **Docs**: `docs/db-design.md`'s `org_kind`/`kind` rows updated to point at migration `0014` and
+  ADR-0068's derivation-at-provisioning framing (the glossary was already updated by ADR-0068
+  itself and needed no further change).
+
+Worktree: `worktree/team-orgs` (branch `feat/team-orgs`). Not yet merged.
+
+**Review wave (same day, pre-merge):** the dual review (claude-review bot + local two-agent pass)
+caught one **critical** — the team-org slug's bare dot→hyphen mapping is not injective, and with
+JIT auto-join a slug collision is a tenant-boundary crossing (registrable `acme-co.uk` vs
+`acme.co.uk`). Fixed: hash-suffixed slugs + a fail-closed `publicMetadata.domain` anchor check
+before any join. Also from review: create-race recovery (two first sign-ups at a new domain no
+longer 500 the loser), `ensureMembership` matches Clerk's already-a-member error by CODE (a bare
+422 swallow also covered quota-exceeded), OAuth provisioning uses verified emails only (the email
+domain IS the tenancy boundary), the public-provider list grew 12 → ~90 domains (a missed provider
+= a shared team org for strangers), FQDN trailing-dot normalization, and a real hard-DELETE FK
+cascade test. Implementation resolutions recorded in ADR-0068's More-information block (webhook
+drop, sticky orgs, cutover semantics). Operator to-dos at merge: delete the stale `agranado-com`
+dev-Clerk org (slug scheme changed); run the one-query prod check for pre-existing corporate-domain
+users; confirm the Clerk instances block unverified sign-ins (ADR-0068 hard dependency).
+
+**Preview-down addendum (same day):** after merging main back in, the PR's preview 500'd on every
+route — `SyntaxError: The requested module '@clerk/backend/errors' does not provide an export named
+'isClerkAPIResponseError'` at module load. Root cause: a two-major version skew. `packages/adapters`
+declared `@clerk/backend@^3.7.1` (whose `/errors` subpath exports the guard), but on Vercel the
+adapter is bundled into `apps/app`'s server build and the externalized `@clerk/backend` import
+resolves from `apps/app`'s node_modules → `2.33.5` (pinned alongside `@clerk/remix@4.x`), whose
+`/errors` subpath exports NO guard — so the import crashed every route, while unit tests (resolving
+the adapter's own 3.7.1) stayed green. Fix: a local STRUCTURAL guard (`clerkError === true` +
+`status` + `errors[]` — the shape both majors stamp on instances via `@clerk/shared`), no
+`@clerk/backend/errors` import at all, and `packages/adapters` re-pinned to `^2.33.0` so
+typecheck/tests exercise the same major production runs. Lesson recorded: `instanceof`-based SDK
+guards are unsafe in this monorepo whenever two copies of the SDK can coexist in one process.
+
 ### 2026-07-08 — Version history UI + visual diff (ADR-0065 §3/§4)
 
 Built the dashboard-facing half of ADR-0065: a version-history page and a visual diff between two

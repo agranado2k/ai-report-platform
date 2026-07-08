@@ -42,6 +42,11 @@ export const aclModeEnum = pgEnum("acl_mode", [
 export const idempotencyStateEnum = pgEnum("idempotency_state", ["in_flight", "completed"]);
 export const abuseStatusEnum = pgEnum("abuse_status", ["open", "actioned", "dismissed"]);
 export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "delivered", "failed"]);
+// New enum, added in the same migration as the column that uses it — safe (the
+// drizzle-kit ADD VALUE one-transaction gotcha, #127, only bites an ADD VALUE
+// on an EXISTING enum; a brand-new enum type has precedent in migration 0009,
+// which added the `acl_mode` `private` value the same transaction-safe way).
+export const orgKindEnum = pgEnum("org_kind", ["personal", "team"]);
 
 // timestamptz at millisecond precision (db-design.md → Conventions).
 const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
@@ -58,6 +63,10 @@ export const orgs = pgTable(
     name: text("name").notNull(),
     plan: planEnum("plan").notNull().default("free"),
     planLimitsJson: jsonb("plan_limits_json").notNull(),
+    // ADR-0061/0068: `personal` (1:1, JIT, never gains members) vs `team`
+    // (corporate-domain, multi-member by design). Default `personal` makes the
+    // migration backfill-free and behavior-neutral for every existing org.
+    kind: orgKindEnum("kind").notNull().default("personal"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
@@ -65,6 +74,7 @@ export const orgs = pgTable(
   (t) => [
     uniqueIndex("orgs_clerk_org_id_uniq").on(t.clerkOrgId),
     index("orgs_plan_idx").on(t.plan),
+    index("orgs_kind_idx").on(t.kind),
   ],
 );
 

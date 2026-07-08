@@ -108,9 +108,13 @@ async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>
   let email: string | undefined;
   try {
     const user = await clerkBackend().users.getUser(userId);
-    const primary =
-      user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ??
-      user.emailAddresses[0];
+    // VERIFIED addresses only (review #158 H-3): under ADR-0068 the email
+    // domain IS the tenancy boundary — an unverified address would let anyone
+    // claim x@victim-corp.com and JIT-join that company's org. The session
+    // path relies on the Clerk instance blocking unverified sign-ins (a
+    // documented ADR-0068 dependency); here we can and do check explicitly.
+    const verified = user.emailAddresses.filter((e) => e.verification?.status === "verified");
+    const primary = verified.find((e) => e.id === user.primaryEmailAddressId) ?? verified[0];
     email = primary?.emailAddress;
   } catch {
     // Clerk unreachable — infra, not a client auth failure (distinct from the 401).
@@ -119,7 +123,7 @@ async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>
   if (!email) {
     return err({
       kind: "Unauthenticated",
-      message: "OAuth identity has no primary email; cannot provision",
+      message: "OAuth identity has no verified email; cannot provision",
     });
   }
   return ok(email);

@@ -16,6 +16,15 @@ Feature: Per-report write grants
   #     loadReadableReport grantee metadata carve-out)
   #   - write-grant-store.contract.test.ts, run against BOTH the in-memory fake
   #     and DrizzleWriteGrantStore-on-pglite (findFor's userId-or-email match)
+  #
+  # ADR-0068 §6 update: the second identity now EXISTS (silver+clerk_test@
+  # agranado.com, a team-org member — see tests/e2e/README.md) and
+  # tests/e2e/support/clerk-session.ts can mint it a session
+  # (mintSecondTestSession). Still @wip because of a DIFFERENT, pre-existing
+  # blocker: this feature file has no step definitions at all, and
+  # playwright.config.ts's testDir doesn't even collect tests/e2e/features/**
+  # yet (only tests/e2e/smoke/**) — see tests/e2e/README.md "Current status".
+  # The fixture is a prerequisite, not the whole gap.
   #   - write-response.test.ts (the write_grant wire shape)
 
   Background:

@@ -19,6 +19,13 @@ export type AclMode = (typeof ACL_MODES)[number];
 export const GRANT_LEVELS = ["editor", "admin"] as const;
 export type GrantLevel = (typeof GRANT_LEVELS)[number];
 
+/** The two `Org` kinds (ADR-0061, resolved by ADR-0068 §1): `personal` is 1:1
+ *  with a public-provider-address user (never gains members); `team` is a
+ *  corporate-domain org, multi-member by design (every same-domain sign-up
+ *  joins it). Persisted as `orgs.kind` (default `personal`). */
+export const ORG_KINDS = ["personal", "team"] as const;
+export type OrgKind = (typeof ORG_KINDS)[number];
+
 /** How a `ReportVersion` was produced (ADR-0062 §6, surfaced by ADR-0065): `upload`
  *  is a plain file/zip upload; `editor` is a save from the in-app ProseMirror editor
  *  (ADR-0062) — not yet buildable, so every version is `upload` today. */

@@ -1,5 +1,5 @@
-// Mint a real Clerk session JWT for the seeded staging test user via the Clerk
-// backend REST API (createSession → session token). The @auth e2e uses this to
+// Mint a real Clerk session JWT for a seeded test user via the Clerk backend
+// REST API (createSession → session token). The @auth e2e uses this to
 // exercise the authenticated upload path without a browser sign-in (ADR-0048) —
 // `POST /api/v1/reports` is a machine API, so the token is sent as an
 // `Authorization: Bearer` header (the header path skips the dev-instance
@@ -8,15 +8,23 @@
 //
 // The backend-minted session carries no active org (org selection is a FAPI
 // concern), so provisioning hits the JIT path — which is exactly why
-// ClerkBackendOrgProvisioner is idempotent (reuses the test user's existing org
-// instead of minting a new one each run).
+// ClerkBackendOrgProvisioner (personal orgs) and the ADR-0068 §3 team-org
+// join-or-create are both idempotent (each reuses/joins the right org instead
+// of minting a duplicate each run).
+//
+// ADR-0068 §6: the two-identity fixture. `silver+clerk_test@agranado.com` is a
+// SECOND hand-provisioned test-mode address on the same dev Clerk instance
+// (Clerk `+clerk_test` addresses always verify with the fixed code `424242`,
+// no real inbox needed). Its domain `agranado.com` is NOT on the public-provider
+// list, so it resolves to a `team` org — see `tests/e2e/README.md` for the full
+// fixture writeup (identifiers, expected org, reconstruction steps).
 
 const CLERK_API = "https://api.clerk.com/v1";
 
 export interface TestSession {
   /** A signed session JWT (carries the `email` custom claim, ADR-0048). */
   readonly jwt: string;
-  /** The seeded test user's Clerk user id (for asserting server-side resolution). */
+  /** The test user's Clerk user id (for asserting server-side resolution). */
   readonly userId: string;
 }
 
@@ -28,17 +36,13 @@ async function clerkFetch(path: string, secretKey: string, init?: RequestInit): 
 }
 
 /**
- * Mint a session token for the seeded test user. Requires `E2E_CLERK_SECRET_KEY`
- * (staging `sk_test_…`) and `E2E_TEST_USER_EMAIL`; the `@auth` scenario is grep'd
- * out when they're absent (see playwright.config.ts), so this throwing on a
- * missing env only fires when the suite was misconfigured to run it.
+ * Mint a session token for a test user by email, given a Clerk secret key.
+ * The general-purpose primitive `mintTestSession` wraps for the primary
+ * (`E2E_TEST_USER_EMAIL`) fixture; `mintTestSessionFor` lets a scenario mint
+ * one for a SPECIFIC address — e.g. the ADR-0068 §6 second identity — without
+ * relying on env-var plumbing per fixture.
  */
-export async function mintTestSession(): Promise<TestSession> {
-  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
-  const email = process.env.E2E_TEST_USER_EMAIL;
-  if (!secretKey || !email) {
-    throw new Error("@auth e2e needs E2E_CLERK_SECRET_KEY + E2E_TEST_USER_EMAIL");
-  }
+export async function mintTestSessionFor(secretKey: string, email: string): Promise<TestSession> {
   const form = { "Content-Type": "application/x-www-form-urlencoded" };
 
   const usersRes = await clerkFetch(`/users?email_address=${encodeURIComponent(email)}`, secretKey);
@@ -65,3 +69,40 @@ export async function mintTestSession(): Promise<TestSession> {
 
   return { jwt, userId };
 }
+
+/**
+ * Mint a session token for the seeded PRIMARY test user. Requires
+ * `E2E_CLERK_SECRET_KEY` (staging `sk_test_…`) and `E2E_TEST_USER_EMAIL`; the
+ * `@auth` scenario is grep'd out when they're absent (see playwright.config.ts),
+ * so this throwing on a missing env only fires when the suite was
+ * misconfigured to run it.
+ */
+export async function mintTestSession(): Promise<TestSession> {
+  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
+  const email = process.env.E2E_TEST_USER_EMAIL;
+  if (!secretKey || !email) {
+    throw new Error("@auth e2e needs E2E_CLERK_SECRET_KEY + E2E_TEST_USER_EMAIL");
+  }
+  return mintTestSessionFor(secretKey, email);
+}
+
+/**
+ * Mint a session token for the ADR-0068 §6 SECOND identity (the team-org
+ * colleague fixture), by email rather than a dedicated env var — the address
+ * itself is stable, documented, hand-provisioned fixture data (see
+ * `tests/e2e/README.md`), not a secret. Still needs `E2E_CLERK_SECRET_KEY`
+ * (same dev instance as the primary fixture). Threw the same way as
+ * `mintTestSession` when the secret is absent, so a scenario using this is
+ * grep'd out under the same `@auth` gate.
+ */
+export async function mintSecondTestSession(): Promise<TestSession> {
+  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error("@auth e2e needs E2E_CLERK_SECRET_KEY");
+  }
+  return mintTestSessionFor(secretKey, SECOND_FIXTURE_EMAIL);
+}
+
+/** ADR-0068 §6 — the hand-provisioned second identity (Clerk test-mode address,
+ *  verification code 424242). See `tests/e2e/README.md`. */
+export const SECOND_FIXTURE_EMAIL = "silver+clerk_test@agranado.com";

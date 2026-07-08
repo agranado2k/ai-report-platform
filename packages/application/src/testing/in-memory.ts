@@ -21,6 +21,7 @@ import {
   versionId as makeVersionId,
   notAllowed,
   type OrgId,
+  type OrgKind,
   ok,
   type Report,
   type ReportId,
@@ -587,6 +588,10 @@ export class InMemoryIdentityStore implements IdentityStore {
   private readonly emailByUserId = new Map<UserId, string>();
   private readonly userIdByEmail = new Map<string, UserId>(); // normalized email → userId
   private readonly orgByClerkOrgId = new Map<string, OrgId>();
+  private readonly rootFolderByOrgId = new Map<OrgId, FolderId>();
+  /** Test-only introspection: the `kind` each mirrored org was created with
+   *  (ADR-0068 §3), keyed by our internal OrgId. */
+  readonly kindByOrgId = new Map<OrgId, OrgKind>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -605,11 +610,12 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.orgByClerkOrgId.get(clerkOrgId) ?? null);
   }
 
-  async createPersonalIdentity(input: {
+  async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
     readonly orgName: string;
+    readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054).
     if (this.deleted.has(input.clerkUserId)) {
@@ -622,14 +628,31 @@ export class InMemoryIdentityStore implements IdentityStore {
       this.seedUser(existing.userId, input.email);
       return ok(existing);
     }
+
+    // Org: find-or-create by clerkOrgId — a JIT team-org join (ADR-0068 §3)
+    // reuses the SAME org + root folder a previous colleague's sign-up already
+    // created; `kind` is recorded only on first creation, mirroring the real
+    // Drizzle adapter's onConflictDoNothing semantics.
+    let orgIdValue = this.orgByClerkOrgId.get(input.clerkOrgId);
+    let rootFolderIdValue: FolderId;
+    if (orgIdValue) {
+      rootFolderIdValue = this.rootFolderByOrgId.get(orgIdValue) as FolderId;
+    } else {
+      this.seq += 1;
+      orgIdValue = makeOrgId(`org-${this.seq}`);
+      rootFolderIdValue = makeFolderId(`folder-${this.seq}`);
+      this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
+      this.rootFolderByOrgId.set(orgIdValue, rootFolderIdValue);
+      this.kindByOrgId.set(orgIdValue, input.kind);
+    }
+
     this.seq += 1;
     const provisioned: ProvisionedIdentity = {
       userId: makeUserId(`user-${this.seq}`),
-      orgId: makeOrgId(`org-${this.seq}`),
-      rootFolderId: makeFolderId(`folder-${this.seq}`),
+      orgId: orgIdValue,
+      rootFolderId: rootFolderIdValue,
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
-    this.orgByClerkOrgId.set(input.clerkOrgId, provisioned.orgId);
     this.seedUser(provisioned.userId, input.email);
     return ok(provisioned);
   }
@@ -819,6 +842,14 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
   /** When set, findPersonalOrg resolves to this org id; null means "no org yet". */
   personalOrgId: string | null = null;
 
+  /** domain → existing team org's Clerk id (ADR-0068 §3). Set a domain here
+   *  BEFORE calling to simulate "a colleague already created this team org";
+   *  `createTeamOrg` also registers here, so a second call in the same test
+   *  (simulating a second colleague) finds what the first created. */
+  readonly teamOrgsByDomain = new Map<string, string>();
+  readonly teamOrgCalls: { readonly domain: string; readonly createdBy: string }[] = [];
+  readonly membershipCalls: { readonly clerkOrgId: string; readonly clerkUserId: string }[] = [];
+
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     this.calls.push({ clerkUserId, name });
     return ok(`clerk-org-${clerkUserId}`);
@@ -826,6 +857,22 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
 
   async findPersonalOrg(_clerkUserId: string): Promise<Result<string | null, AppError>> {
     return ok(this.personalOrgId);
+  }
+
+  async findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>> {
+    return ok(this.teamOrgsByDomain.get(domain) ?? null);
+  }
+
+  async createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>> {
+    this.teamOrgCalls.push({ domain, createdBy });
+    const id = `clerk-team-org-${domain}`;
+    this.teamOrgsByDomain.set(domain, id);
+    return ok(id);
+  }
+
+  async ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>> {
+    this.membershipCalls.push({ clerkOrgId, clerkUserId });
+    return ok(undefined);
   }
 }
 

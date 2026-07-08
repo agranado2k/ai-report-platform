@@ -36,4 +36,12 @@ Per decision point, the PRD's options were weighed; the choices below supersede 
 
 ## More information
 
+**Implementation notes (2026-07-08, PR #158 + its review wave)** — resolutions made while building this ADR's order, recorded here because the diary is not a decision source:
+
+- **Membership-mirroring webhooks: deliberately NOT wired.** No local membership table exists (all gates check Clerk live), and under §1/§3's JIT join-or-create an `organizationMembership.deleted` handler is a placebo — a "removed" member auto-rejoins on their next sign-in because their email still matches the domain. Real member removal requires don't-auto-rejoin machinery (tracked as a follow-up issue); wiring the webhook without it would fake a closed gap.
+- **The Clerk org slug carries a short domain-hash suffix and orgs anchor their true domain in `publicMetadata.domain`**, verified (fail-closed) before any JIT join — a bare dot→hyphen slug is not injective (`my-company.com` ≡ `my.company.com`), and a slug collision under auto-join is a tenant-boundary crossing (registrable-domain variant: `acme-co.uk` vs `acme.co.uk`).
+- **Verified emails only**: the OAuth provision path uses only `verification.status === "verified"` addresses; the session path's email claim depends on the Clerk instance blocking unverified sign-ins — a **hard configuration dependency of this ADR** (an unverified address would let anyone claim a victim domain).
+- **Org membership is sticky**: a user's org is resolved at first provision and never re-keyed — a later email/domain change does NOT migrate them (they keep their original org). Accepted; revisit with multi-org.
+- **Cutover semantics**: any user who signed up at a corporate domain BEFORE the team branch existed owns a personal org; post-cutover their no-active-org sessions would mint a separate team org (split-brain). Pre-deploy check: verify no prod user has a non-public-provider email (one SQL query); today the operator expects zero.
+
 Build order implied: provisioning (domain rule + public-provider list + JIT domain-org) → membership mirroring (Clerk webhooks beyond `user.deleted`) → fixture-backed e2e (un-`@wip` the sharing scenarios) → org-mode share UX and ownership transfer as separate later slices. G4's migration claims the next free number at PR time (0013+ — mind the parallel-epic numbering race, cf. the PR #150 renumber). Glossary: **Org** gains the domain-keyed membership rule.

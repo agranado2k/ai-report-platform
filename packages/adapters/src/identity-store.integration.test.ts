@@ -1,6 +1,8 @@
 // Integration tests for DrizzleIdentityStore against real Postgres (pglite),
 // reusing the #52 harness. No seedIdentity — these create the trio from scratch.
-import { folders } from "arp-db/schema";
+
+import { folders, orgs } from "arp-db/schema";
+import { eq } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleIdentityStore } from "./identity-store";
@@ -25,12 +27,13 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(r.ok && r.value).toBeNull();
   });
 
-  it("createPersonalIdentity mirrors User + Org + Root folder, then findByClerk returns it", async () => {
-    const created = await store.createPersonalIdentity({
+  it("createIdentity mirrors User + Org + Root folder, then findByClerk returns it", async () => {
+    const created = await store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -48,17 +51,19 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
   });
 
   it("is idempotent — re-creating the same identity returns the same ids (no duplicates)", async () => {
-    const a = await store.createPersonalIdentity({
+    const a = await store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
-    const b = await store.createPersonalIdentity({
+    const b = await store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
     expect(a.ok && b.ok).toBe(true);
     if (a.ok && b.ok) {
@@ -69,11 +74,12 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
   });
 
   it("the partial unique index rejects a second Root folder for the same org", async () => {
-    const created = await store.createPersonalIdentity({
+    const created = await store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -93,11 +99,12 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
 
   // ── User soft-delete (ADR-0054) ──────────────────────────────────────────
   const mirror = () =>
-    store.createPersonalIdentity({
+    store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
 
   it("softDeleteByClerkId stamps deleted_at, returns the userId, and hides the user from findByClerk", async () => {
@@ -128,7 +135,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(again.ok && again.value).toBe(created.value.userId);
   });
 
-  it("createPersonalIdentity refuses to resurrect a soft-deleted user — deletion is terminal", async () => {
+  it("createIdentity refuses to resurrect a soft-deleted user — deletion is terminal", async () => {
     await mirror();
     await store.softDeleteByClerkId(CU);
 
@@ -151,17 +158,18 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(unknown.ok && unknown.value).toBeNull();
   });
 
-  it("createPersonalIdentity refreshes a changed mirrored email on re-provision", async () => {
+  it("createIdentity refreshes a changed mirrored email on re-provision", async () => {
     const created = await mirror();
     if (!created.ok) return;
     // Same Clerk user, new primary email (changed in Clerk) — the mirror must
     // follow, or ADR-0060 email-based grant matching silently 403s the grantee
     // at their current address (review #150 M-2).
-    const again = await store.createPersonalIdentity({
+    const again = await store.createIdentity({
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann.new@example.com",
       orgName: "ann's workspace",
+      kind: "personal",
     });
     expect(again.ok).toBe(true);
     const email = await store.findEmailByUserId(created.value.userId);
@@ -196,5 +204,66 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     await store.softDeleteByClerkId(CU);
     const found = await store.findUserIdByEmail("ann@example.com");
     expect(found.ok && found.value).toBeNull();
+  });
+
+  // ── Team orgs — JIT join-or-create mirroring (ADR-0068 §3) ───────────────
+  describe("createIdentity with kind: 'team'", () => {
+    const TEAM_ORG = "clerk_org_team_housenumbers";
+
+    it("persists orgs.kind = 'team' on first creation", async () => {
+      const created = await store.createIdentity({
+        clerkUserId: "clerk_user_alice",
+        clerkOrgId: TEAM_ORG,
+        email: "alice@housenumbers.io",
+        orgName: "housenumbers.io",
+        kind: "team",
+      });
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+
+      const [row] = await tdb.ctx
+        .current()
+        .select({ kind: orgs.kind })
+        .from(orgs)
+        .where(eq(orgs.id, created.value.orgId));
+      expect(row?.kind).toBe("team");
+    });
+
+    it("a second colleague joining the SAME team org mirrors a distinct User under the SAME Org (no duplicate org row)", async () => {
+      const alice = await store.createIdentity({
+        clerkUserId: "clerk_user_alice",
+        clerkOrgId: TEAM_ORG,
+        email: "alice@housenumbers.io",
+        orgName: "housenumbers.io",
+        kind: "team",
+      });
+      expect(alice.ok).toBe(true);
+      if (!alice.ok) return;
+
+      const bob = await store.createIdentity({
+        clerkUserId: "clerk_user_bob",
+        clerkOrgId: TEAM_ORG,
+        email: "bob@housenumbers.io",
+        orgName: "housenumbers.io",
+        kind: "team",
+      });
+      expect(bob.ok).toBe(true);
+      if (!bob.ok) return;
+
+      // Same org, same root folder, DIFFERENT user — the domain org is
+      // multi-member by design (ADR-0068 §1).
+      expect(bob.value.orgId).toBe(alice.value.orgId);
+      expect(bob.value.rootFolderId).toBe(alice.value.rootFolderId);
+      expect(bob.value.userId).not.toBe(alice.value.userId);
+
+      // Still exactly one orgs row for the team org, and it's still kind 'team'.
+      const rows = await tdb.ctx
+        .current()
+        .select({ id: orgs.id, kind: orgs.kind })
+        .from(orgs)
+        .where(eq(orgs.id, alice.value.orgId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.kind).toBe("team");
+    });
   });
 });

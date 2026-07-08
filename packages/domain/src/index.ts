@@ -13,6 +13,7 @@ export * from "./external-id";
 export * from "./folder";
 export * from "./folder-id";
 export * from "./magic-link";
+export * from "./org-key";
 export * from "./pipe";
 export * from "./report";
 export * from "./report-id";
