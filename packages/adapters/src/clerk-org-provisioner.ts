@@ -3,6 +3,7 @@
 // personal orgs, so identity provisioning calls this; the creator becomes the
 // org admin. Infra adapter (ADR-0020) behind the application's ClerkOrgProvisioner
 // port.
+import { createHash } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { isClerkAPIResponseError } from "@clerk/backend/errors";
 import type { ClerkOrgProvisioner } from "arp-application";
@@ -14,13 +15,21 @@ import { type AppError, err, ok, type Result } from "arp-domain";
  *  gets `org:member`). */
 const TEAM_MEMBER_ROLE = "org:member";
 
-/** Derive a Clerk-safe org slug from an email domain (ADR-0068 §3) — a domain
- *  contains dots, which a Clerk org slug can't; hyphens are the deterministic,
- *  one-way substitute (we never need to recover the domain FROM the slug —
- *  `findTeamOrgByDomain`/`createTeamOrg` both re-derive it from the domain
- *  every time, so the mapping only has to be consistent, not reversible). */
+/** Derive a Clerk-safe org slug from an email domain (ADR-0068 §3). The
+ *  mapping must be deterministic (later joiners' lookups re-derive it) AND
+ *  INJECTIVE — hyphens are legal in domains, so a bare dot→hyphen substitution
+ *  collides ("my-company.com" and "my.company.com" → "my-company-com"), and a
+ *  slug collision is a TENANT-BOUNDARY crossing under JIT auto-join (review
+ *  #158 C-1: "acme-co.uk" is independently registrable and would collide with
+ *  "acme.co.uk"). A short domain hash suffix makes the slug collision-free
+ *  while staying within Clerk's [a-z0-9-] slug alphabet; the readable prefix
+ *  is for humans in the Clerk dashboard only. `findTeamOrgByDomain`
+ *  additionally verifies the org's stored domain anchor before joining —
+ *  defense-in-depth, and the loud fail if anything ever collides anyway. */
 function teamOrgSlug(domain: string): string {
-  return domain.toLowerCase().replace(/\./g, "-");
+  const readable = domain.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const hash = createHash("sha256").update(domain.toLowerCase()).digest("hex").slice(0, 8);
+  return `${readable}-${hash}`;
 }
 
 /** The slice of the Clerk backend API we depend on — narrow so tests can fake it. */
@@ -29,6 +38,10 @@ export interface ClerkOrgApi {
     readonly name: string;
     readonly slug?: string;
     readonly createdBy: string;
+    /** Team orgs anchor their true domain here (`{ domain }`) so joins can
+     *  verify identity beyond the slug (review #158 C-1). Metadata is chosen
+     *  over `name` as the anchor because `name` is a mutable display string. */
+    readonly publicMetadata?: Readonly<Record<string, string>>;
   }): Promise<{ readonly id: string }>;
   /** The orgs a user belongs to — used to reuse an existing personal org (idempotency)
    *  AND, for team orgs (ADR-0068 §3), to check whether a user is already a member
@@ -39,8 +52,12 @@ export interface ClerkOrgApi {
     }>;
   }>;
   /** Look up a Clerk org by its deterministic domain-derived slug (ADR-0068 §3);
-   *  null when no org has that slug. */
-  getOrganizationBySlug(slug: string): Promise<{ readonly id: string } | null>;
+   *  null when no org has that slug. `domain` is the org's stored
+   *  publicMetadata.domain anchor (null for orgs created before the anchor
+   *  existed) — the caller verifies it before joining (review #158 C-1). */
+  getOrganizationBySlug(
+    slug: string,
+  ): Promise<{ readonly id: string; readonly domain: string | null } | null>;
   /** Add a user as a member of an existing org (ADR-0068 §3, JIT team-org join). */
   createOrganizationMembership(params: {
     readonly organizationId: string;
@@ -63,7 +80,8 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
       getOrganizationBySlug: async (slug) => {
         try {
           const org = await client.organizations.getOrganization({ slug });
-          return { id: org.id };
+          const anchor = (org.publicMetadata as Record<string, unknown> | null)?.domain;
+          return { id: org.id, domain: typeof anchor === "string" ? anchor : null };
         } catch (e) {
           // Clerk's getOrganization throws on a 404 — that's the expected "no
           // team org for this domain yet" outcome (first sign-up), not a
@@ -137,7 +155,21 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
     // creates — mirrors findPersonalOrg's read/write split.
     try {
       const org = await this.orgs.getOrganizationBySlug(teamOrgSlug(domain));
-      return ok(org ? org.id : null);
+      if (!org) return ok(null);
+      // TENANT-BOUNDARY GUARD (review #158 C-1): the slug is a lookup key, not
+      // an identity — verify the org's stored domain anchor matches EXACTLY
+      // before treating it as this domain's org. A mismatch means a slug
+      // collision (or tampered metadata): fail CLOSED and loud rather than
+      // JIT-joining the caller into someone else's tenant. A null anchor means
+      // an org predating the anchor scheme — same fail-closed treatment (no
+      // such org should exist in prod; the dev fixture org is recreated).
+      if (org.domain !== domain.toLowerCase()) {
+        return err({
+          kind: "Unexpected",
+          message: `team-org slug collision for domain "${domain}" (anchor mismatch) — refusing to join; investigate the Clerk org with slug ${teamOrgSlug(domain)}`,
+        });
+      }
+      return ok(org.id);
     } catch (e) {
       return err({
         kind: "Unexpected",
@@ -158,9 +190,25 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
         name: domain,
         slug: teamOrgSlug(domain),
         createdBy,
+        // The identity anchor findTeamOrgByDomain verifies before any join
+        // (review #158 C-1) — metadata, not `name`, because name is a mutable
+        // display string.
+        publicMetadata: { domain: domain.toLowerCase() },
       });
       return ok(org.id);
     } catch (e) {
+      // Concurrent-first-sign-up recovery (review #158 M-1): two colleagues
+      // onboarding together both see find → null and both create; Clerk's
+      // unique slug rejects the loser. Rather than surfacing a 500 to a
+      // legitimate user, re-resolve — if the org now exists (and passes the
+      // anchor guard), join it. Only recover when the org genuinely exists;
+      // any other create failure surfaces unchanged.
+      const raced = await this.findTeamOrgByDomain(domain);
+      if (raced.ok && raced.value) {
+        const joined = await this.ensureMembership(raced.value, createdBy);
+        if (!joined.ok) return joined;
+        return ok(raced.value);
+      }
       return err({
         kind: "Unexpected",
         message: `clerk.createOrganization(team): ${e instanceof Error ? e.message : String(e)}`,
@@ -187,10 +235,17 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
       });
       return ok(undefined);
     } catch (e) {
-      // A concurrent duplicate-join lands here as a Clerk 4xx ("already a
-      // member") — treat it as the idempotent success it is, same intent as the
-      // check above; anything else is a genuine Unexpected failure.
-      if (isClerkAPIResponseError(e) && e.status === 422) return ok(undefined);
+      // A concurrent duplicate-join is the ONLY error treated as idempotent
+      // success — matched by Clerk's specific error code, NOT the bare 422
+      // status (review #158 H-2: 422 also covers quota-exceeded, invalid role,
+      // etc., and swallowing those would mirror an identity against an org the
+      // user never actually joined).
+      if (
+        isClerkAPIResponseError(e) &&
+        e.errors?.some((detail) => detail.code === "already_a_member_in_organization")
+      ) {
+        return ok(undefined);
+      }
       return err({
         kind: "Unexpected",
         message: `clerk.createOrganizationMembership: ${e instanceof Error ? e.message : String(e)}`,

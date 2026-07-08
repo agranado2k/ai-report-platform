@@ -149,13 +149,14 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
       const repeat = await provisionIdentity(d, secondAtDomain);
 
       expect(repeat.ok).toBe(true);
-      // Second sign-up's membership call is recorded once — the identity mirror
-      // itself short-circuits on the repeat, so ensureMembership isn't called
-      // again either (identity.clerkOrgId is null every time here, but
-      // findByClerk is now keyed on the JOINED org, so the org-resolution
-      // branch runs again — see the "repeat" assertion below for what that
-      // means for ensureMembership call count).
-      expect(d.clerkOrgs.membershipCalls).toHaveLength(2); // once per sign-up call, idempotent each time
+      // Org resolution (incl. ensureMembership) runs on EVERY no-active-org
+      // sign-in — it must, because identity.clerkOrgId is null until Clerk
+      // resolution completes. So the count is one per SECOND-USER sign-in
+      // (the creator goes through createTeamOrg, not ensureMembership):
+      // second's first sign-in + second's repeat = 2. Idempotency lives
+      // INSIDE ensureMembership (already-a-member -> no-op), not in skipping
+      // the call — no duplicate membership is minted (review #158 L-3).
+      expect(d.clerkOrgs.membershipCalls).toHaveLength(2);
     });
 
     it("propagates a team-org lookup failure", async () => {
