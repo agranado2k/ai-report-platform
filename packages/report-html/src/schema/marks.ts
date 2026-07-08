@@ -43,7 +43,13 @@ export const htmlInlineMark: MarkSpec = {
   toDOM(mark) {
     const attrs: Record<string, string> = {};
     if (mark.attrs.class) attrs.class = mark.attrs.class;
-    if (mark.attrs.style) attrs.style = mark.attrs.style;
+    // SECURITY (PR #156 review, Fix 1): re-sanitize at toDOM, not just at
+    // parseDOM's getAttrs — a doc built via `Node.fromJSON` (diffRendered/
+    // diffDocs's client-supplied `_source.json` sidecar) never calls
+    // getAttrs, so an unsanitized `style` could otherwise pass straight
+    // through untouched.
+    const style = sanitizeStyle(mark.attrs.style);
+    if (style) attrs.style = style;
     return ["span", attrs, 0];
   },
 };

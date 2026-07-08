@@ -89,7 +89,11 @@ export const tableHeaderNode: NodeSpec = {
   ],
   toDOM(node) {
     const attrs: Record<string, string> = {};
-    if (node.attrs.style) attrs.style = node.attrs.style;
+    // SECURITY (PR #156 review, Fix 1): re-sanitize at toDOM — see
+    // htmlInlineMark's toDOM comment in marks.ts for why parseDOM-time
+    // sanitizeStyle alone isn't enough (Node.fromJSON bypasses it).
+    const style = sanitizeStyle(node.attrs.style);
+    if (style) attrs.style = style;
     return ["th", attrs, 0];
   },
 };
@@ -109,7 +113,11 @@ export const tableCellNode: NodeSpec = {
   ],
   toDOM(node) {
     const attrs: Record<string, string> = {};
-    if (node.attrs.style) attrs.style = node.attrs.style;
+    // SECURITY (PR #156 review, Fix 1): re-sanitize at toDOM — see
+    // htmlInlineMark's toDOM comment in marks.ts for why parseDOM-time
+    // sanitizeStyle alone isn't enough (Node.fromJSON bypasses it).
+    const style = sanitizeStyle(node.attrs.style);
+    if (style) attrs.style = style;
     return ["td", attrs, 0];
   },
 };

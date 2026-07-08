@@ -1,4 +1,5 @@
 import type { NodeSpec } from "prosemirror-model";
+import { sanitizeStyle } from "./attrs.js";
 
 /** Recognized paragraph roles (ADR-0062 §3), distinct from a bare `<p>`. */
 export const PARAGRAPH_VARIANTS = ["desc", "lede", "sub"] as const;
@@ -32,7 +33,14 @@ export function withParagraphVariant(spec: NodeSpec): NodeSpec {
       const className = node.attrs.variant ?? node.attrs.class ?? null;
       const attrs: Record<string, string> = {};
       if (className) attrs.class = className;
-      if (node.attrs.style) attrs.style = node.attrs.style;
+      // SECURITY (PR #156 review, Fix 1): this toDOM entirely replaces the
+      // withClassStyle-wrapped one it's built on top of (see
+      // withParagraphVariant's doc comment) — including that wrapper's
+      // sanitizeStyle call — so it's re-applied here rather than trusting
+      // node.attrs.style, which a doc built via Node.fromJSON (diffRendered/
+      // diffDocs's client-supplied sidecar) never ran through getAttrs.
+      const style = sanitizeStyle(node.attrs.style);
+      if (style) attrs.style = style;
       return [tag, attrs, 0];
     },
   };
