@@ -11,6 +11,7 @@ import { keymap } from "prosemirror-keymap";
 import { Node as PMNode } from "prosemirror-model";
 import type { Plugin } from "prosemirror-state";
 import { EditorState } from "prosemirror-state";
+import { commentHighlightsPlugin } from "./comment-decorations";
 
 /** Look up a mark type reportSchema is known to define (schema.ts builds on
  *  prosemirror-schema-basic, which always defines `strong`/`em`) — throws
@@ -22,9 +23,12 @@ function requireMark(name: string) {
 }
 
 /** The keymap-bound plugins for the MVP editor: history (undo/redo), a
- *  handful of mark toggles (bold/italic), and ProseMirror's baseKeymap
- *  (Enter/Backspace/Delete/arrow-key list handling, etc.). No toolbar — every
- *  binding here is reachable only by keyboard, per the MVP scope. */
+ *  handful of mark toggles (bold/italic), ProseMirror's baseKeymap
+ *  (Enter/Backspace/Delete/arrow-key list handling, etc.), and the comment
+ *  highlight decoration plugin (ADR-0064 §2a — comment-decorations.ts). No
+ *  toolbar — every keymap binding here is reachable only by keyboard, per the
+ *  MVP scope; the comment highlights are seeded/updated externally via
+ *  `tr.setMeta(commentHighlightsKey, ranges)`, not a keymap command. */
 export function editorPlugins(): Plugin[] {
   return [
     history(),
@@ -36,6 +40,7 @@ export function editorPlugins(): Plugin[] {
       "Mod-i": toggleMark(requireMark("em")),
     }),
     keymap(baseKeymap),
+    commentHighlightsPlugin(),
   ];
 }
 
