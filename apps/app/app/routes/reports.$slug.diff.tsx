@@ -2,14 +2,26 @@
 // report's versions (ADR-0065 §3/§4). Loads both versions' HTML (+ optional
 // `_source.json` sidecar) from R2 and renders:
 //   - a structural, word-level diff (arp-report-html's diffRendered) when
-//     BOTH sides carry a sidecar (the common case for an editor-touched
-//     report), or
-//   - a labeled, lower-fidelity block-level fallback (diffHtmlFallback) when
-//     either side lacks one (e.g. an externally-uploaded version never
-//     opened in the editor) — ADR-0065 §3's explicit "never mistaken for the
-//     structured diff" requirement.
+//     BOTH sides carry a sidecar that parses and conforms to reportSchema
+//     (the common case for an editor-touched report), or
+//   - a labeled, lower-fidelity block-level fallback (diffHtmlFallback)
+//     otherwise — either side lacking a sidecar (e.g. an externally-uploaded
+//     version never opened in the editor), or a sidecar that's present but
+//     corrupt (truncated/non-conforming JSON) — ADR-0065 §3's explicit
+//     "never mistaken for the structured diff" requirement, AND a corrupt
+//     sidecar must degrade gracefully rather than 500 the page (PR #156
+//     review, Fix 2). The parse-or-render-then-fall-back decision itself is
+//     `computeReportDiff` (report-diff.server.ts), unit-tested there since
+//     this route isn't (no route-level test convention in this repo).
 //
-// Auth mirrors the version-history page exactly (loadReportForVersionsRead).
+// Auth: getReport's loadReadableReport guard directly (PR #156 review, Fix
+// 3) — NOT loadReportForVersionsRead. That helper runs listReportVersions's
+// narrower org-scoped guard first only because the version-history page
+// (reports.$slug.versions.tsx) needs its VersionPage projection; this route
+// reads `report.versions` straight off the Report aggregate getReport
+// already returns, so the listReportVersions call was a pure double-fetch —
+// getReport's guard is a strict superset (see report-versions.server.ts's
+// own comment on that superset relationship), so auth is unchanged.
 //
 // RENDERING CHOICE: the diff HTML is the report's EDITABLE BODY ONLY (the
 // shell/body split, ADR-0062 §2) — never re-wrapped in the report's own
@@ -21,12 +33,13 @@
 // just enough to make prose readable and diff markers legible.
 import { json, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
+import { getReport } from "arp-application";
 import { makeSlug } from "arp-domain";
-import { diffHtmlFallback, diffRendered, type PMDocJson, splitShell } from "arp-report-html";
+import { splitShell } from "arp-report-html";
 import { AppHeader, buttonClass, Card, PageShell } from "../components";
 import { resolveActorForRead } from "../server/auth.server";
-import { deps } from "../server/container.server";
-import { loadReportForVersionsRead } from "../server/report-versions.server";
+import { deps, identityStore, writeGrantStore } from "../server/container.server";
+import { computeReportDiff } from "../server/report-diff.server";
 
 function parseVersionNo(raw: string | null): number | null {
   if (!raw) return null;
@@ -47,9 +60,13 @@ export async function loader(args: LoaderFunctionArgs) {
   const toNo = parseVersionNo(url.searchParams.get("to"));
   if (fromNo === null || toNo === null) return redirect(`/reports/${slugR.value}/versions`);
 
-  const guarded = await loadReportForVersionsRead(actor, slugR.value);
-  if (!guarded.ok) return redirect("/"); // never reveal existence to a non-authorized actor
-  const { report } = guarded.value;
+  const reportR = await getReport(
+    { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
+    actor,
+    { slug: slugR.value },
+  );
+  if (!reportR.ok) return redirect("/"); // never reveal existence to a non-authorized actor
+  const report = reportR.value;
 
   const fromVersion = report.versions.find((v) => v.versionNo === fromNo);
   const toVersion = report.versions.find((v) => v.versionNo === toNo);
@@ -72,30 +89,21 @@ export async function loader(args: LoaderFunctionArgs) {
   const fromSidecar = fromSidecarR.ok ? fromSidecarR.value : null;
   const toSidecar = toSidecarR.ok ? toSidecarR.value : null;
 
-  if (fromSidecar && toSidecar) {
-    const fromDoc = JSON.parse(new TextDecoder().decode(fromSidecar.bytes)) as PMDocJson;
-    const toDoc = JSON.parse(new TextDecoder().decode(toSidecar.bytes)) as PMDocJson;
-    const html = diffRendered(fromDoc, toDoc);
-    return json({
-      slug: report.slug,
-      title: report.title,
-      fromNo,
-      toNo,
-      mode: "structural" as const,
-      html,
-      label: null as string | null,
-    });
-  }
+  const diff = computeReportDiff({
+    fromBodyHtml,
+    toBodyHtml,
+    fromSidecarBytes: fromSidecar?.bytes ?? null,
+    toSidecarBytes: toSidecar?.bytes ?? null,
+  });
 
-  const fallback = diffHtmlFallback(fromBodyHtml, toBodyHtml);
   return json({
     slug: report.slug,
     title: report.title,
     fromNo,
     toNo,
-    mode: "fallback" as const,
-    html: fallback.html,
-    label: fallback.label as string | null,
+    mode: diff.mode,
+    html: diff.html,
+    label: diff.label,
   });
 }
 
