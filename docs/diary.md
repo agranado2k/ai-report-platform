@@ -2204,3 +2204,20 @@ one entry point — not the full suggestion/diff/co-editing roadmap those later 
   pre-slice), `docs:check` clean.
 
 Worktree: `worktree/editor-mvp` (branch `feat/editor-mvp`). Not yet merged.
+
+### 2026-07-08 — ADR-0068: the G4 scope decisions (domain-keyed single-org membership)
+
+The G4 scoping PRD (#141) put six deferred decisions to the operator; all six answered and
+recorded as **ADR-0068** (resolves + amends ADR-0061): **(1)** one user = one org, keyed by email
+domain — corporate domains form multi-member team orgs JIT (every same-domain sign-up joins),
+public-provider addresses keep 1:1 personal orgs; the org-mode unlock's active-org check becomes
+correct by construction (no Clerk membership calls); multi-org membership is revisit-later.
+**(2)** Clerk custom-roles infrastructure with only admin/member defined. **(3)** team-org creation
+is JIT at first sign-up (extends ADR-0048) — no invitation UI, no self-serve creation. **(4)**
+ownership transfer DEFERRED — the ADR-0059/0061 launch prerequisite is explicitly waived; accepted
+risk: a departed member's reports go read-only until it ships. **(5)** org-mode share UX stays
+API/MCP-only (fast-follow). **(6)** the two-member e2e fixture is hand-provisioned
+(silver+clerk_test@agranado.com on the dev Clerk instance — an accepted ADR-017 exception,
+reconstruction steps owed in the e2e docs). Worktree `docs/adr-0068-g4-scope-decisions`. The G4
+build follows ADR-0068's build order: provisioning (domain rule + public-provider list) →
+membership mirroring → fixture-backed e2e → share UX / transfer as later slices.
