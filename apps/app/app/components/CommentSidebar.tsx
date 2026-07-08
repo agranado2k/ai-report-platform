@@ -10,13 +10,13 @@
 // "add (on selection), reply (single level), resolve" only. `deleteComment`
 // stays unconsumed by this slice (see reports.$slug.comments.ts's own note).
 import { useFetcher } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { buildSelectionAnchor } from "../editor/anchor";
 import type { CommentDto } from "../server/comment-dto.server";
+import type { CommentActionResult } from "./comment-composer-lifecycle";
+import { isCommentSubmitSuccess } from "./comment-composer-lifecycle";
 import { Badge, Button, Card, Textarea } from "./index";
 import type { EditorSelection } from "./ReportEditor";
-
-type CommentActionResult = { ok: true } | { error: string };
 
 export interface CommentSidebarProps {
   readonly slug: string;
@@ -28,8 +28,11 @@ export interface CommentSidebarProps {
   /** The editor's current non-empty selection, or `null` when nothing is
    *  selected — gates whether the "new comment" composer renders at all. */
   readonly pendingSelection: EditorSelection | null;
-  /** Called after the composer fires its POST (success or cancel) so the
-   *  parent can clear `pendingSelection`. */
+  /** Called on Cancel, or once the composer's add-comment POST resolves
+   *  SUCCESSFULLY — never on failure. A 422/403 (e.g. a write grant revoked
+   *  mid-session, ADR-0060) must leave the composer mounted with its typed
+   *  body and `<ActionError>` visible, so this only fires once
+   *  `isCommentSubmitSuccess` is true (PR #157 review, Fix 2). */
   readonly onSubmittedSelection: () => void;
 }
 
@@ -55,7 +58,18 @@ function ActionError({ data }: { readonly data: CommentActionResult | undefined 
 }
 
 /** The "select text, click Comment" composer — only rendered while there's a
- *  non-empty selection (you comment ON a quote, not on nothing). */
+ *  non-empty selection (you comment ON a quote, not on nothing).
+ *
+ *  PR #157 review, Fix 2: `onSubmitted` (which clears the parent's
+ *  `pendingSelection` and, in turn, unmounts this component) must NOT fire
+ *  the moment the POST goes out — only once it resolves successfully. Firing
+ *  early meant a 422/403 unmounted the composer before its `<ActionError>`
+ *  could ever render, silently dropping the error and the typed body. So
+ *  `submit` only calls `fetcher.submit`; the success effect below — driven by
+ *  the pure `isCommentSubmitSuccess` gate — is what clears the body and
+ *  calls `onSubmitted`. On failure, `fetcher.data` carries `{ error }`,
+ *  `busy` drops back to false, and the composer stays mounted with the typed
+ *  body intact so the user can retry. */
 function NewCommentComposer({
   slug,
   versionId,
@@ -70,6 +84,13 @@ function NewCommentComposer({
   const fetcher = useFetcher<CommentActionResult>();
   const [body, setBody] = useState("");
   const busy = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (isCommentSubmitSuccess(fetcher.state, fetcher.data)) {
+      setBody("");
+      onSubmitted();
+    }
+  }, [fetcher.state, fetcher.data, onSubmitted]);
 
   const submit = () => {
     if (!body.trim()) return;
@@ -91,8 +112,6 @@ function NewCommentComposer({
       }),
       { method: "post", action: actionUrl(slug), encType: "application/json" },
     );
-    setBody("");
-    onSubmitted();
   };
 
   return (
