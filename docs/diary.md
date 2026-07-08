@@ -2484,7 +2484,9 @@ but `apps/view/$slug.tsx` never read the param and always served the live versio
 - Headers/CSP/noindex identical to live. No change to the live-serving path when `v` is absent.
 
 Fully TDD (version-query parser + resolver scan-status matrix: clean N, pending→scanning, flagged→451,
-blocked→404, out-of-range→404, takedown-at-any-N, non-clean-liveVersionId defense-in-depth). New e2e
-`view-version-by-ordinal.feature`. No ADR change needed — this makes code match ADR-0038's existing
+blocked→404, out-of-range→404, takedown-at-any-N, non-clean-liveVersionId defense-in-depth) — that unit
+matrix is the actual regression net. The pre-existing `view-version-by-ordinal.feature` (registered on
+main) is spec-only Gherkin, like every `.feature` in the repo (no step defs under `tests/e2e/steps/` yet)
+— living documentation, not executed e2e. No ADR change needed — this makes code match ADR-0038's existing
 contract; ADR-0065 §5's "?v=N unchanged" stays accurate (0065 didn't touch it). Fixes the dead "View"
 links the #156 version-history page shipped.
