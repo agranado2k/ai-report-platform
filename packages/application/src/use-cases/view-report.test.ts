@@ -117,6 +117,21 @@ describe("resolveViewableReport (ADR-0038 viewer gate)", () => {
     expect(r.ok && r.value.kind).toBe("scanning");
   });
 
+  it("'scanning' carries the report so the route can enforce the Acl BEFORE the holding page", async () => {
+    // Dogfood 2026-07-08 finding: the 200 holding page was served before the
+    // ADR-0056 access gate, so a PRIVATE report mid-scan revealed its existence
+    // and scan state to anonymous visitors. The outcome must expose the report
+    // (its acl + id) so the route can run resolveAccessDecision first.
+    const report = buildReport();
+    const r = await resolve(report);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.kind === "scanning") {
+      expect(r.value.report).toEqual(report);
+    } else {
+      expect.fail("expected a 'scanning' outcome");
+    }
+  });
+
   it("returns 'flagged' for a flagged version with no live", async () => {
     const r = await resolve(buildReport({ verdict: "flagged" }));
     expect(r.ok && r.value.kind).toBe("flagged");
@@ -200,6 +215,17 @@ describe("resolveViewableReport — ?v=N version-by-ordinal (ADR-0038 §3)", () 
   it("returns the 'scanning' holding page for a pending ordinal (v2) — mirrors the live-path row, not a 404", async () => {
     const r = await resolve(buildMultiVersionReport(), 2);
     expect(r.ok && r.value.kind).toBe("scanning");
+  });
+
+  it("?v=N 'scanning' carries the report too — the pre-holding-page Acl gate has no ordinal bypass", async () => {
+    const report = buildMultiVersionReport();
+    const r = await resolve(report, 2);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.kind === "scanning") {
+      expect(r.value.report).toEqual(report);
+    } else {
+      expect.fail("expected a 'scanning' outcome");
+    }
   });
 
   it("returns 451 ('flagged') for a flagged ordinal (v3) — same reason-opaque code as the live path", async () => {

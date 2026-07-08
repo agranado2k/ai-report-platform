@@ -87,19 +87,21 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   switch (outcome.value.kind) {
     case "deleted":
       throw errorResponse(410, "No longer available");
-    case "scanning":
-      return scanningHoldingPage();
     case "flagged":
       throw errorResponse(451, "Unavailable — flagged for review");
     case "notfound":
       throw errorResponse(404, "Not found");
   }
 
-  // Clean version (live, or the requested ?v=N ordinal) → enforce the Acl
-  // (ADR-0056) before serving. Same `report.acl`, same resolveAccessDecision call
-  // regardless of which version was resolved above — ?v=N is not a separate gate,
-  // it's the identical gate applied to a different version (ADR-0038 §3).
-  const { report, version } = outcome.value;
+  // Servable (clean live / clean ?v=N ordinal) OR still scanning → enforce the
+  // Acl (ADR-0056) BEFORE emitting anything about the report. The holding page
+  // sits behind the same gate as content (dogfood 2026-07-08): a private report
+  // mid-scan must show a visitor exactly what it will show them once clean —
+  // the unlock redirect — not a 200 that reveals the slug exists and is being
+  // scanned. Same `report.acl`, same resolveAccessDecision call regardless of
+  // which version was resolved above — ?v=N is not a separate gate, it's the
+  // identical gate applied to a different version (ADR-0038 §3).
+  const { report } = outcome.value;
 
   // The app authorizes private reports; the viewer only verifies a slug-bound token
   // (from the `?access` hand-off or a prior unlock cookie). Public reports serve directly.
@@ -134,6 +136,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     headers.set("cache-control", "no-store");
     return new Response(null, { status: 303, headers });
   }
+  // Access granted. Mid-scan there is still no clean version to serve — the
+  // authorized visitor (owner via /open, or anyone the mode admits, e.g. public)
+  // gets the ADR-0038 §2 holding page, exactly as before.
+  if (outcome.value.kind === "scanning") return scanningHoldingPage();
+  const { version } = outcome.value;
   const blob = await blobs.readObject(report.id, version.id, version.manifest.entryDocument);
   if (!blob.ok) throw errorResponse(500, "Read failed");
   if (!blob.value) throw errorResponse(404, "Not found");
