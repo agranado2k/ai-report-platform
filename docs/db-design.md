@@ -59,7 +59,7 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | Enum | Values |
 |---|---|
 | `plan` | `free`, `pro` |
-| `org_kind` | `personal`, `team` (ADR-0061; default `personal`; lands with the team-orgs build) |
+| `org_kind` | `personal`, `team` (ADR-0061, derived at provisioning by ADR-0068 §1's domain-keyed rule; default `personal`; migration `0014`) |
 | `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `version_origin` | `upload`, `editor` (ADR-0062 §6, ADR-0065; default `upload`) |
@@ -82,13 +82,13 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | `id` | uuid PK | UUIDv7 |
 | `clerk_org_id` | text | unique; mirror of Clerk org |
 | `name` | text | |
-| `kind` | `org_kind` | `personal` / `team` (ADR-0061); default `personal`; lands with the team-orgs build |
+| `kind` | `org_kind` | `personal` / `team` (ADR-0061/0068); default `personal`; set at JIT provisioning by the domain rule (migration `0014`) |
 | `plan` | `plan` | default `free` |
 | `plan_limits_json` | jsonb | quota ceilings (`PlanLimits`, ADR-006) |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | soft delete |
 
-Indexes: `clerk_org_id` unique, `plan`.
+Indexes: `clerk_org_id` unique, `plan`, `kind`.
 
 #### `users` — mirror of Clerk
 | Column | Type | Notes |
