@@ -13,18 +13,26 @@ When("I GET the report-html-importing app route {string}", async ({ request }, p
   response = await request.get(path, { maxRedirects: 0 });
 });
 
-// Deliberately auth-agnostic (see the feature file's comment): any status EXCEPT a
-// 5xx proves the server booted and the whole route module graph — including
-// arp-report-html — resolved. A boot crash of the #163/#167 class 500s on EVERY
-// route, so even an auth-redirect (302) is sufficient proof; no Clerk session
-// needed. The explicit allowlist (rather than a bare "< 500") documents exactly
-// which outcomes this route can legitimately produce for an unauthenticated,
-// possibly-nonexistent slug.
-const NOT_A_BOOT_CRASH = new Set([200, 301, 302, 303, 401, 403, 404]);
+// Assert the ACTUAL outcome: an unauthenticated GET is redirected to /sign-in
+// (root.tsx's rootAuthLoader + the loader's own redirect). Reaching that redirect
+// requires importing the route module — including `arp-report-html` at module
+// scope — so a 302→/sign-in proves the whole server graph resolved and booted. A
+// boot crash of the #163/#167 class 500s instead → fails here.
+//
+// Why not a broad "any non-5xx" allowlist (claude-review #169): Vercel Deployment
+// Protection returns **401** when the bypass secret is missing/rotated, and the
+// platform can return **404** — both WITHOUT the app ever booting. A boot crash +
+// missing bypass would then 401 and a permissive allowlist would false-PASS, the
+// exact class this guard exists to close. Requiring a redirect whose Location
+// points at /sign-in can only come from our app's auth gate, so it stays
+// auth-session-free while rejecting platform-layer responses.
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
 
 Then("the app did not crash booting that route", async () => {
   const status = response.status();
-  expect(NOT_A_BOOT_CRASH.has(status), `unexpected status ${status} (possible boot crash)`).toBe(
-    true,
-  );
+  const location = response.headers().location ?? "";
+  expect(
+    REDIRECT_CODES.has(status) && location.includes("/sign-in"),
+    `expected an auth redirect to /sign-in (proves the app booted); got status ${status}, location "${location}"`,
+  ).toBe(true);
 });
