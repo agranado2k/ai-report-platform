@@ -2414,3 +2414,28 @@ work) and the ADR-0062 `_source.json` sidecar.
   tests green, `docs:check` clean.
 
 Worktree: `worktree/visual-diff` (branch `feat/visual-diff`). Not yet merged.
+
+### 2026-07-08 — Development-agent trust boundary (ADR-0069)
+
+Auditing an external AI coding-agent runtime (`obra/lace`, requested as a comparison for our own Claude
+Code tooling) surfaced a concrete gap: lace auto-spawns project-scoped MCP servers from a repo-tracked
+`.lace/mcp-config.json` with no visible trust prompt — opening a malicious clone could run an
+attacker-controlled process with whatever credentials that session held. The audit itself was done safely
+by delegating the clone-and-read work to tool-restricted `Explore` subagents with no push/send/deploy
+capability, while the privileged orchestrator only ever consumed their already-read-only output — i.e. by
+accident, applying the "lethal trifecta" compartmentalization principle (private data + untrusted content
++ external-action capability must not sit in one context) that this repo's own product architecture
+already applies to untrusted report HTML (ADR-0045's "isolation > AV", ADR-0062 §9's app-origin trust
+boundary).
+
+**ADR-0069** formalizes the same principle for this repo's *development*-agent tooling: classifies
+Private / Untrusted / External-action capability legs, requires untrusted-content reads to be delegated to
+a tool-restricted subagent whose output is treated as data-not-instructions, requires the privileged
+orchestrator not to fetch-and-act on untrusted content in the same step, and pre-emptively requires
+explicit user trust before any future project-scoped MCP config auto-spawns servers (none exists in this
+repo today). Explicitly scoped as risk reduction, not a guarantee — enforcement is procedural (cited from
+`CLAUDE.md`, checked in `/code-review`/`/security-review`), not a runtime hook; hard enforcement was
+considered and deferred pending Phase 0e's hook infrastructure. `CLAUDE.md` gained a new "Agent trust
+boundary" section pointing to it.
+
+Worktree: `worktree/adr-agent-trust-boundary` (branch `docs/adr-agent-trust-boundary`). Not yet merged.

@@ -42,6 +42,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0066 | [AI suggestion mode](0066-ai-suggestions.md) | Proposed — deferred (AI suggestion mode) |
 | 0067 | [Live co-editing](0067-live-collaboration.md) | Proposed — deferred (live co-editing) |
 | 0068 | [Domain-keyed single-org membership — the G4 scope decisions](0068-domain-keyed-single-org-membership.md) | Accepted (2026-07-08) — resolves + amends ADR-0061; defers ownership transfer |
+| 0069 | [Development-agent trust boundary — compartmentalizing untrusted content from private data and external actions](0069-agent-tool-trust-boundary.md) | Accepted (2026-07-08) — applies ADR-0045/0062's isolation principle to Claude Code dev-agent tooling |
 
 ## Backlog (ADRs 1–30 from the spec)
 
