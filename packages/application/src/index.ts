@@ -33,6 +33,7 @@ export * from "./use-cases/resolve-access";
 export * from "./use-cases/resolve-comment";
 export * from "./use-cases/revoke-api-key";
 export * from "./use-cases/revoke-write";
+export * from "./use-cases/save-edited-version";
 export * from "./use-cases/search-reports";
 export * from "./use-cases/send-magic-link";
 export * from "./use-cases/set-acl";

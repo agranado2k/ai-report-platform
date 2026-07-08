@@ -1,4 +1,5 @@
 import type { NodeSpec } from "prosemirror-model";
+import { sanitizeStyle } from "./attrs.js";
 
 /**
  * Generic attr-retention catch-all block node (ADR-0062 §3) for any HTML tag
@@ -26,10 +27,12 @@ export const htmlBlockNode: NodeSpec = {
       tag: "div, aside, header, footer, nav, main",
       priority: 40,
       getAttrs(dom: HTMLElement) {
+        // style is sanitized on the way in (Fix 2, PR #151 review) — see
+        // sanitizeStyle's doc comment in attrs.ts for what's stripped/why.
         return {
           tag: dom.tagName.toLowerCase(),
           class: dom.getAttribute("class"),
-          style: dom.getAttribute("style"),
+          style: sanitizeStyle(dom.getAttribute("style")),
         };
       },
     },
