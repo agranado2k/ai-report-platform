@@ -2439,3 +2439,29 @@ considered and deferred pending Phase 0e's hook infrastructure. `CLAUDE.md` gain
 boundary" section pointing to it.
 
 Worktree: `worktree/adr-agent-trust-boundary` (branch `docs/adr-agent-trust-boundary`). Not yet merged.
+
+### 2026-07-08 — PROD DOWN incident: jsdom un-shippable on serverless → linkedom (PRs #163, #167)
+
+After the editing epic's PRs merged, **every `app.centaurspec.com` route 500'd at boot** — surfaced when
+the operator hit `/reports/{slug}/open`. Root cause: PR #151 put `arp-report-html` (→ jsdom) into
+`apps/app`, and jsdom@29's dependency subtree is repeatedly un-shippable on Vercel's serverless runtime.
+Two layers, fixed in sequence:
+
+- **Layer 1 (#163)** — `css-tree` (transitive jsdom dep) `require`s `data/patch.json` at load; the SSR
+  bundler was *inlining* jsdom and mangling that relative require, so Vercel never shipped the file →
+  `Cannot find module '../data/patch.json'`. Fix mirrored the argon2 precedent (bb1457c): `ssr.external`
+  += jsdom, declare it directly in `apps/app`. Correct for layer 1 — but externalizing then exposed…
+- **Layer 2 (#167)** — with jsdom loading as real modules, `html-encoding-sniffer@6` (CJS) `require()`s
+  the **ESM-only** `@exodus/bytes` → `ERR_REQUIRE_ESM`, crashing every route again. **Decision: stop
+  patching jsdom's tree.** `report-html` needs only `createElement` + `innerHTML`; swapped the server DOM
+  backend to **linkedom** — serverless-native, no native binaries, data files, or ESM-interop landmines.
+  jsdom / css-tree / html-encoding-sniffer / @exodus/bytes are gone from the bundle. Verified against a
+  live app preview (`/reports/{slug}/versions` → 302, not 500). The backend note lives in ADR-0062 §3
+  (linkedom preserves `style` verbatim — a fidelity improvement; fidelity stays 15/15, no data migration).
+
+Vendor change, per the diary protocol. **Process gaps this exposed (follow-ups filed):** #166 — the
+preview smoke only exercises the *view* app, so an app-origin boot crash sailed through CI (add a smoke
+on an app route that imports report-html — the exact check that would have caught both layers). #165 —
+split report-html's server-only DOM helper so a DOM-backend problem can't crash DOM-free routes like
+`/open`. Also this session: Vercel free-tier daily deploy quota (100/day, HTTP 402) blocked CI and prod
+recovery repeatedly → upgraded to Pro.
