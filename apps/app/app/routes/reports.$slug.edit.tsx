@@ -69,7 +69,12 @@ export async function loader(args: LoaderFunctionArgs) {
   );
   if (!htmlBlob.ok || !htmlBlob.value) return redirect("/");
   const html = new TextDecoder().decode(htmlBlob.value.bytes);
-  const { bodyHtml } = splitShell(html);
+  // STYLING FIX (Fix 1): `shell` used to be discarded here — the report's
+  // own `<style>`/`<body>` attrs never reached the client, so the editor
+  // rendered with none of the report's CSS. It's now returned to the client
+  // alongside `doc` so ReportEditor can build the sandboxed iframe document
+  // from it (apps/app/app/editor/iframe-document.ts).
+  const { shell, bodyHtml } = splitShell(html);
 
   const sidecar = await deps().blobs.readObject(report.id, version.id, "_source.json");
   // Lossless reopen when a prior editor save left a sidecar; otherwise a
@@ -112,6 +117,7 @@ export async function loader(args: LoaderFunctionArgs) {
     slug: report.slug,
     title: report.title,
     doc,
+    shell,
     versionNo: version.versionNo,
     versionId: versionIdToWire(version.id),
     comments,
@@ -185,7 +191,8 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function EditReport() {
-  const { slug, title, doc, versionNo, versionId, comments } = useLoaderData<typeof loader>();
+  const { slug, title, doc, shell, versionNo, versionId, comments } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
   const [dirty, setDirty] = useState(false);
@@ -244,13 +251,14 @@ export default function EditReport() {
           <ReportEditor
             key={slug}
             initialDoc={doc as PMDocJson}
+            shell={shell}
             comments={highlightable}
             onChange={(next) => {
               docRef.current = next;
               setDirty(true);
             }}
             onSelectionChange={setSelection}
-            className="report-editor prose min-h-[24rem] focus:outline-none"
+            className="w-full min-h-[24rem] rounded-card border border-border"
           />
         </Card>
         <CommentSidebar

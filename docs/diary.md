@@ -2600,3 +2600,51 @@ behind `acl:write`; the app origin serves no CSP (viewer-only header stack is pe
 drops the deep link for signed-out owners (deliberate anti-oracle collapse).
 
 Worktree: `worktree/viewer-acl-before-scan` (branch `fix/viewer-acl-before-scan`). Not yet merged.
+
+### 2026-07-08 — Editor MVP dogfood fixes: shell CSS, comment highlights, inline-content structure
+
+Operator dogfooded the PR #151 editor MVP and found it poor on three counts, all root-caused and fixed
+in one pass (`worktree/editor-styling-fix`, branch `feat/editor-styling-fix`):
+
+1. **Lost styling (dominant defect).** `reports.$slug.edit.tsx`'s loader called `splitShell(html)` and
+   discarded the `shell` half — the report's own `<style>` never reached the client, and
+   `ReportEditor.tsx` mounted `EditorView` into a bare `<div class="report-editor prose …">` with no CSS
+   backing either class. Every bespoke class (chips/cards/sections/rt/rd/…) rendered unstyled. Fixed by
+   returning `shell` from the loader (save path untouched — the action already re-splits server-side) and
+   mounting `EditorView` **inside a same-origin, sandboxed `<iframe>`** built from that shell
+   (`apps/app/app/editor/iframe-document.ts`'s `buildIframeDocument`, pure/unit-tested). The iframe's own
+   `<body>` — carrying the shell's original classes/attrs — becomes the PM editable root directly via
+   `new EditorView({ mount: body }, …)`, so the editing surface now renders with the report's real CSS,
+   isolated automatically from the dashboard's own `tailwind.css` in both directions.
+2. **Comment highlights invisible.** `comment-decorations.ts` already dispatched
+   `Decoration.inline(from, to, { class: "comment-highlight" })`, but no `.comment-highlight` CSS rule
+   existed anywhere. Added it to the iframe's injected `<style>` (same document as the decorated spans):
+   a translucent brass highlight (`rgba(244,201,93,.28)` background + inset box-shadow), legible on the
+   fixture's warm-dark palette.
+3. **Structure flattening.** The generic attr-retention catch-all (`content: 'block*'`) folded
+   `rt`/`rd`/`rtags`/`chips`/`block-label` into itself and auto-wrapped their bare inline content
+   (text/chip spans) in a `<p>` — extra DOM layer, broken flex/gap layouts, shifted selection. Added
+   dedicated `content: 'inline*'` node specs for those five (`packages/report-html/src/schema/
+   inline-content.ts`) — verified against every fixture occurrence (52× rt/rd/rtags, 25× chips, 14×
+   block-label) that none ever holds a nested block element. `role-head` stays on the generic catch-all
+   (4/7 occurrences mix inline content with a block `<h3>`); `rmeta` is pure-inline too but was judged out
+   of scope for this pass (not named in the fix brief) — left on the catch-all, with a note in the code
+   for whoever picks it up next. A CSS safety net (`.rt>p,.rd>p,.rtags>p,.chips>p,.block-label>p{margin:0;
+   display:contents}`) covers any residual auto-`<p>` from containers this pass didn't touch.
+
+**Security (ADR-0062 §9 amended, not superseded):** the shell's `<style>` is untrusted uploaded CSS now
+actually rendering on the app.<domain> origin (previously discarded, so this exposure is new). The iframe
+carries its own `Content-Security-Policy` meta tag — `default-src 'none'; style-src 'self'
+'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'` — inserted as `<head>`'s
+first child, before the report's own `<style>`. `sandbox="allow-same-origin"` (required for the parent to
+reach `contentDocument` at all) but deliberately **no** `allow-scripts` — PM's event listeners attach from
+the parent's JS context (a same-origin DOM op, not iframe-script execution), and the iframe document never
+emits a `<script>` tag. This is a second, independent containment layer on top of (not a replacement for)
+the existing schema-is-the-allowlist boundary §9 already documents.
+
+Round-trip fidelity suite stayed **15/15** (the count-based class-preservation contract doesn't care about
+the wrapping-div change); `auto-wrap.test.ts`'s pinned `.chips` case moved to `inline-content.test.ts`
+(new behavior) while its `.card` case stays as the accepted-cost contract for genuinely mixed
+inline/block containers. Fully TDD: `inline-content.test.ts` (schema), `iframe-document.test.ts` (pure
+string-building, unit-tested even though the iframe mount itself is manual/e2e territory per the task
+brief). Gates green: biome, typecheck, vitest (1020+ tests), docs:check. Not yet merged.
