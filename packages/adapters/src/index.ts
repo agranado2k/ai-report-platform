@@ -8,6 +8,7 @@ export * from "./api-key-repository";
 export * from "./bundle-processor";
 export * from "./clerk-org-provisioner";
 export * from "./client";
+export * from "./comment-repository";
 export * from "./email-sender";
 export * from "./event-outbox";
 export * from "./folder-repository";

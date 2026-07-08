@@ -3,6 +3,8 @@
 // (ADR-0020): the use cases depend on the IdGenerator port, not on uuid.
 import type { IdGenerator } from "arp-application";
 import {
+  type CommentId,
+  commentId,
   type FolderId,
   folderId,
   type ReportId,
@@ -23,6 +25,10 @@ export class UuidV7IdGenerator implements IdGenerator {
 
   folderId(): FolderId {
     return folderId(uuidv7());
+  }
+
+  commentId(): CommentId {
+    return commentId(uuidv7());
   }
 
   nonceId(): string {

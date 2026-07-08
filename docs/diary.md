@@ -10,10 +10,10 @@
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `717f08f` — Merge PR #146 (per-user report ownership foundation, ADR-0059). |
+| **Last commit on main**| `e2986b3` — Merge PR #150 (ownership epic completion — org ACL mode + per-report write grants, ADR-0056 P2 / ADR-0060). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/sharing-completion` (branch `feat/sharing-completion`, ownership epic G2+G3 — org ACL mode enforcement + per-report write grants, ADR-0056 P2 / ADR-0060; closes #139/#140). `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
+| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/comments` (ADR-0064 comments & annotations slice 1 — full vertical, branch `feat/comments`, not yet merged; rebased onto PR #150). `worktree/sharing-completion` merged (PR #150 — org ACL mode + per-report write grants); `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -2039,3 +2039,103 @@ predating this PR (an unquoted plain scalar containing `: ` inside backticks on 
 repo's own `docs-conformance` check is token-presence lint, not a full parse, so it's gone unnoticed.
 Flagging here per the "flag the contradiction, don't paper over it" rule; left alone as out of scope
 for this PR.
+
+### 2026-07-07 — ADR-0064 comments & annotations, slice 1: full vertical (domain → route)
+
+The Authoring & Collaboration bounded context (ADR-0064) now exists end to end — `Comment`
+aggregate → `CommentRepository` port + Drizzle/in-memory implementations → five use cases →
+HTTP mappers → two Remix routes — built TDD, layer by layer. Docs (glossary, context-map,
+events.md, `CLAUDE.md`'s four-context line) were already updated in an earlier docs-integration
+wave; this slice made the code match them.
+
+- **Domain** (`packages/domain/src`): `CommentId` (brand + `comment-id.ts` wire codec, prefix
+  `comment_`, ADR-0052); `anchor.ts` — the `Anchor` value object (`{ versionPinned: { versionId,
+  textQuote }, relative? }`); `comment.ts` — the aggregate (`createComment`/`replyToComment`/
+  `resolveComment`, each returning a `CommentEmission` mirroring `report.ts`'s `Emission` pattern,
+  named distinctly to avoid a barrel clash). Two JUDGMENT CALLS, both flagged inline: (1) body and
+  anchor text-quote both capped at 2000 chars — ADR-0064 says "bounded... not a document" but gives
+  no number; (2) `resolveComment` is idempotent (no-op + no duplicate event on an already-resolved
+  comment), mirroring `applyScanResult`'s idempotent-absorb style rather than erroring.
+- **Anchor shape**: v1 always populates `versionPinned` (a `ReportVersion` id + a text-quote
+  snapshot); `relative` is an untyped, optional slot for a future Yjs-relative ProseMirror position
+  (ADR-0062/0067) — deliberately NOT typed against `packages/report-html`, since the domain layer
+  must stay dependency-free (ADR-024) and that package has no JS-facing position type yet. Whichever
+  use case eventually resolves/writes a relative position casts at its own boundary.
+- **Migration 0013** (`packages/db/drizzle/0013_comments.sql`, generated via `drizzle-kit generate`
+  then renamed to a descriptive tag, matching 0010/0011's convention). Originally generated as `0012`
+  against a pre-rebase schema; PR #150 (`feat/sharing-completion`, ownership epic G2+G3) merged to
+  `main` mid-flight and claimed `0012` for `report_write_grants` — rebased onto it (`git fetch` +
+  `git rebase origin/main`, stash/pop the uncommitted worktree, resolve schema.ts/journal.json/
+  write-response.ts/diary.md conflicts by keeping both sides' additions) and regenerated as `0013`
+  against the merged 17-table schema. `comments`
+  table per ADR-0064 §5. **JUDGMENT CALL, flagged in the migration + `docs/db-design.md`**: the
+  self-FK `parent_comment_id → comments` is `ON DELETE CASCADE`, not the schema's stated RESTRICT
+  default — a thread's replies are owned by its root the same way `report_versions` are owned by
+  their `report`, so deleting a root comment deletes its replies rather than leaving them
+  FK-orphaned. Verified against REAL Postgres (pglite) in the adapter contract test, not just
+  asserted in the in-memory fake.
+- **Ports + repos**: `CommentRepository` (`findById`/`save`/`listByReport`/`delete`) in
+  `packages/application/src/ports.ts`; `InMemoryCommentRepository` + `DrizzleCommentRepository`;
+  the shared contract suite (`describeCommentRepositoryContract`, mirroring the Folder/Report
+  pattern) runs against both (ADR-0046 two-tier testing) — 8 shared assertions each, including the
+  cascade-delete-on-root case above. `IdGenerator` gained `commentId()` (port + `UuidV7IdGenerator`
+  + the `SequentialIdGenerator` test fake).
+- **Use cases**: `addComment`/`replyToComment` are gated by `canWrite` via the existing
+  `loadWritableReport` seam (ADR-0064 §3: "the SAME way report writes are") — **NOT**
+  `loadOwnedReport`, which this codebase reserves permanently for delete/setAcl/grant-management
+  (ADR-0059 §2). Written initially against the pre-rebase world where `canWrite = isOwner` only;
+  after rebasing onto PR #150, `canWrite` is `isOwner OR hasWriteGrant` for real (`WriteGrantStore` +
+  `IdentityStore.findEmailByUserId`, ADR-0060 §4) — updated both use cases to thread the now-required
+  `WriteGrantCheckDeps` through, so a cross-org write-grantee can genuinely author a comment on a
+  report they can write to, not just the owner. `resolveComment`/`deleteComment` enforce a DIFFERENT
+  rule (comment author OR report owner) — that part is unchanged by the rebase — but their EXISTENCE/
+  visibility gate moved from `loadOrgReport` (org-scoped only) to `loadReadableReport` (owner OR
+  org-visible OR write-grantee): since a comment's author can now legitimately be a cross-org
+  grantee, the base gate must let that same author back in to resolve/delete their OWN comment
+  outside the report's org — `loadOrgReport` would have wrongly 403'd them. Verified with a
+  dedicated test in each use case (grant a cross-org user write access, have them author a comment,
+  then resolve/delete it as that same user under a different org context). `listComments` still
+  mirrors `listReportVersions`'s CURRENT behavior (org-scoped `loadOrgReport`) — flagged as a KNOWN
+  GAP, not fixed: `getReport` gained the grantee carve-out in PR #150 but `listReportVersions` did
+  not, so `listComments` inherits the same parity gap by design (mirroring a sibling endpoint, not
+  `getReport` itself). `CommentAdded`/`CommentResolved` flow through the same `UnitOfWork`+
+  `EventOutbox` transaction shape `processScanResult` uses; `deleteComment` needs neither (no domain
+  event on delete).
+  **Audit rows were NOT added** — despite ADR-0059/0060/0056 all saying "matches the existing
+  every-mutation-audited pattern," grepping the codebase found NO use case anywhere writes
+  `audit_log` yet (the table exists; `AuditLogger` is a documented-but-unwired aspirational
+  consumer on every event in `docs/events.md`, matching this one). Following the actual codebase,
+  not the aspirational doc line — flagged rather than inventing a one-off pattern for this slice
+  alone.
+- **HTTP**: `commentBody` (resource.ts) — `object: "comment"`, `parent_id` null for a root;
+  `addCommentToHttp`/`resolveCommentToHttp`/`deleteCommentToHttp` (write-response.ts),
+  `listCommentsToHttp` (list-response.ts).
+- **Routes**: `GET`/`POST /api/v1/reports/{slug}/comments` (list + create-or-reply — POST branches
+  on `parent_comment_id` in the body, same "one route, body-shape dispatch" idiom the ACL route
+  already uses) and `PATCH`/`DELETE /api/v1/reports/{slug}/comments/{comment_id}` (resolve / delete).
+  **JUDGMENT CALL, flagged in the route file**: ADR-0064 §7 lists "get/update/resolve/delete"
+  without pinning verbs; PATCH carries resolve (mirrors `api.v1.reports.$slug.ts`'s "PATCH = mutate
+  a field in place") since there's exactly one transition today and no un-resolve. A standalone GET
+  for one comment and a general field-editing PATCH were NOT built — out of scope for this slice.
+  MCP tools deferred entirely, per the task brief (kept the surface tight).
+  `openapi.yaml` gained the `Comments` tag, both paths, and the `Comment`/`CommentList`/`Anchor`/
+  `CreateCommentRequest` schemas.
+- **e2e**: `tests/e2e/features/comment-on-a-report.feature` (`@phase-2 @wip`, matching
+  `list-report-versions.feature`'s already-implemented-but-not-yet-playwright-wired precedent) —
+  create+reply+list+resolve happy path, single-level-threading rejection, unauthenticated 401,
+  cross-org 403, author-or-owner moderation, and "never surfaces on the public viewer." Registered
+  in `scripts/docs-conformance/config.mjs`'s feature catalog. `docs/events.md`/
+  `docs/domain-glossary.md`/`docs/context-map.md` already carried `Comment`/`Anchor`/`Thread`/
+  `CommentAdded`/`CommentResolved` from an earlier docs-integration wave — verified they match what
+  actually got built, no corrections needed. `README.md`'s feature-file count corrected 29 → 31
+  (it was already one stale before this slice — a pre-existing, unrelated drift, fixed in passing).
+- **Untouched, as scoped**: `apps/view` (no viewer changes — comments stay app-origin-only per
+  ADR-0064 §4), the editor slice's areas (upload path, `r2-blob-store`, `packages/report-html`),
+  `docs/mcp-usage.md`, every migration number except `0013`.
+- **Gate** (final, post-rebase onto PR #150): `pnpm install` clean; `biome ci .` clean;
+  `turbo typecheck` (12 packages) clean; `vitest run` — 757 tests / 118 files green (the full
+  monorepo suite, PR #150's own `WriteGrantStore` contract suites included; this slice adds the two
+  new pglite comment contract suites, 9 `arp-http` tests, and the grantee-authorization tests added
+  during the auth-seam rebase fix); `npm run docs:check` clean.
+
+Worktree: `worktree/comments` (branch `feat/comments`). Not yet merged.

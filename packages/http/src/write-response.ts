@@ -3,10 +3,10 @@
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
 import type { WriteGrant } from "arp-application";
-import type { Acl, AppError, Folder, Report, Result, UserId } from "arp-domain";
+import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
-import { folderBody, listBody, reportBody, type WireContext } from "./resource";
+import { commentBody, folderBody, listBody, reportBody, type WireContext } from "./resource";
 
 /** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
  *  allowed emails + owner access TTL; the argon2id password hash is NEVER serialized. */
@@ -186,4 +186,32 @@ export function listWriteGrantsToHttp(
     contentType: "application/json",
     body: listBody(result.value.map(writeGrantBody), false),
   };
+}
+
+/** POST /api/v1/reports/{slug}/comments — 201 with the created comment resource
+ *  (ADR-0064 §7). Also used for a reply — a reply IS a comment resource, just
+ *  with `parent_id` set. */
+export function addCommentToHttp(
+  result: Result<Comment, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 201, contentType: "application/json", body: commentBody(result.value, ctx) };
+}
+
+/** PATCH /api/v1/reports/{slug}/comments/{comment_id} — 200 with the resolved
+ *  comment resource (ADR-0064 §7, §3 — author-or-owner; idempotent). */
+export function resolveCommentToHttp(
+  result: Result<Comment, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: commentBody(result.value, ctx) };
+}
+
+/** DELETE /api/v1/reports/{slug}/comments/{comment_id} — 204 No Content on
+ *  success (ADR-0064 §7, §3 — author-or-owner). */
+export function deleteCommentToHttp(result: Result<void, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 204, contentType: "application/json", body: undefined };
 }

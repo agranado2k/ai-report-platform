@@ -3,8 +3,14 @@
 // (ADR-0052); lists use the `{ object: "list", data: [...], has_more }` envelope.
 // Errors stay RFC 9457 (ADR-0040). Mapping lives ONLY here, at the http boundary.
 import type { ReportVersionSummary } from "arp-application";
-import type { Folder, FolderId, ReportId, Slug } from "arp-domain";
-import { folderIdToWire, reportIdToWire, userIdToWire, versionIdToWire } from "arp-domain";
+import type { Comment, Folder, FolderId, ReportId, Slug } from "arp-domain";
+import {
+  commentIdToWire,
+  folderIdToWire,
+  reportIdToWire,
+  userIdToWire,
+  versionIdToWire,
+} from "arp-domain";
 
 /** Which deployment a resource belongs to (ADR-0053): the live product vs preview/dev. */
 export type WireMode = "prod" | "dev";
@@ -64,6 +70,31 @@ export function versionBody(v: ReportVersionSummary, ctx: WireContext) {
     scan_status: v.scanStatus,
     size_bytes: v.sizeBytes,
     origin: v.origin,
+    mode: ctx.mode,
+  };
+}
+
+/** A `comment` resource (ADR-0064) — the Comment aggregate on the wire. `parent_id`
+ *  is null for a root comment (starts a Thread), a `comment_…` External Id for a
+ *  reply. `anchor.relative` is omitted when absent (v1: no editor slice yet, so
+ *  every comment is version-pinned only). */
+export function commentBody(c: Comment, ctx: WireContext) {
+  return {
+    object: "comment" as const,
+    id: commentIdToWire(c.id),
+    report_id: reportIdToWire(c.reportId),
+    author_id: userIdToWire(c.authorUserId),
+    parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
+    body: c.body,
+    anchor: {
+      version_pinned: {
+        version_id: versionIdToWire(c.anchor.versionPinned.versionId),
+        text_quote: c.anchor.versionPinned.textQuote,
+      },
+      ...(c.anchor.relative !== undefined ? { relative: c.anchor.relative } : {}),
+    },
+    resolved_at: c.resolvedAt === null ? null : new Date(c.resolvedAt).toISOString(),
+    created_at: new Date(c.createdAt).toISOString(),
     mode: ctx.mode,
   };
 }

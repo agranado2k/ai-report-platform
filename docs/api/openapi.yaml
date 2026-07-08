@@ -16,6 +16,11 @@ tags:
     description: Upload, re-upload, and list reports (ADR-0037, ADR-0036).
   - name: Folders
     description: List the org's folder tree (ADR-0036, Reports & Folders).
+  - name: Comments
+    description: >
+      Threaded comments anchored to a location in a report's document
+      (ADR-0064, Authoring & Collaboration). Authenticated only — never
+      reachable from the public viewer origin.
   - name: Viewer
     description: >
       Public capability-URL serving on the separate view.<domain> origin
@@ -550,6 +555,139 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/reports/{slug}/comments:
+    get:
+      operationId: listComments
+      tags: [Comments]
+      summary: List a report's comments (cursor-paginated)
+      description: >
+        Returns the report's `Comment`s (roots and replies interleaved; thread
+        client-side via `parent_id`) as a cursor-paginated list envelope
+        (ADR-0053, ADR-0064 §7), newest-created first. Auth is IDENTICAL to
+        `GET /api/v1/reports/{slug}` — org-scoped (ADR-0059 §3). Comments are
+        workspace collaboration data — NEVER reachable from the public viewer
+        origin (ADR-0064 §4).
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/StartingAfter' }
+        - { $ref: '#/components/parameters/EndingBefore' }
+      responses:
+        '200':
+          description: A cursor-paginated list of the report's comments (possibly empty).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createComment
+      tags: [Comments]
+      summary: Create a comment, or reply to one
+      description: >
+        Creates a root comment (starts a Thread), or — when the body carries
+        `parent_comment_id` — a reply to that root. Single-level threading
+        (ADR-0064 Decision 2/4): replying to a reply is a 422. Gated by
+        `canWrite` (ADR-0064 §3 — the SAME seam as rename/re-upload/move:
+        `isOwner OR hasWriteGrant`, ADR-0060 §4), not the stricter owner-only
+        delete/setAcl seam.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCommentRequest' }
+      responses:
+        '201':
+          description: The created comment (or reply) resource.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/comments/{comment_id}:
+    patch:
+      operationId: resolveComment
+      tags: [Comments]
+      summary: Resolve a comment
+      description: >
+        Marks a comment resolved (ADR-0064 §3). Idempotent — resolving an
+        already-resolved comment is a no-op. Authorized by a DIFFERENT rule
+        than create/reply: the comment's AUTHOR or the report's OWNER (not
+        `canWrite`) — the owner moderates every comment on their report.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - name: comment_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
+          description: The comment's External Id (ADR-0052).
+      responses:
+        '200':
+          description: The resolved comment resource.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteComment
+      tags: [Comments]
+      summary: Delete a comment
+      description: >
+        Hard-deletes a comment (ADR-0064 §3). Deleting a root also deletes its
+        replies (the DB's self-FK `ON DELETE CASCADE`). Same author-or-owner
+        authorization as resolve.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - name: comment_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
+          description: The comment's External Id (ADR-0052).
+      responses:
+        '204':
+          description: Deleted (no content).
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /{slug}:
     get:
       operationId: viewReport
@@ -810,6 +948,97 @@ components:
                 The owning user's `user_…` External Id (ADR-0052, ADR-0059) — the user
                 who created the report. Writes are ownership-gated; org members see the
                 report in lists but only the owner may delete it or manage its sharing.
+
+    CommentList:
+      description: A cursor-paginated list of a report's comments (ADR-0053/ADR-0064 list envelope).
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: { type: string, enum: [list] }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Comment' }
+        has_more:
+          type: boolean
+          description: True if more items follow; page on with `starting_after` = the last id.
+
+    Anchor:
+      description: >
+        The two-part, degrading location a comment attaches to (ADR-0064 §2a).
+        v1 always carries `version_pinned`; `relative` is an opaque, optional
+        Yjs-relative-position payload the editor slice will populate later —
+        untyped on the wire, passed through as given.
+      type: object
+      required: [version_pinned]
+      properties:
+        version_pinned:
+          type: object
+          required: [version_id, text_quote]
+          properties:
+            version_id:
+              type: string
+              pattern: '^version_[0-9A-Za-z]{22}$'
+              description: The `ReportVersion` this comment was anchored against.
+            text_quote:
+              type: string
+              description: A snapshot of the anchored text (max 2000 chars) — shown even once the anchor can no longer resolve live.
+        relative:
+          description: Opaque Yjs-relative-position payload (ADR-0067) — reserved, unused until the editor slice lands.
+
+    Comment:
+      description: A `comment` resource — the `Comment` aggregate on the wire (ADR-0064).
+      type: object
+      required: [object, id, report_id, author_id, parent_id, body, anchor, resolved_at, created_at, mode]
+      properties:
+        object: { type: string, enum: [comment] }
+        id:
+          type: string
+          pattern: '^comment_[0-9A-Za-z]{22}$'
+          example: comment_9nQ4mK2vR7pXtB6cD1eF8g
+          description: The comment's External Id (ADR-0052).
+        report_id:
+          type: string
+          pattern: '^report_[0-9A-Za-z]{22}$'
+        author_id:
+          type: string
+          pattern: '^user_[0-9A-Za-z]{22}$'
+          description: The comment's author, as a `user_…` External Id (ADR-0052).
+        parent_id:
+          type: [string, 'null']
+          pattern: '^comment_[0-9A-Za-z]{22}$'
+          description: Null for a root comment (starts a Thread); set for a reply (ADR-0064 Decision 2 — single-level, so this is always a ROOT comment's id).
+        body:
+          type: string
+          description: Bounded to 2000 characters (JUDGMENT CALL — ADR-0064 gives no exact number).
+        anchor: { $ref: '#/components/schemas/Anchor' }
+        resolved_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null = open; set = resolved.
+        created_at:
+          type: string
+          format: date-time
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
+
+    CreateCommentRequest:
+      description: >
+        Create a root comment, or (with `parent_comment_id`) reply to one.
+        Single-level threading — a `parent_comment_id` that is itself a reply
+        is rejected (422).
+      type: object
+      required: [body, anchor]
+      properties:
+        body:
+          type: string
+          description: The comment text (max 2000 chars).
+        anchor: { $ref: '#/components/schemas/Anchor' }
+        parent_comment_id:
+          type: string
+          pattern: '^comment_[0-9A-Za-z]{22}$'
+          description: Omit to create a root comment; set to reply to that root.
 
     FolderList:
       description: A cursor-paginated list of folders (ADR-0053 list envelope).

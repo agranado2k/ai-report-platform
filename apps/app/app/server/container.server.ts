@@ -10,6 +10,7 @@ import {
   ClerkBackendOrgProvisioner,
   DbContext,
   DrizzleApiKeyRepository,
+  DrizzleCommentRepository,
   DrizzleEventOutbox,
   DrizzleFolderRepository,
   DrizzleGrantStore,
@@ -173,6 +174,15 @@ let _folders: DrizzleFolderRepository | undefined;
 export function folderRepo(): DrizzleFolderRepository {
   if (!_folders) _folders = new DrizzleFolderRepository(context());
   return _folders;
+}
+
+let _comments: DrizzleCommentRepository | undefined;
+
+/** The comment repository (Authoring & Collaboration, ADR-0064) — for the
+ *  add/reply/resolve/delete/list comment routes. Memoized like folderRepo(). */
+export function commentRepo(): DrizzleCommentRepository {
+  if (!_comments) _comments = new DrizzleCommentRepository(context());
+  return _comments;
 }
 
 let _passwordHasher: Argon2PasswordHasher | undefined;

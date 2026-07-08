@@ -3,7 +3,11 @@
 // app-side (no DB default). Column names are explicit snake_case. FK policy:
 // ON DELETE RESTRICT by default; CASCADE only on report_versions→reports,
 // acls→reports, report_grants→reports, report_write_grants→reports,
-// scan_jobs→report_versions (db-design.md → Conventions).
+// scan_jobs→report_versions, comments→reports, and comments→comments (self,
+// parent_comment_id — JUDGMENT CALL, ADR-0064: a thread's replies are owned by
+// its root the same way versions are owned by their report, so deleting the
+// root cascades its replies rather than leaving them FK-orphaned under the
+// RESTRICT default) (db-design.md → Conventions).
 
 import { sql } from "drizzle-orm";
 import {
@@ -302,6 +306,42 @@ export const reportWriteGrants = pgTable(
     // reserved for the signup-time grantee_user_id backfill sweep (ADR-0060 §2,
     // "grants for this email" lookup). Don't drop as dead.
     index("report_write_grants_grantee_email_idx").on(t.granteeEmail),
+  ],
+);
+
+// ── Authoring & Collaboration (ADR-0064) ──────────────────────────────────
+// The `Comment` aggregate: a thread is a root comment (parent_comment_id NULL)
+// plus its replies, single level (enforced at the application layer, ADR-0064
+// Decision 2 — not a self-join depth constraint). `anchor_json` carries the
+// Anchor value object (version-pinned fallback + an optional opaque relative
+// position, packages/domain/src/anchor.ts).
+export const comments = pgTable(
+  "comments",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => reports.id, { onDelete: "cascade" }),
+    authorUserId: uuid("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    // NULL = root (starts a Thread); set = a reply to that root. Self-FK CASCADE
+    // (see the file-header FK-policy note) — deleting a root deletes its replies.
+    parentCommentId: uuid("parent_comment_id").references((): AnyPgColumn => comments.id, {
+      onDelete: "cascade",
+    }),
+    body: text("body").notNull(),
+    anchorJson: jsonb("anchor_json").notNull(),
+    resolvedAt: tstz("resolved_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("comments_report_id_idx").on(t.reportId),
+    // Serves the cursor-paginated per-report comment list (listComments,
+    // ADR-0053): keyset on (report_id, id DESC) — same shape as
+    // report_versions_report_id_idx's sibling would be, had one been needed.
+    index("comments_report_id_keyset_idx").on(t.reportId, t.id.desc()),
+    index("comments_parent_comment_id_idx").on(t.parentCommentId),
   ],
 );
 

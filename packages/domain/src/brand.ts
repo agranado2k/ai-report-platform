@@ -13,6 +13,8 @@ export type UserId = Brand<string, "UserId">;
 export type FolderId = Brand<string, "FolderId">;
 export type ReportId = Brand<string, "ReportId">;
 export type VersionId = Brand<string, "VersionId">;
+/** Authoring & Collaboration (ADR-0064) — the `Comment` aggregate id. */
+export type CommentId = Brand<string, "CommentId">;
 
 // Third-party (Clerk) ids — segregated from OUR ids (ADR-0052). Persisted in the
 // `clerk_user_id` / `clerk_org_id` columns; used only to map a Clerk principal to
@@ -25,5 +27,6 @@ export const userId = (s: string): UserId => s as UserId;
 export const folderId = (s: string): FolderId => s as FolderId;
 export const reportId = (s: string): ReportId => s as ReportId;
 export const versionId = (s: string): VersionId => s as VersionId;
+export const commentId = (s: string): CommentId => s as CommentId;
 export const clerkUserId = (s: string): ClerkUserId => s as ClerkUserId;
 export const clerkOrgId = (s: string): ClerkOrgId => s as ClerkOrgId;

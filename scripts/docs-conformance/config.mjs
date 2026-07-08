@@ -170,6 +170,11 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
+  "comment-on-a-report": {
+    title: "Comment on a report",
+    phase: "@phase-2",
+    status: "wip",
+  },
   "cross-org-collaboration": {
     title: "Cross-org collaboration via grants",
     phase: "@phase-2.5",
