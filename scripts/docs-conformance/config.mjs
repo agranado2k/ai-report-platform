@@ -170,6 +170,11 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
+  "review-version-history-and-diff": {
+    title: "Review a report's version history and compare two versions",
+    phase: "@phase-2",
+    status: "wip",
+  },
   "comment-on-a-report": {
     title: "Comment on a report",
     phase: "@phase-2",
