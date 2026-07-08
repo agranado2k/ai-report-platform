@@ -29,6 +29,7 @@ import {
   FolderIcon,
   type FolderNode,
   FolderTree,
+  HistoryIcon,
   Input,
   MoreIcon,
   PageShell,
@@ -382,6 +383,16 @@ export default function Index() {
                     className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
                   >
                     <EditIcon className="h-4 w-4" />
+                  </a>
+                  {/* Version-history + visual diff entry point (ADR-0065):
+                      same org-scoped read gate as GET /api/v1/reports/{slug}/versions
+                      (reports.$slug.versions.tsx mirrors it exactly). */}
+                  <a
+                    href={`/reports/${r.slug}/versions`}
+                    aria-label={`Version history for ${r.title}`}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
+                  >
+                    <HistoryIcon className="h-4 w-4" />
                   </a>
                   <div className="min-w-0 flex-1">
                     <EditableReportTitle slug={r.slug} title={r.title} />

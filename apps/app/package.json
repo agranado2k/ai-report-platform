@@ -30,6 +30,7 @@
     "arp-observability": "workspace:^",
     "arp-report-html": "workspace:*",
     "isbot": "^5.1.0",
+    "linkedom": "^0.18.13",
     "prosemirror-commands": "^1.6.2",
     "prosemirror-history": "^1.4.1",
     "prosemirror-keymap": "^1.2.2",

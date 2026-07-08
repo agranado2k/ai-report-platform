@@ -41,14 +41,11 @@ describe("fragment-level round-trips", () => {
       "<p>Built for <strong>Arthur Granado</strong> — Founder &amp; CTO of " +
       '<a href="https://uk.linkedin.com/in/agranado2k">House Numbers</a>, ex-Snyk. ' +
       'Horizons: <strong style="color:var(--now)">now</strong>, <em>next 12 months</em>.</p>';
-    // jsdom (like a real browser) re-serializes the `style` attribute from
-    // the parsed CSSStyleDeclaration, not the original attribute text — it
-    // normalizes to `color: var(--now);` (space after colon, trailing
-    // semicolon). This is DOM CSSOM behavior, not a schema fidelity loss
-    // (the class/tag/text-fidelity contract this package targets, per
-    // ADR-0062 §3, never claimed byte-identical `style` attribute text).
-    const expected = html.replace('style="color:var(--now)"', 'style="color: var(--now);"');
-    expect(serializeBody(parseBody(html))).toBe(expected);
+    // linkedom (the server DOM backend) preserves the `style` attribute text
+    // verbatim — unlike jsdom, which re-serialized it from the CSSStyleDeclaration
+    // and normalized to `color: var(--now);`. So the round-trip is byte-identical
+    // here, a strict improvement over the previous jsdom CSSOM normalization.
+    expect(serializeBody(parseBody(html))).toBe(html);
   });
 
   it("preserves an unrecognized class on a generic inline <span> (attr-retention rule)", () => {
@@ -152,10 +149,9 @@ describe("fragment-level round-trips", () => {
     const html =
       '<div class="tablewrap"><table><thead><tr><th style="width:22%">Skill</th></tr></thead>' +
       "<tbody><tr><td>TDD</td></tr></tbody></table></div>";
-    // See the jsdom CSSOM style-normalization note on the strong/em/a test
-    // above — same behavior, applies here too.
-    const expected = html.replace('style="width:22%"', 'style="width: 22%;"');
-    expect(serializeBody(parseBody(html))).toBe(expected);
+    // linkedom preserves the `style` text verbatim (see the strong/em/a test
+    // above) — byte-identical round-trip, no CSSOM normalization.
+    expect(serializeBody(parseBody(html))).toBe(html);
   });
 
   it("round-trips inline marks (em) inside a table cell", () => {
@@ -189,8 +185,11 @@ describe("fragment-level round-trips", () => {
       '<div class="rd">Description.</div></div>' +
       '<div class="rtags"><span class="chip chip-cto">CTO</span></div></div></details>';
     const roundtripped = serializeBody(parseBody(html));
+    // linkedom serializes attributes in a different (equally valid) order than
+    // jsdom — `open` before `class` on <details>. HTML attribute order is not
+    // semantically meaningful; the classes/structure/text all survive.
     expect(roundtripped).toBe(
-      '<details class="resgroup card" open="open"><summary>📚 Books</summary>' +
+      '<details open="open" class="resgroup card"><summary>📚 Books</summary>' +
         '<div class="resrow"><div><div class="rt"><p>Title</p></div>' +
         '<div class="rmeta"><p>Author · <span class="ref">example.com</span></p></div>' +
         '<div class="rd"><p>Description.</p></div></div>' +

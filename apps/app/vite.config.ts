@@ -5,9 +5,13 @@ import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  // @node-rs/argon2 (ADR-0056) ships a native `.node` binary — keep it external so
-  // the SSR bundler doesn't try to bundle it; Vercel traces it into the function.
-  ssr: { external: ["@node-rs/argon2"] },
+  // Keep native / awkward-to-bundle deps external so the SSR bundler doesn't inline
+  // them (which drops assets or breaks module-format interop); Vercel traces them in.
+  // - @node-rs/argon2 (ADR-0056) ships a native `.node` binary.
+  // - linkedom (via arp-report-html, server-side DOM) — externalized for the same
+  //   safety as argon2; it replaced jsdom, which was un-shippable on the serverless
+  //   runtime (css-tree data-file tracing, then html-encoding-sniffer ESM interop).
+  ssr: { external: ["@node-rs/argon2", "linkedom"] },
   plugins: [
     // Tailwind v4 (CSS-first @theme tokens) — must run before Remix's CSS handling.
     tailwindcss(),

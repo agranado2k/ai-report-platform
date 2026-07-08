@@ -80,3 +80,53 @@ h2,
 h3 {
   letter-spacing: -0.02em;
 }
+
+/* Version-history visual diff (ADR-0065 §3/§4) — a minimal, neutral style for
+ * the body-only fragment rendered by reports.$slug.diff.tsx (never the
+ * report's own presentation shell, which is a full standalone document —
+ * see that route's comment). `.rd-diff-*` classes come from
+ * arp-report-html's diffRendered (word-level, ProseMirror-changeset) and
+ * diffHtmlFallback (block-level, lower-fidelity) — same tokens, same
+ * component, so both diff modes read as one system. */
+.report-diff-body {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--fg);
+}
+.report-diff-body p {
+  margin: 0.6em 0;
+}
+.report-diff-body table {
+  border-collapse: collapse;
+}
+
+.rd-diff-ins {
+  background: color-mix(in srgb, var(--success) 24%, transparent);
+  text-decoration: underline;
+  text-decoration-color: var(--success);
+  border-radius: 2px;
+}
+.rd-diff-del {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  text-decoration: line-through;
+  color: var(--danger);
+  border-radius: 2px;
+}
+
+.rd-diff-ins-block,
+.rd-diff-del-block {
+  display: block;
+  margin: 0.5em 0;
+  padding: 0.5em 0.75em;
+  border-radius: var(--radius-control);
+}
+.rd-diff-ins-block {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-left: 3px solid var(--success);
+}
+.rd-diff-del-block {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-left: 3px solid var(--danger);
+  text-decoration: line-through;
+  opacity: 0.85;
+}

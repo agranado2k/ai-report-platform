@@ -13,13 +13,14 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "linkedom": "^0.18.13",
+    "prosemirror-changeset": "^2.4.1",
     "prosemirror-model": "^1.25.10",
     "prosemirror-schema-basic": "^1.2.4",
-    "prosemirror-schema-list": "^1.5.1"
+    "prosemirror-schema-list": "^1.5.1",
+    "prosemirror-transform": "^1.10.4"
   },
   "devDependencies": {
-    "@types/jsdom": "^28.0.3",
-    "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
     "vitest": "^3.2.4"
   }

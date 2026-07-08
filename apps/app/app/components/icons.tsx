@@ -99,3 +99,15 @@ export function EditIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/** History — clock with a back-arrow sweep, the dashboard's entry point into a
+ *  report's version history + visual diff (ADR-0065). */
+export function HistoryIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v4h4" />
+      <path d="M12 8v4l3 2" />
+    </Icon>
+  );
+}
