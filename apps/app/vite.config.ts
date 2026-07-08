@@ -5,9 +5,12 @@ import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  // @node-rs/argon2 (ADR-0056) ships a native `.node` binary — keep it external so
-  // the SSR bundler doesn't try to bundle it; Vercel traces it into the function.
-  ssr: { external: ["@node-rs/argon2"] },
+  // Keep native / data-file-bearing deps external so the SSR bundler doesn't inline
+  // them (which drops their non-JS assets); Vercel then traces them into the function.
+  // - @node-rs/argon2 (ADR-0056) ships a native `.node` binary.
+  // - jsdom (via arp-report-html) pulls css-tree, which `require`s `data/patch.json`
+  //   at load — bundling mangles that path and 500s every route at boot (this fix).
+  ssr: { external: ["@node-rs/argon2", "jsdom"] },
   plugins: [
     // Tailwind v4 (CSS-first @theme tokens) — must run before Remix's CSS handling.
     tailwindcss(),
