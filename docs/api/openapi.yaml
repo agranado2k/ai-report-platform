@@ -726,6 +726,40 @@ paths:
         '451':
           description: The relevant version is flagged — unavailable for review.
 
+  /{slug}/edit:
+    get:
+      operationId: viewerEditDeepLink
+      tags: [Viewer]
+      summary: Deep-link from the viewer to the dashboard editor (ADR-0063 Decision 3)
+      description: >
+        A PURE, unauthenticated 302 redirect to the dashboard's own edit route
+        (`{app_origin}/reports/{slug}/edit`, ADR-0062) — the documented
+        fallback while the full in-viewer editing route (ADR-0063 Decisions
+        1-2, a second CSP profile on this origin) stays gated on its required
+        `/security-review` pass. No JS, no HTML body, no session/token concept
+        added to view.<domain>; auth happens entirely on the dashboard after
+        the hop. Never reachable from, and never modifies the behavior of,
+        `GET /{slug}`.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+      responses:
+        '302':
+          description: Redirect to the dashboard's edit route.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+              description: '`{app_origin}/reports/{slug}/edit`'
+        '404':
+          description: The slug does not have a valid shape (rejected before any redirect is built).
+        '503':
+          description: >
+            The dashboard origin isn't configured (APP_ORIGIN unset) — fails
+            closed rather than guessing at a same-origin fallback.
+
 components:
   securitySchemes:
     apiKey:

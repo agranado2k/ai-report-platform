@@ -13,6 +13,10 @@ import { defineConfig } from "vitest/config";
 // need no DOM at all, so `createEditorState`/keymap-bound commands are cheap
 // to unit-test here; the mounted `EditorView` (real DOM, real keyboard
 // events) stays e2e-only like the rest of the Remix UI.
+// `apps/view/app/server` is the SAME carve-out on the viewer app, added for
+// the GET /<slug>/edit deep-link's pure URL-building helper (ADR-0063
+// Decision 3) — apps/view otherwise has no unit-test tier at all (its Remix
+// routes stay e2e-only), same as apps/app's routes.
 export default defineConfig({
   test: {
     include: [
@@ -20,6 +24,7 @@ export default defineConfig({
       "apps/mcp/src/**/*.test.ts",
       "apps/app/app/server/**/*.test.ts",
       "apps/app/app/editor/**/*.test.ts",
+      "apps/view/app/server/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test
