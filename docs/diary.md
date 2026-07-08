@@ -13,7 +13,7 @@
 | **Last commit on main**| `e2986b3` — Merge PR #150 (ownership epic completion — org ACL mode + per-report write grants, ADR-0056 P2 / ADR-0060). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/comments` (ADR-0064 comments & annotations slice 1 — full vertical, branch `feat/comments`, not yet merged; rebased onto PR #150). `worktree/sharing-completion` merged (PR #150 — org ACL mode + per-report write grants); `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
+| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/comments` (ADR-0064 comments & annotations slice 1 — full vertical, branch `feat/comments`, not yet merged; rebased onto PR #150). `worktree/editor-mvp` (ADR-0062 in-dashboard editor, branch `feat/editor-mvp`, not yet merged). `worktree/visual-diff` (ADR-0065 §3/§4 version-history UI + visual diff, branch `feat/visual-diff`, not yet merged). `worktree/sharing-completion` merged (PR #150 — org ACL mode + per-report write grants); `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -2325,3 +2325,92 @@ stays gated on its `/security-review` pass.
   `vitest run` — 126 files / 824 tests green; `npm run docs:check` clean.
 
 Worktree: `worktree/comment-ui` (branch `feat/comment-ui`). Not yet merged.
+
+### 2026-07-08 — Version history UI + visual diff (ADR-0065 §3/§4)
+
+Built the dashboard-facing half of ADR-0065: a version-history page and a visual diff between two
+versions, on top of the already-shipped `/api/v1/reports/{slug}/versions` endpoint (PR #144-adjacent
+work) and the ADR-0062 `_source.json` sidecar.
+
+- **Diff engine (`packages/report-html`, framework-free — no React/Remix, only prosemirror-\*)**:
+  - `diffDocs(oldDoc, newDoc): DocDiff` (`diff.ts`) — diffs two `PMDocJson`s by building a single
+    `Transform` that replaces the whole of `oldDoc`'s content with `newDoc`'s, then handing its step
+    maps to **`prosemirror-changeset`** (new dep, this package only, per ADR-0065's sanctioning) via
+    `ChangeSet.create(oldDoc).addSteps(tr.doc, tr.mapping.maps, null)`. The library re-diffs the
+    replaced range internally down to character-level spans; `simplifyChanges` then expands those to
+    word boundaries (confirmed against the fixture: a raw `"jum"→"lea"` stem overlap becomes the clean
+    whole-word `"jumps"→"leaps"`). Verified on the real `ai-readiness-report.html` fixture (1045 lines):
+    editing one `.desc` paragraph produces exactly the changed spans, with the shared
+    `"Tokenization"`/`"context-window economics"` prefix correctly recognized as unchanged.
+  - `diffRendered(oldDoc, newDoc): string` (`diff.ts`) — renders the merged body HTML with
+    `<span class="rd-diff-ins">`/`<span class="rd-diff-del">` markers (classes, never bare
+    `<ins>`/`<del>`, per the brief). Mechanism: re-parse `newDoc` into `diffSchema` (`diff-schema.ts` —
+    `reportSchema` plus two transient inline marks, `diffIns`/`diffDel`, never persisted), then apply the
+    change ranges as `addMark`/`insert` on a `Transform`, highest position first (right-to-left) so
+    earlier positions in the same pass stay valid. Deletions have no position in the new doc
+    (`toB === fromB`), so the deleted text is inserted as its own `diffDel`-marked run immediately before
+    the insertion point — the spike's `Decoration.widget` idea, reimplemented without needing
+    `prosemirror-view`/`-state` at all (avoided on purpose — those are UI-layer deps; the whole engine
+    stays framework-free using only `prosemirror-model`/`-transform`/`-changeset`, all serialized through
+    the same jsdom `DOMSerializer` `parseBody`/`serializeBody` already use). Accepted ADR-0065 limitation
+    reproduced and tested: a change spanning a paragraph boundary collapses the deleted text into one
+    run.
+  - `diffHtmlFallback(oldHtml, newHtml): HtmlFallbackDiff` (`html-fallback.ts`) — best-effort, block-level
+    diff (split on `><` tag adjacency, classic O(n·m) LCS) for when either side lacks a sidecar. **Security
+    finding, fixed before writing any UI**: this fallback's INPUT is raw, unsanitized, possibly-hostile
+    uploaded HTML — the reason it's a fallback at all is that content never went through `reportSchema`'s
+    parse (the sanitizing boundary `security.test.ts` enforces for `diffDocs`/`diffRendered`). An
+    HTML-passthrough fallback would have been a live app-origin XSS route, directly contradicting
+    ADR-002/013's origin isolation. Fixed by stripping every block to plain text (`stripTags`) and
+    HTML-escaping it (`escapeHtml`) before ever assembling the output string — the returned `html` never
+    contains a byte the caller didn't author. New tests assert a `<script>`, an `onclick=`, and an
+    entity-encoded `<img onerror=…>` all come out inert. `label` is always
+    `"structural diff unavailable — raw comparison"` (`STRUCTURAL_DIFF_UNAVAILABLE_LABEL`), the exact
+    ADR-0065 §3 wording.
+  - 24 new tests across `diff.test.ts` (10) and `html-fallback.test.ts` (8, incl. 3 security) plus the
+    pre-existing 5 fidelity + auto-wrap/fragments/security/shell tests — `packages/report-html` now 69
+    tests, all green.
+- **Dashboard pages (`apps/app`)**:
+  - `reports.$slug.versions.tsx` — lists versions (version_no, uploaded-at, scan_status, origin badge,
+    live badge), "View" (→ `view.<domain>/<slug>?v=N`) and "Compare with previous" actions. **Reality
+    check, flagged rather than silently worked around**: the viewer (`apps/view/app/routes/$slug.tsx`)
+    has NO `?v=N` handling at all today — it only ever serves the live version — despite ADR-0065 §5
+    saying that behavior is "unchanged" (implying it already existed). Out of scope to fix here (`apps/view`
+    is off-limits for this slice); the link is built to the documented contract for forward-compatibility,
+    with an inline comment explaining it's a no-op on non-live versions until a future `apps/view` slice
+    adds the handling.
+  - `reports.$slug.diff.tsx?from=N&to=N` — loads both versions' HTML + optional sidecars; structural diff
+    when both sides have one, `diffHtmlFallback` (with its label) otherwise. Renders the diff's **body-only**
+    fragment inside the dashboard page, deliberately NOT the report's own presentation shell (a full
+    standalone document with its own fonts/layout) — new `.report-diff-body`/`.rd-diff-*` rules added to
+    `apps/app/app/styles/theme.css` (Forge & Ember tokens, ADR-0058) so both diff modes read as one
+    system.
+  - **Auth**: both routes share a new tiny helper, `apps/app/app/server/report-versions.server.ts`
+    (`loadReportForVersionsRead`) — runs `listReportVersions`'s org-scoped `loadOrgReport` guard FIRST
+    (mirroring `GET /api/v1/reports/{slug}/versions` exactly, per the brief), then `getReport` only after
+    that succeeds, purely to obtain the full `Report` aggregate (title, and — for the diff route — each
+    version's manifest) that the `VersionPage` projection deliberately omits. Documented as safe in the
+    helper's own comment: `getReport`'s gate is a strict superset of `loadOrgReport`'s, so calling it
+    second can't grant anything the first check didn't already. This is a small app-local read helper, not
+    a new `packages/application` use case (per the brief's stated preference).
+  - **Entry point**: a new `HistoryIcon` (`components/icons.tsx`) link on each dashboard row
+    (`_index.tsx`), next to the existing Open/Edit icons, routing to `/reports/:slug/versions`.
+  - **Scope-limiting judgment call**: the versions page shows one page of up to 100 versions (no cursor
+    UI) rather than wiring full pagination — ADR-0065 doesn't mandate infinite-scroll on this page, and
+    the vast majority of reports have far fewer than 100 versions; `hasMore` is surfaced as a note
+    ("showing the 100 most recent") rather than Prev/Next links.
+- **No new `/api/v1` route, no OpenAPI change** — both pages compose the existing `listReportVersions`/
+  `getReport` use cases server-side (no HTTP self-call), per the brief's explicit preference.
+- **e2e**: `tests/e2e/features/review-version-history-and-diff.feature` (`@phase-2 @wip` — matching
+  `list-report-versions.feature`'s status; not yet wired into the Playwright run, same as every other
+  `tests/e2e/features/**` file per `playwright.config.ts`'s comment) — versions-list happy path,
+  structural-diff happy path, fallback-diff happy path, non-owner denial on both routes. Registered in
+  `scripts/docs-conformance/config.mjs`. README's `.feature` count corrected 32 → 34 (one file, plus a
+  pre-existing off-by-one already on disk before this slice).
+- **Not touched, on purpose**: `apps/view`, comments code, `reports.$slug.edit.tsx` (read only, to learn
+  its sidecar-reading pattern), `packages/db` migrations (no schema change — the diff is computed on
+  demand from two existing R2 objects, per ADR-0065 §3's "no new storage artifact" decision).
+- **Gate**: `biome ci .` clean, `turbo typecheck` (12 packages) clean, `vitest run` — 123 files / 806
+  tests green, `docs:check` clean.
+
+Worktree: `worktree/visual-diff` (branch `feat/visual-diff`). Not yet merged.

@@ -14,6 +14,7 @@ export {
   DocumentIcon,
   EditIcon,
   FolderIcon,
+  HistoryIcon,
   KeyIcon,
   MoreIcon,
   UploadIcon,

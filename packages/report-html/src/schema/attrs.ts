@@ -51,8 +51,18 @@ export function isDangerousUrl(value: string): boolean {
  * reject the match (`getAttrs` returning `false`) rather than retain it —
  * the `<a>` tag is dropped and its text content survives unmarked, same as
  * any other tag the schema doesn't recognize.
+ *
+ * SECURITY (PR #156 review, Fix 1): that `getAttrs` check only guards the
+ * HTML→doc direction (`parseDOM`). `diffRendered`/`diffDocs` build docs via
+ * `Node.fromJSON` from a client-supplied `_source.json` sidecar, which never
+ * calls `getAttrs` — a JSON payload can set a link mark's `href` straight to
+ * `javascript:alert(1)` and it would otherwise reach `toDOM` untouched. So
+ * `toDOM` is wrapped too: it neutralizes (drops) a dangerous `href` rather
+ * than trusting whatever's in `attrs`, the same "re-check at output time"
+ * treatment `sanitizeStyle` gets everywhere it's retained.
  */
 export function withSafeHref<T extends MarkSpec>(spec: T): T {
+  const originalToDOM = spec.toDOM as ((n: never) => DOMOutputSpec) | undefined;
   return {
     ...spec,
     parseDOM: ((spec.parseDOM as TagParseRule[] | undefined) ?? []).map((rule) => ({
@@ -65,7 +75,29 @@ export function withSafeHref<T extends MarkSpec>(spec: T): T {
         return (base ?? {}) as Attrs;
       },
     })),
+    toDOM: originalToDOM
+      ? (markOrNode: never) => neutralizeDangerousHref(originalToDOM(markOrNode))
+      : spec.toDOM,
   } as T;
+}
+
+/**
+ * Drop a `href` attribute from a `[tag, attrs?, ...children]` DOMOutputSpec
+ * when it's a dangerous URL scheme (see `isDangerousUrl`) — the toDOM-time
+ * half of `withSafeHref`'s belt-and-braces, for docs built via `Node.fromJSON`
+ * rather than parsed from HTML.
+ */
+function neutralizeDangerousHref(spec: DOMOutputSpec): DOMOutputSpec {
+  if (!Array.isArray(spec)) return spec;
+  const [tag, ...rest] = spec as unknown[];
+  const hasAttrsObj =
+    rest.length > 0 && typeof rest[0] === "object" && rest[0] !== null && !Array.isArray(rest[0]);
+  if (!hasAttrsObj) return spec;
+  const attrs = { ...(rest[0] as Record<string, unknown>) };
+  if (typeof attrs.href === "string" && isDangerousUrl(attrs.href)) {
+    delete attrs.href;
+  }
+  return [tag, attrs, ...rest.slice(1)] as unknown as DOMOutputSpec;
 }
 
 /**
@@ -81,6 +113,14 @@ export function withSafeHref<T extends MarkSpec>(spec: T): T {
  * package: paragraph/heading/blockquote/code_block/link/em/strong/list
  * nodes) — a `style`-selector rule's `getAttrs` takes a `string`, not an
  * element, so it isn't a fit for this helper.
+ *
+ * SECURITY (PR #156 review, Fix 1): `sanitizeStyle` above only runs inside
+ * `getAttrs`, i.e. on the HTML→doc direction. `diffRendered`/`diffDocs`
+ * build docs via `Node.fromJSON` from a client-supplied `_source.json`
+ * sidecar, which never calls `getAttrs` — an unsanitized `style` value set
+ * directly in the JSON would otherwise reach `toDOM` untouched. `toDOM`
+ * re-sanitizes below rather than trusting `attrs.style` — sanitizeStyle is
+ * idempotent, so this is a no-op for the normal parsed-from-HTML case.
  */
 export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
   const originalToDOM = spec.toDOM as ((n: never) => DOMOutputSpec) | undefined;
@@ -105,7 +145,7 @@ export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
         // biome-ignore lint/suspicious/noExplicitAny: nodeOrMark.attrs is typed `any` upstream.
         class: (nodeOrMark as any).attrs.class,
         // biome-ignore lint/suspicious/noExplicitAny: nodeOrMark.attrs is typed `any` upstream.
-        style: (nodeOrMark as any).attrs.style,
+        style: sanitizeStyle((nodeOrMark as any).attrs.style),
       }),
   } as T;
 }
