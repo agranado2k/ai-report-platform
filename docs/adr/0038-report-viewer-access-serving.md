@@ -70,3 +70,21 @@ This gives the Journey-1 "scanning…" UX and takedown hygiene without advertisi
 - `docs/spec.html` rev 8 — viewer flow.
 - Related: ADR-001, ADR-002 (separate origin + PSL + `__Host-` cookies), ADR-012 (scan states), ADR-013 (header stack), ADR-0037 (promotion → `live_version_id`).
 - `docs/domain-glossary.md` — `Slug` (capability), `Live version`, `Acl`, `Scan status`.
+
+### Amendment (2026-07-08): the holding page sits behind the Acl gate
+
+§2's "intentional leak" rationale — *"the existence of a pending report to a link-holder
+[is] acceptable, since the slug is a capability the owner chose to share"* — predates
+ADR-0056, under which reports are **private by default** and a slug is no longer
+necessarily an owner-shared capability. A post-merge dogfood run (2026-07-08) showed the
+viewer serving the `200` scanning holding page **before** the ADR-0056 access decision,
+so a private report revealed its existence and scan state to any slug-holder during the
+scan window (a `200`-vs-`302`/`404` oracle), while the same visitor would be denied once
+the scan completed.
+
+Amended behavior: the viewer computes the ADR-0056 access decision **first** for both
+servable and `scanning` outcomes; the holding page is only shown to visitors the report's
+mode admits (owner via the `/open` hand-off, org members, grantees — or anyone, for
+`public`). Everyone else gets the same unlock redirect they would get for the clean
+version. The §2 state table is otherwise unchanged, and `deleted`/`flagged`/`notfound`
+(410/451/404) remain pre-gate, reason-opaque terminal states as documented contract.

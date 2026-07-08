@@ -2576,3 +2576,27 @@ main) is spec-only Gherkin, like every `.feature` in the repo (no step defs unde
 — living documentation, not executed e2e. No ADR change needed — this makes code match ADR-0038's existing
 contract; ADR-0065 §5's "?v=N unchanged" stays accurate (0065 didn't touch it). Fixes the dead "View"
 links the #156 version-history page shipped.
+
+### 2026-07-08 — Post-merge dogfood on the ownership epic → viewer gate-order fix
+
+Ran `/ce-dogfood` against live prod after the epic merged (report:
+`docs/dogfood-reports/2026-07-08-ownership-epic.md`; 15/16 assertions passed — ownership on the
+wire, creator-is-owner, owner-conditional acl, G3 scope denials, viewer/private gates, problem+json
+401s all verified live with a created-then-deleted probe report). The one failure: the viewer served
+the ADR-0038 §2 `200` "Scanning…" holding page BEFORE the ADR-0056 access decision, so a PRIVATE
+report mid-scan revealed its existence and scan state to any slug-holder (a 200-vs-302/404 oracle
+during the scan window). ADR-0038's original "intentional leak" rationale assumed slugs are
+owner-shared capabilities — true pre-ADR-0056, not since private-by-default.
+
+Fix (`fix/viewer-acl-before-scan`): `ViewOutcome.scanning` now carries the report; the route runs
+`resolveAccessDecision` first for both `serve` and `scanning`, and only an admitted visitor (owner
+via `/open`, org member, grantee, or anyone for `public`) sees the holding page — everyone else gets
+the identical unlock redirect the clean version would give them. `deleted`/`flagged`/`notfound`
+(410/451/404) stay pre-gate reason-opaque terminal states (documented contract; the flagged-451
+variant of this question is noted in the PR as a deliberate non-change). ADR-0038 gained a dated
+amendment section; `sharing-modes.feature` gained the two mid-scan scenarios (spec-only Gherkin,
+like the rest). Dogfood observations logged, no action: `reports_list_write_grants` (a read) sits
+behind `acl:write`; the app origin serves no CSP (viewer-only header stack is per ADR-013); `/open`
+drops the deep link for signed-out owners (deliberate anti-oracle collapse).
+
+Worktree: `worktree/viewer-acl-before-scan` (branch `fix/viewer-acl-before-scan`). Not yet merged.

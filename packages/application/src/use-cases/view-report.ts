@@ -31,7 +31,10 @@ import type { ReportRepository } from "../ports";
 export type ViewOutcome =
   | { readonly kind: "serve"; readonly report: Report; readonly version: ReportVersion }
   | { readonly kind: "deleted" } // → 410 Gone
-  | { readonly kind: "scanning" } // → 200 holding page
+  // Carries the report so the route can enforce the Acl (ADR-0056) BEFORE the
+  // holding page — a private report mid-scan must not reveal its existence or
+  // scan state to visitors who couldn't view it once clean (dogfood 2026-07-08).
+  | { readonly kind: "scanning"; readonly report: Report } // → Acl gate, then 200 holding page
   | { readonly kind: "flagged" } // → 451
   | { readonly kind: "notfound" }; // → 404 (unknown / blocked / no servable version)
 
@@ -56,7 +59,7 @@ export async function resolveViewableReport(
   if (report.liveVersionId === null) {
     const newest = report.versions[report.versions.length - 1];
     if (!newest) return ok({ kind: "notfound" });
-    if (newest.scanStatus === "pending") return ok({ kind: "scanning" });
+    if (newest.scanStatus === "pending") return ok({ kind: "scanning", report });
     if (newest.scanStatus === "flagged") return ok({ kind: "flagged" });
     return ok({ kind: "notfound" }); // blocked or any non-servable state
   }
@@ -85,7 +88,7 @@ function resolveRequestedVersion(report: Report, requestedVersionNo: number): Vi
     case "clean":
       return { kind: "serve", report, version };
     case "pending":
-      return { kind: "scanning" };
+      return { kind: "scanning", report };
     case "flagged":
       return { kind: "flagged" };
     default:
