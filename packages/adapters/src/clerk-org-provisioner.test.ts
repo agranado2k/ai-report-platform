@@ -1,14 +1,20 @@
-import { ClerkAPIResponseError } from "@clerk/backend/errors";
 import { describe, expect, it } from "vitest";
 import { ClerkBackendOrgProvisioner, type ClerkOrgApi } from "./clerk-org-provisioner";
 
-/** A real ClerkAPIResponseError (the adapter's type guard rejects shaped plain
- *  objects), carrying the given error code. */
-function clerk422(code: string, message: string): ClerkAPIResponseError {
-  return new ClerkAPIResponseError(message, {
-    data: [{ code, message }],
+/** A Clerk API error as the adapter's STRUCTURAL guard sees it: `clerkError:
+ *  true` + numeric `status` + an `errors` array — the shape every
+ *  `ClerkAPIResponseError` instance carries in both @clerk/backend majors.
+ *  Deliberately a plain shaped object, not a class instance: the adapter must
+ *  not depend on class identity, because the app and the adapter can resolve
+ *  DIFFERENT @clerk/backend copies at runtime (the PR #158 preview-down
+ *  incident behind the structural guard). */
+function clerk422(code: string, message: string): unknown {
+  return {
+    clerkError: true,
     status: 422,
-  });
+    message,
+    errors: [{ code, message }],
+  };
 }
 
 /** A Clerk API fake: no existing memberships and a fresh org id, unless overridden. */

@@ -5,9 +5,37 @@
 // port.
 import { createHash } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
-import { isClerkAPIResponseError } from "@clerk/backend/errors";
 import type { ClerkOrgProvisioner } from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
+
+/** The slice of `ClerkAPIResponseError` this adapter reads. */
+interface ClerkApiErrorLike {
+  readonly status: number;
+  readonly message: string;
+  readonly errors: ReadonlyArray<{ readonly code?: string }>;
+}
+
+/** STRUCTURAL guard for Clerk API errors — deliberately NOT the SDK's
+ *  `isClerkAPIResponseError`. That guard is `instanceof`-based and lives in a
+ *  subpath (`@clerk/backend/errors`) whose export set differs across majors:
+ *  `apps/app` resolves @clerk/backend v2 at runtime (pinned alongside
+ *  @clerk/remix) while this workspace package declares v3, and v2's subpath
+ *  exports no guard at all — importing it crashed EVERY app route at module
+ *  load on the PR #158 preview (`SyntaxError: … does not provide an export
+ *  named 'isClerkAPIResponseError'`). Even when the import resolves, an
+ *  `instanceof` check silently fails across two SDK copies in one process.
+ *  Both majors mark instances with `clerkError = true` + `status` +
+ *  `errors[]` (set by @clerk/shared's class), so shape is the stable contract. */
+function isClerkApiError(e: unknown): e is ClerkApiErrorLike {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { clerkError?: unknown }).clerkError === true &&
+    typeof (e as { status?: unknown }).status === "number" &&
+    typeof (e as { message?: unknown }).message === "string" &&
+    Array.isArray((e as { errors?: unknown }).errors)
+  );
+}
 
 /** The default Clerk system role granted to a JIT team-org joiner (ADR-0068 §2:
  *  custom-roles infra stays open, but only `admin`/`member` are used today — the
@@ -89,7 +117,7 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
           // port surfaces it as Unexpected rather than silently treating an
           // infra hiccup as "org doesn't exist" (which would risk minting a
           // duplicate team org).
-          if (isClerkAPIResponseError(e) && e.status === 404) return null;
+          if (isClerkApiError(e) && e.status === 404) return null;
           throw e;
         }
       },
@@ -241,14 +269,16 @@ export class ClerkBackendOrgProvisioner implements ClerkOrgProvisioner {
       // etc., and swallowing those would mirror an identity against an org the
       // user never actually joined).
       if (
-        isClerkAPIResponseError(e) &&
-        e.errors?.some((detail) => detail.code === "already_a_member_in_organization")
+        isClerkApiError(e) &&
+        e.errors.some((detail) => detail.code === "already_a_member_in_organization")
       ) {
         return ok(undefined);
       }
       return err({
         kind: "Unexpected",
-        message: `clerk.createOrganizationMembership: ${e instanceof Error ? e.message : String(e)}`,
+        message: `clerk.createOrganizationMembership: ${
+          e instanceof Error || isClerkApiError(e) ? e.message : String(e)
+        }`,
       });
     }
   }

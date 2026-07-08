@@ -2399,6 +2399,19 @@ drop, sticky orgs, cutover semantics). Operator to-dos at merge: delete the stal
 dev-Clerk org (slug scheme changed); run the one-query prod check for pre-existing corporate-domain
 users; confirm the Clerk instances block unverified sign-ins (ADR-0068 hard dependency).
 
+**Preview-down addendum (same day):** after merging main back in, the PR's preview 500'd on every
+route — `SyntaxError: The requested module '@clerk/backend/errors' does not provide an export named
+'isClerkAPIResponseError'` at module load. Root cause: a two-major version skew. `packages/adapters`
+declared `@clerk/backend@^3.7.1` (whose `/errors` subpath exports the guard), but on Vercel the
+adapter is bundled into `apps/app`'s server build and the externalized `@clerk/backend` import
+resolves from `apps/app`'s node_modules → `2.33.5` (pinned alongside `@clerk/remix@4.x`), whose
+`/errors` subpath exports NO guard — so the import crashed every route, while unit tests (resolving
+the adapter's own 3.7.1) stayed green. Fix: a local STRUCTURAL guard (`clerkError === true` +
+`status` + `errors[]` — the shape both majors stamp on instances via `@clerk/shared`), no
+`@clerk/backend/errors` import at all, and `packages/adapters` re-pinned to `^2.33.0` so
+typecheck/tests exercise the same major production runs. Lesson recorded: `instanceof`-based SDK
+guards are unsafe in this monorepo whenever two copies of the SDK can coexist in one process.
+
 ### 2026-07-08 — Version history UI + visual diff (ADR-0065 §3/§4)
 
 Built the dashboard-facing half of ADR-0065: a version-history page and a visual diff between two
