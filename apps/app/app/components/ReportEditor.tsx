@@ -123,7 +123,7 @@ export function ReportEditor({
     let cancelled = false;
 
     function mount() {
-      if (cancelled) return;
+      if (cancelled || viewRef.current) return; // idempotent: a double signal is safe.
       const body = iframe?.contentDocument?.body;
       if (!body) return; // defensive — shouldn't happen once `load` has fired.
 
@@ -159,20 +159,27 @@ export function ReportEditor({
       }
     }
 
-    // `srcDoc` is set declaratively below; `load` fires once that document
-    // is parsed and ready to mount into. A same-origin `srcdoc` iframe can
-    // in some environments already be `readyState === "complete"` by the
-    // time this effect runs (synchronous-ish HTML parsing) — checked
-    // defensively rather than always waiting for the event.
-    if (iframe.contentDocument?.readyState === "complete") {
-      mount();
-    } else {
-      iframe.addEventListener("load", mount);
+    // Mount timing (claude-review #171 finding 1): a freshly-rendered `srcdoc`
+    // iframe can momentarily expose the initial `about:blank` document, which
+    // ALSO reports `readyState === "complete"` — mounting into that blank body
+    // (no shell classes/`<style>`) would orphan the view when the real srcdoc
+    // document replaces it, with no remount (the `load` listener wouldn't have
+    // been attached on that branch). So gate on a POSITIVE sentinel that only
+    // the srcdoc document carries — its `documentURI` is `about:srcdoc`, never
+    // `about:blank` — and ALWAYS also listen for `load` (re-checking the same
+    // sentinel). `mount()` is idempotent, so a double signal is harmless.
+    function tryMount() {
+      const doc = iframe?.contentDocument;
+      if (doc?.readyState === "complete" && doc.documentURI?.startsWith("about:srcdoc")) {
+        mount();
+      }
     }
+    tryMount();
+    iframe.addEventListener("load", tryMount);
 
     return () => {
       cancelled = true;
-      iframe.removeEventListener("load", mount);
+      iframe.removeEventListener("load", tryMount);
       viewRef.current?.destroy();
       viewRef.current = undefined;
     };

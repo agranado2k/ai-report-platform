@@ -23,7 +23,8 @@ export const IFRAME_INJECTED_CSS = `
   box-shadow: inset 0 -2px rgba(244, 201, 93, 0.55);
   border-radius: 2px;
 }
-.rt > p, .rd > p, .rtags > p, .chips > p, .block-label > p {
+.rt > p, .rd > p, .rtags > p, .chips > p, .block-label > p,
+.role-head > p, .rmeta > p {
   margin: 0;
   display: contents;
 }
