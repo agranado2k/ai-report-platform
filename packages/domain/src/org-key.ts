@@ -22,20 +22,115 @@ import { ok, type Result } from "./result";
 import type { OrgKind } from "./value-objects";
 
 /** Public email providers → always a `personal` org (1:1, ADR-0048), never a
- *  `team` org. Extend this list to add a provider — no other change needed. */
+ *  `team` org. Extend this list to add a provider — no other change needed.
+ *
+ *  SECURITY (review #158 H-1): a MISSED provider here creates a shared "team
+ *  org" that every stranger on that provider silently auto-joins — the same
+ *  cross-tenant failure the exact-match rule prevents for lookalike domains.
+ *  The list is therefore deliberately broad (major global + regional consumer
+ *  providers and their country variants), and additions are one-line +
+ *  zero-risk. NEVER remove an entry once any org exists for it (kind is frozen
+ *  at first provision — reclassifying a domain splits users across orgs). */
 export const PUBLIC_PROVIDER_DOMAINS: ReadonlySet<string> = new Set([
+  // Google
   "gmail.com",
   "googlemail.com",
+  // Microsoft
   "outlook.com",
+  "outlook.de",
+  "outlook.fr",
+  "outlook.es",
   "hotmail.com",
+  "hotmail.co.uk",
+  "hotmail.fr",
+  "hotmail.de",
+  "hotmail.es",
+  "hotmail.it",
   "live.com",
+  "live.co.uk",
+  "live.fr",
+  "live.de",
+  "msn.com",
+  // Yahoo
   "yahoo.com",
+  "yahoo.co.uk",
+  "yahoo.co.jp",
+  "yahoo.fr",
+  "yahoo.de",
+  "yahoo.es",
+  "yahoo.it",
+  "yahoo.com.br",
+  "yahoo.ca",
+  "yahoo.co.in",
+  "ymail.com",
+  "rocketmail.com",
+  // Apple
   "icloud.com",
   "me.com",
+  "mac.com",
+  // Proton
   "proton.me",
   "protonmail.com",
+  "protonmail.ch",
+  "pm.me",
+  // AOL / Verizon
   "aol.com",
+  "verizon.net",
+  // GMX / United Internet
   "gmx.com",
+  "gmx.net",
+  "gmx.de",
+  "gmx.at",
+  "gmx.ch",
+  "web.de",
+  "mail.com",
+  // Other majors / regionals
+  "fastmail.com",
+  "fastmail.fm",
+  "zoho.com",
+  "zohomail.com",
+  "yandex.com",
+  "yandex.ru",
+  "mail.ru",
+  "inbox.ru",
+  "bk.ru",
+  "list.ru",
+  "qq.com",
+  "163.com",
+  "126.com",
+  "sina.com",
+  "naver.com",
+  "daum.net",
+  "hanmail.net",
+  "tutanota.com",
+  "tutamail.com",
+  "tuta.io",
+  "hey.com",
+  "duck.com",
+  "comcast.net",
+  "att.net",
+  "sbcglobal.net",
+  "btinternet.com",
+  "orange.fr",
+  "wanadoo.fr",
+  "free.fr",
+  "sfr.fr",
+  "laposte.net",
+  "t-online.de",
+  "freenet.de",
+  "libero.it",
+  "virgilio.it",
+  "uol.com.br",
+  "bol.com.br",
+  "terra.com.br",
+  "rediffmail.com",
+  "seznam.cz",
+  "wp.pl",
+  "o2.pl",
+  "onet.pl",
+  "interia.pl",
+  "abv.bg",
+  "ukr.net",
 ]);
 
 export interface OrgKeyResolution {
@@ -52,7 +147,9 @@ export function resolveOrgKey(email: string): Result<OrgKeyResolution, AppError>
   const made = makeEmailAddress(email);
   if (!made.ok) return made;
   const normalized = made.value;
-  const domain = normalized.slice(normalized.lastIndexOf("@") + 1);
+  // Strip a trailing dot from the FQDN form ("domain.com." ≡ "domain.com") so
+  // the two spellings can't split one company across two orgs (review #158 L-2).
+  const domain = normalized.slice(normalized.lastIndexOf("@") + 1).replace(/\.$/, "");
   return ok(
     PUBLIC_PROVIDER_DOMAINS.has(domain)
       ? { kind: "personal", key: normalized }
