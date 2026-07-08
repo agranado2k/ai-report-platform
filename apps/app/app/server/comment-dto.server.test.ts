@@ -23,10 +23,11 @@ const baseComment = {
 };
 
 describe("commentToDto", () => {
-  it("wire-encodes the comment id and version id (ADR-0052 External Ids)", () => {
+  it("wire-encodes the comment id, version id, and author id (ADR-0052 External Ids)", () => {
     const dto = commentToDto(baseComment);
     expect(dto.id.startsWith("comment_")).toBe(true);
     expect(dto.anchor.versionId.startsWith("version_")).toBe(true);
+    expect(dto.authorId.startsWith("user_")).toBe(true);
   });
 
   it("carries a null parentId for a root comment", () => {

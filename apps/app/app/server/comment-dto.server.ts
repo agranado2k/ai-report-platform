@@ -5,14 +5,17 @@
 // same ADR-0052 External Id codec the /api/v1 comments route uses
 // (arp-http's commentBody) — this is a distinct, camelCase, app-internal
 // shape (not the ADR-0053 snake_case public resource), but the id ENCODING
-// itself is the same codec, reused rather than reinvented.
+// itself is the same codec, reused rather than reinvented. `authorId` is
+// wire-encoded the same way `packages/http/src/resource.ts`'s `commentBody`
+// encodes `author_id` for the public API — the raw internal UserId never
+// reaches a client, app-internal DTO or public resource alike.
 import type { Comment } from "arp-domain";
-import { commentIdToWire, versionIdToWire } from "arp-domain";
+import { commentIdToWire, userIdToWire, versionIdToWire } from "arp-domain";
 
 export interface CommentDto {
   readonly id: string;
   readonly parentId: string | null;
-  readonly authorUserId: string;
+  readonly authorId: string;
   /** Best-effort author email (IdentityStore.findEmailByUserId) — null when
    *  not resolved by the caller (e.g. an action's success response, which
    *  doesn't pay that extra lookup; the loader's next revalidation fills it
@@ -33,7 +36,7 @@ export function commentToDto(c: Comment, authorEmail: string | null = null): Com
   return {
     id: commentIdToWire(c.id),
     parentId: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
-    authorUserId: c.authorUserId,
+    authorId: userIdToWire(c.authorUserId),
     authorEmail,
     body: c.body,
     anchor: {

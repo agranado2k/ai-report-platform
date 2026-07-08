@@ -38,7 +38,7 @@ function actionUrl(slug: string): string {
 }
 
 function authorLabel(c: CommentDto): string {
-  return c.authorEmail ?? c.authorUserId;
+  return c.authorEmail ?? c.authorId;
 }
 
 function formatTimestamp(iso: string): string {
