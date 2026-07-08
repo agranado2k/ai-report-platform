@@ -10,6 +10,15 @@ Feature: Sharing modes gate access
   # report resource omits its acl block for non-owners. Not exercisable e2e
   # until the ADR-0061 two-member-org fixture exists; pinned at unit level
   # (get-acl.test.ts, write-response.test.ts).
+  #
+  # ADR-0068 §6 update: the second identity now EXISTS (silver+clerk_test@
+  # agranado.com, a team-org member — see tests/e2e/README.md) and
+  # tests/e2e/support/clerk-session.ts can mint it a session
+  # (mintSecondTestSession). Still @wip because of a DIFFERENT, pre-existing
+  # blocker: this feature file has no step definitions at all, and
+  # playwright.config.ts's testDir doesn't even collect tests/e2e/features/**
+  # yet (only tests/e2e/smoke/**) — see tests/e2e/README.md "Current status".
+  # The fixture is a prerequisite, not the whole gap.
   Scenario Outline: Each ACL mode gates access correctly
     Given a report with ACL mode "<mode>"
     When a requester who "<eligibility>" the rule requests it
