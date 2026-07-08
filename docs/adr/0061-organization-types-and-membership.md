@@ -1,6 +1,6 @@
 # ADR-0061: Organization types & membership — personal and team orgs
 
-- **Status**: Accepted (scope decision; implementation details deferred to its build phase)
+- **Status**: Accepted (scope decision) — deferred decisions **resolved by ADR-0068** (2026-07-08), which also **amends** the membership model (one user = one org, keyed by email domain — no invitations/switcher in the first build) and **defers** the ownership-transfer launch prerequisite
 - **Date**: 2026-07-06
 - **Deciders**: agranado2k
 - **Relates to / amends**: ADR-005 (Clerk Organizations from day 1 — this activates the dormant half), ADR-0048 (JIT personal-org provisioning — unchanged for personal orgs), ADR-0059 (per-user ownership — **hard safety prerequisite**), ADR-0056 P2 (`org` ACL mode — becomes meaningful), ADR-0054 (user soft-delete — ownership transfer).
