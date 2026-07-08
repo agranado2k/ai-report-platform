@@ -32,9 +32,11 @@ export interface CommentForHighlight {
 }
 
 /** Keep only the comments whose `relative` is a plausible `{from,to}` PM
- *  position pair that still resolves inside `[0, docSize]` with `from < to`.
- *  Everything else is filtered out, never thrown — a malformed or
- *  out-of-bounds anchor degrades to "no highlight", not an error. */
+ *  position pair that still resolves inside `[1, docSize]` with `from < to`.
+ *  Position 0 is the doc boundary (before any inline content), never valid
+ *  inline content, so `from` must be at least 1. Everything else is filtered
+ *  out, never thrown — a malformed or out-of-bounds anchor degrades to "no
+ *  highlight", not an error. */
 export function resolvableCommentRanges(
   docSize: number,
   comments: readonly CommentForHighlight[],
@@ -46,7 +48,7 @@ export function resolvableCommentRanges(
     const { from, to } = rel as Record<string, unknown>;
     if (typeof from !== "number" || typeof to !== "number") continue;
     if (!Number.isInteger(from) || !Number.isInteger(to)) continue;
-    if (from < 0 || to > docSize || from >= to) continue;
+    if (from < 1 || to > docSize || from >= to) continue;
     ranges.push({ commentId: c.id, from, to });
   }
   return ranges;

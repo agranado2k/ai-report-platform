@@ -63,21 +63,22 @@ describe("resolvableCommentRanges", () => {
     expect(ranges).toEqual([]);
   });
 
-  it("skips a negative from, even if to is in-bounds", () => {
+  it("skips a from at or below the doc boundary (0 or negative), even if to is in-bounds", () => {
     const ranges = resolvableCommentRanges(docSize, [
       { id: "comment_9", anchor: { relative: { from: -1, to: 5 } } },
+      { id: "comment_10", anchor: { relative: { from: 0, to: 5 } } },
     ]);
     expect(ranges).toEqual([]);
   });
 
   it("resolves multiple comments independently, keeping only the in-bounds ones", () => {
     const ranges = resolvableCommentRanges(docSize, [
-      { id: "ok-1", anchor: { relative: { from: 0, to: 3 } } },
+      { id: "ok-1", anchor: { relative: { from: 1, to: 3 } } },
       { id: "oob-1", anchor: { relative: { from: 0, to: 5000 } } },
       { id: "ok-2", anchor: { relative: { from: 7, to: 12 } } },
     ]);
     expect(ranges).toEqual([
-      { commentId: "ok-1", from: 0, to: 3 },
+      { commentId: "ok-1", from: 1, to: 3 },
       { commentId: "ok-2", from: 7, to: 12 },
     ]);
   });
