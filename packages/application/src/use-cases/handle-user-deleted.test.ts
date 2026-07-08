@@ -8,11 +8,12 @@ const CLERK_ORG = "org_2abcCLERK";
 async function seed() {
   const identities = new InMemoryIdentityStore();
   const apiKeys = new InMemoryApiKeyStore();
-  const id = await identities.createPersonalIdentity({
+  const id = await identities.createIdentity({
     clerkUserId: CLERK_USER,
     clerkOrgId: CLERK_ORG,
     email: "a@example.com",
     orgName: "A",
+    kind: "personal",
   });
   if (!id.ok) throw new Error("seed failed");
   return { identities, apiKeys, userId: id.value.userId, orgId: id.value.orgId };
@@ -39,11 +40,12 @@ describe("handleUserDeleted (Clerk user.deleted mirror, ADR-0054)", () => {
     const { identities, apiKeys } = await seed();
     await handleUserDeleted({ identities, apiKeys }, { clerkUserId: CLERK_USER });
 
-    const reprovision = await identities.createPersonalIdentity({
+    const reprovision = await identities.createIdentity({
       clerkUserId: CLERK_USER,
       clerkOrgId: CLERK_ORG,
       email: "a@example.com",
       orgName: "A",
+      kind: "personal",
     });
     expect(reprovision.ok).toBe(false);
   });
