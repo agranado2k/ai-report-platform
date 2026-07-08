@@ -410,6 +410,9 @@ importers:
 
   packages/report-html:
     dependencies:
+      prosemirror-changeset:
+        specifier: ^2.4.1
+        version: 2.4.1
       prosemirror-model:
         specifier: ^1.25.10
         version: 1.25.10
@@ -419,6 +422,9 @@ importers:
       prosemirror-schema-list:
         specifier: ^1.5.1
         version: 1.5.1
+      prosemirror-transform:
+        specifier: ^1.10.4
+        version: 1.12.0
     devDependencies:
       '@types/jsdom':
         specifier: ^28.0.3
@@ -5124,6 +5130,9 @@ packages:
 
   property-information@6.5.0:
     resolution: {integrity: sha512-PgTgs/BlvHxOu8QuEN7wi5A0OmXaBcHpmCSTehcs6Uuu9IkDIEo13Hy7n898RHfrQ49vKCoGeWZSaAK01nwVig==}
+
+  prosemirror-changeset@2.4.1:
+    resolution: {integrity: sha512-96WBLhOaYhJ+kPhLg3uW359Tz6I/MfcrQfL4EGv4SrcqKEMC1gmoGrXHecPE8eOwTVCJ4IwgfzM8fFad25wNfw==}
 
   prosemirror-commands@1.7.1:
     resolution: {integrity: sha512-rT7qZnQtx5c0/y/KlYaGvtG411S97UaL6gdp6RIZ23DLHanMYLyfGBV5DtSnZdthQql7W+lEVbpSfwtO8T+L2w==}
@@ -10827,6 +10836,10 @@ snapshots:
       retry: 0.12.0
 
   property-information@6.5.0: {}
+
+  prosemirror-changeset@2.4.1:
+    dependencies:
+      prosemirror-transform: 1.12.0
 
   prosemirror-commands@1.7.1:
     dependencies:
