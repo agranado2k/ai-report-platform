@@ -1,7 +1,11 @@
 // Builds the HTML document loaded into the editor's sandboxed same-origin
-// iframe (Fix 1 of the editor styling/structure fix). Pure string building —
-// no DOM — so it's unit-tested directly (iframe-document.test.ts) even
-// though the iframe mount itself (ReportEditor.tsx) is manual/e2e territory.
+// iframe (Fix 1 of the editor styling/structure fix). Uses a real, comment-aware
+// HTML parser to insert the enforcing CSP `<meta>` (see `parseHtml` below —
+// native `DOMParser` in the browser, injected `linkedom` in the unit tests) so a
+// decoy `<head>` hidden in untrusted shell content can't fool where the CSP lands
+// (the security-blocker fix). Unit-tested directly (iframe-document.test.ts) via
+// the injected parser; the iframe mount itself (ReportEditor.tsx) is manual/e2e
+// territory.
 import type { Shell } from "arp-report-html";
 
 /**
