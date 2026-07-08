@@ -2280,3 +2280,17 @@ Implemented ADR-0068's build order in one PR (TDD throughout):
   itself and needed no further change).
 
 Worktree: `worktree/team-orgs` (branch `feat/team-orgs`). Not yet merged.
+
+**Review wave (same day, pre-merge):** the dual review (claude-review bot + local two-agent pass)
+caught one **critical** — the team-org slug's bare dot→hyphen mapping is not injective, and with
+JIT auto-join a slug collision is a tenant-boundary crossing (registrable `acme-co.uk` vs
+`acme.co.uk`). Fixed: hash-suffixed slugs + a fail-closed `publicMetadata.domain` anchor check
+before any join. Also from review: create-race recovery (two first sign-ups at a new domain no
+longer 500 the loser), `ensureMembership` matches Clerk's already-a-member error by CODE (a bare
+422 swallow also covered quota-exceeded), OAuth provisioning uses verified emails only (the email
+domain IS the tenancy boundary), the public-provider list grew 12 → ~90 domains (a missed provider
+= a shared team org for strangers), FQDN trailing-dot normalization, and a real hard-DELETE FK
+cascade test. Implementation resolutions recorded in ADR-0068's More-information block (webhook
+drop, sticky orgs, cutover semantics). Operator to-dos at merge: delete the stale `agranado-com`
+dev-Clerk org (slug scheme changed); run the one-query prod check for pre-existing corporate-domain
+users; confirm the Clerk instances block unverified sign-ins (ADR-0068 hard dependency).

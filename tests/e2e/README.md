@@ -32,6 +32,14 @@ If this fixture is ever lost (Clerk instance reset, account deleted — cf. the
 ADR-0049 instance-hygiene incident) — recreate it exactly as above and treat any
 drift as a **fixture bug**, not a test bug (ADR-0068 §6's explicit call).
 
+> **One-time cleanup after PR #158's review wave:** the team-org slug scheme
+> gained a domain-hash suffix (review #158 C-1), so any `agranado-com` Clerk
+> org JIT-created on the dev instance under the OLD scheme is now stale —
+> lookups use the new slug and the old org would leave the fixture user with
+> a divergent oldest-membership. Delete the old `agranado-com` org in the dev
+> Clerk dashboard; the next fixture sign-in re-provisions under the new slug
+> (with the `publicMetadata.domain` anchor the join guard requires).
+
 ## Current status — what's wired vs what's still blocked
 
 Fixture 2 (this PR) makes it POSSIBLE to mint a session for a second identity. It
