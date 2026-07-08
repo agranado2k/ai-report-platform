@@ -172,12 +172,14 @@ describe("fragment-level round-trips", () => {
   });
 
   it("round-trips resrow inside a resgroup (details.resgroup card + summary + resrow)", () => {
-    // ADR-0062 §3 doesn't specify dedicated nodes/attrs for a resrow's
-    // children (rt/rmeta/rd/rtags/ref) — the fixture never gives them
-    // anything beyond a class, so they fall to the generic attr-retention
-    // catch-all (judgment call, see report-blocks.ts). Each one holds bare
-    // inline content directly, so each also picks up the auto-<p>-wrap
-    // invariant (ADR-0062 §7) — classes and text still survive intact.
+    // ADR-0062 §3 doesn't specify dedicated attrs for a resrow's children
+    // beyond the class — the fixture never gives them anything more. `rt`,
+    // `rd`, and `rtags` now get dedicated `content: 'inline*'` node specs
+    // (schema/inline-content.ts, editor styling/structure fix Fix 3), so
+    // their bare inline content round-trips WITHOUT the auto-<p>-wrap they
+    // used to pick up on the generic catch-all. `rmeta` stays on the generic
+    // catch-all (judgment call, out of scope for this pass — see
+    // inline-content.ts's doc comment) and still gets the <p>.
     const html =
       '<details class="resgroup card" open="open"><summary>📚 Books</summary>' +
       '<div class="resrow"><div><div class="rt">Title</div>' +
@@ -190,10 +192,10 @@ describe("fragment-level round-trips", () => {
     // semantically meaningful; the classes/structure/text all survive.
     expect(roundtripped).toBe(
       '<details open="open" class="resgroup card"><summary>📚 Books</summary>' +
-        '<div class="resrow"><div><div class="rt"><p>Title</p></div>' +
+        '<div class="resrow"><div><div class="rt">Title</div>' +
         '<div class="rmeta"><p>Author · <span class="ref">example.com</span></p></div>' +
-        '<div class="rd"><p>Description.</p></div></div>' +
-        '<div class="rtags"><p><span class="chip chip-cto">CTO</span></p></div></div></details>',
+        '<div class="rd">Description.</div></div>' +
+        '<div class="rtags"><span class="chip chip-cto">CTO</span></div></div></details>',
     );
   });
 });
