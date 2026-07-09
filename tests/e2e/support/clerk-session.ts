@@ -106,3 +106,54 @@ export async function mintSecondTestSession(): Promise<TestSession> {
 /** ADR-0068 §6 — the hand-provisioned second identity (Clerk test-mode address,
  *  verification code 424242). See `tests/e2e/README.md`. */
 export const SECOND_FIXTURE_EMAIL = "silver+clerk_test@agranado.com";
+
+/**
+ * Mint a Clerk **sign-in ticket** (`POST /sign_in_tokens`) for a user by
+ * email, given a Clerk secret key. Unlike `mintTestSessionFor` (a backend
+ * session JWT sent as a Bearer header, for machine/API calls), this is the
+ * token a real BROWSER exchanges for a session client-side, via
+ * `@clerk/testing`'s `clerk.signIn({ page, signInParams: { strategy:
+ * 'ticket', ticket } })` — the browser's own `Clerk.client.signIn.create`
+ * consumes it and calls `Clerk.setActive`, so the resulting session (cookies,
+ * `window.Clerk.user`, etc.) is indistinguishable from an interactive sign-in.
+ *
+ * Deliberately NOT using `@clerk/testing`'s built-in `clerk.signIn({
+ * emailAddress })` convenience path: that helper reads `process.env.
+ * CLERK_SECRET_KEY` directly (hardcoded name, no override), which doesn't
+ * match this repo's `E2E_CLERK_SECRET_KEY` convention. Minting the ticket
+ * ourselves — same `clerkFetch` primitive as `mintTestSessionFor` — keeps one
+ * env-var naming scheme and needs no second secret.
+ */
+export async function mintSignInTicketFor(secretKey: string, email: string): Promise<string> {
+  const form = { "Content-Type": "application/x-www-form-urlencoded" };
+
+  const usersRes = await clerkFetch(`/users?email_address=${encodeURIComponent(email)}`, secretKey);
+  if (!usersRes.ok) throw new Error(`clerk users lookup failed: ${usersRes.status}`);
+  const users = (await usersRes.json()) as ReadonlyArray<{ id: string }>;
+  const userId = users[0]?.id;
+  if (!userId) throw new Error(`no Clerk user for ${email}`);
+
+  const ticketRes = await clerkFetch("/sign_in_tokens", secretKey, {
+    method: "POST",
+    headers: form,
+    body: new URLSearchParams({ user_id: userId }),
+  });
+  if (!ticketRes.ok) throw new Error(`clerk sign_in_tokens failed: ${ticketRes.status}`);
+  const token = ((await ticketRes.json()) as { token: string }).token;
+  return token;
+}
+
+/**
+ * Mint a sign-in ticket for the seeded PRIMARY test user — same env contract
+ * as `mintTestSession()` (`E2E_CLERK_SECRET_KEY` + `E2E_TEST_USER_EMAIL`), so
+ * the `@browser` scenario is grep'd out under the same gate when either is
+ * absent (see playwright.config.ts).
+ */
+export async function mintPrimarySignInTicket(): Promise<string> {
+  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
+  const email = process.env.E2E_TEST_USER_EMAIL;
+  if (!secretKey || !email) {
+    throw new Error("@browser e2e needs E2E_CLERK_SECRET_KEY + E2E_TEST_USER_EMAIL");
+  }
+  return mintSignInTicketFor(secretKey, email);
+}

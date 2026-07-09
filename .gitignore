@@ -54,6 +54,9 @@ test-results/
 blob-report/
 .features-gen/
 coverage/
+# Playwright storageState written by tests/e2e/support/clerk-auth.setup.ts — a
+# real Clerk browser session (cookies/localStorage). Never commit session state.
+tests/e2e/.auth/
 
 # ─── OS / editor ────────────────────────────────────────────────────────
 .DS_Store
