@@ -95,12 +95,27 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      # Poll THIS run's own deployment (not a guess) until /health reports the
-      # isolated marker AND a live DB — or decide this is the pre-isolation
-      # deployment and skip cleanly. Event fields go through env: (never
-      # inlined into the script body), matching the "Gate" step's injection
-      # hygiene for untrusted webhook data.
-      - name: Readiness gate — wait for the isolated, DB-ready deployment
+      # Poll THIS run's own deployment (not a guess) to decide whether it's the
+      # ISOLATED redeploy (run the smoke) or the pre-isolation one racing it
+      # (skip cleanly). The `isolated` marker (NEON_BRANCH injected by
+      # preview-isolation.yml) is the AUTHORITATIVE signal — it's the actual
+      # cause of #149 (the pre-isolation deployment has the wrong/mid-flip env).
+      #
+      # `checks.neon` is ADVISORY ONLY, never a gate/fail condition: /health's
+      # DB ping opens a fresh neon-serverless WebSocket OUTSIDE the app's normal
+      # request/transaction path, and a Neon preview branch AUTO-SUSPENDS when
+      # idle — so the ping can read "error" on a genuinely-healthy deployment
+      # whose DB the real scenarios reach fine (Playwright's request timeout
+      # tolerates the cold-start wake). We wait a bounded window for neon:"ok"
+      # as a courtesy (lets a cold branch warm before the smoke), but proceed on
+      # `isolated:true` regardless — a genuinely-unreachable DB then surfaces as
+      # a real scenario failure (auth-upload's upload step), not a synthetic gate
+      # fail. (Reverses #174's original hard-fail-on-neon, which the /ce-dogfood
+      # run showed would fail every isolated run against a suspended branch.)
+      #
+      # Event fields go through env: (never inlined into the script body),
+      # matching the "Gate" step's injection hygiene for untrusted webhook data.
+      - name: Readiness gate — is this the isolated redeploy?
         id: readiness
         if: steps.gate.outputs.run == 'true'
         env:
@@ -109,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           ever_isolated=false
-          ready=false
+          neon_ok=false
           tries=40
           interval=3
           for i in $(seq 1 "$tries"); do
@@ -119,8 +134,10 @@ jobs:
 
             if [ "$isolated" = "true" ]; then
               ever_isolated=true
+              # Ideal fast path: isolated AND the DB ping confirms warm — stop
+              # waiting and run immediately.
               if [ "$neon" = "ok" ]; then
-                ready=true
+                neon_ok=true
                 break
               fi
             fi
@@ -132,26 +149,23 @@ jobs:
           # be materially longer (up to ~120s + 40×5s). Log text, not logic.
           elapsed=$((tries * interval))
 
-          if [ "$ready" = "true" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Isolated deployment is DB-ready — running the smoke."
-            exit 0
-          fi
-
           if [ "$ever_isolated" = "false" ]; then
             # Never saw isolated:true in the whole window — this is the
             # pre-isolation (prod-fallback) deployment racing the redeploy.
-            # Skip cleanly: not a failure, nothing to smoke yet.
+            # Skip cleanly: not a failure, nothing to smoke on this one.
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Not the isolated preview (isolated=false after ${elapsed}s) — skipping smoke."
             exit 0
           fi
 
-          # Saw isolated:true but the DB ping never came back "ok": THIS is
-          # the deployment we care about, and it's genuinely broken.
-          echo "ready=false" >> "$GITHUB_OUTPUT"
-          echo "::error::Isolated deployment never became DB-ready (checks.neon != \"ok\" after ${elapsed}s) — failing."
-          exit 1
+          # This IS the isolated deployment → run the smoke. neon is advisory.
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          if [ "$neon_ok" = "true" ]; then
+            echo "::notice::Isolated deployment, DB ping ok — running the smoke."
+          else
+            echo "::warning::Isolated deployment reached, but /health DB ping not confirmed ok within ${elapsed}s (advisory — the Neon branch may be cold). Running the smoke anyway; a genuinely-unreachable DB will fail the scenarios."
+          fi
+          exit 0
 
       - name: Run BDD smoke against the preview
         if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true'
