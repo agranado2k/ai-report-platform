@@ -45,6 +45,10 @@ The `audit_log` schema carries `ip_hash` and `geo` columns for future abuse-sign
 
 `AuditAction` covers report/folder/acl/grant/comment/api-key mutations initiated by a signed-in actor — the set with a real `orgId` + `actorUserId` at the call site. System- or webhook-driven use cases (`processScanResult`, `handleUserDeleted`, `provisionIdentity`) are explicitly **excluded** from this seam: they already emit `DomainEvent`s through the outbox, which is the correct trail for automated/system state transitions, and forcing them onto `AuditLogger` would mean synthesizing an `orgId`/`actorUserId` that doesn't cleanly exist for a webhook. If a compliance need for "who/what changed this and why" emerges for those flows later, it should be evaluated against the existing event stream first, not bolted onto the same seam.
 
+A **third** category is also out of scope, distinct from system/webhook: **viewer-access mutations** — `redeemMagicLink` (writes a `report_grants` row) and `sendMagicLink` (writes a nonce). These *are* user-initiated, but by an **unauthenticated email recipient with no org principal** — there is no `actorUserId`/`orgId` at the call site, so they don't fit the actor-shaped seam. The access they confer is already recorded by the grant/nonce rows themselves, and any subsequent action the recipient takes as a signed-in user *is* audited. (So the exclusion boundary has two shapes: system/webhook-driven, and viewer-access-by-actor-shape — neither has a signed-in org principal.)
+
+**PII / erasure posture.** Audit `meta` intentionally retains subject identifiers — notably the grantee **email** on `grant.write.*` — because an audit trail's value is attributing *who was affected*, and that must survive the subject's own deletion. Consequently `audit_log` rows are **NOT** scrubbed by the user-deletion cascade (ADR-0054); they age out only via the `db-design.md` §312 retention policy (1-year hot, cold-export at month-roll). This is a deliberate accountability-over-erasure trade-off for the audit surface specifically; secrets/plaintext tokens are still never written to `meta` (§5, `createApiKey`).
+
 The sixteen wired actions, grouped by resource:
 
 | Resource | Actions |
@@ -59,7 +63,7 @@ The sixteen wired actions, grouped by resource:
 Two actor-shape gaps surfaced while wiring the pattern beyond the first two use cases — both closed in this same PR, not deferred:
 - Folder actors (`createFolder`, `renameFolder`, `deleteFolder`) carried only `orgId`, not `userId`. They're now aliased to the shared `TenancyActor { orgId, userId }` so `folder.*` audit rows carry a real `actorUserId`. Authorization still keys ONLY on `orgId` via `loadOwnedFolder` — `userId` is carried solely for audit attribution, never for authz.
 - `revokeApiKey`'s actor didn't carry `orgId` (`audit_log.org_id` is `NOT NULL`). Its actor type gained `orgId`; the one call site (`settings.api-keys.tsx`) now threads it from the resolved actor.
-- One remaining nuance, not a gap: `revokeWrite` has no `IdentityStore` dependency and `WriteGrantStore.revoke()` doesn't return the grant row, so there's no resolved `UserId` for the grantee at that call site. Its `grant.write.revoked` row's `meta` carries `{ granteeEmail }` instead — the actual revoke key and the only grantee-identifying value on hand — unlike `grantWrite`'s `meta`, which can carry a resolved `granteeUserId` when one exists.
+- Grantee attribution: both `grant.write.*` rows carry the grantee **email** in `meta` (the grant key, always present). `grantWrite` additionally carries the opportunistically-resolved `granteeUserId` (which is **null** until the invitee signs up, ADR-0060 §2 — so the email is the only attribution for a grant to a not-yet-registered user, claude-review #177). `revokeWrite` has no `IdentityStore` dependency and `WriteGrantStore.revoke()` doesn't return the grant row, so it carries the email alone.
 
 ### 5. Commit-last atomicity: audit write is the last (or co-equal-last) step inside `uow.run`
 
@@ -70,7 +74,7 @@ All sixteen wired use cases put `audit.record(...)` inside the existing/added `d
 - **`renameReport` / `moveReport`**: same shape as `deleteReport`; each writes `report.renamed` / `report.moved` with a from/to `meta` diff (title, folder).
 - **`createFolder` / `renameFolder` / `deleteFolder`**: `folder.created` / `folder.renamed` / `folder.deleted`, gated by `loadOwnedFolder` outside the transaction as before.
 - **`setAcl`**: previously issued **two** separate unwrapped writes (grant pruning + the `Acl` persist) — now both, plus `acl.set`, land in one `uow.run`, closing a second latent atomicity gap alongside `deleteReport`'s.
-- **`grantWrite` / `revokeWrite`**: `grant.write.granted` / `grant.write.revoked`; `grantWrite`'s `meta` carries the opportunistically-resolved `granteeUserId` (may be null pre-signup), `revokeWrite`'s carries `granteeEmail` (see §4).
+- **`grantWrite` / `revokeWrite`**: `grant.write.granted` / `grant.write.revoked`; both carry `granteeEmail`, and `grantWrite` also carries the opportunistically-resolved `granteeUserId` (may be null pre-signup) — see §4.
 - **`addComment` / `replyToComment` / `resolveComment`**: already had a `uow.run` spanning the repo save + outbox enqueue (ADR-0064 §6); the audit record joins that same transaction. `deleteComment` gains a `UnitOfWork` wrapper where none existed (no domain event on delete, so audit is its only transactional companion).
 - **`createApiKey` / `revokeApiKey`**: gain a `UnitOfWork` wrapper where none existed. `createApiKey`'s audit `meta` deliberately omits the plaintext token/secret — only the summary fields land in `audit_log`.
 
