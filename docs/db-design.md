@@ -313,7 +313,22 @@ by the dispatcher (~1s poll). Carries the canonical events in `docs/events.md`.
 `id` PK, `org_id`, `actor_user_id` FK → users NULL, `action`, `target_type`,
 `target_id`, `meta_json` jsonb, `ip_hash` NULL, `geo` NULL, `at` timestamptz.
 Indexes: `(org_id, at)`, `actor_user_id`. Partitioned monthly; 1-year hot
-retention; cold-export at month-roll. Every mutating action writes a row.
+retention; cold-export at month-roll. Every **user-initiated org-scoped**
+mutation writes a row, synchronously in the same transaction as the mutation
+(ADR-0070); system/webhook state transitions (scan results, user-deletion
+webhook, identity provisioning) are captured as **domain events** (outbox),
+not audit rows.
+
+`action`/`target_type`/`target_id` are free `text` columns (no DB enum) — the
+app writes from the closed `AuditAction` union in
+`packages/application/src/audit.ts`. The vocabulary, grouped by resource:
+
+- **report**: `report.uploaded`, `report.renamed`, `report.moved`, `report.deleted`
+- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`
+- **acl**: `acl.set`
+- **grant**: `grant.write.granted`, `grant.write.revoked`
+- **comment**: `comment.added`, `comment.replied`, `comment.resolved`, `comment.deleted`
+- **api_key**: `api_key.created`, `api_key.revoked`
 
 ## R2 object layout (ADR-0037)
 

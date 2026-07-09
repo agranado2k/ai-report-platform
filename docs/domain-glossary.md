@@ -97,6 +97,13 @@ Terms used identically across all four contexts.
 - **Trace / span / span link** — observability primitives (ADR-0055, OpenTelemetry): a **trace** is one end-to-end operation (a `trace_id`), made of **spans** (timed units of work); a **span link** causally connects spans in *different* traces — used to tie a report's upload trace to its later async-scan trace across the pg-boss pipeline. Telemetry is I/O, so it lives only in adapters + apps (ADR-0024), never in `domain`/`application`.
 - **Timestamp** — UTC `Date` (millisecond precision). All persisted timestamps are stored as Postgres `timestamptz`.
 
+## Cross-cutting infrastructure
+
+Terms for infra that sits alongside the four bounded contexts rather than inside one of them (mirrors `docs/db-design.md`'s "`outbox` / `audit_log` are cross-cutting infrastructure").
+
+- **Audit log** — the append-only `audit_log` table: a who-did-what-to-what record for every **user-initiated, org-scoped** mutation. Written **synchronously, inside the same transaction as the mutation** (commit-last atomicity, ADR-0037 §5) by the `AuditLogger` port (ADR-0070) — NOT via async event fan-out off the domain-event stream. System- or webhook-driven state transitions (scan verdicts, user-deletion, identity provisioning) are deliberately excluded and stay on the event stream (`docs/events.md`) instead.
+- **Audit action** — the closed `AuditAction` vocabulary (`packages/application/src/audit.ts`) an `Audit log` row's `action` column is written from: `report.*`, `folder.*`, `acl.set`, `grant.write.*`, `comment.*`, `api_key.*` — one member per audited user-initiated mutation use case (ADR-0070). `target_type`/`target_id`/`action` are free `text` at the DB layer; the closed union is an application-layer discipline, not a DB enum.
+
 ## Domain events
 
 Event names are the contract; their full catalog (emitter, subscribers, payload) lives in `docs/events.md`. Events are facts in past tense.
