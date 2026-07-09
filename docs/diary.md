@@ -2820,3 +2820,53 @@ and the isolated one runs green — that's the one thing only a live merge can p
 
 Worktree: `worktree/smoke-readiness-gate` (branch `fix/smoke-readiness-gate`). Not yet merged.
 Not yet merged.
+
+---
+
+### 2026-07-09 — CI trigger inversion: e2e becomes a reusable workflow called from the PR (issue #149, part 2)
+
+The readiness-gate fix above (same day, earlier entry) made the smoke tell the two racing
+`deployment_status` events apart; this entry closes the underlying shape those two events came from.
+`.github/workflows/e2e.yml`'s `on: deployment_status` trigger only ever fires from the **default
+branch** — so a CI change to `e2e.yml` itself could never self-validate on its own PR, it shipped to
+`main` unverified and only got exercised for real on the *next* PR. Inverted instead:
+
+- **`e2e.yml`** dropped `on: deployment_status` for `on: workflow_call` with two required inputs
+  (`base_url`, `head_sha`). Removed entirely: the `concurrency` block (the caller's own per-PR group
+  now governs) and the `gate` step (no `deployment_status` payload to filter — the caller only ever
+  invokes this workflow for the isolated app preview). `Checkout` now pins `ref: inputs.head_sha`;
+  `PLAYWRIGHT_BASE_URL`/the readiness poll's `BASE_URL` now read `inputs.base_url`. The `/health`
+  readiness poll (isolated/`checks.neon`) stays, but is now purely defensive — confirms the caller's
+  contract held and gives a cold Neon branch a warm-up grace window — rather than the primary mechanism
+  for telling two racing deployments apart, since there's only ever one deployment in play now. Never
+  seeing `isolated:true` in the poll window is now a loud failure (`::error::` + exit 1), not a clean
+  skip — that branch shouldn't be reachable given the caller's contract, so treat it as a real
+  regression signal if it ever fires.
+- **`preview-isolation.yml`**'s `isolate` job: the redeploy step now captures the app deployment's
+  `id`/`url` from the Vercel API response BODY (previously only the HTTP status was read; the view
+  project's redeploy stays fire-and-forget), then polls `GET /v13/deployments/{id}` until
+  `readyState: READY` (bounded ~5 min, 60×5s; fails fast on `ERROR`/`CANCELED`). The job gained an
+  `app_url` output (`https://` + the captured url). A new `smoke` job (`needs: isolate`, skipped when
+  `action == closed`) calls `e2e.yml` via `uses: ./.github/workflows/e2e.yml` with
+  `base_url: needs.isolate.outputs.app_url` and `head_sha: github.event.pull_request.head.sha`,
+  `secrets: inherit`.
+- **ADR-0047** amended a second time: the residual noted in the first 2026-07-09 amendment (a preview
+  built before the workflow finishes uses the prod fallback) is now CLOSED rather than merely gated —
+  the pre-isolation deployment is never smoked at all, because there's exactly one e2e invocation per PR
+  push and it always targets the confirmed-isolated, confirmed-`READY` deployment.
+- `tests/e2e/README.md`'s CI section rewritten to describe the new call chain (isolate → redeploy →
+  capture id/url → poll READY → call e2e.yml).
+
+This is a YAML-workflow change with no unit-test surface; validated by construction instead:
+`ruby -ryaml -e "YAML.load_file(...)"` on both files (valid), `npm run docs:check` (green), and a
+line-by-line check that every removed `gate` output reference was also removed downstream (none left).
+`actionlint` was not available in this environment to lint the reusable-workflow contract
+(`workflow_call` input typing, the `uses:`-job shape) mechanically — noted as a gap, not run.
+
+**Cannot be verified in this session**: there is no way to exercise a real `pull_request` event, a real
+Vercel redeploy/readyState poll, or a real reusable-workflow dispatch without a live PR. Made
+correct-by-construction instead. The actual proof is watching **this PR's own Actions run** — for the
+first time, a change to the e2e trigger machinery is exercised by the very PR that makes it, which is
+the whole point of the inversion.
+
+Worktree: `worktree/e2e-trigger-inversion` (branch `ci/e2e-trigger-inversion`). Not yet merged.

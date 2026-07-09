@@ -12,30 +12,42 @@ ADR-0068 §6).
 `@browser` scenarios (below) authenticate the SAME primary identity, but in a real
 Playwright browser — see "Authenticated-browser scenarios (`@browser`)".
 
-## CI readiness gate (issue #149, amends ADR-0047)
+## How the smoke runs in CI (trigger inversion, issue #149, amends ADR-0047)
 
-`.github/workflows/e2e.yml` runs on Vercel's `deployment_status` event, and every
-app-preview commit fires it **twice**: the initial push-triggered build (prod-DB
-fallback, ADR-0047's accepted soft-isolation window) and `preview-isolation.yml`'s
-force-redeploy (isolated Neon branch + `R2_KEY_PREFIX`/`NEON_BRANCH`) — both report
-`state: success`, indistinguishable from the event payload alone. Before running any
-scenario, the workflow now polls `GET /health` on **its own** `target_url` (with the
-`x-vercel-protection-bypass` header, up to 120s) and reads two fields the route
-exposes for exactly this purpose: `isolated` (true once `NEON_BRANCH`/`R2_KEY_PREFIX`
-is injected) and `checks.neon` (a live `SELECT 1` against this deployment's own
-`DATABASE_URL`, always `"ok"`/`"error"` — the route never 500s even on a broken DB).
+`.github/workflows/e2e.yml` is a **reusable workflow** (`on: workflow_call`), not a
+standalone trigger. `.github/workflows/preview-isolation.yml`'s `isolate` job calls
+it, once, after it has:
 
-- `isolated:true` + `checks.neon:"ok"` → the isolated, DB-ready deployment — run the
-  scenarios.
-- Never `isolated:true` within the poll window → this run is against the
-  pre-isolation deployment; skip the scenarios cleanly (green check, no smoke).
-- `isolated:true` but `checks.neon` never `"ok"` → the deployment we actually care
-  about is genuinely broken; fail loud.
+1. Forked/reused the per-PR Neon branch and injected the branch-scoped env
+   (`DATABASE_URL`, `R2_KEY_PREFIX`, `NEON_BRANCH`) on both Vercel projects.
+2. Redeployed `arp-app-prod`, capturing the new deployment's `id`/`url` from the
+   Vercel API response body (not just the HTTP status).
+3. Polled `GET /v13/deployments/{id}` until Vercel's own `readyState` reaches
+   `READY` (bounded ~5 minutes; fails loud on `ERROR`/`CANCELED`).
 
-A `concurrency` group keyed on the deployment sha also cancels a still-polling (or
-still-running) pre-isolation invocation once the isolated redeploy's own
-`deployment_status` event arrives, so the two invocations never race to completion
-in parallel.
+Only then does a `smoke` job invoke `e2e.yml` (`uses:
+./.github/workflows/e2e.yml`) with `base_url` set to that exact, now-live
+deployment URL and `head_sha` set to the PR's head commit. `secrets: inherit`
+passes the caller's secrets through; repo `vars.*` resolve directly.
+
+This replaces the old model, where `e2e.yml` listened for Vercel's
+`deployment_status` event directly. That had two problems: (1)
+`deployment_status` workflows only run from the **default branch**, so a CI
+change to `e2e.yml` could never self-validate on its own PR — it shipped to
+`main` unverified; (2) the app preview fires `deployment_status: success`
+**twice** per commit (the initial push-triggered build, prod-DB fallback under
+ADR-0047's soft-isolation window, and `preview-isolation.yml`'s force-redeploy),
+indistinguishable from the event payload alone, so the smoke could race and run
+against the pre-isolation (wrong-env) deployment.
+
+With the inversion, there is exactly **one** e2e invocation per PR push, always
+against a deployment `preview-isolation.yml` itself confirmed is isolated and
+`READY`, running on the PR that made the change — including changes to the
+workflow files themselves. Inside `e2e.yml`, the `/health` poll (`isolated`,
+`checks.neon`) still runs, but now purely **defensively**: confirming the
+caller's contract held and giving a cold/suspended Neon branch a bounded warm-up
+grace window — not the primary mechanism for telling two racing deployments
+apart, since there aren't two anymore.
 
 ## Fixture 1 — the primary test user
 
