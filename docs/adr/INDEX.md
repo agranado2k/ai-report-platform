@@ -20,7 +20,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0044 | [Signed merge commits instead of rebase-merge + bot-merge](0044-merge-commit-strategy.md) | Accepted (2026-06-09) |
 | 0045 | [Async content-scan pipeline (pg-boss on Neon, Cloudflare cron)](0045-async-content-scan-pipeline.md) | Accepted (2026-06-11) |
 | 0046 | [Two-tier adapter testing — in-process pglite below the Neon e2e tier](0046-adapter-sql-test-tier.md) | Accepted (2026-06-15) |
-| 0047 | [Per-PR preview data isolation (soft) — ephemeral Neon branch + R2 key prefix](0047-preview-data-isolation.md) | Accepted (2026-06-15) |
+| 0047 | [Per-PR preview data isolation (soft) — ephemeral Neon branch + R2 key prefix](0047-preview-data-isolation.md) | Accepted (2026-06-15) — the soft-fallback residual gated by a `/health` readiness check, amended 2026-07-09 (issue #149) |
 | 0048 | [Auth provisioning & integration model (Clerk JIT personal-org)](0048-auth-provisioning-model.md) | Accepted (2026-06-16) |
 | 0049 | [Clerk dev/prod instance separation & the data-orphaning incident](0049-clerk-instance-hygiene.md) | Accepted (2026-06-18) |
 | 0050 | [App design system — Tailwind v4 + CSS-first design tokens](0050-app-design-system-tailwind-v4-tokens.md) | Accepted (2026-06-19) |

@@ -12,6 +12,31 @@ ADR-0068 §6).
 `@browser` scenarios (below) authenticate the SAME primary identity, but in a real
 Playwright browser — see "Authenticated-browser scenarios (`@browser`)".
 
+## CI readiness gate (issue #149, amends ADR-0047)
+
+`.github/workflows/e2e.yml` runs on Vercel's `deployment_status` event, and every
+app-preview commit fires it **twice**: the initial push-triggered build (prod-DB
+fallback, ADR-0047's accepted soft-isolation window) and `preview-isolation.yml`'s
+force-redeploy (isolated Neon branch + `R2_KEY_PREFIX`/`NEON_BRANCH`) — both report
+`state: success`, indistinguishable from the event payload alone. Before running any
+scenario, the workflow now polls `GET /health` on **its own** `target_url` (with the
+`x-vercel-protection-bypass` header, up to 120s) and reads two fields the route
+exposes for exactly this purpose: `isolated` (true once `NEON_BRANCH`/`R2_KEY_PREFIX`
+is injected) and `checks.neon` (a live `SELECT 1` against this deployment's own
+`DATABASE_URL`, always `"ok"`/`"error"` — the route never 500s even on a broken DB).
+
+- `isolated:true` + `checks.neon:"ok"` → the isolated, DB-ready deployment — run the
+  scenarios.
+- Never `isolated:true` within the poll window → this run is against the
+  pre-isolation deployment; skip the scenarios cleanly (green check, no smoke).
+- `isolated:true` but `checks.neon` never `"ok"` → the deployment we actually care
+  about is genuinely broken; fail loud.
+
+A `concurrency` group keyed on the deployment sha also cancels a still-polling (or
+still-running) pre-isolation invocation once the isolated redeploy's own
+`deployment_status` event arrives, so the two invocations never race to completion
+in parallel.
+
 ## Fixture 1 — the primary test user
 
 | | |

@@ -59,6 +59,11 @@ describe("defineEnv", () => {
     expect(defineEnv(valid).R2_KEY_PREFIX).toBeUndefined();
   });
 
+  it("accepts an optional NEON_BRANCH (preview isolation marker) and leaves it undefined when unset", () => {
+    expect(defineEnv({ ...valid, NEON_BRANCH: "preview-pr-42" }).NEON_BRANCH).toBe("preview-pr-42");
+    expect(defineEnv(valid).NEON_BRANCH).toBeUndefined();
+  });
+
   it("accepts an optional VIEW_ORIGIN URL (canonical viewer origin)", () => {
     const env = defineEnv({ ...valid, VIEW_ORIGIN: "https://view.example" });
     expect(env.VIEW_ORIGIN).toBe("https://view.example");

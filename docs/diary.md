@@ -2763,4 +2763,60 @@ ci .` clean (the one warning present is the pre-existing, already-documented fix
 warning from the prior entry), `docs:check` green. **Not run live** — needs the operator to validate
 against a real preview with all four of `E2E_CLERK_SECRET_KEY` / `E2E_TEST_USER_EMAIL` /
 `E2E_CLERK_PUBLISHABLE_KEY` / `VERCEL_AUTOMATION_BYPASS_SECRET` set.
+
+### 2026-07-09 — Smoke reliability: /health readiness gate closes ADR-0047's race (issue #149)
+
+Every app-preview commit fires TWO `deployment_status: success` events — the initial push-triggered
+build (prod-DB fallback, ADR-0047's accepted soft-isolation residual) and `preview-isolation.yml`'s
+force-redeploy (isolated Neon branch + `R2_KEY_PREFIX`) — indistinguishable from `e2e.yml`'s gate alone,
+so the smoke ran against BOTH: the pre-isolation run hit the DB-writing upload step against an app whose
+`DATABASE_URL` was still prod, 500ing intermittently (and writing real rows to prod when it didn't). Fix
+makes the smoke tell the two deployments apart instead of racing them:
+
+- **`/health` (`apps/app/app/routes/health.tsx`)** gained a fail-soft DB ping (`checks.neon: "ok" |
+  "error"`) plus two new fields: `isolated` (`Boolean(NEON_BRANCH || R2_KEY_PREFIX)`) and `neonBranch`
+  (echoed, `null` when unset). The DB-body logic was extracted to a pure `buildHealthBody()` in the new
+  `apps/app/app/server/health.server.ts` — full unit coverage there (routes otherwise stay e2e-only per
+  the root `vitest.config.ts`), with `pingDb` injected so tests never touch a real Neon connection. The
+  ping itself reuses the app's existing DB path exactly: a new `pingDb(ctx: DbContext)` helper in
+  `packages/adapters/src/client.ts` (`ctx.current().execute(sql\`select 1\`)`) — no new drizzle-orm
+  dependency was added to `apps/app`, which doesn't otherwise depend on it directly. Both the DB-client
+  import and the isolation-marker env read are LAZY/wrapped-in-try-catch inside the loader: `defineEnv()`
+  asserts every required secret and would otherwise turn a misconfigured deploy's `/health` into a 500
+  (docs/infra.md already documents this as the reason data-plane misconfig stays distinguishable from a
+  healthy `/health`) — falls back to raw `process.env.NEON_BRANCH`/`R2_KEY_PREFIX` reads on failure, and
+  the DB import is dynamic so a broken adapters graph can't crash route registration (same shape as the
+  jsdom incident above, different dependency).
+- **`NEON_BRANCH`** is a new optional env var (`packages/env/src/schema.ts`), injected by
+  `preview-isolation.yml`'s existing `set_env` loop (same call, `preview-pr-<N>`, already computed at
+  workflow-`env:` level for the Neon branch itself) — unset on prod and on the pre-isolation build.
+  Teardown needs no change: it deletes every Vercel env var matching the PR's `gitBranch`, key-agnostic.
+- **`e2e.yml`** gained a `concurrency: { group: e2e-${{ deployment.sha }}, cancel-in-progress: true }`
+  block (cancels a still-polling pre-isolation run once the isolated redeploy's event lands) and a new
+  "Readiness gate" step between browser install and the smoke: polls `$PLAYWRIGHT_BASE_URL/health` (with
+  the bypass header, up to 40×3s=120s), and branches three ways — `isolated:true` + `checks.neon:"ok"` →
+  proceed; never saw `isolated:true` in the window → this IS the pre-isolation deployment, skip cleanly
+  (exit 0, no smoke, no failure); saw `isolated:true` but `neon` never `"ok"` → the deployment we actually
+  care about is genuinely broken, fail loud (exit 1). The `pnpm e2e` and report-upload steps are now also
+  gated on `steps.readiness.outputs.ready == 'true'`. Event fields read via `env:` only, matching the
+  existing "Gate" step's injection hygiene.
+- **ADR-0047** amended: the "accepted residual" (a preview built before the workflow finishes uses the
+  prod fallback) is now GATED rather than merely documented — the smoke no longer races it.
+
+TDD on the pure `/health` body builder: 6 cases (isolated false/true via each marker independently, DB
+ping ok/error with the 200-always invariant, top-level fields preserved) — red confirmed (module didn't
+exist) before green. Also added a `NEON_BRANCH` case to `packages/env/src/define-env.test.ts` (red before
+green on the schema addition). Full suite: `pnpm install`, `npx biome ci .` (clean — same one pre-existing
+CSS-specificity warning as prior entries, unrelated), `npx turbo typecheck` (all 12 packages), `npx
+vitest run` (137 files / 1032 tests, all green), `npm run docs:check` all green.
+
+**Cannot be verified in this session**: `e2e.yml`'s `deployment_status` trigger only fires from the
+default branch against a live Vercel preview, and the readiness step's poll loop needs a real, protected
+preview URL + `VERCEL_AUTOMATION_BYPASS_SECRET`. Made correct-by-construction and dry-run-verified instead:
+the `jq` parsing was exercised against sample JSON bodies (isolated/ok, isolated/error, unset) outside CI,
+and `ruby -ryaml` confirms both edited workflow files parse as valid YAML. The operator should watch the
+next PR's Actions run to confirm the pre-isolation invocation actually logs the "skipping smoke" notice
+and the isolated one runs green — that's the one thing only a live merge can prove.
+
+Worktree: `worktree/smoke-readiness-gate` (branch `fix/smoke-readiness-gate`). Not yet merged.
 Not yet merged.
