@@ -95,23 +95,48 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      # Poll THIS run's own deployment (not a guess) until /health reports the
-      # isolated marker AND a live DB — or decide this is the pre-isolation
-      # deployment and skip cleanly. Event fields go through env: (never
-      # inlined into the script body), matching the "Gate" step's injection
-      # hygiene for untrusted webhook data.
-      - name: Readiness gate — wait for the isolated, DB-ready deployment
+      # Poll THIS run's own deployment (not a guess) to decide whether it's the
+      # ISOLATED redeploy (run the smoke) or the pre-isolation one racing it
+      # (skip cleanly). The `isolated` marker (NEON_BRANCH injected by
+      # preview-isolation.yml) is the AUTHORITATIVE signal — it's the actual
+      # cause of #149 (the pre-isolation deployment has the wrong/mid-flip env).
+      #
+      # `checks.neon` is ADVISORY ONLY, never a gate/fail condition: /health's
+      # DB ping opens a fresh neon-serverless WebSocket OUTSIDE the app's normal
+      # request/transaction path, and a Neon preview branch AUTO-SUSPENDS when
+      # idle — so the ping can read "error" on a genuinely-healthy deployment
+      # whose DB the real scenarios reach fine (Playwright's request timeout
+      # tolerates the cold-start wake). We wait a bounded window for neon:"ok"
+      # as a courtesy (lets a cold branch warm before the smoke), but proceed on
+      # `isolated:true` regardless — a genuinely-unreachable DB then surfaces as
+      # a real scenario failure (auth-upload's upload step), not a synthetic gate
+      # fail. (Reverses #174's original hard-fail-on-neon, which the /ce-dogfood
+      # run showed would fail every isolated run against a suspended branch.)
+      #
+      # Event fields go through env: (never inlined into the script body),
+      # matching the "Gate" step's injection hygiene for untrusted webhook data.
+      - name: Readiness gate — is this the isolated redeploy?
         id: readiness
         if: steps.gate.outputs.run == 'true'
         env:
           BASE_URL: ${{ github.event.deployment_status.target_url }}
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # Only to detect a creds OUTAGE below — not used for auth here.
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
+          TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
         run: |
           set -euo pipefail
           ever_isolated=false
-          ready=false
+          neon_ok=false
+          isolated_at=0
           tries=40
           interval=3
+          # Once isolated is first seen, wait at most this many more polls for a
+          # `neon:"ok"` courtesy confirmation before proceeding anyway — so a
+          # cold/suspended Neon branch (which may NEVER report ok, since the ping
+          # is advisory) doesn't make every isolated run pay the full window as
+          # latency (claude-review #175).
+          neon_grace=10
           for i in $(seq 1 "$tries"); do
             body=$(curl -fsS -m 5 -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$BASE_URL/health" 2>/dev/null || echo '{}')
             isolated=$(printf '%s' "$body" | jq -r '.isolated // false' 2>/dev/null || echo false)
@@ -119,39 +144,47 @@ jobs:
 
             if [ "$isolated" = "true" ]; then
               ever_isolated=true
+              [ "$isolated_at" -eq 0 ] && isolated_at="$i"
+              # Ideal fast path: isolated AND the DB ping confirms warm — run now.
               if [ "$neon" = "ok" ]; then
-                ready=true
+                neon_ok=true
+                break
+              fi
+              # Bounded courtesy wait: stop once we've given neon its grace.
+              if [ $((i - isolated_at)) -ge "$neon_grace" ]; then
                 break
               fi
             fi
             sleep "$interval"
           done
 
-          # Sleep budget only (tries × interval) — NOT wall-clock: each attempt
-          # also spends up to `curl -m 5`, so the real time to this decision can
-          # be materially longer (up to ~120s + 40×5s). Log text, not logic.
-          elapsed=$((tries * interval))
-
-          if [ "$ready" = "true" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Isolated deployment is DB-ready — running the smoke."
-            exit 0
-          fi
-
           if [ "$ever_isolated" = "false" ]; then
             # Never saw isolated:true in the whole window — this is the
             # pre-isolation (prod-fallback) deployment racing the redeploy.
-            # Skip cleanly: not a failure, nothing to smoke yet.
+            # Skip cleanly: not a failure, nothing to smoke on this one.
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not the isolated preview (isolated=false after ${elapsed}s) — skipping smoke."
+            echo "::notice::Not the isolated preview (isolated=false after ~$((tries * interval))s) — skipping smoke."
             exit 0
           fi
 
-          # Saw isolated:true but the DB ping never came back "ok": THIS is
-          # the deployment we care about, and it's genuinely broken.
-          echo "ready=false" >> "$GITHUB_OUTPUT"
-          echo "::error::Isolated deployment never became DB-ready (checks.neon != \"ok\" after ${elapsed}s) — failing."
-          exit 1
+          # This IS the isolated deployment → run the smoke. neon is advisory.
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          if [ "$neon_ok" = "true" ]; then
+            echo "::notice::Isolated deployment, DB ping ok — running the smoke."
+          else
+            echo "::warning::Isolated deployment reached, but /health DB ping not confirmed ok (advisory — the Neon branch may be cold). Running the smoke anyway; a genuinely-unreachable DB will fail the scenarios."
+          fi
+
+          # Creds-outage guard (claude-review #175): the ONLY DB-writing scenario
+          # is @auth (auth-upload), grep-excluded by playwright.config.ts when the
+          # Clerk staging creds are unset. With neon now advisory, a creds outage
+          # would leave ZERO DB coverage and a dead isolated DB would pass green —
+          # the exact silent-failure class this gate exists to prevent. Make it
+          # loud instead of letting it degrade silently.
+          if [ -z "${CLERK_SECRET_KEY:-}" ] || [ -z "${TEST_USER_EMAIL:-}" ]; then
+            echo "::warning::Clerk staging creds absent — @auth/@browser scenarios (the only DB-writing + editor coverage) are grep-excluded, so this run does NOT exercise DB reachability. A dead isolated DB would pass green. Restore E2E_CLERK_SECRET_KEY / E2E_TEST_USER_EMAIL."
+          fi
+          exit 0
 
       - name: Run BDD smoke against the preview
         if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true'
