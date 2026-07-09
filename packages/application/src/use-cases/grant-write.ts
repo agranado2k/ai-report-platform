@@ -82,7 +82,11 @@ export async function grantWrite(
         actorUserId: actor.userId,
         targetType: "report",
         targetId: found.value.id,
-        meta: { granteeUserId: granteeUserId.value },
+        // Always record the grantee EMAIL (the grant key) — `granteeUserId` is
+        // opportunistic (null until the invitee signs up, ADR-0060 §2), so the
+        // email is the only attribution present for a grant to a not-yet-
+        // registered user. Consistent with revoke-write's audit meta.
+        meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
       },
     ]);
   });

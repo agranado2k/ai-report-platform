@@ -133,7 +133,26 @@ describe("grantWrite use case (ADR-0060)", () => {
       actorUserId: OWNER,
       targetType: "report",
       targetId: reportId("00000000-0000-7000-8000-0000000000c1"),
-      meta: { granteeUserId: OTHER_USER },
+      meta: { granteeEmail: "grantee@x.com", granteeUserId: OTHER_USER },
+    });
+  });
+
+  it("audits the grantee EMAIL even when they haven't signed up (granteeUserId null)", async () => {
+    // The trail must attribute a grant to a not-yet-registered invitee — the
+    // exact case where granteeUserId is null (claude-review #177 finding 1).
+    const { reports, grants, identities, audit, uow } = await seed();
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
+      slug: SLUG as never,
+      email: "newcomer@x.com",
+    });
+    expect(r.ok).toBe(true);
+    expect(audit.recorded()).toContainEqual({
+      action: "grant.write.granted",
+      orgId: ORG,
+      actorUserId: OWNER,
+      targetType: "report",
+      targetId: reportId("00000000-0000-7000-8000-0000000000c1"),
+      meta: { granteeEmail: "newcomer@x.com", granteeUserId: null },
     });
   });
 });
