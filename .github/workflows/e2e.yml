@@ -121,12 +121,22 @@ jobs:
         env:
           BASE_URL: ${{ github.event.deployment_status.target_url }}
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # Only to detect a creds OUTAGE below — not used for auth here.
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
+          TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
         run: |
           set -euo pipefail
           ever_isolated=false
           neon_ok=false
+          isolated_at=0
           tries=40
           interval=3
+          # Once isolated is first seen, wait at most this many more polls for a
+          # `neon:"ok"` courtesy confirmation before proceeding anyway — so a
+          # cold/suspended Neon branch (which may NEVER report ok, since the ping
+          # is advisory) doesn't make every isolated run pay the full window as
+          # latency (claude-review #175).
+          neon_grace=10
           for i in $(seq 1 "$tries"); do
             body=$(curl -fsS -m 5 -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$BASE_URL/health" 2>/dev/null || echo '{}')
             isolated=$(printf '%s' "$body" | jq -r '.isolated // false' 2>/dev/null || echo false)
@@ -134,27 +144,26 @@ jobs:
 
             if [ "$isolated" = "true" ]; then
               ever_isolated=true
-              # Ideal fast path: isolated AND the DB ping confirms warm — stop
-              # waiting and run immediately.
+              [ "$isolated_at" -eq 0 ] && isolated_at="$i"
+              # Ideal fast path: isolated AND the DB ping confirms warm — run now.
               if [ "$neon" = "ok" ]; then
                 neon_ok=true
+                break
+              fi
+              # Bounded courtesy wait: stop once we've given neon its grace.
+              if [ $((i - isolated_at)) -ge "$neon_grace" ]; then
                 break
               fi
             fi
             sleep "$interval"
           done
 
-          # Sleep budget only (tries × interval) — NOT wall-clock: each attempt
-          # also spends up to `curl -m 5`, so the real time to this decision can
-          # be materially longer (up to ~120s + 40×5s). Log text, not logic.
-          elapsed=$((tries * interval))
-
           if [ "$ever_isolated" = "false" ]; then
             # Never saw isolated:true in the whole window — this is the
             # pre-isolation (prod-fallback) deployment racing the redeploy.
             # Skip cleanly: not a failure, nothing to smoke on this one.
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not the isolated preview (isolated=false after ${elapsed}s) — skipping smoke."
+            echo "::notice::Not the isolated preview (isolated=false after ~$((tries * interval))s) — skipping smoke."
             exit 0
           fi
 
@@ -163,7 +172,17 @@ jobs:
           if [ "$neon_ok" = "true" ]; then
             echo "::notice::Isolated deployment, DB ping ok — running the smoke."
           else
-            echo "::warning::Isolated deployment reached, but /health DB ping not confirmed ok within ${elapsed}s (advisory — the Neon branch may be cold). Running the smoke anyway; a genuinely-unreachable DB will fail the scenarios."
+            echo "::warning::Isolated deployment reached, but /health DB ping not confirmed ok (advisory — the Neon branch may be cold). Running the smoke anyway; a genuinely-unreachable DB will fail the scenarios."
+          fi
+
+          # Creds-outage guard (claude-review #175): the ONLY DB-writing scenario
+          # is @auth (auth-upload), grep-excluded by playwright.config.ts when the
+          # Clerk staging creds are unset. With neon now advisory, a creds outage
+          # would leave ZERO DB coverage and a dead isolated DB would pass green —
+          # the exact silent-failure class this gate exists to prevent. Make it
+          # loud instead of letting it degrade silently.
+          if [ -z "${CLERK_SECRET_KEY:-}" ] || [ -z "${TEST_USER_EMAIL:-}" ]; then
+            echo "::warning::Clerk staging creds absent — @auth/@browser scenarios (the only DB-writing + editor coverage) are grep-excluded, so this run does NOT exercise DB reachability. A dead isolated DB would pass green. Restore E2E_CLERK_SECRET_KEY / E2E_TEST_USER_EMAIL."
           fi
           exit 0
 
