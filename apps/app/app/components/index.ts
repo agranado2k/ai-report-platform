@@ -4,7 +4,6 @@ export { Button, type ButtonSize, type ButtonVariant, buttonClass } from "./Butt
 export { Card } from "./Card";
 export { CopyButton } from "./CopyButton";
 export { cx } from "./cx";
-export { EditableReportTitle } from "./EditableReportTitle";
 export { EmptyState } from "./EmptyState";
 export { type FolderNode, FolderTree } from "./FolderTree";
 export { Input, Select, Textarea } from "./Input";
@@ -21,4 +20,5 @@ export {
 } from "./icons";
 export { Logo } from "./Logo";
 export { PageShell } from "./PageShell";
+export { RenameReportForm } from "./RenameReportForm";
 export { StatusBadge } from "./StatusBadge";
