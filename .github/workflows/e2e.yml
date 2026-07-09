@@ -25,11 +25,20 @@ name: E2E (BDD)
 # the smoke against BOTH, and the pre-isolation one 500s on the DB-writing
 # upload step (and would write to prod). The "Readiness gate" step below reads
 # THIS run's own target_url's /health body to tell them apart instead of
-# racing them; the `concurrency` block cancels a still-polling/still-running
-# pre-isolation invocation once the isolated redeploy's event arrives.
+# racing them.
+#
+# The `concurrency` group serializes (does NOT cancel) the two same-SHA
+# invocations. `cancel-in-progress: false` is deliberate: the pre-isolation
+# and isolated redeploy share the deployment SHA, and their `deployment_status`
+# events can arrive in EITHER order (a fast isolated build can finish first).
+# With cancel-in-progress:true, a later-arriving pre-isolation event would
+# cancel an already-running isolated invocation, which then skips — and the
+# isolated deployment would never get smoked at all. Serializing instead means
+# whichever arrives second simply waits; each invocation still self-selects via
+# its own /health readiness gate, so the isolated deployment is ALWAYS smoked.
 concurrency:
   group: e2e-${{ github.event.deployment.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   deployment_status:
