@@ -5,6 +5,7 @@ import { withClassStyle, withSafeHref } from "./schema/attrs.js";
 import { chipMark } from "./schema/chip.js";
 import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { htmlBlockNode } from "./schema/generic-block.js";
+import { blockLabelNode, chipsNode, rdNode, rtagsNode, rtNode } from "./schema/inline-content.js";
 import { htmlInlineMark, kbdMark, pillMark } from "./schema/marks.js";
 import { withParagraphVariant } from "./schema/paragraph.js";
 import {
@@ -43,7 +44,12 @@ nodes = nodes
   .addToEnd("table_cell", tableCellNode)
   .addToEnd("details", detailsNode)
   .addToEnd("summary", summaryNode)
-  .addToEnd("resrow", resrowNode);
+  .addToEnd("resrow", resrowNode)
+  .addToEnd("rt", rtNode)
+  .addToEnd("rd", rdNode)
+  .addToEnd("rtags", rtagsNode)
+  .addToEnd("chips", chipsNode)
+  .addToEnd("block_label", blockLabelNode);
 // Retain class/style on every schema-basic node so bespoke classes on
 // otherwise-standard elements (e.g. `<h3 class="sub">`) degrade to
 // "preserved but uninterpreted" instead of being stripped.
