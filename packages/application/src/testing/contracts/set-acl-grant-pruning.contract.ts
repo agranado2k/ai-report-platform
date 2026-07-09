@@ -11,13 +11,21 @@
 // not the Acl), so both authoring sides must agree.
 import type { OrgId, ReportId, Slug, UserId } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { GrantStore, PasswordHasher, ReportRepository } from "../../ports";
+import type {
+  AuditLogger,
+  GrantStore,
+  PasswordHasher,
+  ReportRepository,
+  UnitOfWork,
+} from "../../ports";
 import { setAcl } from "../../use-cases/set-acl";
 
 export interface SetAclGrantPruningHarness {
   readonly reports: ReportRepository;
   readonly grants: GrantStore;
   readonly hasher: PasswordHasher;
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
   /** The org hosting the pre-seeded report (matches the actor used below). */
   readonly orgId: OrgId;
   /** The pre-seeded report's OWNER — setAcl is owner-gated (ADR-0059). */
@@ -60,7 +68,13 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("mode switch allowlist → password revokes every grant for the report", async () => {
-      const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
+      const deps = {
+        reports: h.reports,
+        hasher: h.hasher,
+        grants: h.grants,
+        audit: h.audit,
+        uow: h.uow,
+      };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -85,7 +99,13 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("allowlist stays but a removed email's grant is revoked; kept emails are untouched", async () => {
-      const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
+      const deps = {
+        reports: h.reports,
+        hasher: h.hasher,
+        grants: h.grants,
+        audit: h.audit,
+        uow: h.uow,
+      };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -109,7 +129,13 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("allowlist widening (additions only) leaves existing grants untouched", async () => {
-      const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
+      const deps = {
+        reports: h.reports,
+        hasher: h.hasher,
+        grants: h.grants,
+        audit: h.audit,
+        uow: h.uow,
+      };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -130,7 +156,13 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("a non-allowlist → non-allowlist switch never touches grants", async () => {
-      const deps = { reports: h.reports, hasher: h.hasher, grants: h.grants };
+      const deps = {
+        reports: h.reports,
+        hasher: h.hasher,
+        grants: h.grants,
+        audit: h.audit,
+        uow: h.uow,
+      };
       const pub = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "public" });
       expect(pub.ok).toBe(true);
       // A grant that (by hypothesis) shouldn't exist while public — proves the

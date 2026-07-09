@@ -1,9 +1,11 @@
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  InMemoryAuditLogger,
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { grantWrite } from "./grant-write";
 
@@ -34,14 +36,16 @@ async function seed() {
     reports,
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
+    audit: new InMemoryAuditLogger(),
+    uow: new PassThroughUnitOfWork(),
   };
 }
 
 describe("grantWrite use case (ADR-0060)", () => {
   it("requires the acl:write scope", async () => {
-    const { reports, grants, identities } = await seed();
+    const { reports, grants, identities, audit, uow } = await seed();
     const r = await grantWrite(
-      { reports, grants, identities },
+      { reports, grants, identities, audit, uow },
       { orgId: ORG, userId: OWNER, scopes: [] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -50,9 +54,9 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("is owner-only — a same-org non-owner is rejected (NotAllowed)", async () => {
-    const { reports, grants, identities } = await seed();
+    const { reports, grants, identities, audit, uow } = await seed();
     const r = await grantWrite(
-      { reports, grants, identities },
+      { reports, grants, identities, audit, uow },
       { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -60,8 +64,8 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("rejects an unknown slug with NotFound", async () => {
-    const { reports, grants, identities } = await seed();
-    const r = await grantWrite({ reports, grants, identities }, ACTOR, {
+    const { reports, grants, identities, audit, uow } = await seed();
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
       email: "grantee@x.com",
     });
@@ -69,8 +73,8 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("rejects a malformed email with ValidationError", async () => {
-    const { reports, grants, identities } = await seed();
-    const r = await grantWrite({ reports, grants, identities }, ACTOR, {
+    const { reports, grants, identities, audit, uow } = await seed();
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "not-an-email",
     });
@@ -78,8 +82,8 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("grants write, normalizing the email, with granteeUserId null when the grantee hasn't signed up", async () => {
-    const { reports, grants, identities } = await seed();
-    const r = await grantWrite({ reports, grants, identities }, ACTOR, {
+    const { reports, grants, identities, audit, uow } = await seed();
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: " Grantee@X.com ",
     });
@@ -92,9 +96,9 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("resolves granteeUserId opportunistically when the grantee already has an account", async () => {
-    const { reports, grants, identities } = await seed();
+    const { reports, grants, identities, audit, uow } = await seed();
     identities.seedUser(OTHER_USER, "grantee@x.com");
-    const r = await grantWrite({ reports, grants, identities }, ACTOR, {
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
@@ -102,16 +106,34 @@ describe("grantWrite use case (ADR-0060)", () => {
   });
 
   it("re-granting the same email upserts in place (no duplicate)", async () => {
-    const { reports, grants, identities } = await seed();
-    await grantWrite({ reports, grants, identities }, ACTOR, {
+    const { reports, grants, identities, audit, uow } = await seed();
+    await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
-    await grantWrite({ reports, grants, identities }, ACTOR, {
+    await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
     const listed = await grants.listByReport(reportId("00000000-0000-7000-8000-0000000000c1"));
     expect(listed.ok && listed.value).toHaveLength(1);
+  });
+
+  it("records a grant.write.granted audit row (ADR-0070)", async () => {
+    const { reports, grants, identities, audit, uow } = await seed();
+    identities.seedUser(OTHER_USER, "grantee@x.com");
+    const r = await grantWrite({ reports, grants, identities, audit, uow }, ACTOR, {
+      slug: SLUG as never,
+      email: "grantee@x.com",
+    });
+    expect(r.ok).toBe(true);
+    expect(audit.recorded()).toContainEqual({
+      action: "grant.write.granted",
+      orgId: ORG,
+      actorUserId: OWNER,
+      targetType: "report",
+      targetId: reportId("00000000-0000-7000-8000-0000000000c1"),
+      meta: { granteeUserId: OTHER_USER },
+    });
   });
 });

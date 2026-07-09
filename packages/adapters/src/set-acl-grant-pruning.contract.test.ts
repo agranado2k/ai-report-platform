@@ -6,9 +6,11 @@
 // (mirrors grant-store.contract.test.ts).
 import { describeSetAclGrantPruningContract, FakePasswordHasher } from "arp-application/testing";
 import { createReport, makeSlug, reportId, versionId } from "arp-domain";
+import { DrizzleAuditLogger } from "./audit-logger";
 import { DrizzleGrantStore } from "./grant-store";
 import { DrizzleReportRepository } from "./report-repository";
 import { makeTestDb, seedIdentity } from "./testing/pglite";
+import { DrizzleUnitOfWork } from "./unit-of-work";
 
 const RID = reportId("00000000-0000-4000-8000-0000000000a1");
 const VID = versionId("00000000-0000-4000-8000-0000000000b1");
@@ -38,6 +40,8 @@ describeSetAclGrantPruningContract("drizzle+pglite", async () => {
     reports,
     grants: new DrizzleGrantStore(tdb.ctx),
     hasher: new FakePasswordHasher(),
+    audit: new DrizzleAuditLogger(tdb.ctx),
+    uow: new DrizzleUnitOfWork(tdb.ctx),
     orgId: ids.orgId,
     userId: ids.userId,
     reportId: RID,

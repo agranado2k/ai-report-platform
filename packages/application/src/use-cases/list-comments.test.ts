@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
@@ -61,6 +62,7 @@ function makeDeps() {
     ids: new SequentialIdGenerator(),
     clock: new FixedClock(1000),
     outbox: new InMemoryEventOutbox(),
+    audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),

@@ -8,8 +8,9 @@
 // A cross-org write-grantee can therefore author a comment on a report outside
 // their own org, same as they can rename/re-upload/move it. Pure orchestration
 // over the driven ports (ADR-0024): load+authz → the domain createComment
-// transition → persist + outbox the CommentAdded event atomically (ADR-0064
-// §6, mirrors processScanResult's uow.run shape).
+// transition → persist + outbox the CommentAdded event + a `comment.added`
+// audit_log row (ADR-0070), all atomically (ADR-0064 §6 / ADR-0037 §5,
+// mirrors processScanResult's uow.run shape).
 import {
   type Anchor,
   type AppError,
@@ -21,6 +22,7 @@ import {
 } from "arp-domain";
 import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type {
+  AuditLogger,
   Clock,
   CommentRepository,
   EventOutbox,
@@ -35,6 +37,8 @@ export interface AddCommentDeps extends WriteGrantCheckDeps {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly outbox: EventOutbox;
+  /** Audit log (ADR-0070) — one `comment.added` row per new root comment. */
+  readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
 }
 export type AddCommentActor = TenancyActor;
@@ -65,7 +69,18 @@ export async function addComment(
   const committed = await deps.uow.run(async () => {
     const saved = await deps.comments.save(emission.value.comment);
     if (!saved.ok) return saved;
-    return deps.outbox.enqueue(emission.value.events);
+    const enqueued = await deps.outbox.enqueue(emission.value.events);
+    if (!enqueued.ok) return enqueued;
+    return deps.audit.record([
+      {
+        action: "comment.added",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "comment",
+        targetId: emission.value.comment.id,
+        meta: { reportId: report.value.id },
+      },
+    ]);
   });
   if (!committed.ok) return committed;
 

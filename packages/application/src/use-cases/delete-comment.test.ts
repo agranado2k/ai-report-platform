@@ -14,6 +14,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
@@ -62,6 +63,7 @@ function makeDeps() {
     ids: new SequentialIdGenerator(),
     clock: new FixedClock(1000),
     outbox: new InMemoryEventOutbox(),
+    audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
@@ -86,6 +88,14 @@ describe("deleteComment use case", () => {
     expect(r.ok).toBe(true);
     const found = await deps.comments.findById(created.value.id);
     expect(found.ok && found.value).toBeNull();
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "comment.deleted",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "comment",
+      targetId: created.value.id,
+      meta: { reportId: created.value.reportId },
+    });
   });
 
   it("rejects an org member who is neither the author nor the owner", async () => {
