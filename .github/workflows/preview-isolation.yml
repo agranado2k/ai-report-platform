@@ -218,8 +218,13 @@ jobs:
           interval=5
           state="UNKNOWN"
           for i in $(seq 1 "$tries"); do
-            state=$(curl -sf "$VERCEL_API/v13/deployments/$app_id?teamId=$VERCEL_TEAM" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.readyState // "UNKNOWN"')
+            # Tolerate a transient API blip (429/5xx): fall back to UNKNOWN and
+            # retry rather than letting a single failed GET kill the whole job
+            # under `set -euo pipefail`. Only a definitive ERROR/CANCELED (below)
+            # or exhausting the window fails loud.
+            resp=$(curl -sf -m 10 "$VERCEL_API/v13/deployments/$app_id?teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" 2>/dev/null || true)
+            state=$(printf '%s' "$resp" | jq -r '.readyState // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
             case "$state" in
               READY) break ;;
               ERROR|CANCELED) echo "::error::arp-app-prod deployment $app_id reached readyState=$state"; exit 1 ;;
