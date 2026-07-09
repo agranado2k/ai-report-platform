@@ -95,11 +95,12 @@ const INJECTED_STYLE_TAG = `<style>${IFRAME_INJECTED_CSS}</style>`;
  * library into the CLIENT bundle for production.
  *
  * Production (`ReportEditor.tsx`, browser-only — `buildIframeDocument` is
- * called from a `useMemo` in a mounted React component) uses this default:
- * the browser's own native `DOMParser`, which is comment-aware (the whole
- * point of this fix), zero extra bytes (already built into every browser),
- * and never touched unless the caller omits the second argument — so it's
- * never evaluated, and therefore never referenced, under Node. The test
+ * called from a client mount `useEffect`, NOT during render, precisely so
+ * `DOMParser` never runs during Remix SSR on the Node function) uses this
+ * default: the browser's own native `DOMParser`, which is comment-aware (the
+ * whole point of this fix), zero extra bytes (already built into every
+ * browser), and never touched unless the caller omits the second argument — so
+ * it's never evaluated, and therefore never referenced, under Node. The test
  * suite (`iframe-document.test.ts`) injects `linkedom`'s `parseHTML`
  * instead — a real, comment-aware HTML5 parser already a workspace
  * dependency (it's `arp-report-html`'s server-side DOM backend) — giving
