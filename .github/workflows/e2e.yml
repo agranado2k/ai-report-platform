@@ -127,6 +127,9 @@ jobs:
             sleep "$interval"
           done
 
+          # Sleep budget only (tries × interval) — NOT wall-clock: each attempt
+          # also spends up to `curl -m 5`, so the real time to this decision can
+          # be materially longer (up to ~120s + 40×5s). Log text, not logic.
           elapsed=$((tries * interval))
 
           if [ "$ready" = "true" ]; then

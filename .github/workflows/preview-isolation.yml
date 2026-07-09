@@ -143,9 +143,14 @@ jobs:
             # Explicit isolation marker (issue #149): the app's /health route
             # echoes this so the e2e readiness gate (.github/workflows/e2e.yml)
             # can tell THIS (isolated) redeploy apart from the initial
-            # push-triggered one, which never gets this var. Same branch name
-            # already computed above for the Neon branch itself ($NEON_BRANCH,
-            # workflow-level env).
+            # push-triggered build on a PR's FIRST push, before this env is
+            # injected. (These vars are git-branch-scoped, so they persist across
+            # later pushes within the same PR — on push #2+ the push-triggered
+            # build already reads NEON_BRANCH + the isolated DATABASE_URL and is
+            # genuinely on the isolated branch too; the readiness gate then
+            # smokes both same-sha deployments, serialized by `concurrency`.)
+            # Same branch name already computed above for the Neon branch itself
+            # ($NEON_BRANCH, workflow-level env).
             set_env "$proj" NEON_BRANCH "$NEON_BRANCH"
           done
 
