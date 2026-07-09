@@ -32,10 +32,12 @@ import {
   type VersionId,
   validationError,
 } from "arp-domain";
+import type { AuditEntry } from "../audit";
 import type {
   ApiKeyPrincipal,
   ApiKeyStore,
   ApiKeySummary,
+  AuditLogger,
   BlobFile,
   BlobStore,
   BundleProcessor,
@@ -380,6 +382,20 @@ export class InMemoryEventOutbox implements EventOutbox {
   /** Test helper: the events enqueued so far (in order). */
   drained(): readonly DomainEvent[] {
     return [...this.events];
+  }
+}
+
+export class InMemoryAuditLogger implements AuditLogger {
+  private readonly entries: AuditEntry[] = [];
+
+  async record(entries: readonly AuditEntry[]): Promise<Result<void, AppError>> {
+    this.entries.push(...entries);
+    return ok(undefined);
+  }
+
+  /** Test helper: the entries recorded so far (in order). */
+  recorded(): readonly AuditEntry[] {
+    return [...this.entries];
   }
 }
 

@@ -37,7 +37,13 @@ import {
   StatusBadge,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { deps, folderRepo, identityStore, writeGrantStore } from "../server/container.server";
+import {
+  auditLogger,
+  deps,
+  folderRepo,
+  identityStore,
+  writeGrantStore,
+} from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 import { log } from "../server/log.server";
 
@@ -174,6 +180,8 @@ export async function action(args: ActionFunctionArgs) {
         folders: folderRepo(),
         grants: writeGrantStore(),
         identities: identityStore(),
+        audit: auditLogger(),
+        uow: deps().uow,
       },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, toFolderId: toFolderId.value },
@@ -187,7 +195,13 @@ export async function action(args: ActionFunctionArgs) {
     const title = String(form.get("title") ?? "");
     if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
     const r = await renameReport(
-      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
+      {
+        reports: deps().reports,
+        grants: writeGrantStore(),
+        identities: identityStore(),
+        audit: auditLogger(),
+        uow: deps().uow,
+      },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, title },
     );
@@ -202,7 +216,7 @@ export async function action(args: ActionFunctionArgs) {
     const folder = String(form.get("folder") ?? "").trim();
     if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
     const r = await deleteReport(
-      { reports: deps().reports },
+      { reports: deps().reports, audit: auditLogger(), uow: deps().uow },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value },
     );
@@ -217,8 +231,8 @@ export async function action(args: ActionFunctionArgs) {
     const folderId = makeFolderId(rawId);
     if (!folderId.ok) return errorToJson(folderId.error);
     const r = await renameFolder(
-      { folders: folderRepo() },
-      { orgId: actor.value.orgId },
+      { folders: folderRepo(), audit: auditLogger(), uow: deps().uow },
+      { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value, name },
     );
     if (!r.ok) return errorToJson(r.error);
@@ -231,8 +245,8 @@ export async function action(args: ActionFunctionArgs) {
     const folderId = makeFolderId(rawId);
     if (!folderId.ok) return errorToJson(folderId.error);
     const r = await deleteFolder(
-      { folders: folderRepo(), reports: deps().reports },
-      { orgId: actor.value.orgId },
+      { folders: folderRepo(), reports: deps().reports, audit: auditLogger(), uow: deps().uow },
+      { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value },
     );
     if (!r.ok) return errorToJson(r.error);
@@ -249,8 +263,8 @@ export async function action(args: ActionFunctionArgs) {
   if (!parentId.ok) return errorToJson(parentId.error);
 
   const r = await createFolder(
-    { folders: folderRepo(), ids: deps().ids },
-    { orgId: actor.value.orgId },
+    { folders: folderRepo(), ids: deps().ids, audit: auditLogger(), uow: deps().uow },
+    { orgId: actor.value.orgId, userId: actor.value.userId },
     { parentId: parentId.value, name },
   );
   if (!r.ok) return errorToJson(r.error);

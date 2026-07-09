@@ -2870,3 +2870,25 @@ first time, a change to the e2e trigger machinery is exercised by the very PR th
 the whole point of the inversion.
 
 Worktree: `worktree/e2e-trigger-inversion` (branch `ci/e2e-trigger-inversion`). Not yet merged.
+
+---
+
+### 2026-07-09 — Audit log write seam built: the "every mutating action writes a row" claim is now true (issue #153, ADR-0070)
+
+Closes issue #153 and the drift flagged in the 2026-07-07 comments entry above ("**Audit rows were NOT
+added**" — the `audit_log` table existed since Phase 1 but no use case ever wrote to it, despite several
+ADRs claiming otherwise). Rather than quietly walking that claim back in the docs, built the seam: see
+**ADR-0070** for the `AuditLogger` port shape, the commit-last-atomicity model (audit row written
+synchronously inside the same `uow.run` transaction as the mutation — not via async event fan-out off the
+domain-event stream), the full sixteen-action vocabulary, and the deliberate exclusion of system/webhook
+use cases (`processScanResult`, `handleUserDeleted`, `provisionIdentity`), which stay on the existing
+event stream as their trail instead.
+
+All sixteen user-initiated, org-scoped mutating use cases are wired in this pass — report/folder CRUD,
+ACL/write-grant management, comments, and API keys — not just a pattern-proof subset left for later
+follow-up. `docs/db-design.md`'s `audit_log` section and `docs/events.md` (which had listed `AuditLogger`
+as an aspirational event subscriber on nearly every row) are reconciled with this reality; `AuditLogger`
+is no longer in any event's subscriber list. `docs/domain-glossary.md` gained **Audit log** and **Audit
+action** under a new "Cross-cutting infrastructure" section.
+
+Worktree: `worktree/audit-logger` (branch `feat/audit-logger`). Not yet merged.

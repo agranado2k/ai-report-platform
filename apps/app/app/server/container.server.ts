@@ -10,6 +10,7 @@ import {
   ClerkBackendOrgProvisioner,
   DbContext,
   DrizzleApiKeyRepository,
+  DrizzleAuditLogger,
   DrizzleCommentRepository,
   DrizzleEventOutbox,
   DrizzleFolderRepository,
@@ -122,6 +123,15 @@ export function writeGrantStore(): WriteGrantStore {
   return _writeGrants;
 }
 
+let _audit: DrizzleAuditLogger | undefined;
+/** The audit log (ADR-0070, issue #153) — every user-initiated, org-scoped
+ *  mutation's `audit_log` row. Memoized once and shared by `deps()` and any
+ *  other use-case deps builder that needs it (e.g. deleteReport). */
+export function auditLogger(): DrizzleAuditLogger {
+  if (!_audit) _audit = new DrizzleAuditLogger(context());
+  return _audit;
+}
+
 let _clock: SystemClock | undefined;
 /** The system clock — epoch ms; backs grant expiry on magic-link redeem. */
 export function clock(): Clock {
@@ -156,6 +166,7 @@ export function deps(): UploadReportDeps {
     bundles: new HtmlBundleProcessor(),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
+    audit: auditLogger(),
     scans: new DrizzleScanQueue(ctx),
     planLimiter: new AllowAllPlanLimiter(),
     ids: new UuidV7IdGenerator(),

@@ -6,7 +6,7 @@
 import { createFolder, listFolders } from "arp-application";
 import { makeFolderId } from "arp-domain";
 import { createFolderToHttp, listFoldersToHttp, parseCursorParams } from "arp-http";
-import { deps, folderRepo } from "../server/container.server";
+import { auditLogger, deps, folderRepo } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 
@@ -39,8 +39,8 @@ export const action = handle({
     if (!parentId.ok) return parentId;
 
     return createFolder(
-      { folders: folderRepo(), ids: deps().ids },
-      { orgId: actor.orgId },
+      { folders: folderRepo(), ids: deps().ids, audit: auditLogger(), uow: deps().uow },
+      { orgId: actor.orgId, userId: actor.userId },
       { parentId: parentId.value, name },
     );
   },

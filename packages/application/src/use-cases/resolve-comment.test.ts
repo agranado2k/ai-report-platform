@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
@@ -64,6 +65,7 @@ function makeDeps() {
     ids: new SequentialIdGenerator(),
     clock: new FixedClock(1000),
     outbox: new InMemoryEventOutbox(),
+    audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
@@ -94,6 +96,14 @@ describe("resolveComment use case", () => {
       commentId: created.value.id,
       reportId: created.value.reportId,
       resolvedAt: 5000,
+    });
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "comment.resolved",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "comment",
+      targetId: created.value.id,
+      meta: { reportId: created.value.reportId },
     });
   });
 

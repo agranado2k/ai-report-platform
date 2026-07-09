@@ -25,6 +25,7 @@ import {
 } from "arp-domain";
 import { canWrite, type WriteGrantCheckDeps } from "../load-owned";
 import type {
+  AuditLogger,
   BlobStore,
   BundleProcessor,
   EventOutbox,
@@ -48,6 +49,8 @@ export interface UploadReportDeps extends WriteGrantCheckDeps {
   readonly bundles: BundleProcessor;
   readonly idempotency: IdempotencyStore;
   readonly outbox: EventOutbox;
+  /** Audit log (ADR-0070) — one `report.uploaded` row per fresh upload/re-upload. */
+  readonly audit: AuditLogger;
   readonly scans: ScanQueue;
   readonly planLimiter: PlanLimiter;
   readonly ids: IdGenerator;
@@ -195,6 +198,17 @@ export async function uploadReport(
     if (!saved.ok) return saved;
     const enq = await deps.outbox.enqueue(events);
     if (!enq.ok) return enq;
+    const audited = await deps.audit.record([
+      {
+        action: "report.uploaded",
+        orgId: cmd.actor.orgId,
+        actorUserId: cmd.actor.userId,
+        targetType: "report",
+        targetId: report.id,
+        meta: { versionId: newVersion.id },
+      },
+    ]);
+    if (!audited.ok) return audited;
     return deps.idempotency.complete(ref, { responseStatus: 201, responseBody: result });
   });
   if (!committed.ok) {

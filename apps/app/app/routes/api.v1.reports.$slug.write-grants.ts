@@ -8,7 +8,7 @@
 // the use case → serialize via arp-http. The use cases own the ownership authz.
 import { grantWrite, listWriteGrants } from "arp-application";
 import { grantWriteToHttp, listWriteGrantsToHttp } from "arp-http";
-import { deps, identityStore, writeGrantStore } from "../server/container.server";
+import { auditLogger, deps, identityStore, writeGrantStore } from "../server/container.server";
 import { handle } from "../server/handle.server";
 
 // GET — list, owner-only (listWriteGrants owns authz via the loadOwnedReport
@@ -33,7 +33,13 @@ export const action = handle({
   run: ({ actor, slug, body }) => {
     const email = typeof body.email === "string" ? body.email : "";
     return grantWrite(
-      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
+      {
+        reports: deps().reports,
+        grants: writeGrantStore(),
+        identities: identityStore(),
+        audit: auditLogger(),
+        uow: deps().uow,
+      },
       { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
       { slug, email },
     );

@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
@@ -61,6 +62,7 @@ function makeDeps() {
     ids: new SequentialIdGenerator(),
     clock: new FixedClock(1000),
     outbox: new InMemoryEventOutbox(),
+    audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
@@ -95,6 +97,15 @@ describe("addComment use case", () => {
 
     const persisted = await deps.comments.findById(r.value.id);
     expect(persisted.ok && persisted.value?.body).toBe("What does this mean?");
+
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "comment.added",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "comment",
+      targetId: r.value.id,
+      meta: { reportId: r.value.reportId },
+    });
   });
 
   it("rejects a non-owner with no write grant with NotAllowed (canWrite = isOwner OR hasWriteGrant, ADR-0064 §3 / ADR-0060 §4)", async () => {

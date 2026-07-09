@@ -3,8 +3,9 @@
 // (ADR-0024). Authorization boundary (ADR-0059 §2 / ADR-0060 §4): the actor
 // must pass the `canWrite` seam for the report (owner OR write-grantee), and
 // the target folder must belong to the REPORT's org — not the actor's, since
-// a cross-org grantee moves a report within the org that hosts it. Persists
-// via the report's save (which upserts folder_id).
+// a cross-org grantee moves a report within the org that hosts it. Load+authz
+// stays OUTSIDE the tx; persists via the report's save + a `report.moved`
+// audit_log row (ADR-0070), committed together (ADR-0037 §5).
 import {
   type AppError,
   type FolderId,
@@ -21,7 +22,7 @@ import {
   type TenancyActor,
   type WriteGrantCheckDeps,
 } from "../load-owned";
-import type { FolderRepository, ReportRepository } from "../ports";
+import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
 const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "target folder not found",
@@ -31,6 +32,9 @@ const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
 export interface MoveReportDeps extends WriteGrantCheckDeps {
   readonly reports: ReportRepository;
   readonly folders: FolderRepository;
+  /** Audit log (ADR-0070) — one `report.moved` row per move. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
 
 export type MoveReportActor = TenancyActor;
@@ -47,6 +51,7 @@ export async function moveReport(
 ): Promise<Result<Report, AppError>> {
   const found = await loadWritableReport(deps.reports, actor, input.slug, deps);
   if (!found.ok) return found;
+  const fromFolderId = found.value.folderId;
 
   // The target folder is checked against the REPORT's org (ADR-0059 §2) —
   // behavior-neutral today (the owner is same-org by construction), but the
@@ -60,7 +65,20 @@ export async function moveReport(
   if (!target.ok) return target;
 
   const moved = placeInFolder(found.value, input.toFolderId);
-  const saved = await deps.reports.save(moved);
-  if (!saved.ok) return saved;
-  return ok(moved); // the moved report → the resource the API returns (ADR-0053)
+  return deps.uow.run(async () => {
+    const saved = await deps.reports.save(moved);
+    if (!saved.ok) return saved;
+    const audited = await deps.audit.record([
+      {
+        action: "report.moved",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "report",
+        targetId: found.value.id,
+        meta: { fromFolderId, toFolderId: input.toFolderId },
+      },
+    ]);
+    if (!audited.ok) return audited;
+    return ok(moved); // the moved report → the resource the API returns (ADR-0053)
+  });
 }

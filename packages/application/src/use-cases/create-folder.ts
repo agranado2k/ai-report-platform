@@ -7,19 +7,20 @@
 //     provisioning, never via this use case, so we can't mint a second Root;
 //   - max nesting depth 8 (docs/db-design.md, ADR-0037), Root = depth 0.
 // Sibling-slug uniqueness is DB-enforced; a clash surfaces as a ValidationError.
+// Load+authz stays OUTSIDE the tx; persists via save + a `folder.created`
+// audit_log row (ADR-0070), committed together (ADR-0037 §5).
 import {
   type AppError,
   createFolder as buildFolder,
   err,
   type Folder,
   type FolderId,
-  type OrgId,
   ok,
   type Result,
   validationError,
 } from "arp-domain";
-import { loadOwnedFolder, type OwnedGuardMessages } from "../load-owned";
-import type { FolderRepository, IdGenerator } from "../ports";
+import { loadOwnedFolder, type OwnedGuardMessages, type TenancyActor } from "../load-owned";
+import type { AuditLogger, FolderRepository, IdGenerator, UnitOfWork } from "../ports";
 
 const PARENT_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "parent folder not found",
@@ -32,11 +33,14 @@ export const MAX_FOLDER_DEPTH = 8;
 export interface CreateFolderDeps {
   readonly folders: FolderRepository;
   readonly ids: IdGenerator;
+  /** Audit log (ADR-0070) — one `folder.created` row per create. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
 
-export interface CreateFolderActor {
-  readonly orgId: OrgId;
-}
+/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
+ *  solely to attribute the audit row; it must never gate authorization. */
+export type CreateFolderActor = TenancyActor;
 
 export interface CreateFolderInput {
   /** Parent folder — required; the org Root is provisioned, not created here. */
@@ -68,9 +72,22 @@ export async function createFolder(
   });
   if (!built.ok) return built;
 
-  const saved = await deps.folders.save(built.value);
-  if (!saved.ok) return saved;
-  return ok(built.value);
+  return deps.uow.run(async () => {
+    const saved = await deps.folders.save(built.value);
+    if (!saved.ok) return saved;
+    const audited = await deps.audit.record([
+      {
+        action: "folder.created",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "folder",
+        targetId: built.value.id,
+        meta: { parentId: input.parentId },
+      },
+    ]);
+    if (!audited.ok) return audited;
+    return ok(built.value);
+  });
 }
 
 /** Depth of `folder` relative to its Root (Root = 0), by walking parent_id up. */
