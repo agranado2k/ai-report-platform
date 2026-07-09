@@ -41,7 +41,7 @@
 // since it has to be in the SAME document as the decorated spans.
 import type { PMDocJson, Shell } from "arp-report-html";
 import { EditorView } from "prosemirror-view";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CommentForHighlight } from "../editor/comment-decorations";
 import { commentHighlightsKey, resolvableCommentRanges } from "../editor/comment-decorations";
 import { createEditorState, docJson } from "../editor/editor-state";
@@ -107,13 +107,24 @@ export function ReportEditor({
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
 
-  // Built once from `shell` (read only at mount, same contract as
-  // `initialDoc`) — memoized so an unrelated re-render (e.g. `comments`
-  // changing) never recomputes a fresh-but-equal string and risks the
-  // `<iframe>` re-navigating (which would tear down the mounted EditorView
-  // outside our own effect's cleanup).
+  // `srcDoc` is built on the CLIENT only. `buildIframeDocument` parses with the
+  // browser's `DOMParser` (comment-aware, per the CSP-bypass fix) — which does
+  // NOT exist during Remix SSR on the Node serverless function. Computing it in
+  // a render-time `useMemo` therefore threw `ReferenceError: DOMParser is not
+  // defined` and 500'd the AUTHENTICATED editor (SSR runs `ReportEditor`; an
+  // unauthenticated request redirects to /sign-in before it renders, which is
+  // why it looked fine). This component is client-only anyway (`EditorView`
+  // needs a real DOM), so we build `srcDoc` in a mount effect: SSR + first
+  // client render emit an `<iframe>` with no `srcDoc` (identical, no hydration
+  // mismatch); the client then sets it, the iframe's `load` fires, and the
+  // mount effect below mounts PM into it. Read only at mount (`[]`), same
+  // contract as `initialDoc`, so no accidental re-navigation on a `comments`
+  // change.
+  const [srcDoc, setSrcDoc] = useState<string>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: shell is read only at mount by design, mirroring initialDoc.
-  const srcDoc = useMemo(() => buildIframeDocument(shell), []);
+  useEffect(() => {
+    setSrcDoc(buildIframeDocument(shell));
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: initialDoc is read only at mount by design (see the prop doc-comment) — the parent remounts via a `key` change (e.g. the slug) to load a genuinely different document.
   useEffect(() => {

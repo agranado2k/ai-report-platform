@@ -31,6 +31,7 @@ export default defineConfig({
       "apps/app/app/server/**/*.test.ts",
       "apps/app/app/editor/**/*.test.ts",
       "apps/app/app/components/comment-composer-lifecycle.test.ts",
+      "apps/app/app/components/ReportEditor.ssr.test.ts",
       "apps/view/app/server/**/*.test.ts",
     ],
     environment: "node",
