@@ -1,27 +1,24 @@
 // deleteFolder — soft-delete a Folder in the acting org (ADR-0036, Reports &
 // Folders). Pure orchestration over the Folder + Report repositories (ADR-0024):
-// load+authz (the shared loadOwnedFolder guard) → reject the Root → reject a
-// non-empty folder (any subfolder or any report placed here) → softDelete.
-// "Block if non-empty" is the chosen policy: the caller empties a folder (move
-// its contents out) before deleting.
-import {
-  type AppError,
-  err,
-  type FolderId,
-  type OrgId,
-  type Result,
-  validationError,
-} from "arp-domain";
-import { loadOwnedFolder } from "../load-owned";
-import type { FolderRepository, ReportRepository } from "../ports";
+// load+authz (the shared loadOwnedFolder guard, OUTSIDE the tx) → reject the
+// Root → reject a non-empty folder (any subfolder or any report placed here)
+// → softDelete + a `folder.deleted` audit_log row (ADR-0070), committed
+// together (ADR-0037 §5). "Block if non-empty" is the chosen policy: the
+// caller empties a folder (move its contents out) before deleting.
+import { type AppError, err, type FolderId, type Result, validationError } from "arp-domain";
+import { loadOwnedFolder, type TenancyActor } from "../load-owned";
+import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
 export interface DeleteFolderDeps {
   readonly folders: FolderRepository;
   readonly reports: ReportRepository;
+  /** Audit log (ADR-0070) — one `folder.deleted` row per soft-delete. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
-export interface DeleteFolderActor {
-  readonly orgId: OrgId;
-}
+/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
+ *  solely to attribute the audit row; it must never gate authorization. */
+export type DeleteFolderActor = TenancyActor;
 export interface DeleteFolderInput {
   readonly folderId: FolderId;
 }
@@ -51,5 +48,17 @@ export async function deleteFolder(
     );
   }
 
-  return deps.folders.softDelete(input.folderId);
+  return deps.uow.run(async () => {
+    const deleted = await deps.folders.softDelete(input.folderId);
+    if (!deleted.ok) return deleted;
+    return deps.audit.record([
+      {
+        action: "folder.deleted",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "folder",
+        targetId: input.folderId,
+      },
+    ]);
+  });
 }

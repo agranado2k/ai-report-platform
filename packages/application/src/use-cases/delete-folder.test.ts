@@ -12,13 +12,19 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { InMemoryFolderRepository, InMemoryReportRepository } from "../testing/in-memory";
+import {
+  InMemoryAuditLogger,
+  InMemoryFolderRepository,
+  InMemoryReportRepository,
+  PassThroughUnitOfWork,
+} from "../testing/in-memory";
 import { deleteFolder } from "./delete-folder";
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
 const ROOT = "00000000-0000-7000-8000-0000000000a0";
 const SUB = "00000000-0000-7000-8000-0000000000a2";
+const actorA = userId("00000000-0000-7000-8000-0000000000d1");
 
 function slug(s: string): Slug {
   const r = makeSlug(s);
@@ -55,15 +61,15 @@ async function setup() {
   const reports = new InMemoryReportRepository();
   await folders.save(folder(ROOT, orgA, null, "Root"));
   await folders.save(folder(SUB, orgA, ROOT, "Sub"));
-  return { folders, reports };
+  return { folders, reports, audit: new InMemoryAuditLogger(), uow: new PassThroughUnitOfWork() };
 }
 
 describe("deleteFolder use case", () => {
   it("soft-deletes an empty folder (excluded from listByOrg)", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgA },
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
     expect(r.ok).toBe(true);
@@ -72,54 +78,71 @@ describe("deleteFolder use case", () => {
   });
 
   it("refuses to delete the Root folder", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgA },
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
       { folderId: folderId(ROOT) },
     );
     expect(!r.ok && r.error.kind).toBe("ValidationError");
   });
 
   it("refuses a folder that contains a report", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     await reports.save(reportIn(orgA, SUB, "aaaaaaaaaa"));
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgA },
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
     expect(!r.ok && r.error.kind).toBe("ValidationError");
   });
 
   it("refuses a folder that contains a subfolder", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     await folders.save(folder("00000000-0000-7000-8000-0000000000a3", orgA, SUB, "Nested"));
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgA },
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
     expect(!r.ok && r.error.kind).toBe("ValidationError");
   });
 
   it("rejects a cross-org folder with NotAllowed", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgB },
+      { folders, reports, audit, uow },
+      { orgId: orgB, userId: actorA },
       { folderId: folderId(SUB) },
     );
     expect(!r.ok && r.error.kind).toBe("NotAllowed");
   });
 
   it("rejects an unknown folder with NotFound", async () => {
-    const { folders, reports } = await setup();
+    const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports },
-      { orgId: orgA },
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
       { folderId: folderId("00000000-0000-7000-8000-00000000dead") },
     );
     expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("records a folder.deleted audit entry alongside the soft-delete (ADR-0070)", async () => {
+    const { folders, reports, audit, uow } = await setup();
+    const r = await deleteFolder(
+      { folders, reports, audit, uow },
+      { orgId: orgA, userId: actorA },
+      { folderId: folderId(SUB) },
+    );
+    expect(r.ok).toBe(true);
+    expect(audit.recorded()).toContainEqual({
+      action: "folder.deleted",
+      orgId: orgA,
+      actorUserId: actorA,
+      targetType: "folder",
+      targetId: folderId(SUB),
+    });
   });
 });

@@ -8,7 +8,13 @@
 import { moveReport } from "arp-application";
 import { makeFolderId } from "arp-domain";
 import { moveReportToHttp } from "arp-http";
-import { deps, folderRepo, identityStore, writeGrantStore } from "../server/container.server";
+import {
+  auditLogger,
+  deps,
+  folderRepo,
+  identityStore,
+  writeGrantStore,
+} from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 
@@ -29,6 +35,8 @@ export const action = handle({
         folders: folderRepo(),
         grants: writeGrantStore(),
         identities: identityStore(),
+        audit: auditLogger(),
+        uow: deps().uow,
       },
       { orgId: actor.orgId, userId: actor.userId },
       { slug, toFolderId: toFolderId.value },

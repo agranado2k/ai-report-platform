@@ -58,7 +58,13 @@ const patchHandler = handle({
   run: ({ actor, slug, body }) => {
     const title = typeof body.title === "string" ? body.title : "";
     return renameReport(
-      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
+      {
+        reports: deps().reports,
+        grants: writeGrantStore(),
+        identities: identityStore(),
+        audit: auditLogger(),
+        uow: deps().uow,
+      },
       { orgId: actor.orgId, userId: actor.userId },
       { slug, title },
     );
