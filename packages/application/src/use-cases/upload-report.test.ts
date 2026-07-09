@@ -37,7 +37,7 @@ describe("uploadReport", () => {
   });
 
   it("creates a report: 201-shape result, persisted, event + scan enqueued, blob stored", async () => {
-    const { deps, reports, outbox, scans, blobs } = makeDeps();
+    const { deps, reports, outbox, audit, scans, blobs } = makeDeps();
     const r = await uploadReport(deps, cmd());
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -51,6 +51,14 @@ describe("uploadReport", () => {
     const found = await reports.findBySlug(sv("slug000001"));
     expect(found.ok && found.value?.slug).toBe("slug000001");
     expect(outbox.drained().map((e) => e.type)).toEqual(["ReportVersionUploaded"]);
+    expect(audit.recorded()).toContainEqual({
+      action: "report.uploaded",
+      orgId: "o1",
+      actorUserId: "u1",
+      targetType: "report",
+      targetId: "r1",
+      meta: { versionId: "v1" },
+    });
     expect(scans.enqueued).toEqual([{ reportId: "r1", versionId: "v1" }]);
     const blob = await blobs.readObject(reportId("r1"), versionId("v1"), "index.html");
     expect(blob.ok && blob.value?.path).toBe("index.html");
@@ -76,7 +84,7 @@ describe("uploadReport", () => {
   });
 
   it("replays an identical retry (same key + content) without creating a duplicate", async () => {
-    const { deps, reports } = makeDeps();
+    const { deps, reports, audit } = makeDeps();
     const first = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
     const second = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
     expect(first.ok && first.value.replayed).toBe(false);
@@ -87,6 +95,8 @@ describe("uploadReport", () => {
     // No second report was created.
     const dup = await reports.findBySlug(sv("slug000002"));
     expect(dup.ok && dup.value).toBeNull();
+    // A replay is not a NEW mutation — exactly one report.uploaded is recorded.
+    expect(audit.recorded().filter((e) => e.action === "report.uploaded")).toHaveLength(1);
   });
 
   it("rejects a reused key with a different body (422)", async () => {

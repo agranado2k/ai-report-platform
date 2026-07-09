@@ -37,7 +37,13 @@ import {
   StatusBadge,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { deps, folderRepo, identityStore, writeGrantStore } from "../server/container.server";
+import {
+  auditLogger,
+  deps,
+  folderRepo,
+  identityStore,
+  writeGrantStore,
+} from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 import { log } from "../server/log.server";
 
@@ -202,7 +208,7 @@ export async function action(args: ActionFunctionArgs) {
     const folder = String(form.get("folder") ?? "").trim();
     if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
     const r = await deleteReport(
-      { reports: deps().reports },
+      { reports: deps().reports, audit: auditLogger(), uow: deps().uow },
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value },
     );

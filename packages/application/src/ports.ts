@@ -29,6 +29,7 @@ import type {
   VersionId,
   VersionOrigin,
 } from "arp-domain";
+import type { AuditEntry } from "./audit";
 
 /**
  * A lightweight read projection of a Report for list views (the dashboard).
@@ -337,6 +338,12 @@ export interface IdempotencyStore {
 export interface EventOutbox {
   /** Append events in the same transaction as the state change. */
   enqueue(events: readonly DomainEvent[]): Promise<Result<void, AppError>>;
+}
+
+// ── Audit log (ADR-0070, issue #153) ──────────────────────────────────────
+export interface AuditLogger {
+  /** Append audit rows in the same transaction as the state change (ADR-0070). */
+  record(entries: readonly AuditEntry[]): Promise<Result<void, AppError>>;
 }
 
 // ── Scan port (Abuse & Moderation). Phase 1 stub always yields clean. ──────

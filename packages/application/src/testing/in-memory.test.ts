@@ -4,6 +4,7 @@ import type { IdempotencyKeyRef } from "../ports";
 import {
   FakePlanLimiter,
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
   InMemoryIdempotencyStore,
@@ -123,6 +124,48 @@ describe("InMemoryEventOutbox", () => {
       "ReportVersionUploaded",
       "ReportPublished",
     ]);
+  });
+});
+
+describe("InMemoryAuditLogger", () => {
+  it("preserves recorded entries in order", async () => {
+    const audit = new InMemoryAuditLogger();
+    await audit.record([
+      {
+        action: "report.uploaded",
+        orgId: orgId("o1"),
+        actorUserId: userId("u1"),
+        targetType: "report",
+        targetId: "r1",
+        meta: { versionId: "v1" },
+      },
+    ]);
+    await audit.record([
+      {
+        action: "report.deleted",
+        orgId: orgId("o1"),
+        actorUserId: userId("u1"),
+        targetType: "report",
+        targetId: "r1",
+      },
+    ]);
+    expect(audit.recorded().map((e) => e.action)).toEqual(["report.uploaded", "report.deleted"]);
+  });
+
+  it("recorded() returns a copy, not the live array", async () => {
+    const audit = new InMemoryAuditLogger();
+    const first = audit.recorded();
+    await audit.record([
+      {
+        action: "report.uploaded",
+        orgId: orgId("o1"),
+        actorUserId: null,
+        targetType: "report",
+        targetId: "r1",
+      },
+    ]);
+    expect(first).toHaveLength(0);
+    expect(audit.recorded()).toHaveLength(1);
   });
 });
 

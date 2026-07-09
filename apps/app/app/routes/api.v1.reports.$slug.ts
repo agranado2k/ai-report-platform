@@ -9,7 +9,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { deleteReport, getReport, renameReport } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { deleteReportToHttp, errorToHttp, getReportToHttp, renameReportToHttp } from "arp-http";
-import { deps, identityStore, writeGrantStore } from "../server/container.server";
+import { auditLogger, deps, identityStore, writeGrantStore } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { toResponse, wireContext } from "../server/http.server";
 
@@ -44,7 +44,7 @@ const deleteHandler = handle({
   slug: true,
   run: ({ actor, slug }) =>
     deleteReport(
-      { reports: deps().reports },
+      { reports: deps().reports, audit: auditLogger(), uow: deps().uow },
       { orgId: actor.orgId, userId: actor.userId },
       { slug },
     ),
