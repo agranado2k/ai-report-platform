@@ -140,6 +140,13 @@ jobs:
             set_env "$proj" DATABASE_URL "$DATABASE_URL"
             set_env "$proj" SCAN_QUEUE_DATABASE_URL "$DATABASE_URL"
             set_env "$proj" R2_KEY_PREFIX "pr-$PR/"
+            # Explicit isolation marker (issue #149): the app's /health route
+            # echoes this so the e2e readiness gate (.github/workflows/e2e.yml)
+            # can tell THIS (isolated) redeploy apart from the initial
+            # push-triggered one, which never gets this var. Same branch name
+            # already computed above for the Neon branch itself ($NEON_BRANCH,
+            # workflow-level env).
+            set_env "$proj" NEON_BRANCH "$NEON_BRANCH"
           done
 
       - name: Redeploy previews so the isolated env takes effect

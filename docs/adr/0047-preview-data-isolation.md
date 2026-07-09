@@ -40,8 +40,18 @@ Chosen: **option 1 (soft isolation)** (operator decision). A `preview-isolation`
 - Requires a `VERCEL_TOKEN` repo secret with team env-management scope (reused from the Terraform provider token).
 - Previews stop accumulating rows in the prod database; the e2e's unique-marker hack can be revisited once this is proven.
 
+**Amended 2026-07-09 (issue #149):** the accepted residual above was an *observed* reliability bug, not just a theoretical race — `e2e.yml`'s `deployment_status` gate can't tell the pre-isolation build apart from the isolated redeploy (both fire `state: success` for the same commit), so the smoke intermittently ran against the pre-isolation deployment and 500'd on the DB-writing upload step (writing to prod in the process). The residual is now **gated, not just documented**:
+
+- `preview-isolation.yml`'s `set_env` loop injects an explicit `NEON_BRANCH` marker (the same `preview-pr-<N>` name already computed for the Neon branch itself) alongside `DATABASE_URL`/`R2_KEY_PREFIX` — unset on prod and on the pre-isolation build.
+- `/health` (`apps/app/app/routes/health.tsx`) echoes `isolated: Boolean(NEON_BRANCH || R2_KEY_PREFIX)` and `neonBranch`, plus a fail-soft DB ping (`checks.neon: "ok" | "error"`, never a 500 — see `apps/app/app/server/health.server.ts`).
+- `e2e.yml` polls `/health` on its own `target_url` before running scenarios: `isolated:true` + `checks.neon:"ok"` → proceed; never isolated within the poll window → this is the pre-isolation deployment, skip cleanly (not a failure); isolated but never DB-ready → fail loud (this deployment is genuinely broken). A `concurrency` group keyed on the deployment sha cancels a still-running pre-isolation invocation once the isolated redeploy's event arrives.
+
+So the two-deployments-per-commit shape (and the soft-fallback window) are unchanged — this amendment closes the *smoke reliability* consequence of that shape, not the isolation model itself.
+
 ## More information
 
 Implemented in `.github/workflows/preview-isolation.yml`; consumes the `R2_KEY_PREFIX` plumbing in `R2BlobStore` / the env contract. Tracked by GitHub issue #53.
 
 The Clerk dimension of preview isolation — previously deferred here to the real-auth track (#54) — is now resolved by **ADR-0048**: Vercel `preview` deploys are provisioned with the **staging/test** Clerk instance keys, while `production` keeps the live keys (split by Vercel `target` in `envs/prod/main.tf`). So a preview can never authenticate against the production Clerk user pool. This supersedes the "deferred" note above.
+
+The readiness-gate amendment (2026-07-09) is implemented in `apps/app/app/routes/health.tsx` / `apps/app/app/server/health.server.ts` / `.github/workflows/e2e.yml` / `.github/workflows/preview-isolation.yml` (`NEON_BRANCH`). Tracked by GitHub issue #149.

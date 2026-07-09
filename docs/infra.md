@@ -149,6 +149,18 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > into Protection Bypass for Automation on **both** `arp-app-prod` and
 > `arp-view-prod`, store it as this repo secret, and **redeploy** (Vercel binds
 > it at build time).
+>
+> **`NEON_BRANCH`** (issue #149, amends ADR-0047) — an explicit isolation marker,
+> not a secret: `preview-isolation.yml`'s `set_env` loop injects it (value
+> `preview-pr-<N>`, the same name already used for the Neon branch itself)
+> alongside `DATABASE_URL`/`R2_KEY_PREFIX` on the isolated redeploy only; unset on
+> `production` and on the pre-isolation build. `packages/env/src/schema.ts`
+> declares it optional (`NEON_BRANCH`). `/health` echoes it (`neonBranch`) and
+> derives `isolated` from it (or `R2_KEY_PREFIX`) so `e2e.yml`'s readiness gate
+> can tell the pre-isolation deployment apart from the isolated one instead of
+> racing both — see `tests/e2e/README.md`'s "CI readiness gate" section. Cleaned
+> up automatically on PR close: the teardown job deletes every Vercel env var
+> matching the PR's `gitBranch`, key-agnostic.
 
 > **`R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`** are a **separate** R2
 > token from the tf-state one — created in the dashboard (R2 → Manage R2 API

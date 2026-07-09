@@ -16,6 +16,20 @@ name: E2E (BDD)
 # the non-app events simply no-op with a clear log line.
 # The 29 product .feature files are not executed yet (no step defs); step
 # definitions + a widened features glob land with 1d (upload API) and 1e (viewer).
+#
+# Issue #149 — smoke reliability: the app preview ALSO gets two
+# `deployment_status: success` events per commit — the initial push-triggered
+# build (prod-DB fallback, ADR-0047's accepted soft-isolation residual) and
+# preview-isolation.yml's force-redeploy (isolated Neon branch + R2_KEY_PREFIX/
+# NEON_BRANCH) — indistinguishable from the event alone, so a naive gate ran
+# the smoke against BOTH, and the pre-isolation one 500s on the DB-writing
+# upload step (and would write to prod). The "Readiness gate" step below reads
+# THIS run's own target_url's /health body to tell them apart instead of
+# racing them; the `concurrency` block cancels a still-polling/still-running
+# pre-isolation invocation once the isolated redeploy's event arrives.
+concurrency:
+  group: e2e-${{ github.event.deployment.sha }}
+  cancel-in-progress: true
 
 on:
   deployment_status:
@@ -72,8 +86,63 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run BDD smoke against the preview
+      # Poll THIS run's own deployment (not a guess) until /health reports the
+      # isolated marker AND a live DB — or decide this is the pre-isolation
+      # deployment and skip cleanly. Event fields go through env: (never
+      # inlined into the script body), matching the "Gate" step's injection
+      # hygiene for untrusted webhook data.
+      - name: Readiness gate — wait for the isolated, DB-ready deployment
+        id: readiness
         if: steps.gate.outputs.run == 'true'
+        env:
+          BASE_URL: ${{ github.event.deployment_status.target_url }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+          ever_isolated=false
+          ready=false
+          tries=40
+          interval=3
+          for i in $(seq 1 "$tries"); do
+            body=$(curl -fsS -m 5 -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$BASE_URL/health" 2>/dev/null || echo '{}')
+            isolated=$(printf '%s' "$body" | jq -r '.isolated // false' 2>/dev/null || echo false)
+            neon=$(printf '%s' "$body" | jq -r '.checks.neon // "error"' 2>/dev/null || echo error)
+
+            if [ "$isolated" = "true" ]; then
+              ever_isolated=true
+              if [ "$neon" = "ok" ]; then
+                ready=true
+                break
+              fi
+            fi
+            sleep "$interval"
+          done
+
+          elapsed=$((tries * interval))
+
+          if [ "$ready" = "true" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Isolated deployment is DB-ready — running the smoke."
+            exit 0
+          fi
+
+          if [ "$ever_isolated" = "false" ]; then
+            # Never saw isolated:true in the whole window — this is the
+            # pre-isolation (prod-fallback) deployment racing the redeploy.
+            # Skip cleanly: not a failure, nothing to smoke yet.
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not the isolated preview (isolated=false after ${elapsed}s) — skipping smoke."
+            exit 0
+          fi
+
+          # Saw isolated:true but the DB ping never came back "ok": THIS is
+          # the deployment we care about, and it's genuinely broken.
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "::error::Isolated deployment never became DB-ready (checks.neon != \"ok\" after ${elapsed}s) — failing."
+          exit 1
+
+      - name: Run BDD smoke against the preview
+        if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true'
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
           # Bypasses Vercel Deployment Protection on the preview (else 401).
@@ -98,7 +167,7 @@ jobs:
         run: pnpm e2e
 
       - name: Upload Playwright report
-        if: steps.gate.outputs.run == 'true' && !cancelled()
+        if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
