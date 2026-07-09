@@ -22,17 +22,14 @@ import {
   Button,
   buttonClass,
   cx,
-  DocumentIcon,
-  EditableReportTitle,
-  EditIcon,
   EmptyState,
   FolderIcon,
   type FolderNode,
   FolderTree,
-  HistoryIcon,
   Input,
   MoreIcon,
   PageShell,
+  RenameReportForm,
   Select,
   StatusBadge,
 } from "../components";
@@ -375,41 +372,34 @@ export default function Index() {
               {items.map((r) => (
                 <li
                   key={r.slug}
-                  className="group flex items-center gap-3 border-b border-border py-3 last:border-0"
+                  className="relative flex items-center gap-3 border-b border-border py-3 transition-colors last:border-0 hover:bg-surface-raised"
                 >
-                  {/* Document icon = open the report. Owner-open (ADR-0056): /reports/{slug}/open
-                      mints an owner access token, so the owner reaches their own report directly —
-                      no password / magic link even when it's private; the viewer still gates
-                      everyone else. (The title click renames.) */}
+                  {/* Stretched-link pattern (CSP-safe, zero extra JS): this is the
+                      ONLY thing that opens the report — clicking anywhere in the
+                      row does. Owner-open (ADR-0056): /reports/{slug}/open mints an
+                      owner access token, so the owner reaches their own report
+                      directly — no password/magic link even when it's private; the
+                      viewer still gates everyone else.
+
+                      Z-INDEX LAYERING: this overlay is `absolute inset-0` with an
+                      explicit `z-0`. Per CSS stacking rules, a positioned element
+                      with z-index 0 paints ABOVE any plain, non-positioned in-flow
+                      sibling (the title text, slug/folder line, status badge below)
+                      even though the overlay is visually invisible — so clicks on
+                      those regions correctly fall through to /open. The kebab
+                      `<details>` is given `relative z-10` so IT (and everything
+                      inside its panel — Move, Delete, Rename) wins the hit-test
+                      over this overlay and is never swallowed by it. */}
                   <a
                     href={`/reports/${r.slug}/open`}
-                    aria-label={`Open ${r.title}`}
-                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
+                    className="absolute inset-0 z-0 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
                   >
-                    <DocumentIcon className="h-4 w-4" />
-                  </a>
-                  {/* Editor MVP entry point (ADR-0062): owner-gated in the route
-                      itself (loadWritableReport) — a non-owner following this
-                      link is redirected home, same fail-closed posture as /open. */}
-                  <a
-                    href={`/reports/${r.slug}/edit`}
-                    aria-label={`Edit ${r.title}`}
-                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
-                  >
-                    <EditIcon className="h-4 w-4" />
-                  </a>
-                  {/* Version-history + visual diff entry point (ADR-0065):
-                      same org-scoped read gate as GET /api/v1/reports/{slug}/versions
-                      (reports.$slug.versions.tsx mirrors it exactly). */}
-                  <a
-                    href={`/reports/${r.slug}/versions`}
-                    aria-label={`Version history for ${r.title}`}
-                    className="flex size-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface-raised text-subtle transition-colors hover:border-brand hover:text-brand"
-                  >
-                    <HistoryIcon className="h-4 w-4" />
+                    <span className="sr-only">Open {r.title}</span>
                   </a>
                   <div className="min-w-0 flex-1">
-                    <EditableReportTitle slug={r.slug} title={r.title} />
+                    <p className="block max-w-full truncate px-1.5 py-0.5 text-sm font-medium text-fg">
+                      {r.title}
+                    </p>
                     <div className="mt-0.5 flex items-center gap-2 pl-1.5 text-xs text-subtle">
                       <code className="font-mono">{r.slug}</code>
                       <span className="inline-flex items-center gap-1">
@@ -419,13 +409,16 @@ export default function Index() {
                     </div>
                   </div>
                   <StatusBadge isPublished={r.isPublished} />
-                  {/* Row actions behind a native <details> menu — no JS, CSP-safe. */}
-                  <details className="relative shrink-0">
+                  {/* Row actions behind a native <details> menu — no JS, CSP-safe.
+                      `relative z-10` lifts it (Move/Delete/Rename) above the
+                      stretched-link overlay above. */}
+                  <details className="relative z-10 shrink-0">
                     <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden">
                       <MoreIcon className="h-4 w-4" />
                       <span className="sr-only">Actions for {r.title}</span>
                     </summary>
                     <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-lg">
+                      <RenameReportForm slug={r.slug} title={r.title} />
                       <Form method="post" className="flex items-center gap-1.5 p-1">
                         <input type="hidden" name="intent" value="move" />
                         <input type="hidden" name="slug" value={r.slug} />
