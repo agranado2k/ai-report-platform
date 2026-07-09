@@ -1,47 +1,46 @@
 name: E2E (BDD)
 
-# Runs the BDD smoke scenario against the live Vercel preview, infrastructure-first
-# (ADR-019, ADR-023). Triggered by the Vercel↔GitHub integration's
-# deployment_status event so we get the preview URL with no token/polling.
+# Runs the BDD smoke scenario against a live Vercel preview, infrastructure-first
+# (ADR-019, ADR-023).
 #
-# NOTE: deployment_status workflows run from the DEFAULT branch, so this file
-# only takes effect once merged to main — it does not self-test on its own PR.
+# TRIGGER INVERSION (issue #149, 2026-07-09): this is now a REUSABLE workflow
+# (`on: workflow_call`), invoked ONCE by `preview-isolation.yml`'s `smoke` job
+# AFTER that workflow has waited for the isolated redeploy's `readyState` to
+# reach `READY`. That inverts the old model, where this workflow listened for
+# Vercel's `deployment_status` event directly:
 #
-# Two Vercel projects (arp-app-prod, arp-view-prod) each emit a deployment_status
-# event, so this workflow is invoked twice per commit. Only the app preview
-# serves the /health route the smoke hits. Rather than gate the JOB on the app
-# preview (which left a confusing "skipped" check from the view-project event),
-# a first "Gate" step decides whether to smoke and the remaining steps are
-# guarded on its output — so every invocation reports a single, green check, and
-# the non-app events simply no-op with a clear log line.
+#   - `deployment_status` workflows only run from the DEFAULT branch, so the
+#     old file could never self-validate on its own PR — a CI change here
+#     shipped to main unverified until the next PR exercised it for real.
+#   - The app preview fires `deployment_status: success` TWICE per commit: the
+#     initial push-triggered build (prod-DB fallback, ADR-0047's soft-isolation
+#     window) and preview-isolation.yml's force-redeploy (the isolated Neon
+#     branch). Both report `state: success` for the same commit, indistinguishable
+#     from the event payload alone — the root cause of #149 (the smoke could run
+#     against the pre-isolation deployment and 500 on the DB-writing upload step,
+#     writing to prod in the process).
+#
+# Now the CALLER (preview-isolation.yml) already knows which deployment is the
+# isolated one — it made the redeploy call and polled Vercel's own API for
+# READY — so it hands this workflow that exact URL directly. There is only one
+# invocation, it always targets the isolated deployment, and it runs on the PR
+# itself (a `workflow_call` job runs in the context of the calling workflow's
+# event), so THIS workflow's own changes are exercised by the PR that makes them.
+#
 # The 29 product .feature files are not executed yet (no step defs); step
 # definitions + a widened features glob land with 1d (upload API) and 1e (viewer).
-#
-# Issue #149 — smoke reliability: the app preview ALSO gets two
-# `deployment_status: success` events per commit — the initial push-triggered
-# build (prod-DB fallback, ADR-0047's accepted soft-isolation residual) and
-# preview-isolation.yml's force-redeploy (isolated Neon branch + R2_KEY_PREFIX/
-# NEON_BRANCH) — indistinguishable from the event alone, so a naive gate ran
-# the smoke against BOTH, and the pre-isolation one 500s on the DB-writing
-# upload step (and would write to prod). The "Readiness gate" step below reads
-# THIS run's own target_url's /health body to tell them apart instead of
-# racing them.
-#
-# The `concurrency` group serializes (does NOT cancel) the two same-SHA
-# invocations. `cancel-in-progress: false` is deliberate: the pre-isolation
-# and isolated redeploy share the deployment SHA, and their `deployment_status`
-# events can arrive in EITHER order (a fast isolated build can finish first).
-# With cancel-in-progress:true, a later-arriving pre-isolation event would
-# cancel an already-running isolated invocation, which then skips — and the
-# isolated deployment would never get smoked at all. Serializing instead means
-# whichever arrives second simply waits; each invocation still self-selects via
-# its own /health readiness gate, so the isolated deployment is ALWAYS smoked.
-concurrency:
-  group: e2e-${{ github.event.deployment.sha }}
-  cancel-in-progress: false
 
 on:
-  deployment_status:
+  workflow_call:
+    inputs:
+      base_url:
+        description: The isolated preview URL to smoke (https://…)
+        required: true
+        type: string
+      head_sha:
+        description: PR head commit to checkout (the test definitions to run)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -51,75 +50,52 @@ jobs:
     name: E2E smoke against preview
     runs-on: ubuntu-latest
     steps:
-      # Decide whether this deployment_status is the successful APP preview.
-      # The event fields are read via env (never interpolated into the script)
-      # to avoid command injection from untrusted webhook data.
-      - name: Gate — only smoke the app preview
-        id: gate
-        env:
-          DS_STATE: ${{ github.event.deployment_status.state }}
-          DS_ENV: ${{ github.event.deployment_status.environment }}
-          DS_URL: ${{ github.event.deployment_status.target_url }}
-        run: |
-          if [ "$DS_STATE" = "success" ] && [ "$DS_ENV" != "Production" ] && [[ "$DS_URL" == *arp-app-prod* ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "App preview deploy succeeded — running the smoke."
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not the app preview (state=$DS_STATE env=$DS_ENV) — no smoke to run."
-          fi
-
       - name: Checkout the deployed commit
-        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.deployment.sha }}
+          ref: ${{ inputs.head_sha }}
 
       - name: Setup Node 24
-        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Enable Corepack + pnpm 10
-        if: steps.gate.outputs.run == 'true'
         run: |
           corepack enable
           corepack prepare pnpm@10.5.0 --activate
 
       - name: Install (frozen lockfile)
-        if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
-        if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      # Poll THIS run's own deployment (not a guess) to decide whether it's the
-      # ISOLATED redeploy (run the smoke) or the pre-isolation one racing it
-      # (skip cleanly). The `isolated` marker (NEON_BRANCH injected by
-      # preview-isolation.yml) is the AUTHORITATIVE signal — it's the actual
-      # cause of #149 (the pre-isolation deployment has the wrong/mid-flip env).
+      # Defensive, not the primary race guard anymore (the caller already
+      # waited for `readyState: READY` on the exact isolated deployment before
+      # invoking this workflow — see preview-isolation.yml's `smoke` job). This
+      # poll now serves two remaining purposes: (1) confirm the app's own
+      # `/health` route agrees the deployment is up and isolated (belt-and-
+      # braces against a READY-but-not-yet-serving edge case), and (2) give a
+      # cold/suspended Neon preview branch a bounded grace window to warm up
+      # before the scenarios hit it.
       #
-      # `checks.neon` is ADVISORY ONLY, never a gate/fail condition: /health's
+      # `checks.neon` stays ADVISORY ONLY, never a gate/fail condition: /health's
       # DB ping opens a fresh neon-serverless WebSocket OUTSIDE the app's normal
       # request/transaction path, and a Neon preview branch AUTO-SUSPENDS when
       # idle — so the ping can read "error" on a genuinely-healthy deployment
       # whose DB the real scenarios reach fine (Playwright's request timeout
       # tolerates the cold-start wake). We wait a bounded window for neon:"ok"
-      # as a courtesy (lets a cold branch warm before the smoke), but proceed on
-      # `isolated:true` regardless — a genuinely-unreachable DB then surfaces as
-      # a real scenario failure (auth-upload's upload step), not a synthetic gate
-      # fail. (Reverses #174's original hard-fail-on-neon, which the /ce-dogfood
-      # run showed would fail every isolated run against a suspended branch.)
+      # as a courtesy, but proceed once `isolated:true` regardless — a
+      # genuinely-unreachable DB then surfaces as a real scenario failure
+      # (auth-upload's upload step), not a synthetic gate fail.
       #
-      # Event fields go through env: (never inlined into the script body),
-      # matching the "Gate" step's injection hygiene for untrusted webhook data.
-      - name: Readiness gate — is this the isolated redeploy?
+      # Event/input fields go through env: (never inlined into the script
+      # body) to avoid command injection from untrusted values.
+      - name: Readiness — confirm /health, warm the Neon branch
         id: readiness
-        if: steps.gate.outputs.run == 'true'
         env:
-          BASE_URL: ${{ github.event.deployment_status.target_url }}
+          BASE_URL: ${{ inputs.base_url }}
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           # Only to detect a creds OUTAGE below — not used for auth here.
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
@@ -159,15 +135,16 @@ jobs:
           done
 
           if [ "$ever_isolated" = "false" ]; then
-            # Never saw isolated:true in the whole window — this is the
-            # pre-isolation (prod-fallback) deployment racing the redeploy.
-            # Skip cleanly: not a failure, nothing to smoke on this one.
+            # The caller only invokes this workflow with the isolated
+            # deployment's own URL (waited on readyState:READY beforehand), so
+            # this should not happen in practice. Fail loud rather than skip
+            # silently — a silent skip here would hide a real regression in
+            # either workflow's contract.
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not the isolated preview (isolated=false after ~$((tries * interval))s) — skipping smoke."
-            exit 0
+            echo "::error::Expected the isolated preview at $BASE_URL but /health never reported isolated:true after ~$((tries * interval))s."
+            exit 1
           fi
 
-          # This IS the isolated deployment → run the smoke. neon is advisory.
           echo "ready=true" >> "$GITHUB_OUTPUT"
           if [ "$neon_ok" = "true" ]; then
             echo "::notice::Isolated deployment, DB ping ok — running the smoke."
@@ -187,9 +164,9 @@ jobs:
           exit 0
 
       - name: Run BDD smoke against the preview
-        if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true'
+        if: steps.readiness.outputs.ready == 'true'
         env:
-          PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
+          PLAYWRIGHT_BASE_URL: ${{ inputs.base_url }}
           # Bypasses Vercel Deployment Protection on the preview (else 401).
           # Enable "Protection Bypass for Automation" on both Vercel projects and
           # store the generated secret as this repo secret.
@@ -212,7 +189,7 @@ jobs:
         run: pnpm e2e
 
       - name: Upload Playwright report
-        if: steps.gate.outputs.run == 'true' && steps.readiness.outputs.ready == 'true' && !cancelled()
+        if: steps.readiness.outputs.ready == 'true' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report

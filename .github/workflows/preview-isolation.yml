@@ -11,6 +11,18 @@ name: Preview data isolation
 # by triggering a redeploy so the isolated env takes effect. The DB is the hard
 # boundary; R2 stays namespaced within the prod bucket.
 #
+# TRIGGER INVERSION (issue #149, 2026-07-09): this workflow is now also the
+# entry point for the e2e smoke. It waits for the app's isolated redeploy to
+# reach Vercel `readyState: READY`, then calls `e2e.yml` as a REUSABLE workflow
+# (`smoke` job below) with that deployment's own URL. This replaces the old
+# `deployment_status`-triggered e2e.yml, which could not self-validate on its
+# own PR (deployment_status only fires from the default branch) and which fired
+# twice per commit (pre-isolation build + isolated redeploy), racing to
+# distinguish them via a `/health` poll. Now there is exactly one smoke
+# invocation, against a URL this workflow itself confirmed is READY, running on
+# the PR that made the change — see `docs/adr/0047-preview-data-isolation.md`
+# for the full history.
+#
 # Needs secrets: NEON_API_KEY, VERCEL_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_APP_ACCESS_KEY_ID,
 # R2_APP_SECRET_ACCESS_KEY. Vars: NEON_PROJECT_ID.
 
@@ -46,6 +58,10 @@ jobs:
     if: github.event.action != 'closed'
     name: Isolate preview data plane
     runs-on: ubuntu-latest
+    outputs:
+      # https:// URL of the isolated app-preview deployment, once it's READY —
+      # consumed by the `smoke` job below to invoke e2e.yml with a live target.
+      app_url: ${{ steps.redeploy.outputs.app_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -141,37 +157,90 @@ jobs:
             set_env "$proj" SCAN_QUEUE_DATABASE_URL "$DATABASE_URL"
             set_env "$proj" R2_KEY_PREFIX "pr-$PR/"
             # Explicit isolation marker (issue #149): the app's /health route
-            # echoes this so the e2e readiness gate (.github/workflows/e2e.yml)
-            # can tell THIS (isolated) redeploy apart from the initial
-            # push-triggered build on a PR's FIRST push, before this env is
-            # injected. (These vars are git-branch-scoped, so they persist across
-            # later pushes within the same PR — on push #2+ the push-triggered
-            # build already reads NEON_BRANCH + the isolated DATABASE_URL and is
-            # genuinely on the isolated branch too; the readiness gate then
-            # smokes both same-sha deployments, serialized by `concurrency`.)
+            # echoes this, and the `smoke` job's e2e.yml call polls /health as a
+            # defensive confirmation that the URL it was handed (the redeploy
+            # below, already waited to readyState:READY) is genuinely the
+            # isolated deployment — belt-and-braces, since trigger inversion
+            # (2026-07-09) means e2e.yml is only ever invoked with THIS
+            # deployment's URL, not raced against the pre-isolation build.
             # Same branch name already computed above for the Neon branch itself
             # ($NEON_BRANCH, workflow-level env).
             set_env "$proj" NEON_BRANCH "$NEON_BRANCH"
           done
 
       - name: Redeploy previews so the isolated env takes effect
+        id: redeploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
+          # On success, prints the response BODY to stdout (caller decides
+          # whether to capture it — the app call needs id+url below, the view
+          # call is fire-and-forget). On failure, logs ::error:: + the body to
+          # stderr and returns non-zero.
           redeploy() {
-            local proj="$1" name="$2" resp code
+            local proj="$1" name="$2" resp code body
             resp=$(curl -s -w $'\n%{http_code}' -X POST \
               "$VERCEL_API/v13/deployments?teamId=$VERCEL_TEAM&forceNew=1&skipAutoDetectionConfirmation=1" \
               -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
               -d "$(jq -nc --arg n "$name" --arg ref "$BRANCH_REF" --argjson rid "$GH_REPO_ID" \
                   '{name:$n,project:$n,gitSource:{type:"github",repoId:$rid,ref:$ref}}')")
             code=$(printf '%s' "$resp" | tail -n1)
-            case "$code" in 200|201) echo "  redeployed $name";; *) echo "::error::redeploy $name → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
+            body=$(printf '%s' "$resp" | sed '$d')
+            case "$code" in
+              200|201) printf '%s' "$body";;
+              *) echo "::error::redeploy $name → HTTP $code" >&2; printf '%s' "$body" >&2; return 1;;
+            esac
           }
-          redeploy "$APP_PROJECT" arp-app-prod
-          redeploy "$VIEW_PROJECT" arp-view-prod
+
+          # App project: capture id + url from the response body — the app
+          # is the one the smoke job targets, so we need to know which
+          # deployment to poll and where to point Playwright.
+          app_body=$(redeploy "$APP_PROJECT" arp-app-prod)
+          app_id=$(printf '%s' "$app_body" | jq -r '.id // empty')
+          app_url=$(printf '%s' "$app_body" | jq -r '.url // empty')
+          [ -n "$app_id" ] && [ -n "$app_url" ] || { echo "::error::redeploy arp-app-prod succeeded but the response had no id/url"; exit 1; }
+          echo "  redeployed arp-app-prod ($app_id → $app_url)"
+
+          # View project: fire-and-forget, as before — nothing downstream
+          # needs its id/url.
+          redeploy "$VIEW_PROJECT" arp-view-prod >/dev/null
+          echo "  redeployed arp-view-prod"
+
           echo "Preview PR #$PR isolated on Neon branch $NEON_BRANCH + R2 prefix pr-$PR/"
+
+          # Poll Vercel's own deployment record until the APP redeploy is
+          # actually serving (readyState: READY) — the smoke job needs a URL
+          # that's live, not just accepted for build. Bounded to ~5 minutes
+          # (60 tries * 5s); a build error fails fast instead of exhausting
+          # the window.
+          tries=60
+          interval=5
+          state="UNKNOWN"
+          for i in $(seq 1 "$tries"); do
+            state=$(curl -sf "$VERCEL_API/v13/deployments/$app_id?teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.readyState // "UNKNOWN"')
+            case "$state" in
+              READY) break ;;
+              ERROR|CANCELED) echo "::error::arp-app-prod deployment $app_id reached readyState=$state"; exit 1 ;;
+              *) sleep "$interval" ;;
+            esac
+          done
+          [ "$state" = "READY" ] || { echo "::error::arp-app-prod deployment $app_id did not reach READY within $((tries * interval))s (last readyState: $state)"; exit 1; }
+          echo "  arp-app-prod deployment $app_id is READY"
+
+          echo "app_url=https://$app_url" >> "$GITHUB_OUTPUT"
+
+  # ── Smoke: run the e2e reusable workflow against the now-READY isolated URL ───
+  smoke:
+    needs: isolate
+    if: github.event.action != 'closed'
+    name: Smoke the isolated preview
+    uses: ./.github/workflows/e2e.yml
+    with:
+      base_url: ${{ needs.isolate.outputs.app_url }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
 
   # ── Teardown: delete the branch, env vars, and R2 objects on PR close ─────────
   teardown:
