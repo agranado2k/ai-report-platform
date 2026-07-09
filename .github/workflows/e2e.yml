@@ -85,6 +85,16 @@ jobs:
           # → the @auth scenario is grep-excluded (playwright.config.ts).
           E2E_CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
           E2E_TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
+          # @browser scenario (authenticated editor smoke, tests/e2e/support/
+          # clerk-auth.setup.ts): the staging pk_test publishable key — needed
+          # client-side so @clerk/clerk-js can initialize window.Clerk for the
+          # ticket sign-in. Reuses the EXISTING repo variable
+          # CLERK_PUBLISHABLE_KEY_STAGING (the staging pk_test), mirroring how
+          # E2E_CLERK_SECRET_KEY maps from the CLERK_SECRET_KEY_STAGING secret —
+          # so no new repo variable is needed. A variable, not a secret
+          # (publishable keys are meant to reach the browser). Absent → @browser
+          # is grep-excluded the same way @auth is (playwright.config.ts).
+          E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
         run: pnpm e2e
 
       - name: Upload Playwright report

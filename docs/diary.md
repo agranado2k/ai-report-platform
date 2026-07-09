@@ -2697,4 +2697,70 @@ fix does not touch.
 `docs/adr/0062-editing-model-report-html-schema.md` §9 gained "Amendment 2" documenting the parser fix and
 the CSP tightening. Gates green: `pnpm install`, `biome ci .` (clean save one pre-existing, unrelated
 fixture CSS-specificity warning), `turbo typecheck`, `vitest run` (1023 tests, 135 files), `docs:check`.
+
+### 2026-07-09 — First authenticated-BROWSER e2e smoke (editor coverage gap)
+
+The dashboard report editor broke twice in prod **behind auth** (#171 unstyled, #172
+`ReferenceError: DOMParser is not defined` SSR 500) and CI caught neither. Root cause: every existing
+`@auth` e2e (`tests/e2e/smoke/auth-upload.feature`) is `request`-only (API calls + a Bearer JWT minted via
+the Clerk backend REST API) — no scenario ever opened a page in a real browser as a signed-in user. The
+one editor-route smoke that exists, `app-route-boot.feature`, deliberately asserts the **unauthenticated**
+302→`/sign-in` (proves the route's module graph — `arp-report-html` import included — boots without a
+serverless crash); it's explicitly auth-agnostic and never reaches `ReportEditor`, so it structurally
+could not have caught either regression.
+
+Added in `worktree/editor-auth-smoke` (branch `test/editor-auth-smoke`, not yet merged): a real
+authenticated-browser Playwright project, `chromium-auth`, alongside the existing unauthenticated
+`chromium` project.
+
+- **`@clerk/testing@2.2.5`** (root devDependency) — its `/playwright` export gives `clerkSetup`,
+  `setupClerkTestingToken`, and the `clerk` helper (`signIn`/`signOut`/`loaded`). Its built-in
+  `clerk.signIn({ page, emailAddress })` convenience path was deliberately NOT used — it reads
+  `process.env.CLERK_SECRET_KEY` directly (hardcoded name, no override), which doesn't match this repo's
+  `E2E_`-prefixed env convention. Instead: `mintSignInTicketFor`/`mintPrimarySignInTicket` (new in
+  `tests/e2e/support/clerk-session.ts`, mirroring the existing `mintTestSessionFor` shape) mint a Clerk
+  **sign-in ticket** (`POST /sign_in_tokens`) via the same `clerkFetch` primitive, then
+  `clerk.signIn({ page, signInParams: { strategy: 'ticket', ticket } })` — the browser's own
+  `Clerk.client.signIn.create` consumes it, so the resulting session is a real interactive-equivalent
+  sign-in, not a synthetic header.
+- **`tests/e2e/support/clerk-auth.setup.ts`** — a Playwright **setup project** (plain `@playwright/test`
+  spec, not BDD): `clerkSetup({ publishableKey, secretKey })` (both passed explicitly — the package's own
+  env fallbacks, e.g. `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, don't match this repo's names either) →
+  `setupClerkTestingToken({ page })` (must be registered before any FAPI request, i.e. before `page.goto`)
+  → ticket sign-in → `page.context().storageState({ path: "tests/e2e/.auth/primary.json" })`. The state
+  file is gitignored (`.gitignore` gained a `tests/e2e/.auth/` entry) — never commit session state.
+- **`playwright.config.ts`** gained three projects: `setup` (the spec above, own `grep`/`grepInvert`
+  override since it carries no Gherkin tags and would otherwise be excluded by the top-level `/@smoke/`
+  grep), `chromium` (unchanged behavior, but now ALWAYS excludes `@browser` regardless of creds — it has
+  no storageState, so it can't run an authenticated scenario), and `chromium-auth` (`dependencies:
+  ["setup"]`, `storageState` applied, `grep: /@browser/` so it runs only the new scenario). The `@browser`
+  gate composes with the existing `@auth` gate: needs `E2E_CLERK_SECRET_KEY` + `E2E_TEST_USER_EMAIL` (same
+  pair `@auth` needs) **plus** `E2E_CLERK_PUBLISHABLE_KEY` (new — the ticket exchange runs client-side via
+  `@clerk/clerk-js`, which needs the publishable key to initialize `window.Clerk`). Verified with
+  `playwright test --list` under three env combinations: none of the three creds → `@browser` absent
+  entirely; `@auth` creds only (no publishable key) → `@auth` scenarios run, `@browser` still absent; all
+  three → `@browser` appears, only under `chromium-auth`, never under `chromium`.
+- **`tests/e2e/smoke/editor-auth.feature`** / **`editor-auth.steps.ts`** (tags `@smoke @auth @browser`):
+  Background uploads the REAL `ai-readiness-report.html` fixture (`packages/report-html/src/fixtures/` —
+  also used by `shell.test.ts`; carries a genuine `:root { --bg: #0b0f17; … }` shell and `.chip` elements)
+  via the same session-minting + `request.post` pattern as `auth-upload.steps.ts`, as the SAME fixture
+  user the browser session authenticates as (so the editor's `loadWritableReport` ownership check
+  passes). The scenario then: `page.goto` the editor route, asserts the URL is NOT `/sign-in` (catches a
+  silent auth failure), asserts the `<iframe title="Report editor surface">` is present (SSR-rendered
+  regardless of client mount — catches the #172 SSR-crash class), then asserts (via `frameLocator`) the
+  iframe's `<body>` is `contenteditable="true"` (ProseMirror actually mounted client-side) AND the report's
+  own `--bg` custom property is live inside the iframe's computed style (catches the #171
+  lost-shell-styling class). Deliberately does NOT exercise type→save→new-version — a flaky save step
+  would undermine a smoke; left as a documented follow-up.
+- **`.github/workflows/e2e.yml`** gained `E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.E2E_CLERK_PUBLISHABLE_KEY }}`
+  (a repo variable, not a secret — publishable keys are meant to reach the browser) on the `pnpm e2e` step.
+
+Verified without live Clerk creds (none available in this session): `pnpm install` clean (lockfile
+updated), `bddgen` succeeds, `playwright test --list` shows the three gating states above, an ad hoc
+strict `tsc --noEmit` pass (mirroring root `tsconfig.json`) on all new/changed e2e files is clean
+(`@clerk/testing` types resolve, including the `ticket` strategy variant of `ClerkSignInParams`), `biome
+ci .` clean (the one warning present is the pre-existing, already-documented fixture CSS-specificity
+warning from the prior entry), `docs:check` green. **Not run live** — needs the operator to validate
+against a real preview with all four of `E2E_CLERK_SECRET_KEY` / `E2E_TEST_USER_EMAIL` /
+`E2E_CLERK_PUBLISHABLE_KEY` / `VERCEL_AUTOMATION_BYPASS_SECRET` set.
 Not yet merged.

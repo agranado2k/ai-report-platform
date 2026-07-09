@@ -2,11 +2,15 @@
 
 This suite runs against real infrastructure (ADR-019 — no mocks for external
 services in e2e). Two Clerk identities are hand-provisioned on the **dev/staging**
-Clerk instance (`pk_test`/`sk_test`, ADR-0048) so scenarios can authenticate as a
-real user without a browser sign-in flow (`tests/e2e/support/clerk-session.ts`
-mints a session token via the Clerk backend REST API). This is the one accepted
-ADR-017 exception in this repo — a clicked fixture, not code — so both
-identities are documented here for reconstructability (per ADR-0068 §6).
+Clerk instance (`pk_test`/`sk_test`, ADR-0048) so `@auth` scenarios can authenticate
+as a real user with NO browser at all — `tests/e2e/support/clerk-session.ts` mints a
+session token via the Clerk backend REST API, sent as a Bearer header on `request`
+calls. This is the one accepted ADR-017 exception in this repo — a clicked fixture,
+not code — so both identities are documented here for reconstructability (per
+ADR-0068 §6).
+
+`@browser` scenarios (below) authenticate the SAME primary identity, but in a real
+Playwright browser — see "Authenticated-browser scenarios (`@browser`)".
 
 ## Fixture 1 — the primary test user
 
@@ -39,6 +43,60 @@ drift as a **fixture bug**, not a test bug (ADR-0068 §6's explicit call).
 > a divergent oldest-membership. Delete the old `agranado-com` org in the dev
 > Clerk dashboard; the next fixture sign-in re-provisions under the new slug
 > (with the `publicMetadata.domain` anchor the join guard requires).
+
+## Authenticated-browser scenarios (`@browser`)
+
+Every `@auth` scenario above is `request`-only — a session JWT sent as a Bearer
+header, no browser involved. That can't exercise anything client-side (React
+hydration, a mounted editor, computed styles inside a sandboxed iframe, …), which
+is exactly the gap that let two prod incidents (#171 unstyled editor, #172
+`ReferenceError: DOMParser is not defined` SSR 500 — both **behind auth**) sail
+through CI untouched. `@browser` scenarios (e.g. `tests/e2e/smoke/editor-auth.feature`)
+open a real Playwright `page` as a genuinely signed-in user instead.
+
+**How the session is established** (`tests/e2e/support/clerk-auth.setup.ts`, a
+Playwright **setup project** — a plain `@playwright/test` spec, not a BDD feature):
+
+1. `clerkSetup({ publishableKey, secretKey })` (`@clerk/testing/playwright`) fetches
+   a Clerk Testing Token from the Backend API — required so the FAPI requests
+   `@clerk/clerk-js` makes from the browser bypass bot/captcha protection. Both
+   keys are passed EXPLICITLY: `clerkSetup`'s own env fallbacks
+   (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, …) don't match this
+   repo's `E2E_`-prefixed convention.
+2. `setupClerkTestingToken({ page })` registers a `context.route` interceptor that
+   injects the testing token into FAPI requests — must run BEFORE `page.goto`,
+   since that's what triggers `@clerk/clerk-js` to start calling FAPI.
+3. `page.goto("/sign-in")` loads `@clerk/clerk-js` (root.tsx wires
+   `PUBLIC_CLERK_PUBLISHABLE_KEY` into `ClerkApp` for every route).
+4. `mintPrimarySignInTicket()` (`tests/e2e/support/clerk-session.ts`) mints a Clerk
+   **sign-in ticket** (`POST /sign_in_tokens`, same `clerkFetch` primitive as
+   `mintTestSessionFor`) for the primary fixture user.
+5. `clerk.signIn({ page, signInParams: { strategy: "ticket", ticket } })` — the
+   browser's OWN `Clerk.client.signIn.create` consumes the ticket client-side, so
+   the resulting session (cookies, `window.Clerk.user`, …) is indistinguishable
+   from an interactive sign-in.
+6. `page.context().storageState({ path: "tests/e2e/.auth/primary.json" })`
+   persists it — every `@browser` scenario reuses this ONE session rather than
+   re-authenticating per test. The file is gitignored; never commit session state.
+
+Deliberately NOT using `@clerk/testing`'s built-in `clerk.signIn({ page,
+emailAddress })` convenience path: internally it reads `process.env.CLERK_SECRET_KEY`
+directly (hardcoded name, not overridable in the call), which doesn't match
+`E2E_CLERK_SECRET_KEY`. Minting the ticket ourselves keeps one env-var naming
+scheme and needs no second secret.
+
+**Wiring in `playwright.config.ts`:** three projects — `setup` (the spec above),
+`chromium` (the existing unauthenticated/API-Bearer project — always excludes
+`@browser`, since it has no storageState and can't run an authenticated scenario),
+and `chromium-auth` (`dependencies: ["setup"]`, `storageState` applied, runs ONLY
+`@browser`-tagged scenarios).
+
+**Gate:** `@browser` needs everything `@auth` needs (`E2E_CLERK_SECRET_KEY` +
+`E2E_TEST_USER_EMAIL`) **plus** `E2E_CLERK_PUBLISHABLE_KEY` — the ticket exchange
+happens client-side, so `@clerk/clerk-js` needs the publishable key to initialize.
+Missing any of the three grep-excludes `@browser` entirely (never runs
+half-configured) — see the `grep`/`grepInvert` logic at the top of
+`playwright.config.ts`.
 
 ## Current status — what's wired vs what's still blocked
 
