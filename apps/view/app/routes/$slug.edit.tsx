@@ -233,8 +233,15 @@ export default function EditReport() {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  const [mode, setMode] = useState<ViewerMode>("edit");
-  const [viewHtml, setViewHtml] = useState<string | null>(null);
+  // The unified experience opens READ-ONLY by default — the View⇄Edit
+  // toggle promotes to the editor; it does not open into it.
+  const [mode, setMode] = useState<ViewerMode>("view");
+  // View mode's initial render needs a snapshot ready immediately (default
+  // mode is now "view"), so this is seeded from the loader's doc rather
+  // than left `null` until the first mode switch.
+  const [viewHtml, setViewHtml] = useState<string | null>(() =>
+    reinjectShell(shell, serializeBody(doc as PMDocJson)),
+  );
   const [diffData, setDiffData] = useState<DiffWire | null>(null);
   const [activeTab, setActiveTab] = useState<PanelTab>(null);
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
