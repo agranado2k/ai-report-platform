@@ -42,10 +42,10 @@
 import type { PMDocJson, Shell } from "arp-report-html";
 import { EditorView } from "prosemirror-view";
 import { useEffect, useRef, useState } from "react";
-import type { CommentForHighlight } from "../editor/comment-decorations";
-import { commentHighlightsKey, resolvableCommentRanges } from "../editor/comment-decorations";
-import { createEditorState, docJson } from "../editor/editor-state";
-import { buildIframeDocument } from "../editor/iframe-document";
+import type { CommentForHighlight } from "./comment-decorations";
+import { commentHighlightsKey, resolvableCommentRanges } from "./comment-decorations";
+import { createEditorState, docJson } from "./editor-state";
+import { buildIframeDocument } from "./iframe-document";
 
 /** The editor's current text selection, forwarded to the caller so it can
  *  build an ADR-0064 anchor when the user clicks "Comment" (`from === to`
