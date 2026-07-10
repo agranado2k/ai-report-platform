@@ -6,6 +6,7 @@ export * from "./anchor";
 export * from "./brand";
 export * from "./comment";
 export * from "./comment-id";
+export * from "./edit-token";
 export * from "./email-address";
 export * from "./errors";
 export * from "./events";
