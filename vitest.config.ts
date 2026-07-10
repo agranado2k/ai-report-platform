@@ -19,12 +19,6 @@ import { defineConfig } from "vitest/config";
 // the GET /<slug>/edit deep-link's pure URL-building helper (ADR-0063
 // Decision 3) — apps/view otherwise has no unit-test tier at all (its Remix
 // routes stay e2e-only), same as apps/app's routes.
-// `apps/app/app/components/comment-composer-lifecycle.test.ts` is a single,
-// narrow carve-out in `components/` (PR #157 review, Fix 2): the mounted
-// CommentSidebar/NewCommentComposer stay e2e-only like the rest of this
-// app's components, but the pure success/failure gate that decides whether
-// a fetcher's settled state should clear the composer is dependency-free
-// (no DOM, no React import) and cheap to unit-test directly.
 // `apps/view/app/edit` is the in-viewer editor's CLIENT save-fetch helper
 // (ADR-0063 Phase 4): a plain `fetch` wrapper with no DOM/React dependency
 // (the browser's `fetch` and Node's are interface-compatible, and a fake
@@ -36,7 +30,6 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
       "apps/app/app/server/**/*.test.ts",
-      "apps/app/app/components/comment-composer-lifecycle.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
     ],
