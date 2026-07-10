@@ -2931,3 +2931,45 @@ types — an environment gap, not a code issue; noted here in case it recurs.
 
 Worktree: `worktree/view-origin-editing` (branch `feat/view-origin-editing`, off `main`). Not yet merged;
 not pushed.
+
+### 2026-07-10 — Unified document experience epic: app-origin foundation shipped (Phases 0–4b), view-origin client underway (4c)
+
+The "one experience on `view.<domain>`" epic (merge the fragmented public-viewer / dashboard-editor /
+dashboard-versions surfaces into a single authenticated in-viewer experience — ADR-0063). Operator chose
+the **view-origin** path (the ambitious, security-gated one) and full scope (**Compare/diff included**,
+shared code **extracted** into packages, not copied). Delivered as a sequence of focused PRs, each built
+by a Sonnet agent with the orchestrator reviewing every diff + running gates:
+
+- **#178 (Phase 0)** — report-row cleanup: dropped the 3 per-row buttons; the row itself opens the report
+  via a CSP-safe stretched-link; rename moved into the kebab.
+- **#179 (Phase 1)** — version authorship surfaced in the versions list (`uploadedBy` → author email,
+  with the `findEmailByUserId` soft-delete PII filter fixed at source, ADR-0054/0070).
+- **#180 (Phase 2)** — the scoped **edit-token codec** (`packages/domain/src/edit-token.ts`):
+  `scope:"edit"` + `sub`, slug-bound, HMAC-signed, cross-parse-guarded against the owner access token.
+- **#181 (Phase 3)** — the second **edit-route CSP profile** (`editViewHeaders`), plus the
+  `appOrigin`-validation hardening (`new URL().origin`, no CSP directive injection).
+- **#182 (Phase 4b)** — **ADR-0071**: extracted `packages/ui` (`arp-ui`, the Forge & Ember primitives)
+  + `packages/editor` (`arp-editor`, the ProseMirror plumbing + `ReportEditor`) out of `apps/app`, so the
+  view-origin editor imports one copy — critically, one copy of `iframe-document.ts`'s sandbox CSP.
+- **#183 (Phase 4a)** — the **app-origin edit-token API seam**: mint at `/open` for a canWrite non-owner
+  (15-min TTL); `resolveEditTokenActor` acceptance boundary wired as the LAST front door in both actor
+  resolvers, slug-gated (can't become a general Clerk bypass), `reports:write`-scope only (never
+  `acl:write`), with a LIVE `loadWritableReport` re-check honoring grant revocation; new token-auth
+  endpoints `POST .../versions` (save) + `GET .../diff` (JSON); locked-down CORS (exact `VIEW_ORIGIN`,
+  never `*`/reflected, never `Allow-Credentials`, Bearer-header auth → no CSRF, fail-closed when unset).
+  **Passed an independent `/security-review`** (the ADR-0063 gate): zero HIGH/MEDIUM findings; the one
+  borderline item (edit token also usable for move/rename) filtered as a false positive (2/10 — the
+  write-grantee already holds that capability via their session; no escalation). Forward gate recorded
+  (**F-1**): the `/diff` payload is HTML derived from stored bodies, so the 4c client MUST render it
+  through the viewer's sandboxed-iframe + CSP (ADR-013) and SW block (ADR-014), never unsandboxed.
+
+**In progress — Phase 4c** (`worktree/view-unified`, branch `feat/view-unified-experience`): the
+view-origin unified client — `apps/view`'s first hydrated route + Tailwind pipeline, the edit-token
+validate seam + `editViewHeaders`, the unified layout (View⇄Edit toggle, Comments/Versions tabs
+hidden-by-default, Compare), and cross-origin writes to the #183 API. Gated on a second `/security-review`
+of the assembled view-origin auth+JS surface before merge. Phase 5 (cutover — retire the split app
+`/edit` + `/versions` routes) follows.
+
+Note: local `main` in the primary checkout diverged (holds an un-pushed `06a4353` `/ce-dogfood` docs
+commit while `origin/main` moved ahead) — all epic worktrees branch off `origin/main`, so nothing is
+lost; reconcile the primary checkout's `main` when convenient.
