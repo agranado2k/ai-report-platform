@@ -574,6 +574,59 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/reports/{slug}/edit-token:
+    post:
+      operationId: refreshEditToken
+      tags: [Reports]
+      summary: Silently refresh an in-flight editing session's edit token
+      description: >
+        Issues a FRESH, slug-bound `scope:"edit"` token to a caller
+        presenting a CURRENTLY-VALID one (ADR-0063 Phase 5), so an editing
+        session can keep itself alive past the 15-minute edit-token TTL
+        without a full round-trip back through `GET /reports/{slug}/open`.
+        Auth is the SAME `editToken` seam as every other edit-token
+        endpoint on this API — `canWrite` (`isOwner OR hasWriteGrant`,
+        ADR-0060 §4) is re-checked LIVE a SECOND time here (belt-and-braces,
+        mirroring `POST /api/v1/reports/{slug}/versions`'s own re-check),
+        so a revoked write grant or a lost ownership denies the refresh
+        (403), not just future saves. The new token's `sub` is always the
+        freshly re-checked actor — never echoed from the presented token's
+        own claims. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
+
+
+        **Security trade-off (flagged for `/security-review`):** making an
+        edit token refreshable for as long as `canWrite` holds means a
+        LEAKED token is also refreshable, extending its effective life
+        beyond the original TTL for as long as the thief keeps refreshing it
+        before the grant is revoked. Mitigated by the token's narrow
+        `reports:write`-only, single-report scope, the LIVE re-check on
+        every refresh (revocation cuts it off within one remaining TTL), and
+        the view origin's CSP + sandboxed report iframe that's supposed to
+        keep the token out of reach in the first place. See ADR-0063's Phase
+        5 entry for the full writeup, including a flagged-but-not-built
+        recommendation (an absolute session cap).
+      security:
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). MUST be
+            the CANONICAL slug the presented `editToken` was minted for
+            (ADR-0063) — a `report_…` External Id is rejected on this path.
+      responses:
+        '200':
+          description: The freshly-minted edit token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EditToken' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/reports/{slug}:
     get:
       operationId: getReport
@@ -1091,6 +1144,28 @@ components:
         doc:
           type: object
           description: The edited ProseMirror document JSON.
+
+    EditToken:
+      description: >
+        The `edit_token` resource (ADR-0063 Phase 5) —
+        `POST /api/v1/reports/{slug}/edit-token`'s response. Carries no
+        prefixed External Id and no deployment `mode` — it's a bearer
+        capability, not an addressable object.
+      type: object
+      required: [object, edit_token, expires_at]
+      properties:
+        object: { type: string, enum: [edit_token] }
+        edit_token:
+          type: string
+          description: >
+            The freshly-minted, slug-bound, `scope:"edit"` bearer token
+            (packages/domain/src/edit-token.ts). Use it exactly like the
+            token `GET /reports/{slug}/open` mints — as
+            `Authorization: Bearer <edit_token>` on subsequent
+            `editToken`-authenticated calls.
+        expires_at:
+          type: integer
+          description: Epoch seconds this token expires at (mint time + the standard edit-token TTL).
 
     ReportDiff:
       description: >
