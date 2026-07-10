@@ -8,11 +8,13 @@ import { defineConfig } from "vitest/config";
 // `apps/app/app/server` also gets unit coverage for its transport-seam helpers
 // (the `handle()` combinator, etc.) — these are pure enough to test with
 // injected fakes, unlike the rest of the Remix app which stays e2e-only.
-// `apps/app/app/editor` is the same carve-out for the ProseMirror editor's
-// STATE/TRANSFORM wiring (ADR-0062): `prosemirror-state`/`-model`/`-commands`
-// need no DOM at all, so `createEditorState`/keymap-bound commands are cheap
-// to unit-test here; the mounted `EditorView` (real DOM, real keyboard
-// events) stays e2e-only like the rest of the Remix UI.
+// The ProseMirror editor's STATE/TRANSFORM wiring (ADR-0062) —
+// `prosemirror-state`/`-model`/`-commands` need no DOM at all, so
+// `createEditorState`/keymap-bound commands, plus the SSR-safety test for
+// `ReportEditor` itself, are cheap to unit-test — now live in
+// `packages/editor/src/**/*.test.ts` (ADR-0071), covered by the
+// `packages/*/src/**/*.test.ts` glob below; the mounted `EditorView` (real
+// DOM, real keyboard events) stays e2e-only like the rest of the Remix UI.
 // `apps/view/app/server` is the SAME carve-out on the viewer app, added for
 // the GET /<slug>/edit deep-link's pure URL-building helper (ADR-0063
 // Decision 3) — apps/view otherwise has no unit-test tier at all (its Remix
@@ -29,9 +31,7 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
       "apps/app/app/server/**/*.test.ts",
-      "apps/app/app/editor/**/*.test.ts",
       "apps/app/app/components/comment-composer-lifecycle.test.ts",
-      "apps/app/app/components/ReportEditor.ssr.test.ts",
       "apps/view/app/server/**/*.test.ts",
     ],
     environment: "node",

@@ -10,13 +10,12 @@
 // "add (on selection), reply (single level), resolve" only. `deleteComment`
 // stays unconsumed by this slice (see reports.$slug.comments.ts's own note).
 import { useFetcher } from "@remix-run/react";
+import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { useEffect, useState } from "react";
-import { buildSelectionAnchor } from "../editor/anchor";
 import type { CommentDto } from "../server/comment-dto.server";
 import type { CommentActionResult } from "./comment-composer-lifecycle";
 import { isCommentSubmitSuccess } from "./comment-composer-lifecycle";
 import { Badge, Button, Card, Textarea } from "./index";
-import type { EditorSelection } from "./ReportEditor";
 
 export interface CommentSidebarProps {
   readonly slug: string;

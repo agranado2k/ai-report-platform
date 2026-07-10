@@ -16,6 +16,7 @@ import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { listComments, loadWritableReport, saveEditedVersion } from "arp-application";
 import type { ReportVersion } from "arp-domain";
 import { makeSlug, versionIdToWire } from "arp-domain";
+import { type EditorSelection, ReportEditor } from "arp-editor";
 import {
   type PMDocJson,
   parseBody,
@@ -26,7 +27,6 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { AppHeader, Button, buttonClass, Card, PageShell } from "../components";
 import { CommentSidebar } from "../components/CommentSidebar";
-import { type EditorSelection, ReportEditor } from "../components/ReportEditor";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import type { CommentDto } from "../server/comment-dto.server";
 import { commentToDto } from "../server/comment-dto.server";

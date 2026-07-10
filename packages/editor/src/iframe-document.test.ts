@@ -31,7 +31,7 @@ import { buildIframeDocument, IFRAME_INJECTED_CSS } from "./iframe-document";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(
   __dirname,
-  "../../../../packages/report-html/src/fixtures/ai-readiness-report.html",
+  "../../report-html/src/fixtures/ai-readiness-report.html",
 );
 
 /** The test-only stand-in for the browser's `DOMParser`, injected into every

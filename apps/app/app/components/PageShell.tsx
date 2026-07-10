@@ -1,5 +1,5 @@
+import { cx } from "arp-ui";
 import type { ComponentProps } from "react";
-import { cx } from "./cx";
 
 /** Centered page container with consistent gutters. */
 export function PageShell({ className, ...props }: ComponentProps<"main">) {
