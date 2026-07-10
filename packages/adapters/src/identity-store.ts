@@ -168,11 +168,16 @@ export class DrizzleIdentityStore implements IdentityStore {
 
   async findEmailByUserId(uid: UserId): Promise<Result<string | null, AppError>> {
     try {
+      // Exclude soft-deleted users (matches findByClerkUserId / findUserIdByEmail):
+      // soft-delete stamps deleted_at but never scrubs `email` (softDeleteByClerkId),
+      // so without this filter a since-deleted author's email would still resolve —
+      // leaking PII into audit-adjacent surfaces (version-author, comment-author)
+      // contrary to ADR-0054's terminal-deletion + ADR-0070's erasure posture.
       const [row] = await this.ctx
         .current()
         .select({ email: users.email })
         .from(users)
-        .where(eq(users.id, uid))
+        .where(and(eq(users.id, uid), isNull(users.deletedAt)))
         .limit(1);
       return ok(row?.email ?? null);
     } catch (e) {
