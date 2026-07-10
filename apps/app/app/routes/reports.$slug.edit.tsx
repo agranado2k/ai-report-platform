@@ -13,17 +13,10 @@
 // page load and the save action.
 import { type ActionFunctionArgs, json, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
-import { listComments, loadWritableReport, saveEditedVersion } from "arp-application";
-import type { ReportVersion } from "arp-domain";
+import { listComments, loadWritableReport } from "arp-application";
 import { makeSlug, versionIdToWire } from "arp-domain";
 import { type EditorSelection, ReportEditor } from "arp-editor";
-import {
-  type PMDocJson,
-  parseBody,
-  reinjectShell,
-  serializeBody,
-  splitShell,
-} from "arp-report-html";
+import { type PMDocJson, parseBody, splitShell } from "arp-report-html";
 import { useMemo, useRef, useState } from "react";
 import { AppHeader, Button, buttonClass, Card, PageShell } from "../components";
 import { CommentSidebar } from "../components/CommentSidebar";
@@ -32,18 +25,10 @@ import type { CommentDto } from "../server/comment-dto.server";
 import { commentToDto } from "../server/comment-dto.server";
 import { commentRepo, deps, identityStore, writeGrantStore } from "../server/container.server";
 import { errorToJson, rejectNonJsonContentType } from "../server/http.server";
-
-/** The version an editor session opens: the live version when one has been
- *  published, else the newest by `version_no` (a fresh upload that hasn't
- *  cleared scan yet still needs to be openable/editable, ADR-0062 §5). */
-function editableVersion(report: {
-  readonly liveVersionId: string | null;
-  readonly versions: readonly ReportVersion[];
-}) {
-  const newest = [...report.versions].sort((a, b) => b.versionNo - a.versionNo)[0];
-  if (!report.liveVersionId) return newest;
-  return report.versions.find((v) => v.id === report.liveVersionId) ?? newest;
-}
+import {
+  editableVersion,
+  reassembleAndSaveEditedVersion,
+} from "../server/save-edited-version.server";
 
 export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
@@ -142,29 +127,6 @@ export async function action(args: ActionFunctionArgs) {
   const slugR = makeSlug(String(args.params.slug ?? ""));
   if (!slugR.ok) return errorToJson(slugR.error);
 
-  // Re-read fresh (not the loader's snapshot) so the shell we re-inject comes
-  // from the CURRENT editable version, and so a non-owner's POST is denied
-  // even if they somehow reached this action directly (loadWritableReport =
-  // the exact canWrite gate re-upload uses).
-  const found = await loadWritableReport(deps().reports, actor.value, slugR.value, {
-    grants: writeGrantStore(),
-    identities: identityStore(),
-  });
-  if (!found.ok) return errorToJson(found.error);
-  const report = found.value;
-  const version = editableVersion(report);
-  if (!version) return errorToJson({ kind: "NotFound", message: "report has no version" });
-
-  const htmlBlob = await deps().blobs.readObject(
-    report.id,
-    version.id,
-    version.manifest.entryDocument,
-  );
-  if (!htmlBlob.ok || !htmlBlob.value) {
-    return errorToJson({ kind: "Unexpected", message: "editable version's HTML is missing" });
-  }
-  const { shell } = splitShell(new TextDecoder().decode(htmlBlob.value.bytes));
-
   let doc: PMDocJson;
   try {
     const body = (await args.request.json()) as { doc?: unknown };
@@ -176,15 +138,13 @@ export async function action(args: ActionFunctionArgs) {
     return json({ error: "malformed JSON body" }, { status: 422 });
   }
 
-  const bodyHtml = serializeBody(doc);
-  const wholeHtml = reinjectShell(shell, bodyHtml);
-
-  const saved = await saveEditedVersion(deps(), {
-    actor: actor.value,
-    slug: slugR.value,
-    html: new TextEncoder().encode(wholeHtml),
-    sourceDoc: doc,
-  });
+  // reassembleAndSaveEditedVersion re-reads the report fresh (not the
+  // loader's snapshot), re-runs the canWrite gate (loadWritableReport — the
+  // exact seam re-upload uses), re-injects the doc into the CURRENT
+  // editable version's shell, and saves it via saveEditedVersion. Shared
+  // with POST /api/v1/reports/{slug}/versions (the edit-token save route) —
+  // ONE reassembly implementation, not two copies that could drift.
+  const saved = await reassembleAndSaveEditedVersion(deps(), actor.value, slugR.value, doc);
   if (!saved.ok) return errorToJson(saved.error);
 
   return json({ ok: true as const, ...saved.value.result });
