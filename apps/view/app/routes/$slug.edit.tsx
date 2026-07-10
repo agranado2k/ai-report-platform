@@ -1,10 +1,11 @@
-// GET /<slug>/edit — the authenticated, first-party-JS editing surface on the
-// viewer origin (ADR-0063 Decisions 1-3, Phase 4). Supersedes the interim,
-// unauthenticated 302-to-dashboard redirect (ADR-0063 Decision 3's fallback)
-// now that the auth seam + edit-route CSP profile have landed. Mirrors
-// `$slug.tsx`'s unlock-cookie flow, swapped for the edit token: a `?et=`
-// hand-off sets a scoped cookie and 303s to the clean URL (keeping the token
-// out of history/referer); a redeemed `arp_edit` cookie renders the editor;
+// GET /<slug>/edit — the authenticated, first-party-JS unified editing
+// experience on the viewer origin (ADR-0063 Decisions 1-3, Phase 4;
+// unified-experience epic on top). Supersedes the interim, unauthenticated
+// 302-to-dashboard redirect (ADR-0063 Decision 3's fallback) now that the
+// auth seam + edit-route CSP profile have landed. Mirrors `$slug.tsx`'s
+// unlock-cookie flow, swapped for the edit token: a `?et=` hand-off sets a
+// scoped cookie and 303s to the clean URL (keeping the token out of
+// history/referer); a redeemed `arp_edit` cookie renders the unified editor;
 // anything else (missing/invalid/expired token, no configured secret/app
 // origin, or no editable document) degrades to the public, read-only viewer —
 // this route NEVER renders the editor without a live, valid capability.
@@ -12,17 +13,46 @@
 // Does NOT touch `$slug.tsx` (the public `GET /<slug>` route) — same disjoint
 // Remix flat-route path as before (`/:slug/edit` vs `/:slug`), so the public
 // viewer's behavior/headers are unaffected by anything in this file.
+//
+// UNIFIED-EXPERIENCE ADDITIONS (on top of the 4c-2a auth seam + editor +
+// save, which are unchanged below): the loader additionally loads the
+// report's Comments + Versions server-side (Bearer, server-to-server — no
+// CORS involved, see ../edit/comments-client.ts / ../edit/versions-client.ts)
+// once the SAME auth decision below has already resolved to "render". The
+// component adds the app-styled chrome (TopBar), a tabbed Comments|Versions
+// left panel (hidden by default — the document is the dominant element), a
+// View⇄Edit toggle, and Compare (visual diff). View mode and Compare BOTH
+// render through `SandboxedHtml` (a fully sandboxed, no-`allow-scripts`,
+// no-`allow-same-origin` `srcDoc` iframe built by `buildReadOnlyIframeDocument`
+// — arp-editor) — never `dangerouslySetInnerHTML`, never on the app origin
+// (F-1, claude-review #183 / ADR-0063's "4c client" note).
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { resolveViewableReport } from "arp-application";
-import { makeSlug } from "arp-domain";
-import { ReportEditor } from "arp-editor";
+import { makeSlug, versionIdToWire } from "arp-domain";
+import { type EditorSelection, ReportEditor } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
-import { type PMDocJson, parseBody, type Shell, splitShell } from "arp-report-html";
-import { Button, Card } from "arp-ui";
+import {
+  type PMDocJson,
+  parseBody,
+  reinjectShell,
+  type Shell,
+  serializeBody,
+  splitShell,
+} from "arp-report-html";
+import { Card } from "arp-ui";
 import { useRef, useState } from "react";
+import { listComments } from "../edit/comments-client";
+import { CommentsPanel } from "../edit/components/CommentsPanel";
+import { SandboxedHtml } from "../edit/components/SandboxedHtml";
+import { TopBar, type ViewerMode } from "../edit/components/TopBar";
+import type { PanelTab } from "../edit/components/types";
+import { VersionsPanel } from "../edit/components/VersionsPanel";
+import { buildEditLoaderExtras } from "../edit/loader-data";
 import { saveEdit } from "../edit/save-edit";
+import { listVersions } from "../edit/versions-client";
+import type { CommentWire, DiffWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { buildEditCookie, readEditCookieValue, resolveEditAccess } from "../server/edit-session";
 
@@ -118,23 +148,38 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       ? (JSON.parse(new TextDecoder().decode(sidecar.value.bytes)) as PMDocJson)
       : parseBody(bodyHtml);
 
+  // Comments + Versions (unified-experience epic): loaded SERVER-SIDE, via
+  // the SAME Bearer edit token, against the app-origin REST API — this is a
+  // server-to-server call (Vercel function → app.<domain>), so no CORS is
+  // involved (CORS only governs BROWSER-initiated cross-origin requests).
+  // Best-effort: a failure here never blocks opening the editor — the tabs
+  // just render empty until the user's own client-side actions succeed (see
+  // buildEditLoaderExtras).
+  const [commentsResult, versionsResult] = await Promise.all([
+    listComments({ appOrigin, slug, editToken: decision.token }),
+    listVersions({ appOrigin, slug, editToken: decision.token }),
+  ]);
+  const { comments, versions } = buildEditLoaderExtras(commentsResult, versionsResult);
+
   const headers = editViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 
   // SECURITY: `editToken` is returned to the CLIENT below (loader JSON,
   // hydrated into the page) so client JS can send it as an
-  // `Authorization: Bearer` header on the cross-origin save (../edit/save-edit.ts).
-  // This is safe DESPITE the token being readable by this page's own JS,
-  // because the untrusted report content renders ONLY inside ReportEditor's
-  // sandboxed `srcDoc` iframe (`sandbox="allow-same-origin"`, no
-  // `allow-scripts` — packages/editor/src/ReportEditor.tsx). That iframe
-  // executes no script of its own and cannot reach into the PARENT
-  // document's JS context (the one holding `editToken`) — sandboxing without
-  // `allow-scripts` means the report's own markup/CSS can render but nothing
-  // in it can run. The token's real exposure boundary is instead this
-  // route's OWN CSP (`editViewHeaders`'s `script-src 'self'`, no
-  // `unsafe-inline`/`unsafe-eval`) — nothing but this app's first-party
-  // bundle ever executes in the document that holds the token.
+  // `Authorization: Bearer` header on every cross-origin call (save, comments,
+  // versions, diff — ../edit/*-client.ts, all copying ../edit/save-edit.ts's
+  // pattern). This is safe DESPITE the token being readable by this page's
+  // own JS, because ALL untrusted content — the report body in the editor
+  // AND in View mode, and the visual diff — renders ONLY inside a sandboxed
+  // iframe with no `allow-scripts` (packages/editor/src/ReportEditor.tsx for
+  // the editor; ../edit/components/SandboxedHtml.tsx, using the stricter
+  // `sandbox=""`, for View mode and Compare). Those iframes execute no
+  // script of their own and cannot reach into the PARENT document's JS
+  // context (the one holding `editToken`) — the token's real exposure
+  // boundary is instead this route's OWN CSP (`editViewHeaders`'s
+  // `script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) — nothing but
+  // this app's first-party bundle ever executes in the document that holds
+  // the token.
   return json(
     {
       doc,
@@ -143,6 +188,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       appOrigin,
       editToken: decision.token,
       docTitle: report.title,
+      versionId: versionIdToWire(version.id),
+      comments,
+      versions,
     },
     { headers },
   );
@@ -151,10 +199,28 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export default function EditReport() {
-  const { doc, shell, slug, appOrigin, editToken, docTitle } = useLoaderData<typeof loader>();
+  const {
+    doc,
+    shell,
+    slug,
+    appOrigin,
+    editToken,
+    docTitle,
+    versionId,
+    comments: initialComments,
+    versions,
+  } = useLoaderData<typeof loader>();
+
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<ViewerMode>("edit");
+  const [viewHtml, setViewHtml] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<DiffWire | null>(null);
+  const [activeTab, setActiveTab] = useState<PanelTab>(null);
+  const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
+  const [selection, setSelection] = useState<EditorSelection | null>(null);
 
   async function onSave() {
     setStatus("saving");
@@ -169,37 +235,121 @@ export default function EditReport() {
     }
   }
 
+  // View mode renders a SNAPSHOT of the current (possibly unsaved) editor
+  // content — recomputed fresh every time the user switches to View, not
+  // continuously while editing (ReportEditor keeps running underneath,
+  // hidden — see below — so no edits are ever lost by toggling modes).
+  function selectMode(next: "edit" | "view") {
+    if (next === "view") {
+      setViewHtml(reinjectShell(shell, serializeBody(docRef.current)));
+    }
+    setMode(next);
+  }
+
+  function closeCompare() {
+    setDiffData(null);
+    setMode("edit");
+  }
+
+  function toggleTab(tab: "comments" | "versions") {
+    setActiveTab((current) => (current === tab ? null : tab));
+  }
+
+  const diffHtml = diffData ? reinjectShell(shell, diffData.html) : null;
+
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-subtle">Centaur Spec</p>
-          <h1 className="text-xl font-semibold text-fg">{docTitle}</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <span
-            className={status === "error" ? "text-sm text-danger" : "text-sm text-subtle"}
-            role="status"
-            aria-live="polite"
-          >
-            {status === "saving" ? "Saving…" : (message ?? "")}
-          </span>
-          <Button variant="primary" onClick={onSave} disabled={status === "saving"}>
-            Save
-          </Button>
-        </div>
+    <div className="flex min-h-screen flex-col">
+      <TopBar
+        docTitle={docTitle}
+        mode={mode}
+        onSelectMode={selectMode}
+        onCloseCompare={closeCompare}
+        activeTab={activeTab}
+        onToggleTab={toggleTab}
+        commentCount={comments.length}
+        saveStatus={status === "saving" ? "Saving…" : (message ?? "")}
+        saveDisabled={status === "saving"}
+        onSave={onSave}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        {activeTab ? (
+          <aside className="w-80 shrink-0 overflow-y-auto border-r border-border bg-surface p-4">
+            {activeTab === "comments" ? (
+              <CommentsPanel
+                appOrigin={appOrigin}
+                slug={slug}
+                editToken={editToken}
+                currentVersionId={versionId}
+                comments={comments}
+                onCommentsChange={setComments}
+                pendingSelection={mode === "edit" ? selection : null}
+                onSelectionConsumed={() => setSelection(null)}
+              />
+            ) : (
+              <VersionsPanel
+                appOrigin={appOrigin}
+                slug={slug}
+                editToken={editToken}
+                versions={versions}
+                onCompare={(diff) => {
+                  setDiffData(diff);
+                  setMode("diff");
+                }}
+              />
+            )}
+          </aside>
+        ) : null}
+
+        <main className="min-w-0 flex-1 overflow-auto p-6">
+          {/* ReportEditor stays mounted at ALL times (even when hidden) so
+              in-progress edits are never lost by switching to View/Compare —
+              the mode switch only toggles visibility via CSS. */}
+          <div className={mode === "edit" ? "" : "hidden"}>
+            <Card className="p-6">
+              <ReportEditor
+                key={slug}
+                initialDoc={doc as PMDocJson}
+                shell={shell}
+                comments={comments}
+                onChange={(next) => {
+                  docRef.current = next;
+                }}
+                onSelectionChange={setSelection}
+                className="w-full min-h-[32rem] rounded-card border border-border"
+              />
+            </Card>
+          </div>
+
+          {mode === "view" && viewHtml ? (
+            <Card className="p-6">
+              <SandboxedHtml
+                html={viewHtml}
+                title="Report preview"
+                className="w-full min-h-[32rem] rounded-card border border-border"
+              />
+            </Card>
+          ) : null}
+
+          {mode === "diff" && diffData && diffHtml ? (
+            <Card className="p-6">
+              <p className="mb-3 text-sm font-medium text-fg">
+                Comparing v{diffData.from.version_no} → v{diffData.to.version_no}
+              </p>
+              {diffData.diff_mode === "fallback" && diffData.label ? (
+                <p className="mb-4 rounded-control border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                  {diffData.label}
+                </p>
+              ) : null}
+              <SandboxedHtml
+                html={diffHtml}
+                title="Version diff"
+                className="w-full min-h-[32rem] rounded-card border border-border"
+              />
+            </Card>
+          ) : null}
+        </main>
       </div>
-      <Card className="p-6">
-        <ReportEditor
-          key={slug}
-          initialDoc={doc as PMDocJson}
-          shell={shell}
-          onChange={(next) => {
-            docRef.current = next;
-          }}
-          className="w-full min-h-[32rem] rounded-card border border-border"
-        />
-      </Card>
-    </main>
+    </div>
   );
 }
