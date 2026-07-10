@@ -17,15 +17,36 @@
 // slice; only resolve+delete were requested. A future edit-comment PATCH could
 // reuse this same route by inspecting the body shape, same as this file's
 // sibling reuses POST for both create and reply.
-import type { ActionFunctionArgs } from "@remix-run/node";
+//
+// CORS + `loader` (ADR-0063 API slice): this resource only ever had an
+// `action` (PATCH/DELETE) — no `loader` at all — so a GET/HEAD/OPTIONS
+// request used to 404 (Remix/React-Router: a route with no `loader` export
+// throws 404 for any non-mutation method BEFORE even reaching this file's
+// code). But an `OPTIONS` preflight is ALWAYS routed to `loader`, never
+// `action` (React-Router only sends POST/PUT/PATCH/DELETE to `action`), so
+// without a `loader` here a cross-origin preflight would 404 and the
+// PATCH/DELETE it's gating would never even be attempted by the browser.
+// The added `loader` answers that preflight (via `corsRoute`) and otherwise
+// 405s a stray GET — a more correct response than the old 404, and the only
+// way to make CORS work on this resource at all.
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { deleteComment, resolveComment } from "arp-application";
 import { makeCommentId, methodNotAllowed } from "arp-domain";
 import { deleteCommentToHttp, errorToHttp, resolveCommentToHttp } from "arp-http";
 import { clock, commentRepo, deps } from "../server/container.server";
+import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { toResponse, wireContext } from "../server/http.server";
 
-export async function action(args: ActionFunctionArgs) {
+const ALLOWED_METHODS = "PATCH, DELETE, OPTIONS";
+
+export const loader = corsRoute(ALLOWED_METHODS, async (_args: LoaderFunctionArgs) =>
+  toResponse(errorToHttp(methodNotAllowed("PATCH, DELETE"))),
+);
+
+export const action = corsRoute(ALLOWED_METHODS, dispatchAction);
+
+async function dispatchAction(args: ActionFunctionArgs) {
   const method = args.request.method.toUpperCase();
   if (method === "PATCH") return patchHandler(args);
   if (method === "DELETE") return deleteHandler(args);
