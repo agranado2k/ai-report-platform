@@ -1,26 +1,29 @@
 import type { MetaFunction } from "@remix-run/node";
-import { Button, Card } from "arp-ui";
-import { useState } from "react";
+import { Card } from "arp-ui";
 
 export const meta: MetaFunction = () => [{ title: "Centaur Spec — viewer" }];
 
-// Smoke test for the view-origin CSS/hydration foundation (Phase 4c): proves the
-// Tailwind build emits Forge & Ember utility classes (ADR-0058) AND that an
-// arp-ui component hydrates on this origin (the click count only advances after
-// React attaches on the client — a static SSR-only page could never respond).
-// This is not the real landing page; the unified in-viewer experience replaces
-// it once ADR-0063's client lands.
+// The viewer origin's landing page (`view.<domain>/`). This origin has no
+// index of its own — every real destination is a report at `/<slug>`
+// (public, read-only, ADR-002/0038) or `/<slug>/edit` (authenticated, the
+// unified editing experience, ADR-0063). A bare visit here carries no slug,
+// so there is nothing to serve; this is a minimal, on-brand explainer, not a
+// dashboard. Replaces the interim hydration-smoke-test click-counter that
+// proved the Tailwind build + arp-ui hydration foundation during Phase 4c —
+// that check now lives in the shipped `/<slug>/edit` route itself.
 export default function Index() {
-  const [pings, setPings] = useState(0);
-
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
       <Card className="p-8">
-        <h1 className="text-2xl font-semibold text-fg">Centaur Spec — viewer origin</h1>
+        <h1 className="text-2xl font-semibold text-fg">Centaur Spec — viewer</h1>
         <p className="mt-3 text-muted">
           This origin (<code className="font-mono text-sm text-subtle">view.&lt;domain&gt;</code>)
           serves uploaded reports by slug. Hosted HTML/JS runs here under a strict CSP stack
           (ADR-013) so it cannot reach the dashboard origin.
+        </p>
+        <p className="mt-2 text-muted">
+          Have a report link? Open it directly — reports are served at{" "}
+          <code className="font-mono text-sm text-subtle">/&lt;slug&gt;</code>.
         </p>
         <p className="mt-2 text-muted">
           Health endpoint:{" "}
@@ -28,16 +31,6 @@ export default function Index() {
             /health
           </a>
         </p>
-        <div className="mt-6 flex items-center gap-3">
-          <Button variant="primary" onClick={() => setPings((n) => n + 1)}>
-            Hydration check
-          </Button>
-          <span className="text-sm text-subtle">
-            {pings === 0
-              ? "Click to confirm React hydrated"
-              : `Hydrated — ${pings} click${pings === 1 ? "" : "s"}`}
-          </span>
-        </div>
       </Card>
     </main>
   );
