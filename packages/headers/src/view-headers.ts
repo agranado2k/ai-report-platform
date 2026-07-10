@@ -53,9 +53,6 @@ const VIEW_CSP_REPORT_ONLY = [
   CSP_SHARED.reportTo,
 ].join("; ");
 
-/** Strips a single trailing slash from an origin (`https://app.x.com/` →
- *  `https://app.x.com`) so `connect-src` never ends up with a doubled or
- *  dangling `/` before the `;` directive separator. */
 /**
  * Validate + reduce `appOrigin` to a bare origin token (`scheme://host[:port]`)
  * before it's interpolated into `connect-src`. SECURITY (claude-review #181): a

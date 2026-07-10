@@ -18,8 +18,12 @@ export type EditViewHeadersOptions = SecureHeadersOptions & {
    * reads/writes through (ADR-0063 Decision 3). REQUIRED: unlike the public
    * profile, this route needs an explicit, narrow widening rather than
    * `'self'` alone. Pass a bare origin (e.g. `https://app.centaurspec.com`);
-   * a trailing slash is normalized away. Never resolves to `'*'` — a caller
-   * cannot loosen this to a wildcard through this option.
+   * it is *validated*, not best-effort — `editViewHeaders` parses it with
+   * `new URL()` and **throws** on a malformed URL, a non-`http(s)` scheme,
+   * embedded credentials, or a non-local `http` origin (prod must be https),
+   * then reduces it to the clean origin token (path/query/fragment/trailing
+   * slash stripped). Never resolves to `'*'` — a caller cannot loosen this to
+   * a wildcard, nor inject a CSP directive, through this option.
    */
   readonly appOrigin: string;
 };
