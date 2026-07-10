@@ -56,14 +56,23 @@ Feature: Comment on a report
     When I view the public viewer page for "abc1234567"
     Then the response contains no comment data
 
+  # RETARGETED (ADR-0063 Phase 5 dashboard-editor retirement): this scenario
+  # used to describe the DASHBOARD editor's sidebar (apps/app's
+  # CommentSidebar.tsx, deleted). Comment-composing UI now lives on the
+  # unified in-viewer experience's Comments tab (apps/view/app/edit/components/CommentsPanel.tsx),
+  # which drives the SAME add/reply/resolve API this feature already covers
+  # above. Left as a TODO rather than rewritten in place: the UI-level
+  # selection/highlight/thread assertions below need re-authoring against
+  # CommentsPanel's actual DOM, not just a search-and-replace of "editor" ->
+  # "unified experience".
   @wip
-  Scenario: Add, reply, and resolve a comment from the dashboard editor's sidebar
-    Given I have "abc1234567" open in the in-dashboard editor
+  Scenario: Add, reply, and resolve a comment from the unified in-viewer experience's Comments panel
+    Given I have "abc1234567" open in the unified in-viewer editing experience
     When I select a span of text in the document and click "Comment"
     And I write a comment body and submit it
-    Then the comment appears in the sidebar as an open Thread
+    Then the comment appears in the Comments panel as an open Thread
     And the selected text is rendered with a highlight decoration in the editor
     When I open the Thread and submit a reply
     Then the reply appears nested under the root comment
     When I click "Resolve" on the root comment
-    Then the Thread shows as resolved in the sidebar
+    Then the Thread shows as resolved in the Comments panel
