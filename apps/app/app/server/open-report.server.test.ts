@@ -1,10 +1,11 @@
-// Unit tests for the owner-open decision — the ADR-0059 §4 security keystone —
-// PLUS the edit-token mint (ADR-0063): a canWrite (owner OR write-grantee) user
-// who is NOT the owner is minted a short-lived, slug-bound `scope:"edit"`
-// token instead of the owner's 24h `owner:true` access token. The owner path
-// MUST stay unaffected — an owner is trivially canWrite too, so the ownership
-// gate is checked FIRST and short-circuits before the edit-token branch is
-// ever reached.
+// Unit tests for the owner-open decision — the ADR-0059 §4 security keystone,
+// extended by ADR-0063 Phase 5: EVERY canWrite user (owner OR write-grantee)
+// is now minted the SAME short-lived, slug-bound `scope:"edit"` token and
+// lands in the unified in-viewer experience (`/edit?et=...`) — there is no
+// longer a separate, higher-privilege `owner:true` access token minted from
+// this route. `loadWritableReport` (isOwner OR hasWriteGrant, ADR-0060 §4)
+// is now THE single gate; a user who is neither is bounced to "/" and never
+// learns whether the report exists.
 import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
@@ -15,7 +16,6 @@ import {
   folderId,
   makeSlug,
   orgId,
-  readAccessToken,
   readEditToken,
   reportId,
   type Slug,
@@ -23,7 +23,7 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { EDIT_TTL_SECONDS, OWNER_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
+import { EDIT_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
@@ -79,8 +79,8 @@ function makeDeps(
   };
 }
 
-describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () => {
-  it("mints an owner:true token for the OWNER and redirects to the viewer", async () => {
+describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0063 Phase 5)", () => {
+  it("OWNER: mints an edit token (sub = owner) and redirects to the unified /edit experience", async () => {
     const { reports } = await seededReports("aaaaaaaaaa");
     const { deps, logged } = makeDeps(reports);
     const location = await ownerOpenLocation(deps, {
@@ -89,18 +89,52 @@ describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () =>
       viewOrigin: VIEW,
       secret: SECRET,
     });
-    expect(location.startsWith(`${VIEW}/aaaaaaaaaa?access=`)).toBe(true);
-    const token = decodeURIComponent(location.split("?access=")[1] ?? "");
-    const claims = readAccessToken(token, "aaaaaaaaaa", SECRET, Math.floor(NOW / 1000));
-    expect(claims).toMatchObject({ slug: "aaaaaaaaaa", owner: true });
-    expect(logged).toHaveLength(1); // the privileged mint is audited
+    expect(location.startsWith(`${VIEW}/aaaaaaaaaa/edit?et=`)).toBe(true);
+    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    const claims = readEditToken(token, "aaaaaaaaaa", SECRET, nowSeconds);
+    expect(claims).toMatchObject({
+      slug: "aaaaaaaaaa",
+      sub: OWNER,
+      scope: "edit",
+      exp: nowSeconds + EDIT_TTL_SECONDS,
+    });
+    expect(logged).toHaveLength(1); // the mint is audited
   });
 
-  it("KEYSTONE: a same-org non-owner is bounced to the dashboard — no token", async () => {
+  it("GRANTEE (non-owner canWrite): mints the SAME shape of edit token (sub = grantee)", async () => {
+    const { reports, report } = await seededReports("ffffffffff");
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    identities.seedUser(GRANTEE, "grantee@x.com");
+    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
+    const { deps, logged } = makeDeps(reports, { grants, identities });
+
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: GRANTEE },
+      rawHandle: "ffffffffff",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+
+    expect(location.startsWith(`${VIEW}/ffffffffff/edit?et=`)).toBe(true);
+    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    const claims = readEditToken(token, "ffffffffff", SECRET, nowSeconds);
+    expect(claims).toMatchObject({
+      slug: "ffffffffff",
+      sub: GRANTEE,
+      scope: "edit",
+      exp: nowSeconds + EDIT_TTL_SECONDS,
+    });
+    expect(logged).toHaveLength(1); // audited exactly like the owner path — same capability now
+  });
+
+  it("KEYSTONE: a same-org non-owner, non-grantee is bounced to the dashboard — no token", async () => {
     const { reports } = await seededReports("bbbbbbbbbb");
     const { deps, logged } = makeDeps(reports);
     const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: COLLEAGUE }, // same org, NOT the owner
+      actor: { orgId: ORG, userId: COLLEAGUE }, // same org, NOT owner, NOT a write-grantee
       rawHandle: "bbbbbbbbbb",
       viewOrigin: VIEW,
       secret: SECRET,
@@ -133,7 +167,7 @@ describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () =>
     expect(location).toBe("/");
   });
 
-  it("falls through to the gated viewer when no secret is configured (previews/dev)", async () => {
+  it("no secret configured (previews/dev): a canWrite OWNER falls through to the bare gated viewer — no token", async () => {
     const { reports } = await seededReports("dddddddddd");
     const { deps, logged } = makeDeps(reports);
     const location = await ownerOpenLocation(deps, {
@@ -146,107 +180,7 @@ describe("ownerOpenLocation (ADR-0059 §4 — the owner-token mint gate)", () =>
     expect(logged).toHaveLength(0);
   });
 
-  it("the no-secret fall-through is still owner-gated — a non-owner can't resolve a slug", async () => {
-    const { reports } = await seededReports("dddddddddd");
-    const { deps } = makeDeps(reports);
-    const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: COLLEAGUE },
-      rawHandle: "dddddddddd",
-      viewOrigin: VIEW,
-      secret: undefined,
-    });
-    // The ownership gate runs BEFORE the no-secret branch (review #146): without
-    // it, any authenticated user could turn a report_… id into its capability
-    // slug via the redirect Location — for public mode the slug IS the capability.
-    expect(location).toBe("/");
-  });
-
-  it("the minted token expires after 24h", async () => {
-    const { reports } = await seededReports("eeeeeeeeee");
-    const { deps } = makeDeps(reports);
-    const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: OWNER },
-      rawHandle: "eeeeeeeeee",
-      viewOrigin: VIEW,
-      secret: SECRET,
-    });
-    const token = decodeURIComponent(location.split("?access=")[1] ?? "");
-    const nowSeconds = Math.floor(NOW / 1000);
-    expect(
-      readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS - 1),
-    ).not.toBeNull();
-    expect(
-      readAccessToken(token, "eeeeeeeeee", SECRET, nowSeconds + OWNER_TTL_SECONDS + 1),
-    ).toBeNull();
-  });
-});
-
-describe("ownerOpenLocation — edit-token mint for a canWrite non-owner (ADR-0063)", () => {
-  it("mints a scope:edit token for a write-grantee and redirects to the edit route", async () => {
-    const { reports, report } = await seededReports("ffffffffff");
-    const grants = new InMemoryWriteGrantStore();
-    const identities = new InMemoryIdentityStore();
-    identities.seedUser(GRANTEE, "grantee@x.com");
-    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
-
-    const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: GRANTEE },
-      rawHandle: "ffffffffff",
-      viewOrigin: VIEW,
-      secret: SECRET,
-    });
-
-    expect(location.startsWith(`${VIEW}/ffffffffff/edit?et=`)).toBe(true);
-    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
-    const nowSeconds = Math.floor(NOW / 1000);
-    const claims = readEditToken(token, "ffffffffff", SECRET, nowSeconds);
-    expect(claims).toMatchObject({
-      slug: "ffffffffff",
-      sub: GRANTEE,
-      scope: "edit",
-      exp: nowSeconds + EDIT_TTL_SECONDS,
-    });
-    expect(logged).toHaveLength(1); // the mint is audited, same as the owner path
-  });
-
-  it("owner-but-also-canWrite: the OWNER still gets the owner access token, not an edit token", async () => {
-    const { reports, report } = await seededReports("gggggggggg");
-    const grants = new InMemoryWriteGrantStore();
-    const identities = new InMemoryIdentityStore();
-    // The owner also (redundantly) holds a write grant on their own report —
-    // ownership must win; the two capabilities are not layered.
-    identities.seedUser(OWNER, "owner@x.com");
-    await grants.grant(report.id, "owner@x.com", OWNER, OWNER);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
-
-    const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: OWNER },
-      rawHandle: "gggggggggg",
-      viewOrigin: VIEW,
-      secret: SECRET,
-    });
-
-    expect(location.startsWith(`${VIEW}/gggggggggg?access=`)).toBe(true);
-    expect(location).not.toContain("/edit?et=");
-    expect(logged).toHaveLength(1);
-  });
-
-  it("a non-canWrite, non-owner user gets NO token at all (falls to dashboard)", async () => {
-    const { reports } = await seededReports("hhhhhhhhhh");
-    // COLLEAGUE has no write grant — same org, but neither owner nor grantee.
-    const { deps, logged } = makeDeps(reports);
-    const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: COLLEAGUE },
-      rawHandle: "hhhhhhhhhh",
-      viewOrigin: VIEW,
-      secret: SECRET,
-    });
-    expect(location).toBe("/");
-    expect(logged).toHaveLength(0);
-  });
-
-  it("secret unset: a write-grantee canWrite user still falls through unchanged — no edit token", async () => {
+  it("no secret configured: a canWrite GRANTEE ALSO falls through to the bare gated viewer — the fallback is unified, not owner-only", async () => {
     const { reports, report } = await seededReports("iiiiiiiiii");
     const grants = new InMemoryWriteGrantStore();
     const identities = new InMemoryIdentityStore();
@@ -260,31 +194,41 @@ describe("ownerOpenLocation — edit-token mint for a canWrite non-owner (ADR-00
       viewOrigin: VIEW,
       secret: undefined,
     });
-    expect(location).toBe("/");
+    expect(location).toBe(`${VIEW}/iiiiiiiiii`);
     expect(logged).toHaveLength(0);
   });
 
-  it("the minted edit token expires after 15 minutes", async () => {
-    const { reports, report } = await seededReports("jjjjjjjjjj");
-    const grants = new InMemoryWriteGrantStore();
-    const identities = new InMemoryIdentityStore();
-    identities.seedUser(GRANTEE, "grantee@x.com");
-    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps } = makeDeps(reports, { grants, identities });
-
+  it("no secret configured: the canWrite gate STILL runs first — a non-owner/non-grantee can't resolve a slug", async () => {
+    const { reports } = await seededReports("dddddddddd");
+    const { deps } = makeDeps(reports);
     const location = await ownerOpenLocation(deps, {
-      actor: { orgId: ORG, userId: GRANTEE },
-      rawHandle: "jjjjjjjjjj",
+      actor: { orgId: ORG, userId: COLLEAGUE },
+      rawHandle: "dddddddddd",
+      viewOrigin: VIEW,
+      secret: undefined,
+    });
+    // The canWrite gate runs BEFORE the no-secret branch (review #146's
+    // reasoning, preserved): without it, any authenticated user could turn a
+    // report_… id into its capability slug via the redirect Location.
+    expect(location).toBe("/");
+  });
+
+  it("the minted edit token expires after EDIT_TTL_SECONDS, for the OWNER too (no more 24h owner token)", async () => {
+    const { reports } = await seededReports("eeeeeeeeee");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "eeeeeeeeee",
       viewOrigin: VIEW,
       secret: SECRET,
     });
     const token = decodeURIComponent(location.split("?et=")[1] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
     expect(
-      readEditToken(token, "jjjjjjjjjj", SECRET, nowSeconds + EDIT_TTL_SECONDS - 1),
+      readEditToken(token, "eeeeeeeeee", SECRET, nowSeconds + EDIT_TTL_SECONDS - 1),
     ).not.toBeNull();
     expect(
-      readEditToken(token, "jjjjjjjjjj", SECRET, nowSeconds + EDIT_TTL_SECONDS + 1),
+      readEditToken(token, "eeeeeeeeee", SECRET, nowSeconds + EDIT_TTL_SECONDS + 1),
     ).toBeNull();
   });
 });
