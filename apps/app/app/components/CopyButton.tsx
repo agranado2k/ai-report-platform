@@ -1,6 +1,5 @@
+import { CheckIcon, CopyIcon, cx } from "arp-ui";
 import { useState } from "react";
-import { cx } from "./cx";
-import { CheckIcon, CopyIcon } from "./icons";
 
 /**
  * Copy a string to the clipboard with brief "Copied" feedback. Client-only

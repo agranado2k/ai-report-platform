@@ -1,6 +1,5 @@
 import { useFetcher } from "@remix-run/react";
-import { Button } from "./Button";
-import { Input } from "./Input";
+import { Button, Input } from "arp-ui";
 
 type RenameResult = { ok: true } | { error: string };
 
