@@ -42,7 +42,7 @@ import {
   splitShell,
 } from "arp-report-html";
 import { Card } from "arp-ui";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
@@ -222,6 +222,17 @@ export default function EditReport() {
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
 
+  // Only OPEN ROOT comments drive the editor's highlight decorations
+  // (claude-review #184): a resolved thread no longer needs its anchor
+  // highlighted, and a reply shares its parent's anchor — passing replies too
+  // would just stack a duplicate range at the same offsets. The CommentsPanel
+  // still receives the FULL `comments` list (it renders resolved threads +
+  // replies); only the highlight feed is narrowed.
+  const highlightComments = useMemo(
+    () => comments.filter((c) => c.resolved_at === null && c.parent_id === null),
+    [comments],
+  );
+
   async function onSave() {
     setStatus("saving");
     setMessage(null);
@@ -311,7 +322,7 @@ export default function EditReport() {
                 key={slug}
                 initialDoc={doc as PMDocJson}
                 shell={shell}
-                comments={comments}
+                comments={highlightComments}
                 onChange={(next) => {
                   docRef.current = next;
                 }}

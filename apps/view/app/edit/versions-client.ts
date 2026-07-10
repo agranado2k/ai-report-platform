@@ -28,6 +28,9 @@ export async function listVersions(input: ListVersionsInput): Promise<ListVersio
   const fetchImpl = input.fetchImpl ?? fetch;
   let response: Response;
   try {
+    // v1 cap (claude-review #184): a single `limit=100` page; `has_more` is not
+    // consumed, so a report with >100 versions shows only the first page. A
+    // cursor follow is deferred to the Phase 5 cutover — not "shows everything".
     response = await fetchImpl(
       `${input.appOrigin}/api/v1/reports/${input.slug}/versions?limit=100`,
       {

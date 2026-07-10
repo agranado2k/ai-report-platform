@@ -35,6 +35,10 @@ export async function listComments(input: CommentsRequestInput): Promise<ListCom
   const fetchImpl = input.fetchImpl ?? fetch;
   let response: Response;
   try {
+    // v1 cap (claude-review #184): a single `limit=100` page — the envelope's
+    // `has_more` is intentionally not consumed, so a report with >100 comments
+    // silently shows only the first page. A "load more"/cursor follow is
+    // deferred to the Phase 5 cutover; this is NOT "shows everything".
     response = await fetchImpl(
       `${input.appOrigin}/api/v1/reports/${input.slug}/comments?limit=100`,
       {
