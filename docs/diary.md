@@ -2892,3 +2892,42 @@ is no longer in any event's subscriber list. `docs/domain-glossary.md` gained **
 action** under a new "Cross-cutting infrastructure" section.
 
 Worktree: `worktree/audit-logger` (branch `feat/audit-logger`). Not yet merged.
+
+### 2026-07-10 — In-viewer editing, Phase 3: the edit-route CSP profile (ADR-0063 Decisions 1-2)
+
+Added `editViewHeaders({ appOrigin, reportToUrl? })` to `packages/headers/src/view-headers.ts`, the
+second, route-selected security-header profile ADR-0063 calls for on the viewer origin — alongside the
+existing `viewHeaders()` (public, unauthenticated `GET /<slug>`), never in place of it. TDD, since this
+is security-sensitive: the assertions (`packages/headers/src/view-headers.test.ts`) were written and
+confirmed red (`editViewHeaders` undefined) before the implementation.
+
+`viewHeaders()`'s output is pinned byte-identical by a regression test — Phase 3 touches nothing about
+the public route's headers. The two profiles now share their non-differing directives (`default-src`,
+`img-src`, `font-src`, `frame-ancestors`, `base-uri`, `form-action`, `object-src`, `worker-src`,
+`report-to`) through one internal `CSP_SHARED` table so they can't silently drift apart.
+
+Every relaxation vs the public profile is documented inline in `view-headers.ts` and in the ADR amendment
+(full detail there): no top-level `sandbox` CSP header (the biggest one — the edit route's top-level
+document is the trusted first-party editor, not the untrusted report; the report itself stays contained
+inside the editor's own sandboxed `srcDoc` iframe, which already carries its own restrictive `<meta>` CSP
+per ADR-0062 §9 / PRs #171-172), `connect-src` widened to `'self'` plus exactly the caller-supplied
+`appOrigin` (never `'*'`), and a new `frame-src 'self'` (absent from the public profile) so the editor's
+own report iframe can render. `script-src` stays `'self'` with no `'unsafe-inline'` — confirmed unneeded
+by precedent: `appHeaders()` (the dashboard origin) already ships the same restriction for the same
+Remix/React stack. `Cache-Control` is `no-store` (authenticated, per-user route, vs the public route's
+`private, max-age=60`).
+
+Nothing wires this profile to a route yet — Phase 4. It is an inert, pure, unit-tested header builder
+until then; the `/security-review` this ADR's Status is gated on runs against the wired surface, not this
+function in isolation. Two open items flagged in the ADR for that review: whether "top-level not
+sandboxed" is acceptable given this is the first authenticated, first-party-JS-bearing route ever added
+to `view.<domain>`, and confirming `frame-src 'self'` actually permits the `srcDoc` iframe in every
+target browser (spec/implementation history here has been inconsistent).
+
+Gates green: `biome ci .` (0 errors — 1 pre-existing, unrelated warning in an unrelated report-html
+fixture), `turbo typecheck` (12/12), `vitest run` (141 files / 1091 tests), `docs:check`. This worktree's
+`node_modules` needed a fresh `pnpm install` before `turbo typecheck` would resolve `@remix-run/node`
+types — an environment gap, not a code issue; noted here in case it recurs.
+
+Worktree: `worktree/view-origin-editing` (branch `feat/view-origin-editing`, off `main`). Not yet merged;
+not pushed.
