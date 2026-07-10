@@ -26,7 +26,7 @@
 // unset.
 
 import { defineEnv } from "arp-env";
-import { corsPreflightResponse, corsResponseHeaders } from "arp-http";
+import { corsPreflightResponse, corsResponseHeaders, mergeVary } from "arp-http";
 import { toResponse } from "./http.server";
 
 function configuredViewOrigin(): string | undefined {
@@ -53,7 +53,9 @@ export function corsRoute<Args extends { request: Request }>(
 
     if (args.request.method === "OPTIONS") {
       const res = toResponse(corsPreflightResponse(origin, policy));
-      res.headers.set("Vary", "Origin");
+      // Merge, not set — a freshly-built preflight has no Vary today, but stay
+      // uniform with the real-response branch below (claude-review #183 L-1).
+      res.headers.set("Vary", mergeVary(res.headers.get("Vary"), "Origin"));
       return res;
     }
 
@@ -62,7 +64,9 @@ export function corsRoute<Args extends { request: Request }>(
     for (const [key, value] of Object.entries(corsResponseHeaders(origin, policy))) {
       headers.set(key, value);
     }
-    headers.set("Vary", "Origin");
+    // Append `Origin` to any Vary the handler already set (e.g. Accept-Encoding)
+    // rather than clobbering it → no cache poisoning (claude-review #183 L-1).
+    headers.set("Vary", mergeVary(headers.get("Vary"), "Origin"));
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

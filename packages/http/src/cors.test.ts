@@ -6,7 +6,7 @@
 // and never set Access-Control-Allow-Credentials (auth rides a Bearer
 // header, not cookies — ADR-0063).
 import { describe, expect, it } from "vitest";
-import { corsPreflightResponse, corsResponseHeaders } from "./cors";
+import { corsPreflightResponse, corsResponseHeaders, mergeVary } from "./cors";
 
 const VIEW_ORIGIN = "https://view.example.com";
 
@@ -69,7 +69,23 @@ describe("corsPreflightResponse", () => {
       "Access-Control-Allow-Origin": VIEW_ORIGIN,
       "Access-Control-Allow-Headers": "Authorization, Content-Type",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Max-Age": "600",
     });
+  });
+
+  it("advertises a preflight cache lifetime (Access-Control-Max-Age) — origin-independent", () => {
+    // Present even on a non-matching origin: it caches only the method/header
+    // allow-list, never a credential, so it can't be used to probe config.
+    const match = corsPreflightResponse(VIEW_ORIGIN, {
+      allowedOrigin: VIEW_ORIGIN,
+      allowedMethods: "GET, OPTIONS",
+    });
+    const noMatch = corsPreflightResponse("https://evil.example.com", {
+      allowedOrigin: VIEW_ORIGIN,
+      allowedMethods: "GET, OPTIONS",
+    });
+    expect(match.headers?.["Access-Control-Max-Age"]).toBe("600");
+    expect(noMatch.headers?.["Access-Control-Max-Age"]).toBe("600");
   });
 
   it("omits Access-Control-Allow-Origin (but still answers 204) when the origin doesn't match", () => {
@@ -91,5 +107,22 @@ describe("corsPreflightResponse", () => {
       allowedMethods: "GET, OPTIONS",
     });
     expect(res.headers?.["Access-Control-Allow-Credentials"]).toBeUndefined();
+  });
+});
+
+describe("mergeVary", () => {
+  it("returns the token alone when there is no existing Vary", () => {
+    expect(mergeVary(null, "Origin")).toBe("Origin");
+    expect(mergeVary("", "Origin")).toBe("Origin");
+  });
+
+  it("appends the token, preserving an existing Vary (no clobber → no cache poisoning)", () => {
+    expect(mergeVary("Accept-Encoding", "Origin")).toBe("Accept-Encoding, Origin");
+    expect(mergeVary("Accept-Encoding, Cookie", "Origin")).toBe("Accept-Encoding, Cookie, Origin");
+  });
+
+  it("dedupes case-insensitively — never adds Origin twice", () => {
+    expect(mergeVary("origin", "Origin")).toBe("origin");
+    expect(mergeVary("Accept-Encoding, ORIGIN", "Origin")).toBe("Accept-Encoding, ORIGIN");
   });
 });

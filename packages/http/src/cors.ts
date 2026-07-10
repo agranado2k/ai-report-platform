@@ -66,6 +66,29 @@ export function corsPreflightResponse(
       ...corsResponseHeaders(requestOrigin, policy),
       "Access-Control-Allow-Headers": "Authorization, Content-Type",
       "Access-Control-Allow-Methods": policy.allowedMethods,
+      // Cache the preflight so the editor doesn't pay an OPTIONS round-trip on
+      // every versions/diff/comments call. 10 min — modest, and it caches only
+      // the (origin-independent) method/header allow-list, never a credential.
+      "Access-Control-Max-Age": "600",
     },
   };
+}
+
+/**
+ * Merge a token into a `Vary` header value without clobbering existing tokens
+ * (case-insensitive dedupe). The CORS wrapper adds `Vary: Origin` because the
+ * response's `Access-Control-Allow-Origin` differs by request Origin — but a
+ * handler may already have set its own `Vary` (e.g. `Accept-Encoding`);
+ * overwriting it with `set` would drop that and can cause cache poisoning
+ * (claude-review #183 L-1). `mergeVary(null, "Origin") === "Origin"`;
+ * `mergeVary("Accept-Encoding", "Origin") === "Accept-Encoding, Origin"`;
+ * `mergeVary("origin", "Origin") === "origin"` (already present, kept as-is).
+ */
+export function mergeVary(existing: string | null, add: string): string {
+  const tokens = (existing ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (!tokens.some((t) => t.toLowerCase() === add.toLowerCase())) tokens.push(add);
+  return tokens.join(", ");
 }

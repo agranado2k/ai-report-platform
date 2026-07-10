@@ -124,6 +124,26 @@ describe("corsRoute — real requests", () => {
     expect(res.headers.get("Content-Type")).toBe("application/problem+json");
   });
 
+  it("appends Origin to a Vary the handler already set, instead of clobbering it (no cache poisoning)", async () => {
+    const handler = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { Vary: "Accept-Encoding" },
+        }),
+    );
+    const route = corsRoute<FakeArgs>("GET, OPTIONS", handler);
+
+    const res = await route({
+      request: req("https://app.example.test/x", { headers: { Origin: VIEW_ORIGIN } }),
+      params: {},
+      context: {},
+    });
+
+    // The handler's own Vary token survives; Origin is added, not substituted.
+    expect(res.headers.get("Vary")).toBe("Accept-Encoding, Origin");
+  });
+
   it("always sets Vary: Origin, even on a non-matching origin (cache correctness)", async () => {
     const handler = vi.fn(async () => new Response(null, { status: 204 }));
     const route = corsRoute<FakeArgs>("GET, OPTIONS", handler);
