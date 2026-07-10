@@ -56,8 +56,37 @@ const VIEW_CSP_REPORT_ONLY = [
 /** Strips a single trailing slash from an origin (`https://app.x.com/` →
  *  `https://app.x.com`) so `connect-src` never ends up with a doubled or
  *  dangling `/` before the `;` directive separator. */
+/**
+ * Validate + reduce `appOrigin` to a bare origin token (`scheme://host[:port]`)
+ * before it's interpolated into `connect-src`. SECURITY (claude-review #181): a
+ * raw string spliced into a CSP is a directive-injection vector — an `appOrigin`
+ * like `"https://x.com; default-src *"` would inject `default-src *` even though
+ * `connect-src` never literally becomes `'*'`. Parsing with `new URL` and
+ * returning `.origin` structurally prevents this: `.origin` is always a clean
+ * token with NO path/query/fragment, whitespace, or `;`. Throws on a malformed
+ * URL, a non-http(s) scheme (blocks `javascript:`/`data:`), embedded
+ * credentials, or a non-local http origin (prod must be https; http is allowed
+ * only for localhost dev). `appOrigin` is operator config (env `APP_ORIGIN`),
+ * not user input, but a value flowing into a security header is validated at the
+ * boundary regardless.
+ */
 function normalizeOrigin(origin: string): string {
-  return origin.replace(/\/+$/, "");
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    throw new Error(`editViewHeaders: appOrigin is not a valid URL: ${JSON.stringify(origin)}`);
+  }
+  if (url.username || url.password) {
+    throw new Error("editViewHeaders: appOrigin must not carry credentials");
+  }
+  const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocal)) {
+    throw new Error(
+      `editViewHeaders: appOrigin must be https (http allowed only for localhost), got ${JSON.stringify(origin)}`,
+    );
+  }
+  return url.origin; // clean scheme://host[:port] — no path/query/fragment/`;`/whitespace
 }
 
 /**

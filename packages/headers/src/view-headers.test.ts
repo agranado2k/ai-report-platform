@@ -162,6 +162,45 @@ describe("editViewHeaders", () => {
     expect(h.get("Content-Security-Policy")).toContain(`connect-src 'self' ${APP_ORIGIN};`);
   });
 
+  it("SECURITY: cannot inject a CSP directive via appOrigin (claude-review #181)", () => {
+    // The guarantee is outcome-based: a crafted appOrigin can NEVER add a
+    // directive to the CSP — either the URL is invalid (throws, rejected) or its
+    // path/query/fragment payload is stripped by `new URL().origin`. Assert the
+    // property regardless of which path a given payload takes.
+    const cspFor = (appOrigin: string): string => {
+      try {
+        return editViewHeaders({ appOrigin }).get("Content-Security-Policy") ?? "";
+      } catch {
+        return ""; // rejected outright — also safe
+      }
+    };
+    for (const payload of [
+      "https://evil.com; default-src *",
+      "https://app.centaurspec.com/evil?a;b#c; default-src *",
+      "https://app.centaurspec.com/ x script-src *",
+    ]) {
+      const csp = cspFor(payload);
+      expect(csp).not.toContain("default-src *");
+      expect(csp).not.toContain("script-src *");
+      expect(csp).not.toContain("evil");
+    }
+    // A parseable junk-in-path origin is reduced to its clean origin token:
+    const h = editViewHeaders({ appOrigin: "https://app.centaurspec.com/x?a=1#f" });
+    expect(h.get("Content-Security-Policy")).toContain(
+      "connect-src 'self' https://app.centaurspec.com;",
+    );
+  });
+
+  it("SECURITY: rejects non-http(s) schemes, embedded credentials, and non-local http", () => {
+    expect(() => editViewHeaders({ appOrigin: "javascript:alert(1)" })).toThrow();
+    expect(() => editViewHeaders({ appOrigin: "data:text/html,x" })).toThrow();
+    expect(() => editViewHeaders({ appOrigin: "https://user:pass@app.centaurspec.com" })).toThrow();
+    expect(() => editViewHeaders({ appOrigin: "http://app.centaurspec.com" })).toThrow(); // prod must be https
+    expect(() => editViewHeaders({ appOrigin: "not a url" })).toThrow();
+    // http IS allowed for localhost dev:
+    expect(() => editViewHeaders({ appOrigin: "http://localhost:3000" })).not.toThrow();
+  });
+
   it("scopes script-src to 'self' only — first-party editor bundle, no 'unsafe-inline'", () => {
     const h = editViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Content-Security-Policy")).toContain("script-src 'self';");

@@ -33,7 +33,7 @@ The editing epic (ADR-0062: a ProseMirror-based editor for report content, infor
 
 The enforcing/sandbox CSP for the **public** route does **not** relax, at all. A second, separate CSP profile is introduced, scoped **only** to the new `GET /<slug>/edit` route:
 
-- `script-src 'self'` plus build-time hashes for the editor bundle (no `unsafe-inline`, no `unsafe-eval`) — first-party editor JS only, nothing report-supplied.
+- `script-src 'self'` — first-party editor JS only, nothing report-supplied; no `unsafe-inline`, no `unsafe-eval`. (Superseded the original "plus build-time hashes" wording: the implementation ships the *stricter* bare `'self'`, since this repo's Remix/React stack already hydrates without inline scripts — see `appHeaders()`. A per-response nonce, not hashes, is the documented path if a future editor build step ever needs an inline allowance; flagged for `/security-review`.)
 - `connect-src` limited to the app-origin API (`app.<domain>/api/v1/...` — the token-mint and save endpoints), nothing else.
 - `worker-src`, `frame-ancestors`, `object-src`, and the rest of the ADR-013 stack carry over from the public profile — the edit route is *additive* (it gains a script allowance the public route doesn't have), never a general loosening.
 - The two profiles are selected by route, computed independently, and there is no code path where a public `GET /<slug>` request can receive the edit-route CSP or vice versa. e2e security-header tests assert both profiles independently (see Consequences).
