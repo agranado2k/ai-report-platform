@@ -25,6 +25,11 @@ import { defineConfig } from "vitest/config";
 // app's components, but the pure success/failure gate that decides whether
 // a fetcher's settled state should clear the composer is dependency-free
 // (no DOM, no React import) and cheap to unit-test directly.
+// `apps/view/app/edit` is the in-viewer editor's CLIENT save-fetch helper
+// (ADR-0063 Phase 4): a plain `fetch` wrapper with no DOM/React dependency
+// (the browser's `fetch` and Node's are interface-compatible, and a fake
+// `fetchImpl` is injected in tests either way), so it's cheap to unit-test
+// directly rather than deferring it to e2e like the mounted editor route.
 export default defineConfig({
   test: {
     include: [
@@ -33,6 +38,7 @@ export default defineConfig({
       "apps/app/app/server/**/*.test.ts",
       "apps/app/app/components/comment-composer-lifecycle.test.ts",
       "apps/view/app/server/**/*.test.ts",
+      "apps/view/app/edit/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test

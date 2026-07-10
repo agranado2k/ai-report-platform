@@ -1,7 +1,7 @@
 // Behavior tests for parseVersionQuery — the pure ?v=N query-param parser behind
 // $slug.tsx's version-by-ordinal resolution (issue #155, ADR-0038 §3). No
 // Request/Response needed, so it's cheap to unit test directly, mirroring
-// edit-redirect.test.ts's carve-out for apps/view/app/server's pure helpers.
+// edit-session.test.ts's carve-out for apps/view/app/server's pure helpers.
 import { describe, expect, it } from "vitest";
 import { parseVersionQuery } from "./version-query";
 

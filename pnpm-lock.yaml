@@ -241,12 +241,18 @@ importers:
       arp-domain:
         specifier: workspace:*
         version: link:../../packages/domain
+      arp-editor:
+        specifier: workspace:*
+        version: link:../../packages/editor
       arp-env:
         specifier: workspace:*
         version: link:../../packages/env
       arp-headers:
         specifier: workspace:*
         version: link:../../packages/headers
+      arp-report-html:
+        specifier: workspace:*
+        version: link:../../packages/report-html
       arp-ui:
         specifier: workspace:*
         version: link:../../packages/ui
