@@ -9,7 +9,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 import { resolveActorForRead } from "../server/auth.server";
-import { accessTokenSecret, deps, viewOrigin } from "../server/container.server";
+import {
+  accessTokenSecret,
+  deps,
+  identityStore,
+  viewOrigin,
+  writeGrantStore,
+} from "../server/container.server";
 import { log } from "../server/log.server";
 import { ownerOpenLocation } from "../server/open-report.server";
 
@@ -20,7 +26,12 @@ export async function loader(args: LoaderFunctionArgs) {
   const actor = await resolveActorForRead(args);
 
   const location = await ownerOpenLocation(
-    { reports: deps().reports, now: () => Date.now(), log: (f, m) => log.info(f, m) },
+    {
+      reports: deps().reports,
+      now: () => Date.now(),
+      log: (f, m) => log.info(f, m),
+      writeGrant: { grants: writeGrantStore(), identities: identityStore() },
+    },
     {
       actor: actor.ok ? actor.value : null,
       rawHandle: String(args.params.slug ?? ""),
