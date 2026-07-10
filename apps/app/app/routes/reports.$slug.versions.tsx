@@ -111,7 +111,7 @@ export default function ReportVersions() {
                 <Badge tone={ORIGIN_TONE[v.origin]}>{v.origin}</Badge>
                 <Badge tone={SCAN_TONE[v.scanStatus]}>{v.scanStatus}</Badge>
                 <span className="text-subtle">{formatUploadedAt(v.uploadedAt)}</span>
-                <span className="truncate text-xs text-subtle">
+                <span className="min-w-0 truncate text-xs text-subtle">
                   edited by {v.authorEmail ?? "unknown author"}
                 </span>
               </div>
