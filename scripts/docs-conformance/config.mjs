@@ -170,23 +170,14 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
-  "review-version-history-and-diff": {
-    title: "Review a report's version history and compare two versions",
-    phase: "@phase-2",
-    status: "wip",
-  },
+  // review-version-history-and-diff.feature, edit-report-in-dashboard.feature, and
+  // view-edit-deep-link.feature were deleted (ADR-0063 "Phase 5-C" — they specced
+  // the dashboard editor's /versions and /diff pages, the dashboard editor page
+  // itself, and an early superseded viewer->dashboard deep-link design; none had
+  // step definitions or ran in CI). Their use cases now live in the unified
+  // in-viewer experience, covered by ADR-0063 and apps/view's unit tests.
   "comment-on-a-report": {
     title: "Comment on a report",
-    phase: "@phase-2",
-    status: "wip",
-  },
-  "edit-report-in-dashboard": {
-    title: "Edit a report in the dashboard",
-    phase: "@phase-2",
-    status: "full",
-  },
-  "view-edit-deep-link": {
-    title: "Viewer's /<slug>/edit deep-links to the dashboard editor",
     phase: "@phase-2",
     status: "wip",
   },

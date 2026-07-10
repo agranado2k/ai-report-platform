@@ -13,26 +13,30 @@ When("I GET the report-html-importing app route {string}", async ({ request }, p
   response = await request.get(path, { maxRedirects: 0 });
 });
 
-// Assert the ACTUAL outcome: an unauthenticated GET is redirected to /sign-in
-// (root.tsx's rootAuthLoader + the loader's own redirect). Reaching that redirect
-// requires importing the route module — including `arp-report-html` at module
-// scope — so a 302→/sign-in proves the whole server graph resolved and booted. A
-// boot crash of the #163/#167 class 500s instead → fails here.
+// Assert the ACTUAL outcome: an unauthenticated GET to this /api/v1 route answers
+// 401 application/problem+json (handle()'s resolveActorForRead gate,
+// apps/app/app/server/handle.server.ts -> packages/http/src/problem.ts's
+// errorToHttp, runs BEFORE the slug/query-param/report-html code). Reaching
+// that 401 requires importing the route module — including `arp-report-html`
+// at module scope via report-diff-loader.server.ts's `splitShell` — so a
+// clean, correctly-shaped 401 proves the whole server graph resolved and
+// booted. A boot crash of the #163/#167 class 500s instead -> fails here.
 //
 // Why not a broad "any non-5xx" allowlist (claude-review #169): Vercel Deployment
-// Protection returns **401** when the bypass secret is missing/rotated, and the
-// platform can return **404** — both WITHOUT the app ever booting. A boot crash +
-// missing bypass would then 401 and a permissive allowlist would false-PASS, the
-// exact class this guard exists to close. Requiring a redirect whose Location
-// points at /sign-in can only come from our app's auth gate, so it stays
-// auth-session-free while rejecting platform-layer responses.
-const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
-
+// Protection returns **401** for a DIFFERENT reason when the bypass secret is
+// missing/rotated (a platform-layer 401, not our app's), and the platform can
+// also return **404** — both WITHOUT the app ever booting. A boot crash + missing
+// bypass could then coincidentally 401 too, so a bare "status === 401" check isn't
+// enough on its own — requiring OUR problem+json body shape (`code:
+// "unauthenticated"`, the exact wire shape `errorToHttp`/`problemFor` in
+// packages/http/src/problem.ts produces) can only come from our app's own auth
+// gate actually running, so it stays auth-session-free while rejecting
+// platform-layer responses.
 Then("the app did not crash booting that route", async () => {
   const status = response.status();
-  const location = response.headers().location ?? "";
+  const body = (await response.json().catch(() => null)) as { code?: string } | null;
   expect(
-    REDIRECT_CODES.has(status) && location.includes("/sign-in"),
-    `expected an auth redirect to /sign-in (proves the app booted); got status ${status}, location "${location}"`,
+    status === 401 && body?.code === "unauthenticated",
+    `expected our app's own 401 problem+json with code "unauthenticated" (proves the app booted); got status ${status}, body ${JSON.stringify(body)}`,
   ).toBe(true);
 });

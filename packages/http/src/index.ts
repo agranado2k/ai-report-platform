@@ -5,6 +5,7 @@
 export * from "./cors";
 export * from "./cursor";
 export * from "./diff-response";
+export * from "./edit-token-response";
 export * from "./list-response";
 export * from "./problem";
 export * from "./request";

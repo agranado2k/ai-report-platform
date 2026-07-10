@@ -1,37 +1,34 @@
 // The owner-open decision (GET /reports/{slug}/open) — factored out of the
-// route so the SECURITY KEYSTONE is unit-testable (ADR-0059 §4): the 24h
-// `owner:true` access token — the most privileged token in the system, it
-// bypasses every share gate — is minted ONLY when the report's `ownerId`
-// equals the acting user. Org membership is NOT enough: without this gate any
-// future org member could mint an un-revocable owner token for a colleague's
-// report (ADR-0056's accepted un-revocability trade-off would then apply to
-// non-owners).
+// route so the SECURITY KEYSTONE is unit-testable (ADR-0059 §4 / ADR-0060
+// §4, extended by ADR-0063 Phase 5): `loadWritableReport` (`isOwner OR
+// hasWriteGrant`) is THE gate. EVERY canWrite user — the report's owner OR a
+// write-grantee — is minted the SAME short-lived (15 min), slug-bound,
+// `scope:"edit"` token (packages/domain/src/edit-token.ts) and lands in the
+// SAME unified in-viewer experience (`${viewOrigin}/${slug}/edit?et=...`).
 //
-// ADR-0063 extends this decision: a NON-owner who still `canWrite` (a
-// write-grantee, ADR-0060 §4) is minted a short-lived (15 min), slug-bound,
-// `scope:"edit"` token instead — the app↔view/editor in-viewer-editing
-// capability, a structurally distinct, lower-TTL primitive from the owner's
-// access token (packages/domain/src/edit-token.ts). The ownership gate is
-// checked FIRST and short-circuits: an owner is trivially canWrite too, but
-// MUST still get the owner access token, never the edit token — the two
-// capabilities are not layered.
+// Phase 5 retires the two-tier design this function used to implement: an
+// owner no longer gets a separate, higher-privilege 24h `owner:true` access
+// token — that capability (and its `mintAccessToken`/`resolveAccessDecision`
+// machinery, still used by the SEPARATE public gated-view/unlock flow,
+// unlock.$slug.tsx) is simply never minted from this route any more. Grep
+// audit before this change (Phase 5 task brief) confirmed the owner-access
+// token minted HERE had no other consumer — the unlock flow mints its own,
+// under different modes ("password"/"allowlist"/"org"), never `owner:true`.
 //
 // Returns the redirect Location; every failure collapses to "/" (the root
 // gate sends anonymous users to sign-in) so we never reveal whether the
 // report exists.
 import {
-  loadOwnedReport,
   loadWritableReport,
   type ReportRepository,
   type TenancyActor,
   type WriteGrantCheckDeps,
 } from "arp-application";
-import { mintAccessToken, mintEditToken } from "arp-domain";
+import { mintEditToken } from "arp-domain";
 import { resolveReportSlug } from "./report-handle.server";
 
-export const OWNER_TTL_SECONDS = 86_400; // 24h owner view-session
 export const EDIT_TTL_SECONDS = 900; // 15 min edit capability (ADR-0063) — a write is
-// higher-privilege than read, so it lives a fraction as long as the owner token.
+// higher-privilege than read, so it lives a fraction as long as the old 24h owner token did.
 
 export interface OwnerOpenDeps {
   readonly reports: ReportRepository;
@@ -65,45 +62,21 @@ export async function ownerOpenLocation(
   const slug = await resolveReportSlug(req.rawHandle, deps.reports);
   if (!slug.ok) return "/";
 
-  // THE OWNERSHIP GATE (ADR-0059 §4): loadOwnedReport returns the report ONLY
-  // when the acting user owns it — org-scoped getReport is NOT sufficient
-  // here. Runs BEFORE the no-secret fall-through so a non-owner can never use
-  // /open to resolve a report_… id into its capability slug (review #146).
-  // Checked FIRST, ahead of the canWrite/edit-token branch below: an owner is
-  // trivially canWrite too, but must always get the higher-privilege owner
-  // access token, never the edit token (ADR-0063).
-  const owned = await loadOwnedReport(deps.reports, req.actor, slug.value);
-  if (owned.ok) {
-    // Private viewing not configured (previews/dev): fall through to the
-    // gated viewer — owner-only, per the gate above.
-    if (!req.secret) return `${req.viewOrigin}/${slug.value}`;
-
-    const nowSeconds = Math.floor(deps.now() / 1000);
-    const token = mintAccessToken(slug.value, OWNER_TTL_SECONDS, req.secret, nowSeconds, {
-      owner: true,
-    });
-    // Audit the mint — this token bypasses every share gate for its TTL, so
-    // log who/what/when for incident response.
-    deps.log(
-      {
-        orgId: req.actor.orgId,
-        userId: req.actor.userId,
-        slug: slug.value,
-        exp: nowSeconds + OWNER_TTL_SECONDS,
-      },
-      "owner-open: minted owner access token",
-    );
-    return `${req.viewOrigin}/${slug.value}?access=${encodeURIComponent(token)}`;
-  }
-
-  // NOT the owner: the canWrite / edit-token branch (ADR-0063 §3). Only
-  // attempted when a secret is configured — no secret means no downstream
-  // origin trusts a signed token at all (previews/dev), so a non-owner falls
-  // through to "/" exactly like today, never reaching loadWritableReport.
-  if (!req.secret) return "/";
-
+  // THE CANWRITE GATE (ADR-0059 §4 keystone, extended by ADR-0060 §4 /
+  // ADR-0063 Phase 5): loadWritableReport returns the report ONLY when the
+  // acting user OWNS it or holds a LIVE write grant — org-scoped getReport is
+  // NOT sufficient here, same reasoning the old owner-only gate relied on.
+  // Runs BEFORE the no-secret fall-through so a non-canWrite user can never
+  // use /open to resolve a report_… id into its capability slug (review
+  // #146, preserved verbatim under the unified gate).
   const writable = await loadWritableReport(deps.reports, req.actor, slug.value, deps.writeGrant);
   if (!writable.ok) return "/"; // neither owner nor a write-grantee — no token, never reveal existence
+
+  // Private viewing not configured (previews/dev): fall through to the bare
+  // gated viewer URL — no token minted (no downstream origin trusts one, the
+  // same fail-closed posture the owner-only branch used to have, now
+  // extended to every canWrite user since there is only one gate).
+  if (!req.secret) return `${req.viewOrigin}/${slug.value}`;
 
   const nowSeconds = Math.floor(deps.now() / 1000);
   const editToken = mintEditToken(
@@ -113,7 +86,7 @@ export async function ownerOpenLocation(
     req.secret,
     nowSeconds,
   );
-  // Audit the mint — same posture as the owner-token mint above: this is a
+  // Audit the mint — same posture the old owner-token mint had: a
   // privileged, if short-lived and narrowly-scoped, write capability.
   deps.log(
     {

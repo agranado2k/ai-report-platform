@@ -6,7 +6,8 @@
 // expired" mapping. `save-edit.ts` itself is untouched (ADR-0063 Phase 4,
 // out of scope for this epic) — this is a NEW, narrower helper the newer
 // call sites share.
-const EXPIRED_MESSAGE = "Your editing session has expired — reopen this report from the dashboard.";
+export const EXPIRED_MESSAGE =
+  "Your editing session has expired — reopen this report from the dashboard.";
 
 export interface ApiFailure {
   readonly ok: false;

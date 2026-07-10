@@ -42,17 +42,19 @@ import {
   splitShell,
 } from "arp-report-html";
 import { Card } from "arp-ui";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
 import type { PanelTab } from "../edit/components/types";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
+import { EXPIRED_MESSAGE } from "../edit/http";
 import { buildEditLoaderExtras } from "../edit/loader-data";
+import { isEditTokenExpired, nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
 import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
-import type { CommentWire, DiffWire } from "../edit/wire-types";
+import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { buildEditCookie, readEditCookieValue, resolveEditAccess } from "../server/edit-session";
 
@@ -187,6 +189,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       slug,
       appOrigin,
       editToken: decision.token,
+      // The validated token's expiry (epoch seconds) — decoded from the
+      // `EditClaims` `resolveEditAccess` already parsed above, never
+      // re-parsed from the raw token client-side. Drives the silent-refresh
+      // timer (ADR-0063 Phase 5) in the component below.
+      editTokenExp: decision.claims.exp,
       docTitle: report.title,
       versionId: versionIdToWire(version.id),
       comments,
@@ -198,29 +205,149 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+// Silent-refresh timing (ADR-0063 Phase 5): refresh this long before the
+// current token would actually expire — generous enough to absorb clock
+// drift + a slow request, small enough that the refresh never competes with
+// an in-flight save/comment write for the same 15-min window
+// (EDIT_TTL_SECONDS, apps/app/app/server/open-report.server.ts).
+const REFRESH_SKEW_MS = 120_000; // 2 min
+// A transient (network/5xx) refresh failure retries on a short fixed
+// cadence rather than waiting out the remaining TTL — plenty of headroom
+// inside REFRESH_SKEW_MS's 2-min margin for a few attempts before expiry.
+const REFRESH_RETRY_MS = 30_000; // 30s
+
 export default function EditReport() {
   const {
     doc,
     shell,
     slug,
     appOrigin,
-    editToken,
+    editToken: initialEditToken,
+    editTokenExp: initialEditTokenExp,
     docTitle,
-    versionId,
+    versionId: initialVersionId,
     comments: initialComments,
-    versions,
+    versions: initialVersions,
   } = useLoaderData<typeof loader>();
 
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  const [mode, setMode] = useState<ViewerMode>("edit");
-  const [viewHtml, setViewHtml] = useState<string | null>(null);
+  // The unified experience opens READ-ONLY by default — the View⇄Edit
+  // toggle promotes to the editor; it does not open into it.
+  const [mode, setMode] = useState<ViewerMode>("view");
+  // View mode's initial render needs a snapshot ready immediately (default
+  // mode is now "view"), so this is seeded from the loader's doc rather
+  // than left `null` until the first mode switch.
+  const [viewHtml, setViewHtml] = useState<string | null>(() =>
+    reinjectShell(shell, serializeBody(doc as PMDocJson)),
+  );
   const [diffData, setDiffData] = useState<DiffWire | null>(null);
   const [activeTab, setActiveTab] = useState<PanelTab>(null);
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
+
+  // The edit token + its expiry, refreshed silently in the background (the
+  // effect below). EVERY cross-origin write (save, comments, versions) must
+  // read these CURRENT values, not the loader's originals — passed down as
+  // `editToken`/`editTokenExp` throughout this component, same identifiers
+  // the loader destructure used to use, so no call site below needs to know
+  // it's now state rather than a loader constant.
+  const [editToken, setEditToken] = useState(initialEditToken);
+  const [editTokenExp, setEditTokenExp] = useState(initialEditTokenExp);
+  // Mirrors of the two state values above, read by the refresh effect's
+  // recursive scheduler so it always sees the latest token/expiry without
+  // needing to re-run (and re-arm a duplicate timer) on every state change.
+  const editTokenRef = useRef(editToken);
+  const editTokenExpRef = useRef(editTokenExp);
+
+  // versionId/versions: also promoted to state (were plain loader constants
+  // before) so a successful save can advance them post-hoc — see onSave's
+  // post-save re-fetch below (claude-review #184 finding #1).
+  const [versionId, setVersionId] = useState(initialVersionId);
+  const [versions, setVersions] = useState<readonly VersionWire[]>(initialVersions);
+
+  // Silent token refresh (ADR-0063 Phase 5): the edit token is short-lived
+  // (15 min) — without this, an editing session dies mid-edit the moment it
+  // expires. Schedules a refresh REFRESH_SKEW_MS before the CURRENT token's
+  // expiry; on success, advances editToken/editTokenExp (state, for
+  // rendering/props below) and the refs (so the next scheduled refresh
+  // reads the fresh expiry without waiting on a re-render), then
+  // reschedules. A 401/403 (`expired`) means the token — or the underlying
+  // write grant — is no longer valid: nothing left to do but surface the
+  // same "reopen from the dashboard" message saveEdit's own failures show,
+  // and stop refreshing (no reschedule). Any other failure (network blip,
+  // 5xx) retries shortly rather than giving up on the whole session over a
+  // transient error.
+  //
+  // Runs once per mount (`appOrigin`/`slug` are stable for the route's
+  // lifetime) rather than re-running on every editToken/editTokenExp
+  // change, so a single recursive `setTimeout` chain owns the schedule —
+  // `cancelled` guards every `setState` inside it against firing after
+  // unmount, and the cleanup clears whichever timer (scheduled refresh OR
+  // a transient retry) is currently pending.
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    function scheduleRefresh() {
+      const delayMs = nextRefreshDelayMs(
+        editTokenExpRef.current,
+        Math.floor(Date.now() / 1000),
+        REFRESH_SKEW_MS,
+      );
+      // A delay of 0 (already inside the margin, or already expired) fires
+      // on the next tick — i.e. "refresh immediately" — never a negative
+      // timeout.
+      timeoutId = setTimeout(runRefresh, delayMs);
+    }
+
+    async function runRefresh() {
+      const result = await refreshEditToken({
+        appOrigin,
+        slug,
+        editToken: editTokenRef.current,
+      });
+      if (cancelled) return;
+
+      if (result.ok) {
+        editTokenRef.current = result.editToken;
+        editTokenExpRef.current = result.expiresAt;
+        setEditToken(result.editToken);
+        setEditTokenExp(result.expiresAt);
+        scheduleRefresh();
+        return;
+      }
+
+      if (result.expired) {
+        setStatus("error");
+        setMessage(result.message);
+        return; // irrecoverable client-side — stop refreshing.
+      }
+
+      // Transient failure (network/5xx): retry soon rather than waiting
+      // out the remaining TTL and losing the session over a blip — BUT only
+      // while the current token is still alive. If it has already passed its
+      // expiry (claude-review #185: a fully-offline client's `fetch` keeps
+      // rejecting, so it never gets the 401 that would stop it), a refresh can
+      // no longer succeed — the app rejects the now-expired presented token —
+      // so stop retrying a dead token forever and surface the expired state.
+      if (isEditTokenExpired(editTokenExpRef.current, Math.floor(Date.now() / 1000))) {
+        setStatus("error");
+        setMessage(EXPIRED_MESSAGE);
+        return;
+      }
+      timeoutId = setTimeout(runRefresh, REFRESH_RETRY_MS);
+    }
+
+    scheduleRefresh();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [appOrigin, slug]);
 
   // Only OPEN ROOT comments drive the editor's highlight decorations
   // (claude-review #184): a resolved thread no longer needs its anchor
@@ -240,6 +367,20 @@ export default function EditReport() {
     if (result.ok) {
       setStatus("saved");
       setMessage(`Saved as v${result.version} — scan: ${result.scanStatus}`);
+      // Post-save staleness fix (claude-review #184 finding #1): the save
+      // response only carries the new version's NUMBER, not its id, so
+      // `versionId` (new comments' anchor pin) and `versions` (the
+      // Versions/Compare tab) would otherwise keep pointing at whatever was
+      // current when the editor opened. Re-fetch the list to pick up the
+      // newly-created version's id. Best-effort — a failed re-fetch just
+      // leaves the prior versionId/versions state in place rather than
+      // crashing a save that already succeeded.
+      const refreshed = await listVersions({ appOrigin, slug, editToken });
+      if (refreshed.ok) {
+        setVersions(refreshed.versions);
+        const newest = [...refreshed.versions].sort((a, b) => b.version_no - a.version_no)[0];
+        if (newest) setVersionId(newest.id);
+      }
     } else {
       setStatus("error");
       setMessage(result.message);

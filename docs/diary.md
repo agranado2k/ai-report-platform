@@ -2973,3 +2973,57 @@ of the assembled view-origin auth+JS surface before merge. Phase 5 (cutover — 
 Note: local `main` in the primary checkout diverged (holds an un-pushed `06a4353` `/ce-dogfood` docs
 commit while `origin/main` moved ahead) — all epic worktrees branch off `origin/main`, so nothing is
 lost; reconcile the primary checkout's `main` when convenient.
+
+### 2026-07-10 — Unified document experience epic: Phase 5 cutover complete, epic closed
+
+Phase 5 (`worktree/phase5-cutover`, branch `feat/unified-cutover`) finished the cutover the 4c client
+entry above left in progress, in three slices:
+
+- **5-A (owner-routing + re-mint)** — `GET /reports/{slug}/open` collapsed from its old two-tier design
+  (owner got a 24h `owner:true` `Access token` + the old read-only viewer; a write-grantee got the 15-min
+  `scope:"edit"` token + the unified experience) down to ONE gate: `loadWritableReport` (`isOwner OR
+  hasWriteGrant`) mints the SAME edit token for every canWrite user, owner or grantee, who all land in
+  the unified in-viewer experience identically. `OWNER_TTL_SECONDS`/`mintAccessToken` removed as dead
+  code from `open-report.server.ts`; the separate public gated-view/unlock flow (`unlock.$slug.tsx`) is
+  untouched — it never minted `owner:true` from this call site. Added `POST
+  /api/v1/reports/{slug}/edit-token`, a silent-refresh endpoint so a live editing session doesn't need a
+  full round-trip back through Clerk every 15 minutes — re-runs `loadWritableReport` LIVE on every
+  refresh, so a revoked grant or ownership change cuts a session off within one remaining TTL. Flagged for
+  `/security-review`: an edit token is now refreshable for as long as `canWrite` holds, so a leaked token's
+  effective life is no longer capped at 15 minutes — mitigated by narrow scope
+  (`reports:write` only), the live re-check, and the token never leaving the edit-route CSP's controlled
+  surface; an absolute session cap was considered and deliberately left unbuilt for the reviewer to weigh.
+- **5-B (view refresh / default-View / post-save fix)** — the unified client now silently refreshes its
+  edit token in the background (via the new endpoint) instead of degrading mid-session; the experience
+  defaults to read-only **View** mode rather than dropping straight into Edit; and a post-save staleness
+  bug (the Versions tab not reflecting a just-saved version without a manual reload) was fixed by
+  re-fetching versions after save.
+- **5-C (dashboard editor retirement, this slice)** — with every canWrite user already routed through the
+  unified experience, the dashboard's own HTML editor pages had zero remaining traffic path and were
+  deleted outright: `apps/app/app/routes/reports.$slug.{edit,versions,diff}.tsx` + `reports.$slug.comments.ts`
+  (the same-origin action `CommentSidebar` posted to) + `CommentSidebar.tsx`/`comment-composer-lifecycle.ts`
+  (superseded by `apps/view`'s own `CommentsPanel`). Two now-orphaned app-local helpers went with them
+  (`comment-dto.server.ts`, `comment-intent.server.ts` — grep-verified zero remaining callers; the
+  `/api/v1` comments routes have always serialized through `arp-http`'s own mappers, never these). Every
+  `/api/v1/reports/{slug}/*` endpoint, the edit-token codec, and `apps/view`'s editor were untouched — the
+  API was always the cross-origin data plane, independent of whether a same-origin dashboard page also
+  existed. The one CI-wired e2e that drove the dashboard editor in a real browser
+  (`tests/e2e/smoke/editor-auth.feature`, issue #173) is retrimmed rather than deleted: it now asserts
+  only the app-side half of the hand-off that still exists (`/open` authenticates + redirects to an
+  edit-shaped `view.<domain>` URL), with a TODO flagging that real-browser render/hydration coverage for
+  the unified editor itself has no home yet — `VIEW_ORIGIN` isn't wired for preview envs
+  (`infra/terraform/envs/prod/main.tf` scopes it to `production` only) and there's no cross-origin
+  Playwright harness for `apps/view`. `tests/e2e/smoke/app-route-boot.feature` (the #163/#167 module-boot
+  regression guard) retargeted from the deleted route to `GET /api/v1/reports/{slug}/diff`, which imports
+  `arp-report-html` at module scope just the same. Three backlog `.feature` files that existed only to
+  spec the now-deleted dashboard pages (never wired into `playwright.config.ts`, no step definitions) were
+  deleted rather than left describing dead surface; `comment-on-a-report.feature`'s still-valid API
+  scenarios are untouched. Full detail: ADR-0063 "Phase 5-C".
+
+**Epic closed.** The public viewer, the dashboard editor, the dashboard versions/diff pages, and the
+comment sidebar are consolidated into one authenticated surface: `view.<domain>/<slug>/edit`, reached
+one-click from the dashboard by any canWrite user. `app.<domain>` keeps the report list, upload, sharing,
+folders, and org/settings management — content editing lives on the viewer origin exclusively now.
+
+Gates green on this slice: `pnpm install`, `turbo typecheck`, `biome ci .`, full `vitest run`,
+`docs:check`, `turbo build` (both apps).

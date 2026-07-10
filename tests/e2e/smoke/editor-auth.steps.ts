@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect } from "@playwright/test";
+import { type APIResponse, expect } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import { mintTestSession, type TestSession } from "../support/clerk-session";
 
@@ -11,18 +11,20 @@ const { Given, When, Then } = createBdd();
 // step phrasing from the other smoke files so the global registry has no clashes.
 let session: TestSession;
 let slug: string;
+let response: APIResponse;
 
 // The REAL ai-readiness-report.html fixture (also exercised by
-// packages/report-html/src/shell.test.ts) rather than a synthetic snippet —
-// it carries a genuine presentation shell (`:root { --bg: #0b0f17; … }`) and
-// `.chip` elements, exactly the kind of styling the #171 regression stripped.
+// packages/report-html/src/shell.test.ts) — a genuine presentation shell
+// (`:root { --bg: #0b0f17; … }`) and `.chip` elements, kept as the upload
+// fixture even though this scenario no longer asserts on its styling (see the
+// TODO in editor-auth.feature) so a future re-expansion of this scenario back
+// into the view-app editor's own SSR/hydration coverage can reuse it as-is.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(
   __dirname,
   "../../../packages/report-html/src/fixtures/ai-readiness-report.html",
 );
 const FIXTURE_HTML = readFileSync(FIXTURE_PATH, "utf-8");
-const FIXTURE_BG = "#0b0f17";
 
 Given("a report I own exists", async ({ request }) => {
   // Same primary fixture user (E2E_TEST_USER_EMAIL) as the browser session
@@ -32,7 +34,7 @@ Given("a report I own exists", async ({ request }) => {
   // provisions the SAME actor's identity mirror the editor loader resolves.
   session = await mintTestSession();
 
-  const response = await request.post("/api/v1/reports", {
+  const uploadResponse = await request.post("/api/v1/reports", {
     headers: { Authorization: `Bearer ${session.jwt}` },
     multipart: {
       file: {
@@ -42,48 +44,34 @@ Given("a report I own exists", async ({ request }) => {
       },
     },
   });
-  const body = (await response.json()) as Record<string, unknown>;
-  expect(response.status(), JSON.stringify(body)).toBe(201);
+  const body = (await uploadResponse.json()) as Record<string, unknown>;
+  expect(uploadResponse.status(), JSON.stringify(body)).toBe(201);
   expect(typeof body.slug).toBe("string");
   slug = body.slug as string;
 });
 
-When("I open the editor for that report", async ({ page }) => {
-  await page.goto(`/reports/${slug}/edit`);
+// `page.request` (not `page.goto`) shares the authenticated page's cookies
+// but doesn't navigate anywhere — we only need the redirect Location, not a
+// real render of whatever's at the other end (see the feature file's TODO).
+When("I open that report", async ({ page }) => {
+  response = await page.request.get(`/reports/${slug}/open`, { maxRedirects: 0 });
 });
 
-Then("I am not redirected to sign-in", async ({ page }) => {
-  const url = page.url();
-  expect(url).toContain(`/reports/${slug}/edit`);
-  expect(url).not.toContain("/sign-in");
+Then("I am not redirected to sign-in", async () => {
+  const location = response.headers().location ?? "";
+  expect(location).not.toContain("/sign-in");
 });
 
-Then("the editor surface is present", async ({ page }) => {
-  // SSR-rendered regardless of client mount state (ReportEditor always emits
-  // the <iframe>; only `srcDoc` is deferred to a client effect) — reaching
-  // this locator proves the authenticated route rendered its component tree
-  // without 500ing, the exact #172 (DOMParser-in-SSR) regression class.
-  await expect(page.locator('iframe[title="Report editor surface"]')).toBeVisible();
-});
-
-Then("the editor renders the report styled", async ({ page }) => {
-  const editorFrame = page.frameLocator('iframe[title="Report editor surface"]');
-  // ProseMirror's EditorView mounts directly into the iframe's own <body>
-  // (`{ mount: body }` in ReportEditor.tsx) — its contenteditable attribute
-  // only appears once the client-side mount effect has actually run, so its
-  // presence proves the client mount succeeded (not just the SSR shell).
-  await expect(editorFrame.locator("body")).toHaveAttribute("contenteditable", "true");
-  // The report's OWN presentation shell must be live inside the iframe's
-  // document — this is exactly what the #171 regression broke (the shell
-  // never reached the client, so the editor rendered with none of the
-  // report's CSS). Polled because `srcDoc` is set asynchronously after mount.
-  await expect
-    .poll(
-      () =>
-        editorFrame
-          .locator(":root")
-          .evaluate((el) => getComputedStyle(el).getPropertyValue("--bg").trim()),
-      { message: "expected the report's --bg custom property to be live inside the iframe" },
-    )
-    .toBe(FIXTURE_BG);
+Then("I am redirected to an edit-shaped location for that report", async () => {
+  const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+  const location = response.headers().location ?? "";
+  expect(
+    REDIRECT_CODES.has(response.status()),
+    `expected a redirect; got status ${response.status()}, location "${location}"`,
+  ).toBe(true);
+  // ownerOpenLocation (open-report.server.ts) mints a scope:"edit" token and
+  // redirects to `${viewOrigin}/${slug}/edit?et=<token>` for any canWrite
+  // user — owner or write-grantee, no distinction since Phase 5.
+  expect(location).toContain(`/${slug}/edit`);
+  expect(location).toContain("et=");
 });
