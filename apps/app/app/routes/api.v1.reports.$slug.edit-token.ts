@@ -12,7 +12,16 @@
 // Auth: the SAME seam as every other edit-token-authenticatable route on
 // this API (diff.ts, versions.ts) — `handle({ mode: "write" })` resolves
 // `actor` via `resolveUploadActor`, whose LAST front door is
-// `resolveEditTokenActor`: it verifies the presented token's signature/
+// `resolveEditTokenActor`. INTENTIONALLY any write actor, not edit-token-only
+// (claude-review #185 / security-review): although this route's sole purpose
+// is refreshing an in-flight edit session, `mode:"write"` also lets a Clerk
+// session / `arp_` API key / OAuth caller reach it. That's benign — every
+// path re-gates on `loadWritableReport`, and such a caller already holds
+// `reports:write` (and could already mint an edit token via GET
+// /reports/{slug}/open), so the issued token is a strict SUBSET of their
+// existing capability, never an escalation. Restricting to the edit-token
+// front door would be pure surface-tidiness, not a security fix, and would
+// diverge from the shared `handle({mode})` seam — so we don't. it verifies the presented token's signature/
 // scope/expiry/slug-match AND re-checks `canWrite` LIVE before `actor` even
 // exists in `run()` below (edit-token-actor.server.test.ts covers every
 // failure mode of THAT boundary — expired/tampered/wrong-secret/wrong-slug/

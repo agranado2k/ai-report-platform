@@ -49,8 +49,9 @@ import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
 import type { PanelTab } from "../edit/components/types";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
+import { EXPIRED_MESSAGE } from "../edit/http";
 import { buildEditLoaderExtras } from "../edit/loader-data";
-import { nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
+import { isEditTokenExpired, nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
 import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
@@ -326,7 +327,17 @@ export default function EditReport() {
       }
 
       // Transient failure (network/5xx): retry soon rather than waiting
-      // out the remaining TTL and losing the session over a blip.
+      // out the remaining TTL and losing the session over a blip — BUT only
+      // while the current token is still alive. If it has already passed its
+      // expiry (claude-review #185: a fully-offline client's `fetch` keeps
+      // rejecting, so it never gets the 401 that would stop it), a refresh can
+      // no longer succeed — the app rejects the now-expired presented token —
+      // so stop retrying a dead token forever and surface the expired state.
+      if (isEditTokenExpired(editTokenExpRef.current, Math.floor(Date.now() / 1000))) {
+        setStatus("error");
+        setMessage(EXPIRED_MESSAGE);
+        return;
+      }
       timeoutId = setTimeout(runRefresh, REFRESH_RETRY_MS);
     }
 

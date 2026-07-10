@@ -4,7 +4,7 @@
 // fake `fetchImpl` is injected for the request-shape/response-mapping
 // assertions, and nextRefreshDelayMs is plain arithmetic.
 import { describe, expect, it, vi } from "vitest";
-import { nextRefreshDelayMs, refreshEditToken } from "./refresh-token";
+import { isEditTokenExpired, nextRefreshDelayMs, refreshEditToken } from "./refresh-token";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -154,5 +154,16 @@ describe("nextRefreshDelayMs", () => {
   it("clamps to 0 exactly at the skew boundary", () => {
     // exp - now === skewMs/1000 exactly → 0, not negative.
     expect(nextRefreshDelayMs(1_000_120, 1_000_000, 120_000)).toBe(0);
+  });
+});
+
+describe("isEditTokenExpired", () => {
+  it("is false while the token is still before its expiry", () => {
+    expect(isEditTokenExpired(1_000_900, 1_000_000)).toBe(false);
+  });
+
+  it("is true at or past the expiry — the signal to stop the offline retry loop", () => {
+    expect(isEditTokenExpired(1_000_000, 1_000_000)).toBe(true); // exactly at exp
+    expect(isEditTokenExpired(999_000, 1_000_000)).toBe(true); // past exp (offline client)
   });
 });

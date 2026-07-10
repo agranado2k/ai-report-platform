@@ -90,3 +90,16 @@ export function nextRefreshDelayMs(
   const msUntilExpiry = (expEpochSeconds - nowEpochSeconds) * 1000;
   return Math.max(0, msUntilExpiry - skewMs);
 }
+
+/**
+ * True once the current token has passed its expiry — the signal to STOP the
+ * transient-failure retry loop (claude-review #185). A fully-offline client's
+ * `fetch` keeps rejecting (a network failure, never a 401), so it never
+ * observes the server-side expiry that would otherwise end the loop; once the
+ * presented token is past `exp` a refresh can no longer succeed anyway (the app
+ * rejects an expired token), so the client must give up and surface the
+ * expired state rather than retry a dead token indefinitely.
+ */
+export function isEditTokenExpired(expEpochSeconds: number, nowEpochSeconds: number): boolean {
+  return nowEpochSeconds >= expEpochSeconds;
+}
