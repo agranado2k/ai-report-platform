@@ -53,7 +53,7 @@ import { buildEditLoaderExtras } from "../edit/loader-data";
 import { nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
 import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
-import type { CommentWire, DiffWire } from "../edit/wire-types";
+import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { buildEditCookie, readEditCookieValue, resolveEditAccess } from "../server/edit-session";
 
@@ -224,9 +224,9 @@ export default function EditReport() {
     editToken: initialEditToken,
     editTokenExp: initialEditTokenExp,
     docTitle,
-    versionId,
+    versionId: initialVersionId,
     comments: initialComments,
-    versions,
+    versions: initialVersions,
   } = useLoaderData<typeof loader>();
 
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
@@ -260,6 +260,12 @@ export default function EditReport() {
   // needing to re-run (and re-arm a duplicate timer) on every state change.
   const editTokenRef = useRef(editToken);
   const editTokenExpRef = useRef(editTokenExp);
+
+  // versionId/versions: also promoted to state (were plain loader constants
+  // before) so a successful save can advance them post-hoc — see onSave's
+  // post-save re-fetch below (claude-review #184 finding #1).
+  const [versionId, setVersionId] = useState(initialVersionId);
+  const [versions, setVersions] = useState<readonly VersionWire[]>(initialVersions);
 
   // Silent token refresh (ADR-0063 Phase 5): the edit token is short-lived
   // (15 min) — without this, an editing session dies mid-edit the moment it
@@ -350,6 +356,20 @@ export default function EditReport() {
     if (result.ok) {
       setStatus("saved");
       setMessage(`Saved as v${result.version} — scan: ${result.scanStatus}`);
+      // Post-save staleness fix (claude-review #184 finding #1): the save
+      // response only carries the new version's NUMBER, not its id, so
+      // `versionId` (new comments' anchor pin) and `versions` (the
+      // Versions/Compare tab) would otherwise keep pointing at whatever was
+      // current when the editor opened. Re-fetch the list to pick up the
+      // newly-created version's id. Best-effort — a failed re-fetch just
+      // leaves the prior versionId/versions state in place rather than
+      // crashing a save that already succeeded.
+      const refreshed = await listVersions({ appOrigin, slug, editToken });
+      if (refreshed.ok) {
+        setVersions(refreshed.versions);
+        const newest = [...refreshed.versions].sort((a, b) => b.version_no - a.version_no)[0];
+        if (newest) setVersionId(newest.id);
+      }
     } else {
       setStatus("error");
       setMessage(result.message);
