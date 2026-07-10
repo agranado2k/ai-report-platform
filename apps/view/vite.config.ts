@@ -1,4 +1,5 @@
 import { vitePlugin as remix } from "@remix-run/dev";
+import tailwindcss from "@tailwindcss/vite";
 import { vercelPreset } from "@vercel/remix/vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -8,6 +9,8 @@ export default defineConfig({
   // Its native `.node` binary can't be bundled — keep it external (ADR-0056).
   ssr: { external: ["@node-rs/argon2"] },
   plugins: [
+    // Tailwind v4 (CSS-first @theme tokens) — must run before Remix's CSS handling.
+    tailwindcss(),
     remix({
       presets: [vercelPreset()],
       future: {

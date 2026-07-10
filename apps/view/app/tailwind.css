@@ -1,6 +1,6 @@
-/* Tailwind v4 entry for the app origin. Static, compiled CSS served from 'self'
+/* Tailwind v4 entry for the view origin. Static, compiled CSS served from 'self'
  * (CSP-safe). Design tokens live in arp-ui's theme.css (the single source of
- * truth, shared with apps/view — see packages/ui/src/theme.css); fonts are
+ * truth, shared with apps/app — see packages/ui/src/theme.css); fonts are
  * self-hosted per-app (CSP font-src 'self'). */
 @import "tailwindcss";
 @import "./styles/fonts.css";

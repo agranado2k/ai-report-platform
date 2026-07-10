@@ -241,12 +241,21 @@ importers:
       arp-domain:
         specifier: workspace:*
         version: link:../../packages/domain
+      arp-editor:
+        specifier: workspace:*
+        version: link:../../packages/editor
       arp-env:
         specifier: workspace:*
         version: link:../../packages/env
       arp-headers:
         specifier: workspace:*
         version: link:../../packages/headers
+      arp-report-html:
+        specifier: workspace:*
+        version: link:../../packages/report-html
+      arp-ui:
+        specifier: workspace:*
+        version: link:../../packages/ui
       isbot:
         specifier: ^5.1.0
         version: 5.1.40
@@ -260,12 +269,18 @@ importers:
       '@remix-run/dev':
         specifier: ^2.15.0
         version: 2.17.5(@remix-run/react@2.17.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3))(@remix-run/serve@2.17.5(typescript@5.9.3))(@types/node@25.9.1)(lightningcss@1.32.0)(typescript@5.9.3)(vite@5.4.21(@types/node@25.9.1)(lightningcss@1.32.0))
+      '@tailwindcss/vite':
+        specifier: ^4
+        version: 4.3.1(vite@5.4.21(@types/node@25.9.1)(lightningcss@1.32.0))
       '@types/react':
         specifier: ^18.3.12
         version: 18.3.30
       '@types/react-dom':
         specifier: ^18.3.1
         version: 18.3.7(@types/react@18.3.30)
+      tailwindcss:
+        specifier: ^4
+        version: 4.3.1
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

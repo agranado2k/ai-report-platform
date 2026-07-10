@@ -142,10 +142,28 @@ function domParserParse(html: string): Document {
  * implied-tag placement (harmless-but-quirky for a genuinely headless input;
  * observed with `linkedom`, not spec behavior) never leaks into the output.
  */
-export function buildIframeDocument(shell: Shell, parseHtml: HtmlParser = domParserParse): string {
-  const doc = parseHtml(shell.pre + shell.post);
+// Shared by both entry points below: parses to a `Document`, inserts the CSP
+// `<meta>` as `<head>`'s first ELEMENT child (before whatever untrusted
+// content the parsed head/body carry) plus the highlight/safety-net
+// `<style>`, and re-serializes from the parsed `<head>`/`<body>` elements'
+// own markup — never the parser's internal tree shape. `fallbackHtml` covers
+// the defensive "not a real HTML document" case (see the doc comment on
+// `buildIframeDocument` below) — every real report shell/document parses to
+// a proper `<html><head>…</head><body>…</body></html>`, so this only fires
+// on a degenerate input.
+function injectCspIntoParsedDocument(doc: Document, fallbackHtml: string): string {
   const head = doc.head;
   const body = doc.body;
+  if (doc.documentElement?.tagName !== "HTML" || !head || !body) {
+    return fallbackHtml;
+  }
+  head.insertAdjacentHTML("afterbegin", CSP_META);
+  head.insertAdjacentHTML("beforeend", INJECTED_STYLE_TAG);
+  return `<!doctype html><html>${head.outerHTML}${body.outerHTML}</html>`;
+}
+
+export function buildIframeDocument(shell: Shell, parseHtml: HtmlParser = domParserParse): string {
+  const doc = parseHtml(shell.pre + shell.post);
   // Defensive fallback: every real report shell carries a <head>...</head>
   // (see fixtures/ai-readiness-report.html), and any spec-compliant parser
   // (including the browser's real DOMParser) always implies a proper
@@ -154,10 +172,40 @@ export function buildIframeDocument(shell: Shell, parseHtml: HtmlParser = domPar
   // degenerate parse (observed only for a bare `<body>` tag with literally
   // no preceding `<html>`/`<head>` token at all) — still produce a valid,
   // CSP-protected document rather than relying on that edge case's shape.
-  if (doc.documentElement?.tagName !== "HTML" || !head || !body) {
-    return `<!doctype html><html><head>${CSP_META}${INJECTED_STYLE_TAG}</head>${shell.pre}${shell.post}`;
-  }
-  head.insertAdjacentHTML("afterbegin", CSP_META);
-  head.insertAdjacentHTML("beforeend", INJECTED_STYLE_TAG);
-  return `<!doctype html><html>${head.outerHTML}${body.outerHTML}</html>`;
+  return injectCspIntoParsedDocument(
+    doc,
+    `<!doctype html><html><head>${CSP_META}${INJECTED_STYLE_TAG}</head>${shell.pre}${shell.post}`,
+  );
+}
+
+/**
+ * Build the full HTML document string loaded into a READ-ONLY sandboxed
+ * iframe (unified-experience epic: View mode + the version-diff view,
+ * claude-review #183 F-1 / ADR-0063's "4c client" note). Same CSP-injection
+ * mechanism as `buildIframeDocument` above — comment-aware parse, the locked
+ * `<meta>` CSP inserted as `<head>`'s first element child — applied to an
+ * ALREADY-ASSEMBLED full HTML document string instead of an empty body a
+ * caller mounts ProseMirror into. Callers pass `reinjectShell(shell,
+ * bodyHtml)` (arp-report-html): either the live editor doc re-serialized to
+ * HTML (View mode) or a version-diff's rendered body fragment (Compare) —
+ * both are untrusted, stored-report-derived HTML, so both MUST render only
+ * through this function's `srcDoc`, never via `dangerouslySetInnerHTML` into
+ * the top-level (token-holding) document and never on the app origin.
+ *
+ * No ProseMirror mount happens here — there is no `EditorView`, so unlike
+ * `buildIframeDocument`'s consumer (`ReportEditor.tsx`, which needs
+ * `sandbox="allow-same-origin"` for `contentDocument` access), a caller
+ * rendering THIS document needs no DOM access into the iframe at all and
+ * should use the maximally-restrictive `sandbox=""` (no `allow-same-origin`,
+ * no `allow-scripts` — nothing).
+ */
+export function buildReadOnlyIframeDocument(
+  fullHtml: string,
+  parseHtml: HtmlParser = domParserParse,
+): string {
+  const doc = parseHtml(fullHtml);
+  return injectCspIntoParsedDocument(
+    doc,
+    `<!doctype html><html><head>${CSP_META}${INJECTED_STYLE_TAG}</head>${fullHtml}`,
+  );
 }
