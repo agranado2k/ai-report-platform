@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { mintAccessToken } from "./access-token";
+import { mintAccessToken, readAccessToken } from "./access-token";
 import { mintEditToken, readEditToken, verifyEditToken } from "./edit-token";
 
 const SECRET = "test-secret-key-of-some-length";
@@ -59,9 +59,14 @@ describe("edit token (ADR-0063)", () => {
     expect(readEditToken(plainAccessToken, SLUG, SECRET, NOW + 60)).toBeNull();
   });
 
-  it("NOTE: the reverse is fine — an edit token is not required to fail readAccessToken's shape checks, since edit implies read; this phase does not need to assert that direction", () => {
-    // No assertion here — documenting the asymmetry intentionally left alone by this ADR.
-    expect(true).toBe(true);
+  it("the reverse is safe — an edit token reads as a plain NON-owner access claim (no owner escalation)", () => {
+    // Edit implies read, so an edit token IS readable on the access path — but it must
+    // confer only ordinary, ACL-gated read: NO `owner` bypass, and the edit-only fields
+    // (`sub`/`scope`) dropped. Locks in the OTHER half of the no-confusion guarantee.
+    const editToken = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
+    const asAccess = readAccessToken(editToken, SLUG, SECRET, NOW + 60);
+    expect(asAccess).toEqual({ slug: SLUG, exp: NOW + 900 }); // no owner, no sub, no scope
+    expect(asAccess?.owner).toBeUndefined();
   });
 
   it('rejects scope:"read" (tampered/downgraded scope)', () => {
