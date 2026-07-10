@@ -103,7 +103,13 @@ describe("resolveEditAccess", () => {
     expect(decision.kind).toBe("render");
     if (decision.kind === "render") {
       expect(decision.token).toBe(token);
-      expect(decision.claims).toEqual({ slug: SLUG, exp: NOW + 900, sub: "user_1", scope: "edit" });
+      expect(decision.claims).toEqual({
+        slug: SLUG,
+        exp: NOW + 900,
+        sub: "user_1",
+        scope: "edit",
+        sessionStart: NOW,
+      });
     }
   });
 

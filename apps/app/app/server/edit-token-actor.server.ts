@@ -50,8 +50,11 @@ export interface EditTokenActorDeps {
  *  the header is absent, uses a different scheme, or the value is blank.
  *  Purely header plumbing — `readEditToken`'s signature check is what
  *  actually discriminates an edit token from an `arp_` key or a Clerk OAuth
- *  JWT riding the same header. */
-function bearerToken(request: Request): string | null {
+ *  JWT riding the same header. Exported: edit-token-refresh.server.ts's
+ *  `resolvePresentedSession` reuses the identical extraction to independently
+ *  recover the presented token's `sessionStart` for the absolute session cap
+ *  (ADR-0063 amendment) — rather than duplicate this regex there. */
+export function bearerToken(request: Request): string | null {
   const header = request.headers.get("authorization");
   if (!header) return null;
   const match = /^Bearer\s+(.+)$/.exec(header.trim());
