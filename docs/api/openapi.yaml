@@ -446,15 +446,21 @@ paths:
         envelope (`{ object: "list", data, has_more }`, ADR-0053, ADR-0065),
         newest-created first. Auth is IDENTICAL to `GET /api/v1/reports/{slug}` —
         org-scoped; a report outside your org reads as not-found. A read-only
-        discovery surface — it grants no new write capability.
+        discovery surface — it grants no new write capability. CORS-enabled
+        for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). When
+            authenticating with an `editToken`, this MUST be the CANONICAL
+            slug the token was minted for (ADR-0063) — a `report_…` External
+            Id is rejected on that auth path.
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/StartingAfter' }
         - { $ref: '#/components/parameters/EndingBefore' }
@@ -464,6 +470,104 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VersionList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: saveEditedVersion
+      tags: [Reports]
+      summary: Save an edit as a new version
+      description: >
+        Re-assembles the report's current presentation shell around the
+        submitted ProseMirror document, saves it as a NEW `ReportVersion`
+        through the standard ADR-0037 upload pipeline (`origin: "editor"`,
+        with the lossless `_source.json` sidecar, ADR-0062 §4/§5), and
+        re-enters the ADR-012 scan gate identically to any other upload —
+        there is no unscanned fast path for an edit. This is always a SAVE
+        to an EXISTING report (via the same re-upload mechanism `update_slug`
+        drives) — there is no create path here. Auth: `apiKey`, a Clerk
+        session, OR (ADR-0063) a slug-bound `editToken` carrying ONLY
+        `reports:write` — every path re-checks `canWrite` LIVE
+        (`isOwner OR hasWriteGrant`, ADR-0059 §2 / ADR-0060 §4).
+        CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
+      security:
+        - apiKey: []
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveEditedVersionRequest' }
+      responses:
+        '201':
+          description: The saved version, as the created `report` resource (mirrors POST /api/v1/reports).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/diff:
+    get:
+      operationId: getReportDiff
+      tags: [Reports]
+      summary: Diff two of a report's versions (JSON)
+      description: >
+        The visual diff between two versions, as JSON (ADR-0063 API slice,
+        ADR-0065 §3/§4) — the cross-origin, machine-readable counterpart to
+        the dashboard's HTML diff page. Structural (word-level) when BOTH
+        versions carry a parseable `_source.json` sidecar; a labeled,
+        lower-fidelity HTML fallback otherwise (`diff_mode` on the response
+        distinguishes the two — deliberately NOT named `mode`, which is
+        reserved for the deployment context on every resource, ADR-0053).
+        Addresses versions by their `version_…` External Id, not a display
+        ordinal. Auth: `apiKey`, a Clerk session, OR (ADR-0063) a slug-bound
+        `editToken` — read access is the SAME org-visible-or-write-grantee
+        seam as `GET /api/v1/reports/{slug}`. CORS-enabled for `VIEW_ORIGIN`
+        (ADR-0063).
+      security:
+        - apiKey: []
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, pattern: '^version_[0-9A-Za-z]{22}$' }
+          description: The OLDER version's External Id.
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, pattern: '^version_[0-9A-Za-z]{22}$' }
+          description: The NEWER version's External Id.
+      responses:
+        '200':
+          description: The computed diff.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDiff' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -566,15 +670,21 @@ paths:
         (ADR-0053, ADR-0064 §7), newest-created first. Auth is IDENTICAL to
         `GET /api/v1/reports/{slug}` — org-scoped (ADR-0059 §3). Comments are
         workspace collaboration data — NEVER reachable from the public viewer
-        origin (ADR-0064 §4).
+        origin (ADR-0064 §4). CORS-enabled for `VIEW_ORIGIN` (ADR-0063) — the
+        edit-token-authenticated caller IS reachable, only the anonymous
+        public viewer route is excluded.
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/StartingAfter' }
         - { $ref: '#/components/parameters/EndingBefore' }
@@ -599,15 +709,19 @@ paths:
         (ADR-0064 Decision 2/4): replying to a reply is a 422. Gated by
         `canWrite` (ADR-0064 §3 — the SAME seam as rename/re-upload/move:
         `isOwner OR hasWriteGrant`, ADR-0060 §4), not the stricter owner-only
-        delete/setAcl seam.
+        delete/setAcl seam. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
       requestBody:
         required: true
         content:
@@ -635,15 +749,22 @@ paths:
         Marks a comment resolved (ADR-0064 §3). Idempotent — resolving an
         already-resolved comment is a no-op. Authorized by a DIFFERENT rule
         than create/reply: the comment's AUTHOR or the report's OWNER (not
-        `canWrite`) — the owner moderates every comment on their report.
+        `canWrite`) — the owner moderates every comment on their report. An
+        `editToken` actor resolves under their real, mirrored `userId`, so
+        this rule applies to them identically. CORS-enabled for
+        `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - name: comment_id
           in: path
           required: true
@@ -666,15 +787,19 @@ paths:
       description: >
         Hard-deletes a comment (ADR-0064 §3). Deleting a root also deletes its
         replies (the DB's self-FK `ON DELETE CASCADE`). Same author-or-owner
-        authorization as resolve.
+        authorization as resolve. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - name: comment_id
           in: path
           required: true
@@ -768,6 +893,26 @@ components:
       description: >
         API key (ADR-0008) carrying the `reports:write` scope (ADR-0016).
         Hashed, prefixed, user-scoped so cross-org collaboration works.
+    editToken:
+      type: http
+      scheme: bearer
+      description: >
+        Slug-bound, single-purpose edit token (ADR-0063), minted by the app
+        for a user with `canWrite` on ONE specific report. Grants ONLY the
+        `reports:write` scope on that report — never `acl:write` (grant/
+        revoke/setAcl/listWriteGrants stay apiKey/Clerk-session-only).
+        `canWrite` is re-checked LIVE on every accept (a grant revoked after
+        mint rejects on the next call, not just the next mint), and the
+        request path's `slug` MUST be the CANONICAL slug the token was
+        minted for. Accepted as an alternative to `apiKey` on the
+        report-editing surface only (save a version, read a diff, list/add/
+        resolve/delete comments, list versions) — every other endpoint stays
+        apiKey/Clerk-session-only. These endpoints are additionally
+        CORS-enabled for the configured `VIEW_ORIGIN` (echoed
+        `Access-Control-Allow-Origin`, never `*`, no
+        `Access-Control-Allow-Credentials` — auth rides this Bearer header,
+        never a cookie) so a cross-origin view.<domain> caller can use them
+        directly.
 
   parameters:
     IdempotencyKey:
@@ -925,9 +1070,72 @@ components:
           type: string
           enum: [upload, editor]
           description: >
-            How this version was produced (ADR-0062 §6, ADR-0065). `editor` is
-            reserved for the in-app editor — not buildable yet, so every version
-            is `upload` today.
+            How this version was produced (ADR-0062 §6, ADR-0065). `editor` —
+            produced by `POST /api/v1/reports/{slug}/versions` or the
+            dashboard editor's save action (ADR-0063); `upload` — every other
+            create/re-upload path.
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
+
+    SaveEditedVersionRequest:
+      description: >
+        Body for `POST /api/v1/reports/{slug}/versions` (ADR-0062 §5,
+        ADR-0063). The `doc` is opaque here — a `Report HTML schema`-conforming
+        ProseMirror document JSON (see `docs/domain-glossary.md`), re-assembled
+        server-side around the report's current presentation shell.
+      type: object
+      required: [doc]
+      properties:
+        doc:
+          type: object
+          description: The edited ProseMirror document JSON.
+
+    ReportDiff:
+      description: >
+        The `report_diff` resource (ADR-0063 API slice, ADR-0065 §3/§4) —
+        `GET /api/v1/reports/{slug}/diff`'s response.
+      type: object
+      required: [object, diff_mode, html, label, from, to, mode]
+      properties:
+        object: { type: string, enum: [report_diff] }
+        diff_mode:
+          type: string
+          enum: [structural, fallback]
+          description: >
+            `structural` — a word-level ProseMirror diff (both versions carried
+            a parseable `_source.json` sidecar). `fallback` — a labeled,
+            lower-fidelity block-level HTML diff (at least one version lacked a
+            sidecar, e.g. an externally-uploaded version, or its sidecar was
+            corrupt). Deliberately NOT named `mode` — that field means the
+            deployment context on every resource (ADR-0053); this is a
+            different axis (diff fidelity).
+        html:
+          type: string
+          description: The rendered diff markup (structural or fallback).
+        label:
+          type: string
+          nullable: true
+          description: A human-readable caption, present only when `diff_mode` is `fallback`.
+        from:
+          type: object
+          required: [id, version_no]
+          properties:
+            id:
+              type: string
+              pattern: '^version_[0-9A-Za-z]{22}$'
+              description: The OLDER version's External Id.
+            version_no: { type: integer, description: Its display ordinal. }
+        to:
+          type: object
+          required: [id, version_no]
+          properties:
+            id:
+              type: string
+              pattern: '^version_[0-9A-Za-z]{22}$'
+              description: The NEWER version's External Id.
+            version_no: { type: integer, description: Its display ordinal. }
         mode:
           type: string
           enum: [prod, dev]
