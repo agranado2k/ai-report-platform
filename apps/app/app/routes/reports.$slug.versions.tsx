@@ -17,8 +17,9 @@ import type { ScanStatus, VersionOrigin } from "arp-domain";
 import { makeSlug } from "arp-domain";
 import { AppHeader, Badge, type BadgeTone, buttonClass, Card, PageShell } from "../components";
 import { resolveActorForRead } from "../server/auth.server";
-import { viewOrigin } from "../server/container.server";
+import { identityStore, viewOrigin } from "../server/container.server";
 import { loadReportForVersionsRead } from "../server/report-versions.server";
+import { uniqueVersionAuthorIds, versionsToDto } from "../server/version-dto.server";
 
 const MAX_VERSIONS_SHOWN = 100;
 
@@ -54,19 +55,26 @@ export async function loader(args: LoaderFunctionArgs) {
 
   const { report, versions } = guarded.value;
 
+  // Best-effort author email enrichment (IdentityStore.findEmailByUserId) —
+  // one lookup per UNIQUE author, not per version; mirrors the edit route's
+  // comment-author enrichment (reports.$slug.edit.tsx). A failed/missing
+  // lookup falls back to `authorEmail: null` (versionsToDto), and the render
+  // below picks the display fallback.
+  const uniqueAuthorIds = uniqueVersionAuthorIds(versions.items);
+  const emailEntries = await Promise.all(
+    uniqueAuthorIds.map(async (id) => {
+      const emailResult = await identityStore().findEmailByUserId(id);
+      return [id, emailResult.ok ? emailResult.value : null] as const;
+    }),
+  );
+  const emailByAuthor = new Map(emailEntries);
+
   return json({
     slug: report.slug,
     title: report.title,
     viewOrigin: viewOrigin(args.request),
     hasMore: versions.hasMore,
-    versions: versions.items.map((v) => ({
-      versionNo: v.versionNo,
-      uploadedAt: v.uploadedAt,
-      scanStatus: v.scanStatus,
-      origin: v.origin,
-      sizeBytes: v.sizeBytes,
-      isLive: report.liveVersionId === v.id,
-    })),
+    versions: versionsToDto(versions.items, report.liveVersionId, emailByAuthor),
   });
 }
 
@@ -103,6 +111,9 @@ export default function ReportVersions() {
                 <Badge tone={ORIGIN_TONE[v.origin]}>{v.origin}</Badge>
                 <Badge tone={SCAN_TONE[v.scanStatus]}>{v.scanStatus}</Badge>
                 <span className="text-subtle">{formatUploadedAt(v.uploadedAt)}</span>
+                <span className="min-w-0 truncate text-xs text-subtle">
+                  edited by {v.authorEmail ?? "unknown author"}
+                </span>
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 {/* Cross-origin to view.<domain> (ADR-002/0038). NOTE: the

@@ -124,6 +124,14 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(unknown.ok && unknown.value).toBeNull();
   });
 
+  it("findEmailByUserId returns null for a soft-deleted user (no PII leak, ADR-0054/0070)", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    await store.softDeleteByClerkId(CU);
+    const email = await store.findEmailByUserId(created.value.userId);
+    expect(email.ok && email.value).toBeNull(); // deleted → email must not resolve
+  });
+
   it("softDeleteByClerkId re-resolves an already-deleted user (self-healing retry)", async () => {
     const created = await mirror();
     if (!created.ok) return;
