@@ -80,6 +80,14 @@ fi
 : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID not set (R2 access key id)}"
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY not set (R2 secret access key)}"
 
+# The Cloudflare account id IS the R2 account id (R2 is Cloudflare's S3 — the
+# backend's S3 endpoint below is derived from it). Terraform's required
+# `cloudflare_account_id` variable takes the same value, so derive it here when
+# the operator hasn't explicitly set TF_VAR_cloudflare_account_id. Without this,
+# `plan`/`apply` fail with "No value for required variable" (`.tfvars.local`
+# only carries R2_ACCOUNT_ID, not the TF_VAR_ form).
+export TF_VAR_cloudflare_account_id="${TF_VAR_cloudflare_account_id:-$R2_ACCOUNT_ID}"
+
 # ─── Backend config (per-env, temp file) ──────────────────────────────────
 BACKEND_FILE="$(mktemp)"
 cleanup_backend_file() { rm -f "$BACKEND_FILE"; }
