@@ -16,6 +16,7 @@ import {
   folderId,
   makeSlug,
   orgId,
+  readAccessToken,
   readEditToken,
   reportId,
   type Slug,
@@ -23,7 +24,7 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { EDIT_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
+import { EDIT_TTL_SECONDS, OWNER_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
@@ -80,7 +81,7 @@ function makeDeps(
 }
 
 describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0063 Phase 5)", () => {
-  it("OWNER: mints an edit token (sub = owner) and redirects to the unified /edit experience", async () => {
+  it("OWNER: mints an edit token (sub = owner) AND a fallback owner access token (oa=), redirects to the unified /edit experience", async () => {
     const { reports } = await seededReports("aaaaaaaaaa");
     const { deps, logged } = makeDeps(reports);
     const location = await ownerOpenLocation(deps, {
@@ -90,8 +91,9 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       secret: SECRET,
     });
     expect(location.startsWith(`${VIEW}/aaaaaaaaaa/edit?et=`)).toBe(true);
-    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const [etPart, oaPart] = location.split("?et=")[1]?.split("&oa=") ?? [];
     const nowSeconds = Math.floor(NOW / 1000);
+    const token = decodeURIComponent(etPart ?? "");
     const claims = readEditToken(token, "aaaaaaaaaa", SECRET, nowSeconds);
     expect(claims).toMatchObject({
       slug: "aaaaaaaaaa",
@@ -100,10 +102,21 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       exp: nowSeconds + EDIT_TTL_SECONDS,
       sessionStart: nowSeconds, // /open always starts a FRESH session (ADR-0063 session cap)
     });
-    expect(logged).toHaveLength(1); // the mint is audited
+    // Defense-in-depth (hotfix): the OWNER also gets a fallback owner access
+    // token (`oa=`) so a failed edit-token round-trip on the view origin can
+    // degrade to a read-only OWNER view instead of a lockout/unlock-wall.
+    expect(oaPart).toBeTruthy();
+    const ownerToken = decodeURIComponent(oaPart ?? "");
+    const ownerClaims = readAccessToken(ownerToken, "aaaaaaaaaa", SECRET, nowSeconds);
+    expect(ownerClaims).toMatchObject({
+      slug: "aaaaaaaaaa",
+      owner: true,
+      exp: nowSeconds + OWNER_TTL_SECONDS,
+    });
+    expect(logged).toHaveLength(1); // the mint is audited (both tokens, one log line)
   });
 
-  it("GRANTEE (non-owner canWrite): mints the SAME shape of edit token (sub = grantee)", async () => {
+  it("GRANTEE (non-owner canWrite): mints the SAME shape of edit token (sub = grantee), NO owner token (no privilege escalation)", async () => {
     const { reports, report } = await seededReports("ffffffffff");
     const grants = new InMemoryWriteGrantStore();
     const identities = new InMemoryIdentityStore();
@@ -119,6 +132,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     });
 
     expect(location.startsWith(`${VIEW}/ffffffffff/edit?et=`)).toBe(true);
+    expect(location).not.toContain("&oa="); // review #146: a grantee NEVER gets an owner:true token
     const token = decodeURIComponent(location.split("?et=")[1] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
     const claims = readEditToken(token, "ffffffffff", SECRET, nowSeconds);
@@ -224,7 +238,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       viewOrigin: VIEW,
       secret: SECRET,
     });
-    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const token = decodeURIComponent(location.split("?et=")[1]?.split("&oa=")[0] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
     expect(
       readEditToken(token, "eeeeeeeeee", SECRET, nowSeconds + EDIT_TTL_SECONDS - 1),

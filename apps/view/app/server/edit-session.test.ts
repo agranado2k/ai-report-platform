@@ -7,6 +7,7 @@ import { mintEditToken } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
   buildEditCookie,
+  degradeLocation,
   EDIT_COOKIE_NAME,
   readEditCookieValue,
   resolveEditAccess,
@@ -136,6 +137,17 @@ describe("resolveEditAccess", () => {
       nowSeconds: NOW,
     });
     expect(decision).toEqual({ kind: "set-cookie", token: freshQuery, maxAgeSeconds: 900 });
+  });
+});
+
+describe("degradeLocation — hotfix: an owner degrade never lands on the unlock wall", () => {
+  it("no `oa` → the current bare public-viewer fallback, unchanged", () => {
+    expect(degradeLocation(SLUG, undefined)).toBe(`/${SLUG}`);
+  });
+
+  it("`oa` present → routes through the viewer's existing `?access=` owner flow, URL-encoded", () => {
+    const oa = "owner.token.with/special+chars";
+    expect(degradeLocation(SLUG, oa)).toBe(`/${SLUG}?access=${encodeURIComponent(oa)}`);
   });
 });
 

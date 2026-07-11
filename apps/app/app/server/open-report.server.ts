@@ -6,14 +6,27 @@
 // `scope:"edit"` token (packages/domain/src/edit-token.ts) and lands in the
 // SAME unified in-viewer experience (`${viewOrigin}/${slug}/edit?et=...`).
 //
-// Phase 5 retires the two-tier design this function used to implement: an
+// Phase 5 retired the two-tier design this function used to implement: an
 // owner no longer gets a separate, higher-privilege 24h `owner:true` access
-// token — that capability (and its `mintAccessToken`/`resolveAccessDecision`
-// machinery, still used by the SEPARATE public gated-view/unlock flow,
-// unlock.$slug.tsx) is simply never minted from this route any more. Grep
-// audit before this change (Phase 5 task brief) confirmed the owner-access
-// token minted HERE had no other consumer — the unlock flow mints its own,
-// under different modes ("password"/"allowlist"/"org"), never `owner:true`.
+// token as their PRIMARY route in — every canWrite user (owner or grantee)
+// is minted the same short-lived edit token and lands in the unified
+// `/edit` experience. Grep audit before that change (Phase 5 task brief)
+// confirmed the owner-access token minted HERE had no other consumer — the
+// unlock flow mints its own, under different modes ("password"/"allowlist"/
+// "org"), never `owner:true`.
+//
+// HOTFIX (production regression from the Phase 5 cutover, PR #185): if the
+// view origin can't validate the edit token (e.g. a `VIEW_ACCESS_TOKEN_SECRET`
+// misalignment between the app that mints and the view that verifies), the
+// view's `/edit` route degrades to the public viewer, which then sees a
+// PRIVATE report with no access and bounces an OWNER to `/unlock/{slug}` —
+// asking an owner to unlock their own report. Defense-in-depth: an OWNER
+// (never a write-grantee — see below) ALSO gets a fallback `owner:true`
+// access token threaded as `oa=` alongside `et=`, so a broken edit-token
+// round-trip degrades to a read-only OWNER view instead of a lockout. This
+// restores (as a DEGRADE path only) the exact `owner:true` capability Phase 5
+// removed as the PRIMARY path — an owner still lands in the unified editor
+// whenever the edit token validates; `oa=` only matters when it doesn't.
 //
 // Returns the redirect Location; every failure collapses to "/" (the root
 // gate sends anonymous users to sign-in) so we never reveal whether the
@@ -24,11 +37,17 @@ import {
   type TenancyActor,
   type WriteGrantCheckDeps,
 } from "arp-application";
-import { mintEditToken } from "arp-domain";
+import { mintAccessToken, mintEditToken } from "arp-domain";
 import { resolveReportSlug } from "./report-handle.server";
 
 export const EDIT_TTL_SECONDS = 900; // 15 min edit capability (ADR-0063) — a write is
 // higher-privilege than read, so it lives a fraction as long as the old 24h owner token did.
+
+// The pre-Phase-5 owner access-token TTL — reinstated ONLY as a fallback
+// (`oa=`) minted alongside the edit token, never as this route's primary
+// capability. Kept at its historical 24h so the degrade path behaves exactly
+// like the old owner-view flow did.
+export const OWNER_TTL_SECONDS = 86_400;
 
 export interface OwnerOpenDeps {
   readonly reports: ReportRepository;
@@ -86,6 +105,18 @@ export async function ownerOpenLocation(
     req.secret,
     nowSeconds,
   );
+
+  // OWNER vs write-grantee (`writable.value` already carries `ownerId` — one
+  // lookup, no extra `loadOwnedReport` round-trip needed): ONLY the actual
+  // owner also gets a fallback owner access token. Minting an `owner:true`
+  // token for a mere write-grantee would be a privilege escalation (review
+  // #146) — an `owner:true` token bypasses every share gate, not just this
+  // report's edit capability.
+  const isOwner = writable.value.ownerId === req.actor.userId;
+  const ownerAccessToken = isOwner
+    ? mintAccessToken(slug.value, OWNER_TTL_SECONDS, req.secret, nowSeconds, { owner: true })
+    : undefined;
+
   // Audit the mint — same posture the old owner-token mint had: a
   // privileged, if short-lived and narrowly-scoped, write capability.
   deps.log(
@@ -94,8 +125,18 @@ export async function ownerOpenLocation(
       userId: req.actor.userId,
       slug: slug.value,
       exp: nowSeconds + EDIT_TTL_SECONDS,
+      // Hotfix: note whether a fallback owner token was ALSO minted, for
+      // incident response into the degrade path (never true for a grantee).
+      ownerFallbackMinted: isOwner,
     },
     "owner-open: minted edit token",
   );
-  return `${req.viewOrigin}/${slug.value}/edit?et=${encodeURIComponent(editToken)}`;
+
+  const location = `${req.viewOrigin}/${slug.value}/edit?et=${encodeURIComponent(editToken)}`;
+  // The `oa=` fallback param carries the SAME exposure the pre-Phase-5
+  // owner-view flow already had (an owner:true token in `?access=`, handled
+  // by the view origin's existing HttpOnly-cookie `?access=` flow) — this is
+  // not a new surface, just a new place the identical token shape can arrive
+  // from when the edit-token round-trip fails.
+  return ownerAccessToken ? `${location}&oa=${encodeURIComponent(ownerAccessToken)}` : location;
 }
