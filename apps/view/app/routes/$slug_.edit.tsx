@@ -1,3 +1,15 @@
+// ⚠️ FILENAME IS LOAD-BEARING: `$slug_.edit.tsx`, NOT `$slug.edit.tsx`. The
+// trailing `_` on the `$slug_` segment opts this route OUT of Remix v2
+// flat-route dot-nesting. As `$slug.edit.tsx` it became a CHILD of
+// `$slug.tsx` (the public viewer) — so `GET /:slug/edit` ran the PARENT
+// viewer loader FIRST, which redirects any PRIVATE report to
+// `${appOrigin}/unlock/{slug}` before this loader ever ran. Net: the editor
+// was structurally unreachable for every private report (an owner was told to
+// "unlock" their own report — the P0 that shipped from #184 undetected because
+// no test exercised real Remix route resolution). Keep the underscore; a
+// regression guard lives in `edit-route-not-nested.test.ts`, and the 4c
+// cross-origin editor e2e renders this route end-to-end.
+//
 // GET /<slug>/edit — the authenticated, first-party-JS unified editing
 // experience on the viewer origin (ADR-0063 Decisions 1-3, Phase 4;
 // unified-experience epic on top). Supersedes the interim, unauthenticated
