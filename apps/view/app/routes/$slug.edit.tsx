@@ -111,7 +111,21 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   const decision = resolveEditAccess({ queryToken, cookieToken, slug, secret, nowSeconds });
 
-  if (decision.kind === "denied") return redirectToPublicViewer(slug, oa);
+  if (decision.kind === "denied") {
+    // Observability (claude-review #187): when an OWNER's edit-token round-trip
+    // is denied and we degrade them to a read-only owner view (`oa` present),
+    // emit a structured signal. This is the exact secret-misalignment class of
+    // incident that — before this log — could only be inferred from user
+    // reports. Vercel captures `console` output to the function logs; the view
+    // origin has no logger of its own (ADR-0038 keeps it minimal), so a bare
+    // `console.warn` is the dependency-free signal here. Never logs the token.
+    if (oa) {
+      console.warn(
+        JSON.stringify({ event: "owner-edit-degraded-to-view", slug, reason: "edit-token-denied" }),
+      );
+    }
+    return redirectToPublicViewer(slug, oa);
+  }
 
   if (decision.kind === "set-cookie") {
     // Valid `?et=` hand-off: mint the arp_edit cookie and 303 to the clean
