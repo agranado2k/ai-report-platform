@@ -3,7 +3,7 @@
 // cutover). The edit token is short-lived (`EDIT_TTL_SECONDS`, 15 min on the
 // app origin) — an editing session that outlives it must not die mid-edit,
 // so the route component schedules a call to this helper before expiry (see
-// `../routes/$slug.edit.tsx`'s refresh `useEffect`, and `nextRefreshDelayMs`
+// `../routes/$slug_.edit.tsx`'s refresh `useEffect`, and `nextRefreshDelayMs`
 // below for the scheduling math).
 //
 // POSTs the CURRENT token to the app-origin re-mint endpoint (`POST

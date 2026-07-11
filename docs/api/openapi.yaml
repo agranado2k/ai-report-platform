@@ -919,7 +919,7 @@ paths:
       description: >
         The authenticated, first-party-JS editing surface on the viewer
         origin — Edit/View/Comments/Compare behind one edit-token capability
-        (`apps/view/app/routes/$slug.edit.tsx`). Supersedes the interim,
+        (`apps/view/app/routes/$slug_.edit.tsx`). Supersedes the interim,
         unauthenticated 302-to-dashboard redirect this operation used to
         document (ADR-0063 Decision 3's original fallback) — the dashboard's
         own `/reports/{slug}/edit` page no longer exists (ADR-0063
