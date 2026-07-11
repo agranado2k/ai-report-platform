@@ -7,7 +7,7 @@
 // was structurally unreachable for every private report (an owner was told to
 // "unlock" their own report — the P0 that shipped from #184 undetected because
 // no test exercised real Remix route resolution). Keep the underscore; a
-// regression guard lives in `edit-route-not-nested.test.ts`, and the 4c
+// regression guard lives in `edit/edit-route-nesting.test.ts`, and the 4c
 // cross-origin editor e2e renders this route end-to-end.
 //
 // GET /<slug>/edit — the authenticated, first-party-JS unified editing
