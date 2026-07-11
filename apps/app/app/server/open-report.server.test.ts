@@ -98,6 +98,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       sub: OWNER,
       scope: "edit",
       exp: nowSeconds + EDIT_TTL_SECONDS,
+      sessionStart: nowSeconds, // /open always starts a FRESH session (ADR-0063 session cap)
     });
     expect(logged).toHaveLength(1); // the mint is audited
   });
@@ -126,6 +127,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       sub: GRANTEE,
       scope: "edit",
       exp: nowSeconds + EDIT_TTL_SECONDS,
+      sessionStart: nowSeconds, // /open always starts a FRESH session (ADR-0063 session cap)
     });
     expect(logged).toHaveLength(1); // audited exactly like the owner path — same capability now
   });

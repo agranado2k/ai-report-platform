@@ -27,6 +27,19 @@ export interface EditClaims extends TokenClaims {
    *  secret and codec family. Must be the exact literal `"edit"` — any other value
    *  (including a merely-truthy string) is rejected. */
   readonly scope: "edit";
+  /** epoch seconds — the time of the FIRST mint of this refresh chain, carried
+   *  forward UNCHANGED across every re-mint (edit-token-refresh.server.ts never
+   *  resets it). This is the anchor the absolute session cap
+   *  (`SESSION_CAP_SECONDS`, edit-token-refresh.server.ts) measures against:
+   *  `now - sessionStart >= SESSION_CAP_SECONDS` bounds the TOTAL length of a
+   *  refresh chain independent of write-grant revocation, so a leaked token
+   *  dies eventually even against a grant that's never revoked (e.g. an
+   *  owner's own report). OPTIONAL for backward compat: a token minted before
+   *  this field existed has none — it still authenticates normally here
+   *  (`readEditToken`/`parseEditClaims` don't require it for save/comments/
+   *  diff), only the refresh path treats a missing `sessionStart` specially
+   *  (fail closed — see refreshEditToken's module doc). */
+  readonly sessionStart?: number;
 }
 
 /** Narrow a parsed JSON payload into `EditClaims`, or null if it doesn't look like
@@ -35,28 +48,51 @@ export interface EditClaims extends TokenClaims {
  *  read as an edit capability — token confusion between the read/share primitive
  *  and the edit primitive. Strict on purpose: `slug` a string, `exp` a number,
  *  `sub` a NON-EMPTY string, and `scope === "edit"` EXACTLY (no other/missing
- *  scope narrows). Returns only those four fields — anything else on the raw
- *  payload is dropped, not forwarded. */
+ *  scope narrows); `sessionStart`, if present, must be a number (type confusion
+ *  guard) — but its ABSENCE is not rejected: a pre-session-cap legacy token has
+ *  none and still narrows fine (backward compat, see `EditClaims.sessionStart`'s
+ *  doc). Returns only those known fields — anything else on the raw payload is
+ *  dropped, not forwarded. */
 function parseEditClaims(raw: unknown): EditClaims | null {
   if (typeof raw !== "object" || raw === null) return null;
   const claims = raw as Partial<EditClaims>;
   if (typeof claims.slug !== "string" || typeof claims.exp !== "number") return null;
   if (typeof claims.sub !== "string" || claims.sub.length === 0) return null;
   if (claims.scope !== "edit") return null;
-  return { slug: claims.slug, exp: claims.exp, sub: claims.sub, scope: "edit" };
+  if (claims.sessionStart !== undefined && typeof claims.sessionStart !== "number") return null;
+  return {
+    slug: claims.slug,
+    exp: claims.exp,
+    sub: claims.sub,
+    scope: "edit",
+    ...(claims.sessionStart !== undefined ? { sessionStart: claims.sessionStart } : {}),
+  };
 }
 
 /** Mint a slug-bound, sub-bound edit token valid for `ttlSeconds` from `nowSeconds`.
- *  Construction key order (slug, exp, sub, scope) becomes part of the wire format
- *  per signed-token.ts's `mintClaimsToken` — JSON-encoded verbatim, then signed. */
+ *  Construction key order (slug, exp, sub, scope, sessionStart) becomes part of
+ *  the wire format per signed-token.ts's `mintClaimsToken` — JSON-encoded
+ *  verbatim, then signed. `sessionStartSeconds` defaults to `nowSeconds` — a
+ *  FRESH session — so every EXISTING mint site (open-report.server.ts's first
+ *  mint on `/open`) is unchanged: it always starts a new session. Only a
+ *  REFRESH (edit-token-refresh.server.ts) passes an explicit value — the
+ *  ORIGINAL session's start, carried forward unchanged — so a chain of
+ *  refreshes all measure against the same anchor for the absolute session cap. */
 export function mintEditToken(
   slug: string,
   sub: string,
   ttlSeconds: number,
   secret: string,
   nowSeconds: number,
+  sessionStartSeconds: number = nowSeconds,
 ): string {
-  const claims: EditClaims = { slug, exp: nowSeconds + ttlSeconds, sub, scope: "edit" };
+  const claims: EditClaims = {
+    slug,
+    exp: nowSeconds + ttlSeconds,
+    sub,
+    scope: "edit",
+    sessionStart: sessionStartSeconds,
+  };
   return mintClaimsToken(claims, secret);
 }
 

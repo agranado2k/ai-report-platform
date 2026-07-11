@@ -594,17 +594,24 @@ paths:
         own claims. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
 
 
-        **Security trade-off (flagged for `/security-review`):** making an
-        edit token refreshable for as long as `canWrite` holds means a
-        LEAKED token is also refreshable, extending its effective life
-        beyond the original TTL for as long as the thief keeps refreshing it
-        before the grant is revoked. Mitigated by the token's narrow
-        `reports:write`-only, single-report scope, the LIVE re-check on
-        every refresh (revocation cuts it off within one remaining TTL), and
-        the view origin's CSP + sandboxed report iframe that's supposed to
-        keep the token out of reach in the first place. See ADR-0063's Phase
-        5 entry for the full writeup, including a flagged-but-not-built
-        recommendation (an absolute session cap).
+        **Security trade-off, now bounded by an absolute session cap
+        (ADR-0063 Phase 5-D):** making an edit token refreshable for as long
+        as `canWrite` holds means a LEAKED token is also refreshable — but
+        the refresh CHAIN as a whole is capped at `SESSION_CAP_SECONDS` (8h)
+        from its FIRST mint, independent of write-grant revocation: the
+        presented token's `sessionStart` claim is carried forward unchanged
+        on every refresh, and once `now - sessionStart >= SESSION_CAP_SECONDS`
+        the refresh is denied (403) — the caller must re-open the report
+        (`GET /reports/{slug}/open`) to start a genuinely fresh session. A
+        presented token with no `sessionStart` (minted before this cap
+        existed) is also denied (403), fail-closed on unknown age. Also
+        mitigated, as before, by the token's narrow `reports:write`-only,
+        single-report scope, the LIVE `canWrite` re-check on every refresh
+        (a revoked grant cuts a refresh off within one remaining TTL, often
+        sooner than the 8h cap), and the view origin's CSP + sandboxed
+        report iframe that's supposed to keep the token out of reach in the
+        first place. See ADR-0063's Phase 5 / Phase 5-D entries for the full
+        writeup.
       security:
         - editToken: []
       parameters:
