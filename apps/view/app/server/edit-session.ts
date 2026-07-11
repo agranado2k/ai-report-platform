@@ -31,6 +31,28 @@ export function buildEditCookie(slug: string, token: string, maxAgeSeconds: numb
   return `${EDIT_COOKIE_NAME}=${token}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
 }
 
+/**
+ * HOTFIX (production regression from the Phase 5 cutover, PR #185): the
+ * "can't render the editor" degrade path used to always be the bare public
+ * viewer (`/${slug}`) — for a PRIVATE report, that then bounces to
+ * `/unlock/{slug}`, which is wrong when the caller who just failed the
+ * edit-token round-trip is the report's OWNER (e.g. a `VIEW_ACCESS_TOKEN_SECRET`
+ * misalignment between the app that mints and the view that verifies rejects
+ * an otherwise-legitimate `?et=`). `ownerOpenLocation`
+ * (apps/app/app/server/open-report.server.ts) now ALSO mints a fallback
+ * `owner:true` access token for actual owners and threads it as `oa=`
+ * alongside `et=`; when it's present, degrade through the viewer's existing
+ * `?access=` owner flow (HttpOnly unlock cookie, URL cleaned by `$slug.tsx`)
+ * instead of the bare viewer. This is the SAME exposure the pre-Phase-5
+ * owner-view flow already had for this exact token shape (an owner token in
+ * `?access=`) — not a new surface, just a new place it can arrive from. When
+ * `oa` is absent (a write-grantee's failed round-trip, or no fallback was
+ * minted), behavior is unchanged: the bare public viewer.
+ */
+export function degradeLocation(slug: string, oa: string | undefined): string {
+  return oa ? `/${slug}?access=${encodeURIComponent(oa)}` : `/${slug}`;
+}
+
 export interface EditAccessInput {
   /** The `?et=` query-string token, if present (the fresh app-minted hand-off). */
   readonly queryToken: string | undefined;

@@ -56,7 +56,12 @@ import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import { buildEditCookie, readEditCookieValue, resolveEditAccess } from "../server/edit-session";
+import {
+  buildEditCookie,
+  degradeLocation,
+  readEditCookieValue,
+  resolveEditAccess,
+} from "../server/edit-session";
 
 function notFoundResponse(): Response {
   const headers = viewHeaders();
@@ -73,9 +78,14 @@ function notFoundResponse(): Response {
 // CSP profile), not `editViewHeaders()` — this response never carries editor
 // content or the edit token, so it gets the stricter, unauthenticated-route
 // header set.
-function redirectToPublicViewer(slug: string): Response {
+//
+// `oa`, when present (hotfix — see `degradeLocation`'s doc), routes an OWNER
+// through the viewer's existing `?access=` flow instead of the bare gated
+// viewer, so a broken edit-token round-trip degrades to a read-only OWNER
+// view of their own report rather than cascading to `/unlock/{slug}`.
+function redirectToPublicViewer(slug: string, oa?: string): Response {
   const headers = viewHeaders();
-  headers.set("location", `/${slug}`);
+  headers.set("location", degradeLocation(slug, oa));
   headers.set("cache-control", "no-store");
   headers.set("x-robots-tag", "noindex, nofollow");
   return new Response(null, { status: 302, headers });
@@ -91,13 +101,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const queryToken = url.searchParams.get("et") ?? undefined;
+  // Hotfix fallback (see `degradeLocation`'s doc): the fallback owner access
+  // token `ownerOpenLocation` mints alongside `et=` for actual owners, ONLY
+  // consulted when the edit-token round-trip below is denied.
+  const oa = url.searchParams.get("oa") ?? undefined;
   const cookieToken = readEditCookieValue(request.headers.get("cookie"));
   const { secret, appOrigin } = viewerAccessConfig();
   const nowSeconds = Math.floor(Date.now() / 1000);
 
   const decision = resolveEditAccess({ queryToken, cookieToken, slug, secret, nowSeconds });
 
-  if (decision.kind === "denied") return redirectToPublicViewer(slug);
+  if (decision.kind === "denied") return redirectToPublicViewer(slug, oa);
 
   if (decision.kind === "set-cookie") {
     // Valid `?et=` hand-off: mint the arp_edit cookie and 303 to the clean
