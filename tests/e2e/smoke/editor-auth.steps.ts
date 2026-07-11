@@ -1,11 +1,19 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type APIResponse, expect } from "@playwright/test";
+import { type APIResponse, expect, test } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import { mintTestSession, type TestSession } from "../support/clerk-session";
 
 const { Given, When, Then } = createBdd();
+
+// Cross-origin editor-render half (see editor-auth.feature's doc comment).
+// Only set when preview-isolation.yml's `redeploy` job captured a live VIEW
+// preview URL and threaded it through e2e.yml — absent on a plain local
+// `pnpm e2e` run. Read once at module load, same style as playwright.config.ts's
+// hasAuthCreds/hasBrowserCreds (computed once from process.env, not re-read
+// per step).
+const VIEW_BASE_URL = process.env.PLAYWRIGHT_VIEW_BASE_URL;
 
 // Module state — workers: 1 makes this safe (see playwright.config.ts). Distinct
 // step phrasing from the other smoke files so the global registry has no clashes.
@@ -74,4 +82,52 @@ Then("I am redirected to an edit-shaped location for that report", async () => {
   // user — owner or write-grantee, no distinction since Phase 5.
   expect(location).toContain(`/${slug}/edit`);
   expect(location).toContain("et=");
+});
+
+// The cross-origin half (editor-auth.feature's doc comment): on a preview,
+// `location` above is ALREADY broken as a navigation target — `viewOrigin`
+// fell back to the APP's own request origin (container.server.ts), since
+// VIEW_ORIGIN is prod-only. We don't navigate there. Instead we lift the
+// `et=` token out of it (it's a real, valid, freshly-minted edit token
+// regardless of which origin the app thought it was building a URL for) and
+// navigate straight to the deployed VIEW preview's own URL, captured by
+// preview-isolation.yml's `redeploy` job and threaded through e2e.yml as
+// PLAYWRIGHT_VIEW_BASE_URL.
+Then("the unified editor actually renders at the view origin", async ({ page }) => {
+  // Mirrors playwright.config.ts's hasAuthCreds/hasBrowserCreds gating style:
+  // a missing precondition skips this half cleanly rather than failing on an
+  // env this run was never given (local `pnpm e2e`, or any invocation of
+  // e2e.yml that didn't thread a view_base_url). test.skip(condition, …)
+  // called mid-test stops execution immediately, same as an eager skip.
+  test.skip(
+    !VIEW_BASE_URL,
+    "PLAYWRIGHT_VIEW_BASE_URL not set — cross-origin view render not exercised",
+  );
+
+  // location is absolute (`${someOrigin}/${slug}/edit?et=...`) even when
+  // someOrigin is wrong for navigation purposes — new URL() only needs it to
+  // pull the et= param back out.
+  const location = response.headers().location ?? "";
+  const redirectUrl = new URL(location);
+  const token = redirectUrl.searchParams.get("et");
+  expect(token, `expected an et= token in Location "${location}"`).toBeTruthy();
+
+  await page.goto(`${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}`);
+
+  // The ONLY element the "render" decision kind ever emits (see
+  // apps/view/app/routes/$slug.edit.tsx's data-testid comment) — every
+  // "can't/shouldn't render the editor" branch degrades to the public viewer
+  // instead, which never renders this. Its presence alone proves the et=
+  // token round-trip validated AND APP_ORIGIN was wired, i.e. the exact
+  // regression class (owner-lockout via a broken edit-token hand-off) that
+  // shipped uncaught before this scenario existed.
+  await expect(page.getByTestId("unified-editor")).toBeVisible();
+
+  // Belt-and-braces: confirm we did NOT degrade to the public viewer/unlock
+  // flow (degradeLocation, apps/view/app/server/edit-session.ts returns
+  // `/${slug}` or `/${slug}?access=...` — never `/edit` — on every degrade
+  // path, and a denied decision with no owner fallback lands on /unlock).
+  const landedUrl = page.url();
+  expect(landedUrl).toContain(`/${slug}/edit`);
+  expect(landedUrl).not.toContain("/unlock");
 });

@@ -37,6 +37,15 @@ on:
         description: The isolated preview URL to smoke (https://…)
         required: true
         type: string
+      view_base_url:
+        description: >-
+          The isolated VIEW-preview URL (https://…), once redeployed with
+          APP_ORIGIN pointed at `base_url` (preview-isolation.yml's `redeploy`
+          job). Optional — absent on a plain local `pnpm e2e` run; when unset,
+          the @browser scenario's cross-origin editor-render step skips
+          cleanly (tests/e2e/smoke/editor-auth.steps.ts).
+        required: false
+        type: string
       head_sha:
         description: PR head commit to checkout (the test definitions to run)
         required: true
@@ -167,6 +176,10 @@ jobs:
         if: steps.readiness.outputs.ready == 'true'
         env:
           PLAYWRIGHT_BASE_URL: ${{ inputs.base_url }}
+          # Cross-origin editor e2e (editor-auth.feature): the isolated VIEW
+          # preview's own URL, once known — see `view_base_url`'s input doc
+          # above. Absent locally, so the step self-skips.
+          PLAYWRIGHT_VIEW_BASE_URL: ${{ inputs.view_base_url }}
           # Bypasses Vercel Deployment Protection on the preview (else 401).
           # Enable "Protection Bypass for Automation" on both Vercel projects and
           # store the generated secret as this repo secret.
