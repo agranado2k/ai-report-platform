@@ -450,7 +450,13 @@ export default function EditReport() {
   const diffHtml = diffData ? reinjectShell(shell, diffData.html) : null;
 
   return (
-    <div className="flex min-h-screen flex-col">
+    // data-testid: the ONLY reliable "the unified editor genuinely mounted"
+    // signal for the cross-origin e2e (tests/e2e/smoke/editor-auth.steps.ts) —
+    // this route degrades to the public viewer (redirectToPublicViewer, no
+    // TopBar/ReportEditor at all) on every "can't render" branch above, so
+    // this element's presence is equivalent to reaching the "render" decision
+    // kind, i.e. the et= token round-trip + APP_ORIGIN wiring both worked.
+    <div className="flex min-h-screen flex-col" data-testid="unified-editor">
       <TopBar
         docTitle={docTitle}
         mode={mode}
