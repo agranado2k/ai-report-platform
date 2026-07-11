@@ -114,10 +114,14 @@ export type PresentedSession =
  * accepts any of four front doors, so the resolved actor alone can't tell us
  * whether an edit token was the one that authenticated it). A token that
  * fails to verify (expired/tampered/wrong-secret/wrong-slug/wrong-scope) is
- * treated identically to "no token presented" — fail-open-to-fresh-session
- * only in the narrow sense that there's no chain to bound; the LIVE canWrite
- * re-check in `refreshEditToken` is what actually gates whether a token is
- * issued at all. Never throws.
+ * treated identically to "no token presented" → a fresh session. This is NOT
+ * an open door: a caller can only reach `run()` at all because a credential
+ * ALREADY authenticated them (a failed-verify edit token authenticates
+ * nothing — `handle()` 401s before `run()` unless a DIFFERENT front door,
+ * Clerk/`arp_`/OAuth, succeeded), and the LIVE `canWrite` re-check in
+ * `refreshEditToken` still gates whether ANY token is issued. The only effect
+ * of the "fresh session" classification is that there's no prior refresh chain
+ * to bound — correct, because there is none. Never throws.
  */
 export function resolvePresentedSession(
   request: Request,
