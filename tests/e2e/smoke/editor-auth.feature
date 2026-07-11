@@ -64,4 +64,4 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
     When I open that report
     Then I am not redirected to sign-in
     And I am redirected to an edit-shaped location for that report
-    And the unified editor actually renders at the view origin
+    And the view edit route accepts the edit token instead of falling back to the public viewer

@@ -93,41 +93,63 @@ Then("I am redirected to an edit-shaped location for that report", async () => {
 // navigate straight to the deployed VIEW preview's own URL, captured by
 // preview-isolation.yml's `redeploy` job and threaded through e2e.yml as
 // PLAYWRIGHT_VIEW_BASE_URL.
-Then("the unified editor actually renders at the view origin", async ({ page }) => {
-  // Mirrors playwright.config.ts's hasAuthCreds/hasBrowserCreds gating style:
-  // a missing precondition skips this half cleanly rather than failing on an
-  // env this run was never given (local `pnpm e2e`, or any invocation of
-  // e2e.yml that didn't thread a view_base_url). test.skip(condition, …)
-  // called mid-test stops execution immediately, same as an eager skip.
-  test.skip(
-    !VIEW_BASE_URL,
-    "PLAYWRIGHT_VIEW_BASE_URL not set — cross-origin view render not exercised",
-  );
+Then(
+  "the view edit route accepts the edit token instead of falling back to the public viewer",
+  async ({ page }) => {
+    // Mirrors playwright.config.ts's hasAuthCreds/hasBrowserCreds gating style:
+    // a missing precondition skips this half cleanly rather than failing on an
+    // env this run was never given (local `pnpm e2e`, or any invocation of
+    // e2e.yml that didn't thread a view_base_url). test.skip(condition, …)
+    // called mid-test stops execution immediately, same as an eager skip.
+    test.skip(
+      !VIEW_BASE_URL,
+      "PLAYWRIGHT_VIEW_BASE_URL not set — cross-origin view hand-off not exercised",
+    );
 
-  // location is absolute (`${someOrigin}/${slug}/edit?et=...`) even when
-  // someOrigin is wrong for navigation purposes — new URL() only needs it to
-  // pull the et= param back out.
-  const location = response.headers().location ?? "";
-  const redirectUrl = new URL(location);
-  const token = redirectUrl.searchParams.get("et");
-  expect(token, `expected an et= token in Location "${location}"`).toBeTruthy();
+    // location is absolute (`${someOrigin}/${slug}/edit?et=...`) even when
+    // someOrigin is wrong for navigation purposes — new URL() only needs it to
+    // pull the et= param back out.
+    const location = response.headers().location ?? "";
+    const token = new URL(location).searchParams.get("et");
+    expect(token, `expected an et= token in Location "${location}"`).toBeTruthy();
 
-  await page.goto(`${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}`);
+    // Hit the REAL view-origin /edit with the freshly-minted edit token, no
+    // redirect following. `page.request` carries the context's Vercel
+    // deployment-protection bypass header (playwright.config.ts) and needs no
+    // Clerk session — the view origin is credential-free, the token IS the proof.
+    const res = await page.request.get(
+      `${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}`,
+      { maxRedirects: 0 },
+    );
+    const loc = res.headers().location ?? "";
 
-  // The ONLY element the "render" decision kind ever emits (see
-  // apps/view/app/routes/$slug.edit.tsx's data-testid comment) — every
-  // "can't/shouldn't render the editor" branch degrades to the public viewer
-  // instead, which never renders this. Its presence alone proves the et=
-  // token round-trip validated AND APP_ORIGIN was wired, i.e. the exact
-  // regression class (owner-lockout via a broken edit-token hand-off) that
-  // shipped uncaught before this scenario existed.
-  await expect(page.getByTestId("unified-editor")).toBeVisible();
+    // The de-nested /edit LOADER ran and ACCEPTED the token: `resolveEditAccess`
+    // returns "set-cookie" → a 303 to the clean `/${slug}/edit` URL, dropping the
+    // `?et=` and setting the `arp_edit` cookie. The #188 P0 (the /edit route
+    // nested UNDER the public viewer) would instead run `$slug.tsx`'s loader
+    // FIRST → a one-hop 302 to `${appOrigin}/unlock/${slug}`. This assertion is
+    // therefore the direct guard for that routing regression, and it also
+    // exercises the cross-origin token round-trip (the app preview mints, the
+    // view preview verifies with the shared VIEW_ACCESS_TOKEN_SECRET), so a real
+    // secret misalignment fails here too.
+    expect(
+      res.status(),
+      `expected the /edit loader's set-cookie 303, got ${res.status()} → "${loc}" — a 302 to /unlock means the /edit route re-nested under the public viewer (the #188 P0)`,
+    ).toBe(303);
+    expect(loc).toContain(`/${slug}/edit`);
+    expect(loc).not.toContain("/unlock");
+    const setCookie = res
+      .headersArray()
+      .filter((h) => h.name.toLowerCase() === "set-cookie")
+      .map((h) => h.value)
+      .join("; ");
+    expect(setCookie).toContain("arp_edit");
 
-  // Belt-and-braces: confirm we did NOT degrade to the public viewer/unlock
-  // flow (degradeLocation, apps/view/app/server/edit-session.ts returns
-  // `/${slug}` or `/${slug}?access=...` — never `/edit` — on every degrade
-  // path, and a denied decision with no owner fallback lands on /unlock).
-  const landedUrl = page.url();
-  expect(landedUrl).toContain(`/${slug}/edit`);
-  expect(landedUrl).not.toContain("/unlock");
-});
+    // NOTE: this is a LOADER-level guard (token round-trip + routing). A full
+    // browser-render assertion (`getByTestId("unified-editor")` visible) needs a
+    // SERVABLE report — a clean scan — which previews don't produce without
+    // driving `POST /internal/scan-drain`; wiring `SCAN_DRAIN_SECRET` into CI to
+    // enable that is a tracked follow-up (the `data-testid="unified-editor"` on
+    // the render branch is left in place for it).
+  },
+);
