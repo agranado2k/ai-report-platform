@@ -176,6 +176,70 @@ export class ApiClient {
     return this.get<ListEnvelope>(`/api/v1/reports/${encodeURIComponent(slug)}/write-grants`);
   }
 
+  /** List a report's comments (ADR-0064) — cursor-paginated (ADR-0053),
+   *  newest-created first; each item is a comment resource with id (comment_…),
+   *  report_id, author_id (user_…), parent_id (comment_… for a reply, else null),
+   *  body, anchor { version_pinned: { version_id, text_quote } }, resolved_at,
+   *  created_at. Auth mirrors listReportVersions (org-scoped read). */
+  listComments(slug: string, params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+    const qs = new URLSearchParams();
+    appendCursor(qs, params);
+    const query = qs.toString();
+    return this.get<ListEnvelope>(
+      `/api/v1/reports/${encodeURIComponent(slug)}/comments${query ? `?${query}` : ""}`,
+    );
+  }
+
+  /** Create a root comment on a report, OR (when `parentCommentId` is set) a reply
+   *  to an existing one (ADR-0064). canWrite-gated; returns the created comment
+   *  resource (201). The anchor pins the comment to a specific ReportVersion +
+   *  quoted text; `relative` is forwarded opaquely (the editor slice interprets it). */
+  addComment(
+    slug: string,
+    params: {
+      readonly body: string;
+      readonly versionId: string;
+      readonly textQuote: string;
+      readonly relative?: unknown;
+      readonly parentCommentId?: string;
+    },
+  ): Promise<ApiResult<Record<string, unknown>>> {
+    return this.request<Record<string, unknown>>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/comments`,
+      {
+        json: {
+          body: params.body,
+          anchor: {
+            version_pinned: { version_id: params.versionId, text_quote: params.textQuote },
+            ...(params.relative !== undefined ? { relative: params.relative } : {}),
+          },
+          ...(params.parentCommentId !== undefined
+            ? { parent_comment_id: params.parentCommentId }
+            : {}),
+        },
+      },
+    );
+  }
+
+  /** Resolve a comment (ADR-0064) — PATCH with no body; returns the resolved
+   *  comment resource (resolved_at set). Author-or-report-owner gated. One-way
+   *  and idempotent: there is only one resolved transition (no un-resolve). */
+  resolveComment(slug: string, commentId: string): Promise<ApiResult<Record<string, unknown>>> {
+    return this.request<Record<string, unknown>>(
+      "PATCH",
+      `/api/v1/reports/${encodeURIComponent(slug)}/comments/${encodeURIComponent(commentId)}`,
+    );
+  }
+
+  /** Delete a comment (ADR-0064) — 204 no content. Author-or-report-owner gated. */
+  deleteComment(slug: string, commentId: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>(
+      "DELETE",
+      `/api/v1/reports/${encodeURIComponent(slug)}/comments/${encodeURIComponent(commentId)}`,
+    );
+  }
+
   createFolder(params: {
     readonly name: string;
     readonly parentId: string;

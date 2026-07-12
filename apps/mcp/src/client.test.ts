@@ -295,3 +295,134 @@ describe("ApiClient writes", () => {
     expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/write-grants");
   });
 });
+
+describe("ApiClient comments", () => {
+  const client = (fn: typeof fetch) =>
+    new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+  it("listComments GETs /reports/{slug}/comments (slug encoded) with no cursor", async () => {
+    const { fn, calls } = stub(json({ object: "list", data: [], has_more: false }));
+    const r = await client(fn).listComments("ab/cd");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.has_more).toBe(false);
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/ab%2Fcd/comments");
+    expect(calls[0]?.headers.authorization).toBe("Bearer arp_live_x");
+  });
+
+  it("listComments forwards cursor params (limit/starting_after)", async () => {
+    const { fn, calls } = stub(json({ object: "list", data: [], has_more: true }));
+    const r = await client(fn).listComments("abc12345", {
+      limit: 5,
+      startingAfter: "comment_abc",
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/abc12345/comments?limit=5&starting_after=comment_abc",
+    );
+  });
+
+  it("listComments forwards ending_before for paging back", async () => {
+    const { fn, calls } = stub(json({ object: "list", data: [], has_more: false }));
+    await client(fn).listComments("abc12345", { endingBefore: "comment_zzz" });
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/abc12345/comments?ending_before=comment_zzz",
+    );
+  });
+
+  it("addComment POSTs a root comment with the anchor and no parent_comment_id", async () => {
+    const { fn, calls } = stub(json({ object: "comment", id: "comment_1", parent_id: null }, 201));
+    const r = await client(fn).addComment("abc12345", {
+      body: "What does this mean?",
+      versionId: "version_1",
+      textQuote: "the Q3 number",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.data as { id: string }).id).toBe("comment_1");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/comments");
+    expect(calls[0]?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({
+      body: "What does this mean?",
+      anchor: {
+        version_pinned: { version_id: "version_1", text_quote: "the Q3 number" },
+      },
+    });
+  });
+
+  it("addComment includes relative when passed", async () => {
+    const { fn, calls } = stub(json({ object: "comment", id: "comment_1" }, 201));
+    await client(fn).addComment("abc12345", {
+      body: "note",
+      versionId: "version_1",
+      textQuote: "quote",
+      relative: { css: "#heading" },
+    });
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({
+      body: "note",
+      anchor: {
+        version_pinned: { version_id: "version_1", text_quote: "quote" },
+        relative: { css: "#heading" },
+      },
+    });
+  });
+
+  it("addComment POSTs a reply with parent_comment_id set", async () => {
+    const { fn, calls } = stub(
+      json({ object: "comment", id: "comment_2", parent_id: "comment_1" }, 201),
+    );
+    const r = await client(fn).addComment("abc12345", {
+      body: "a reply",
+      versionId: "version_1",
+      textQuote: "quote",
+      parentCommentId: "comment_1",
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({
+      body: "a reply",
+      anchor: {
+        version_pinned: { version_id: "version_1", text_quote: "quote" },
+      },
+      parent_comment_id: "comment_1",
+    });
+  });
+
+  it("resolveComment PATCHes /comments/{comment_id} (both ids encoded) with no body", async () => {
+    const { fn, calls } = stub(
+      json({ object: "comment", id: "comment_1", resolved_at: "2026-07-08T00:00:00.000Z" }),
+    );
+    const r = await client(fn).resolveComment("ab/cd", "comment_1");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.data as { resolved_at: string }).resolved_at).toBeTruthy();
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/ab%2Fcd/comments/comment_1");
+    expect(calls[0]?.body).toBeUndefined();
+  });
+
+  it("deleteComment DELETEs /comments/{comment_id} and treats 204 as success", async () => {
+    const { fn, calls } = stub(new Response(null, { status: 204 }));
+    const r = await client(fn).deleteComment("abc12345", "comment_1");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toBeUndefined();
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/abc12345/comments/comment_1",
+    );
+  });
+
+  it("surfaces an RFC-9457 problem when the caller lacks write access", async () => {
+    const { fn } = stub(json({ title: "Forbidden", status: 403, code: "forbidden" }, 403));
+    const r = await client(fn).addComment("abc12345", {
+      body: "x",
+      versionId: "version_1",
+      textQuote: "q",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem.code).toBe("forbidden");
+  });
+});
