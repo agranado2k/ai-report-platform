@@ -1138,7 +1138,7 @@ components:
       description: A `version` resource — the ReportVersionSummary projection (ADR-0065).
       type: object
       required:
-        [object, id, version_no, uploaded_by, author, uploaded_at, scan_status, size_bytes, origin, mode]
+        [object, id, version_no, uploaded_by, uploaded_at, scan_status, size_bytes, origin, mode]
       properties:
         object: { type: string, enum: [version] }
         id:
@@ -1353,7 +1353,7 @@ components:
     Comment:
       description: A `comment` resource — the `Comment` aggregate on the wire (ADR-0064).
       type: object
-      required: [object, id, report_id, author_id, author, parent_id, body, anchor, resolved_at, created_at, mode]
+      required: [object, id, report_id, author_id, parent_id, body, anchor, resolved_at, created_at, mode]
       properties:
         object: { type: string, enum: [comment] }
         id:
