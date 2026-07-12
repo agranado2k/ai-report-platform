@@ -3027,3 +3027,35 @@ folders, and org/settings management — content editing lives on the viewer ori
 
 Gates green on this slice: `pnpm install`, `turbo typecheck`, `biome ci .`, full `vitest run`,
 `docs:check`, `turbo build` (both apps).
+
+## 2026-07-12 — Unified-editor feedback wave: chrome cleanup, author names, comment intents, full-height panes
+
+Turned the in-viewer-editor design feedback (left as comments on the `yRlDEWhlfF` concept report,
+read via the new `reports_list_comments` MCP tool — PR #191) into four shipped changes on the
+`view.<domain>/<slug>/edit` surface (ADR-0063):
+
+- **#192 chrome cleanup** — stripped the View/Edit toggle + Comments/Versions top-bar buttons; the
+  panel is collapsed-by-default behind a badged edge chevron (unresolved-comment count), tabs moved
+  inside the panel. View mode removed (unreachable once the toggle went); Compare/diff intact.
+- **#193 author identity** — comments + versions now surface the author's email (the only resolvable
+  identity attribute; no display-name is stored) via a route-layer `resolveAuthorEmails` enrichment on
+  the authenticated, org-scoped Bearer API only. `/security-review` clean (email never on the public
+  viewer / write-response / error / log paths).
+- **#194 comment intent** — closed enum `note|enhancement|add|remove` (default `note`) through the whole
+  stack (domain VO → use cases → API 422-on-invalid → pg enum migration 0015 → composer + reply
+  selector). ADR-0064 Decision 8. Agent-action semantics that CONSUME the intent are deferred.
+- **#195 full-height panes** — reworked the shell into a fixed `h-dvh` app frame with two independent
+  scrollbars (edge-to-edge report iframe carries its own scroll; the panel's tab header is pinned and
+  only its list scrolls), per screenshot feedback that it read like a form, not a page.
+
+**Merge-drift caught:** #192/#193/#194 each passed CI in isolation, but the 3-way union left
+`arp-view typecheck` red on `main` — #194 made `CommentWire.intent` required while #192/#193 fixtures
+predated the field. Repaired in #195's first commit (`intent: "note"` added to `panel.test.ts` +
+`CommentsPanel.test.ts`). Also: a client-bundle build break (importing the `arp-domain` value barrel —
+and its `node:crypto` — into a browser component) surfaced only in the Vercel build, not `tsc`/`vitest`;
+fixed by switching to a type-only import (#194). Lesson logged: never import a runtime value from the
+`arp-domain` barrel into an `apps/view` client component.
+
+The `yRlDEWhlfF` concept report (title "One Document Experience") was refreshed to v4 to reflect the
+shipped design. New MCP surface: comment tools (`reports_list_comments|add_comment|resolve_comment|delete_comment`)
+on `arp-mcp`, thin client over the existing `/api/v1` comment routes (ADR-003).
