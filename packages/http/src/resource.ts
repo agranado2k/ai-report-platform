@@ -60,12 +60,23 @@ export function folderBody(f: Folder, ctx: WireContext) {
  *  `uploaded_at` renders as an ISO-8601 string (no existing timestamp wire field
  *  to match; ISO is unambiguous vs Stripe's epoch-seconds, given `uploadedAt` is
  *  epoch ms internally). */
-export function versionBody(v: ReportVersionSummary, ctx: WireContext) {
+export function versionBody(
+  v: ReportVersionSummary,
+  ctx: WireContext,
+  authorEmail: string | null = null,
+) {
   return {
     object: "version" as const,
     id: versionIdToWire(v.id),
     version_no: v.versionNo,
     uploaded_by: userIdToWire(v.uploadedBy),
+    // ADR-0063 author display: the uploader's resolvable identity. `id` mirrors
+    // `uploaded_by` (kept intact, additive); `email` is the only stored identity
+    // attribute (no display-name exists) and is null for a deleted/never-mirrored
+    // user. Resolved in the route/DTO layer, never here. Comments/versions are
+    // served ONLY on the authenticated, org-scoped canWrite API — never the
+    // public viewer — so an in-org collaborator's email is acceptable to surface.
+    author: { id: userIdToWire(v.uploadedBy), email: authorEmail },
     uploaded_at: new Date(v.uploadedAt).toISOString(),
     scan_status: v.scanStatus,
     size_bytes: v.sizeBytes,
@@ -78,12 +89,17 @@ export function versionBody(v: ReportVersionSummary, ctx: WireContext) {
  *  is null for a root comment (starts a Thread), a `comment_…` External Id for a
  *  reply. `anchor.relative` is omitted when absent (v1: no editor slice yet, so
  *  every comment is version-pinned only). */
-export function commentBody(c: Comment, ctx: WireContext) {
+export function commentBody(c: Comment, ctx: WireContext, authorEmail: string | null = null) {
   return {
     object: "comment" as const,
     id: commentIdToWire(c.id),
     report_id: reportIdToWire(c.reportId),
     author_id: userIdToWire(c.authorUserId),
+    // ADR-0063 author display: mirrors `versionBody`'s `author`. `id` mirrors
+    // `author_id` (kept intact, additive); `email` is the author's resolved
+    // identity (null for a deleted/never-mirrored user), filled in the route/DTO
+    // layer. Only ever served on the authenticated org-scoped API, never public.
+    author: { id: userIdToWire(c.authorUserId), email: authorEmail },
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
     anchor: {

@@ -24,6 +24,13 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** The human label for a version's uploader (ADR-0063 author display): the
+ *  resolved email when available, else a stable "Unknown user" fallback —
+ *  never the raw `user_…` id (`uploaded_by`) that used to render here. */
+export function versionAuthorLabel(v: Pick<VersionWire, "author">): string {
+  return v.author?.email ?? "Unknown user";
+}
+
 function scanBadge(status: string) {
   if (status === "clean") return <Badge tone="success">clean</Badge>;
   if (status === "pending") return <Badge tone="neutral">pending</Badge>;
@@ -114,7 +121,7 @@ export function VersionsPanel({
             <div>
               <p className="font-medium text-fg">v{v.version_no}</p>
               <p className="text-xs text-subtle">
-                {v.uploaded_by} · {formatTimestamp(v.uploaded_at)} · {v.origin}
+                {versionAuthorLabel(v)} · {formatTimestamp(v.uploaded_at)} · {v.origin}
               </p>
             </div>
             {scanBadge(v.scan_status)}

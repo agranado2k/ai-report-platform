@@ -46,6 +46,7 @@ const commentResource = (overrides: Partial<Comment> = {}) => {
     id: commentIdToWire(c.id),
     report_id: reportIdToWire(c.reportId),
     author_id: userIdToWire(c.authorUserId),
+    author: { id: userIdToWire(c.authorUserId), email: null },
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
     anchor: {
@@ -124,6 +125,21 @@ describe("listCommentsToHttp", () => {
       data: [commentResource({ id: commentId(C2) }), commentResource({ id: commentId(C1) })],
       has_more: true,
     });
+  });
+
+  it("folds each comment's resolved author email in from the emailByAuthor map", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const emailByAuthor = new Map([[userId(U1), "alice@example.com"]]);
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, emailByAuthor);
+    const data = (res.body as { data: { author: { id: string; email: string | null } }[] }).data;
+    expect(data[0]?.author).toEqual({ id: userIdToWire(userId(U1)), email: "alice@example.com" });
+  });
+
+  it("falls back to author.email null when the map has no entry for the author", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, new Map());
+    const data = (res.body as { data: { author: { email: string | null } }[] }).data;
+    expect(data[0]?.author.email).toBeNull();
   });
 
   it("propagates a NotAllowed (cross-org) error as a problem", () => {

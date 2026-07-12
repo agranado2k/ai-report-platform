@@ -27,14 +27,16 @@
 // echoed for the configured VIEW_ORIGIN, and an `OPTIONS` preflight answered
 // before any auth runs.
 import { listReportVersions } from "arp-application";
-import { err, makeVersionId, validationError } from "arp-domain";
+import { err, makeVersionId, ok, validationError } from "arp-domain";
 import { listReportVersionsToHttp, parseCursorParams, uploadResultToHttp } from "arp-http";
 import type { PMDocJson } from "arp-report-html";
-import { deps, viewOrigin } from "../server/container.server";
+import { resolveAuthorEmails } from "../server/author-email.server";
+import { deps, identityStore, viewOrigin } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 import { reassembleAndSaveEditedVersion } from "../server/save-edited-version.server";
+import { uniqueVersionAuthorIds } from "../server/version-dto.server";
 
 const ALLOWED_METHODS = "GET, POST, OPTIONS";
 
@@ -43,18 +45,32 @@ export const loader = corsRoute(
   handle({
     mode: "read",
     slug: true,
-    run: ({ args, actor, slug }) => {
+    run: async ({ args, actor, slug }) => {
       const url = new URL(args.request.url);
       const cursor = parseCursorParams(url.searchParams, makeVersionId);
       if (!cursor.ok) return cursor; // malformed cursor → 422
 
-      return listReportVersions(
+      const page = await listReportVersions(
         { reports: deps().reports },
         { orgId: actor.orgId },
         { slug, ...cursor.value },
       );
+      if (!page.ok) return page;
+
+      // ADR-0063 author display: resolve each unique uploader id → email (ONE
+      // IdentityStore round-trip per distinct author), fold onto the wire below.
+      const emailByAuthor = await resolveAuthorEmails(
+        uniqueVersionAuthorIds(page.value.items),
+        identityStore(),
+      );
+      return ok({ ...page.value, emailByAuthor });
     },
-    toHttp: (result) => listReportVersionsToHttp(result, wireContext()),
+    toHttp: (result) =>
+      listReportVersionsToHttp(
+        result,
+        wireContext(),
+        result.ok ? result.value.emailByAuthor : undefined,
+      ),
   }),
 );
 

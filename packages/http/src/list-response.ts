@@ -3,7 +3,7 @@
 // list envelope (`{ object: "list", data: [...], has_more }`) or an
 // application/problem+json error. Field names snake_case; internal org id never sent.
 import type { CommentPage, FolderPage, ReportPage, VersionPage } from "arp-application";
-import type { AppError, Result } from "arp-domain";
+import type { AppError, Result, UserId } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import {
   commentBody,
@@ -53,6 +53,7 @@ export function listFoldersToHttp(
 export function listReportVersionsToHttp(
   result: Result<VersionPage, AppError>,
   ctx: WireContext,
+  emailByAuthor?: ReadonlyMap<UserId, string | null>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   const { items, hasMore } = result.value;
@@ -60,7 +61,7 @@ export function listReportVersionsToHttp(
     status: 200,
     contentType: "application/json",
     body: listBody(
-      items.map((v) => versionBody(v, ctx)),
+      items.map((v) => versionBody(v, ctx, emailByAuthor?.get(v.uploadedBy) ?? null)),
       hasMore,
     ),
   };
@@ -72,6 +73,7 @@ export function listReportVersionsToHttp(
 export function listCommentsToHttp(
   result: Result<CommentPage, AppError>,
   ctx: WireContext,
+  emailByAuthor?: ReadonlyMap<UserId, string | null>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   const { items, hasMore } = result.value;
@@ -79,7 +81,7 @@ export function listCommentsToHttp(
     status: 200,
     contentType: "application/json",
     body: listBody(
-      items.map((c) => commentBody(c, ctx)),
+      items.map((c) => commentBody(c, ctx, emailByAuthor?.get(c.authorUserId) ?? null)),
       hasMore,
     ),
   };
