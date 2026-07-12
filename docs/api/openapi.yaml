@@ -802,16 +802,21 @@ paths:
 
   /api/v1/reports/{slug}/comments/{comment_id}:
     patch:
-      operationId: resolveComment
+      operationId: patchComment
       tags: [Comments]
-      summary: Resolve a comment
+      summary: Resolve or edit a comment
       description: >
-        Marks a comment resolved (ADR-0064 §3). Idempotent — resolving an
-        already-resolved comment is a no-op. Authorized by a DIFFERENT rule
-        than create/reply: the comment's AUTHOR or the report's OWNER (not
+        PATCH is OVERLOADED on the request-body shape (ADR-0064 §7): a body
+        carrying `body` and/or `intent` EDITS those fields; an empty/absent
+        body RESOLVES the comment (idempotent — resolving an already-resolved
+        comment is a no-op). Both paths are authorized by a DIFFERENT rule than
+        create/reply: the comment's AUTHOR or the report's OWNER (not
         `canWrite`) — the owner moderates every comment on their report. An
-        `editToken` actor resolves under their real, mirrored `userId`, so
-        this rule applies to them identically. CORS-enabled for
+        `editToken` actor acts under their real, mirrored `userId`, so this
+        rule applies to them identically. Editing is v1-scoped to `body` +
+        `intent`; the anchor is immutable and there is no `edited_at` indicator
+        yet. A present `body` must be a non-empty string, and a present `intent`
+        must be a valid value (both → 422 otherwise). CORS-enabled for
         `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
@@ -830,15 +835,37 @@ paths:
           required: true
           schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
           description: The comment's External Id (ADR-0052).
+      requestBody:
+        required: false
+        description: >
+          Omit entirely (or send an empty object) to RESOLVE. Send `body` and/or
+          `intent` to EDIT those fields.
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  description: New comment text (non-empty).
+                intent:
+                  type: string
+                  enum: [note, enhancement, add, remove]
+                  description: New comment intent.
+              additionalProperties: false
       responses:
         '200':
-          description: The resolved comment resource.
+          description: The resolved or edited comment resource.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comment' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
     delete:
       operationId: deleteComment
