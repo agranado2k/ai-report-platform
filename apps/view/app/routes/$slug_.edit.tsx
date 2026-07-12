@@ -215,10 +215,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // versions, diff — ../edit/*-client.ts, all copying ../edit/save-edit.ts's
   // pattern). This is safe DESPITE the token being readable by this page's
   // own JS, because ALL untrusted content — the report body in the editor
-  // AND in View mode, and the visual diff — renders ONLY inside a sandboxed
+  // and the visual diff — renders ONLY inside a sandboxed
   // iframe with no `allow-scripts` (packages/editor/src/ReportEditor.tsx for
   // the editor; ../edit/components/SandboxedHtml.tsx, using the stricter
-  // `sandbox=""`, for View mode and Compare). Those iframes execute no
+  // `sandbox=""`, for Compare). Those iframes execute no
   // script of their own and cannot reach into the PARENT document's JS
   // context (the one holding `editToken`) — the token's real exposure
   // boundary is instead this route's OWN CSP (`editViewHeaders`'s

@@ -8,7 +8,10 @@
 // there the bar shows just a "← Back to document" button.
 import { Button } from "arp-ui";
 
-export type ViewerMode = "edit" | "view" | "diff";
+// Only two live states on /edit: always-editing, or Compare (visual diff).
+// View mode was removed with its toggle — keep the union at exactly the two
+// reachable states so a future edit can't silently re-introduce a dead branch.
+export type ViewerMode = "edit" | "diff";
 
 export interface TopBarProps {
   readonly docTitle: string;

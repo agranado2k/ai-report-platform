@@ -1,5 +1,5 @@
-// Renders an already-reassembled, untrusted report HTML document (View mode,
-// or a version-diff's HTML reinjected into the report's shell) inside a
+// Renders an already-reassembled, untrusted report HTML document (a
+// version-diff's HTML reinjected into the report's shell, for Compare) inside a
 // FULLY sandboxed iframe (unified-experience epic, F-1 — claude-review #183 /
 // ADR-0063's "4c client" note). This is the read-only sibling of
 // `ReportEditor`'s own sandboxed `srcDoc` iframe: same CSP-injection
