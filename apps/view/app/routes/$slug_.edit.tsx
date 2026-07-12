@@ -48,7 +48,6 @@ import { makeSlug, versionIdToWire } from "arp-domain";
 import { type EditorSelection, ReportEditor } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
-import { Card } from "arp-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
@@ -447,7 +446,7 @@ export default function EditReport() {
     // TopBar/ReportEditor at all) on every "can't render" branch above, so
     // this element's presence is equivalent to reaching the "render" decision
     // kind, i.e. the et= token round-trip + APP_ORIGIN wiring both worked.
-    <div className="flex min-h-screen flex-col" data-testid="unified-editor">
+    <div className="flex h-dvh flex-col overflow-hidden" data-testid="unified-editor">
       <TopBar
         docTitle={docTitle}
         mode={mode}
@@ -458,81 +457,92 @@ export default function EditReport() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-auto p-8">
+        {/* The document pane fills the viewport height and scrolls on its OWN
+            (the report iframe carries the scroll), edge-to-edge with no chrome
+            padding — it should read like a real web page, not a card in a form. */}
+        <main className="min-w-0 flex-1 overflow-hidden">
           {/* ReportEditor stays mounted at ALL times (even when hidden) so
-              in-progress edits are never lost by switching to View/Compare —
-              the mode switch only toggles visibility via CSS. */}
-          <div className={mode === "edit" ? "" : "hidden"}>
-            <Card className="p-8">
-              <ReportEditor
-                key={slug}
-                initialDoc={doc as PMDocJson}
-                shell={shell}
-                comments={highlightComments}
-                onChange={(next) => {
-                  docRef.current = next;
-                }}
-                onSelectionChange={setSelection}
-                className="w-full min-h-[32rem] rounded-card border border-border"
-              />
-            </Card>
+              in-progress edits are never lost by switching to Compare — the mode
+              switch only toggles visibility via CSS. `h-full` makes the iframe
+              fill the pane so the report body (inside it) is what scrolls. */}
+          <div className={mode === "edit" ? "h-full" : "hidden"}>
+            <ReportEditor
+              key={slug}
+              initialDoc={doc as PMDocJson}
+              shell={shell}
+              comments={highlightComments}
+              onChange={(next) => {
+                docRef.current = next;
+              }}
+              onSelectionChange={setSelection}
+              className="h-full w-full border-0"
+            />
           </div>
 
           {mode === "diff" && diffData && diffHtml ? (
-            <Card className="p-8">
-              <p className="mb-3 text-sm font-medium text-fg">
-                Comparing v{diffData.from.version_no} → v{diffData.to.version_no}
-              </p>
-              {diffData.diff_mode === "fallback" && diffData.label ? (
-                <p className="mb-4 rounded-control border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-                  {diffData.label}
+            <div className="flex h-full flex-col">
+              <div className="shrink-0 border-b border-border px-6 py-3">
+                <p className="text-sm font-medium text-fg">
+                  Comparing v{diffData.from.version_no} → v{diffData.to.version_no}
                 </p>
-              ) : null}
+                {diffData.diff_mode === "fallback" && diffData.label ? (
+                  <p className="mt-2 rounded-control border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                    {diffData.label}
+                  </p>
+                ) : null}
+              </div>
               <SandboxedHtml
                 html={diffHtml}
                 title="Version diff"
-                className="w-full min-h-[32rem] rounded-card border border-border"
+                className="min-h-0 w-full flex-1 border-0"
               />
-            </Card>
+            </div>
           ) : null}
         </main>
 
         {panel.open ? (
-          <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-border bg-surface p-6">
-            <PanelHeader
-              tab={panel.tab}
-              unresolvedCount={activeCommentCount}
-              onSelectTab={(tab) => setPanel((p) => selectPanelTab(p, tab))}
-              onClose={() => setPanel((p) => closePanel(p))}
-            />
-            {panel.tab === "comments" ? (
-              <CommentsPanel
-                appOrigin={appOrigin}
-                slug={slug}
-                editToken={editToken}
-                currentVersionId={versionId}
-                comments={comments}
-                onCommentsChange={setComments}
-                pendingSelection={mode === "edit" ? selection : null}
-                onSelectionConsumed={() => setSelection(null)}
+          // Full-height panel: the tab header stays put, and ONLY the
+          // comments/versions list below it scrolls — its own independent
+          // scrollbar, separate from the document pane's.
+          <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-surface">
+            <div className="shrink-0 px-4 pt-4">
+              <PanelHeader
+                tab={panel.tab}
+                unresolvedCount={activeCommentCount}
+                onSelectTab={(tab) => setPanel((p) => selectPanelTab(p, tab))}
+                onClose={() => setPanel((p) => closePanel(p))}
               />
-            ) : (
-              <VersionsPanel
-                appOrigin={appOrigin}
-                slug={slug}
-                editToken={editToken}
-                versions={versions}
-                onCompare={(diff) => {
-                  setDiffData(diff);
-                  setMode("diff");
-                }}
-              />
-            )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+              {panel.tab === "comments" ? (
+                <CommentsPanel
+                  appOrigin={appOrigin}
+                  slug={slug}
+                  editToken={editToken}
+                  currentVersionId={versionId}
+                  comments={comments}
+                  onCommentsChange={setComments}
+                  pendingSelection={mode === "edit" ? selection : null}
+                  onSelectionConsumed={() => setSelection(null)}
+                />
+              ) : (
+                <VersionsPanel
+                  appOrigin={appOrigin}
+                  slug={slug}
+                  editToken={editToken}
+                  versions={versions}
+                  onCompare={(diff) => {
+                    setDiffData(diff);
+                    setMode("diff");
+                  }}
+                />
+              )}
+            </div>
           </aside>
         ) : (
-          // Collapsed-edge affordance: a `‹` chevron pinned to the right of the
-          // document, badged with the active-comment count. Opens to Comments.
-          <div className="shrink-0 py-6">
+          // Collapsed-edge affordance: a `‹` chevron pinned to the top-right of
+          // the document, badged with the active-comment count. Opens to Comments.
+          <div className="shrink-0">
             <PanelToggle
               unresolvedCount={activeCommentCount}
               onOpen={() => setPanel(openPanel("comments"))}
