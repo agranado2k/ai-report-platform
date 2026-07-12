@@ -176,6 +176,37 @@ describe("replyToComment", () => {
     expect(parsed.parent_comment_id).toBe(COMMENT.id);
     expect(result).toEqual({ ok: true, comment: reply });
   });
+
+  it("includes the intent in the POST body when supplied, and omits it otherwise", async () => {
+    const reply: CommentWire = { ...COMMENT, id: "comment_reply", parent_id: COMMENT.id };
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonResponse(201, reply));
+
+    await replyToComment({
+      ...BASE,
+      fetchImpl,
+      parentCommentId: COMMENT.id,
+      body: "please add this",
+      intent: "add",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withIntent = JSON.parse(
+      (fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(withIntent.intent).toBe("add");
+    expect(withIntent.parent_comment_id).toBe(COMMENT.id);
+
+    await replyToComment({
+      ...BASE,
+      fetchImpl,
+      parentCommentId: COMMENT.id,
+      body: "no intent here",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withoutIntent = JSON.parse(
+      (fetchImpl.mock.calls[1] as [string, RequestInit])[1].body as string,
+    );
+    expect("intent" in withoutIntent).toBe(false);
+  });
 });
 
 describe("resolveComment", () => {

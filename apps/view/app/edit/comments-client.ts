@@ -119,7 +119,10 @@ export interface ReplyCommentInput extends AddCommentInput {
 /** POST a reply — a comment resource on the wire too, just with `parent_id`
  *  set (single-level threading, ADR-0064). */
 export async function replyToComment(input: ReplyCommentInput): Promise<CommentWriteResult> {
-  return postComment(input, { parent_comment_id: input.parentCommentId });
+  return postComment(input, {
+    parent_comment_id: input.parentCommentId,
+    ...(input.intent === undefined ? {} : { intent: input.intent }),
+  });
 }
 
 export interface ResolveCommentInput extends CommentsRequestInput {

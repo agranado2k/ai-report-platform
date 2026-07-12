@@ -13,6 +13,7 @@
 // append/replace) rather than triggering a full list refetch — one fewer
 // network round-trip, and no window where a failed refetch would silently
 // leave a stale list after a successful write.
+import { COMMENT_INTENTS } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
@@ -47,14 +48,22 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-/** The comment-intent options surfaced in the composer (ADR-0064 Decision 8).
- *  `note` is the default. Labels are human-facing; the value is the wire enum. */
-const INTENT_OPTIONS: readonly { readonly value: string; readonly label: string }[] = [
-  { value: "note", label: "Note" },
-  { value: "enhancement", label: "Enhance" },
-  { value: "add", label: "Add" },
-  { value: "remove", label: "Remove" },
-];
+/** Human-facing labels for each intent value. The VALUES themselves are
+ *  derived from the domain's `COMMENT_INTENTS` (below) so a new intent added
+ *  to the enum can't leave the composer out of sync; this map only carries the
+ *  display text. A value missing a label falls back to the value itself. */
+const INTENT_LABELS: Readonly<Record<string, string>> = {
+  note: "Note",
+  enhancement: "Enhance",
+  add: "Add",
+  remove: "Remove",
+};
+
+/** The comment-intent options surfaced in the composer (ADR-0064 Decision 8),
+ *  derived from the domain enum so they never drift. `note` is the default;
+ *  the value is the wire enum, the label is human-facing. */
+const INTENT_OPTIONS: readonly { readonly value: string; readonly label: string }[] =
+  COMMENT_INTENTS.map((value) => ({ value, label: INTENT_LABELS[value] ?? value }));
 
 function ErrorText({ message }: { readonly message: string | null }) {
   if (!message) return null;
@@ -184,6 +193,7 @@ function CommentThread({
 }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const [replyIntent, setReplyIntent] = useState("note");
   const [replyBusy, setReplyBusy] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [resolveBusy, setResolveBusy] = useState(false);
@@ -201,6 +211,7 @@ function CommentThread({
       editToken,
       parentCommentId: root.id,
       body: replyBody,
+      intent: replyIntent,
       anchor: {
         versionId: root.anchor.version_pinned.version_id,
         textQuote: root.anchor.version_pinned.text_quote,
@@ -213,6 +224,7 @@ function CommentThread({
       return;
     }
     setReplyBody("");
+    setReplyIntent("note");
     setReplyOpen(false);
     onCommentsChange([...comments, result.comment]);
   };
@@ -267,23 +279,41 @@ function CommentThread({
             rows={2}
             className="w-full"
           />
-          <div className="mt-2 flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setReplyOpen(false)}
-              disabled={replyBusy}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={submitReply}
-              disabled={replyBusy || !replyBody.trim()}
-            >
-              {replyBusy ? "Posting…" : "Reply"}
-            </Button>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 text-xs text-subtle">
+              <span id={`reply-intent-label-${root.id}`}>Intent</span>
+              <Select
+                size="sm"
+                aria-labelledby={`reply-intent-label-${root.id}`}
+                value={replyIntent}
+                onChange={(e) => setReplyIntent(e.target.value)}
+                disabled={replyBusy}
+              >
+                {INTENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setReplyOpen(false)}
+                disabled={replyBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={submitReply}
+                disabled={replyBusy || !replyBody.trim()}
+              >
+                {replyBusy ? "Posting…" : "Reply"}
+              </Button>
+            </div>
           </div>
         </div>
       ) : (
