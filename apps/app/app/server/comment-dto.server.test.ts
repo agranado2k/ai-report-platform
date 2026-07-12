@@ -14,6 +14,7 @@ function comment(id: string, author = authorA): Comment {
     reportId: reportId("33333333-3333-7333-8333-333333333333"),
     authorUserId: author,
     body: "hi",
+    intent: "note",
     anchor: {
       versionPinned: {
         versionId: versionId("44444444-4444-7444-8444-444444444444"),
