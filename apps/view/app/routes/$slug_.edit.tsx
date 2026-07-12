@@ -446,7 +446,7 @@ export default function EditReport() {
     // TopBar/ReportEditor at all) on every "can't render" branch above, so
     // this element's presence is equivalent to reaching the "render" decision
     // kind, i.e. the et= token round-trip + APP_ORIGIN wiring both worked.
-    <div className="flex h-screen flex-col overflow-hidden" data-testid="unified-editor">
+    <div className="flex h-dvh flex-col overflow-hidden" data-testid="unified-editor">
       <TopBar
         docTitle={docTitle}
         mode={mode}
