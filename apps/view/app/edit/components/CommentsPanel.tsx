@@ -57,10 +57,6 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-/** Human-facing labels for each intent value. The VALUES themselves are
- *  derived from the domain's `COMMENT_INTENTS` (below) so a new intent added
- *  to the enum can't leave the composer out of sync; this map only carries the
- *  display text. A value missing a label falls back to the value itself. */
 /** Human-facing labels, keyed by the domain `Intent` union. Typed as
  *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
  *  fifth member to the domain enum breaks the build here until it gets a label
