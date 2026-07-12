@@ -9,6 +9,7 @@
 // `SandboxedHtml` (F-1) — this component never touches the diff HTML.
 import { Badge, Button, Select } from "arp-ui";
 import { useState } from "react";
+import { initialsFromEmail, relativeTime } from "../comment-format";
 import { getDiff } from "../diff-client";
 import type { DiffWire, VersionWire } from "../wire-types";
 
@@ -29,6 +30,21 @@ function formatTimestamp(iso: string): string {
  *  never the raw `user_…` id (`uploaded_by`) that used to render here. */
 export function versionAuthorLabel(v: Pick<VersionWire, "author">): string {
   return v.author?.email ?? "Unknown user";
+}
+
+/** A small circular initials avatar for a version's uploader
+ *  (comment-display-polish) — mirrors the Comments panel. Initials come from
+ *  the email local-part (the only identity available); `?` when absent.
+ *  Decorative — the email is rendered as text beside it. */
+function Avatar({ email }: { readonly email: string | null }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-5 w-5 shrink-0 select-none items-center justify-center rounded-full bg-surface-raised text-[9px] font-semibold text-subtle"
+    >
+      {initialsFromEmail(email)}
+    </span>
+  );
 }
 
 function scanBadge(status: string) {
@@ -118,11 +134,16 @@ export function VersionsPanel({
             key={v.id}
             className="flex items-center justify-between rounded-control border border-border p-2 text-sm"
           >
-            <div>
-              <p className="font-medium text-fg">v{v.version_no}</p>
-              <p className="text-xs text-subtle">
-                {versionAuthorLabel(v)} · {formatTimestamp(v.uploaded_at)} · {v.origin}
-              </p>
+            <div className="flex min-w-0 items-center gap-2">
+              <Avatar email={v.author?.email ?? null} />
+              <div className="min-w-0">
+                <p className="font-medium text-fg">v{v.version_no}</p>
+                <p className="truncate text-xs text-subtle">
+                  {versionAuthorLabel(v)} ·{" "}
+                  <span title={formatTimestamp(v.uploaded_at)}>{relativeTime(v.uploaded_at)}</span>{" "}
+                  · {v.origin}
+                </p>
+              </div>
             </div>
             {scanBadge(v.scan_status)}
           </li>
