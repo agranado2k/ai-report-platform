@@ -13,6 +13,7 @@ export * from "./use-cases/delete-comment";
 export * from "./use-cases/delete-folder";
 export * from "./use-cases/delete-report";
 export * from "./use-cases/drain-scans";
+export * from "./use-cases/edit-comment";
 export * from "./use-cases/get-acl";
 export * from "./use-cases/get-report";
 export * from "./use-cases/get-report-acl";

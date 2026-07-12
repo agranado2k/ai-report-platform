@@ -22,6 +22,7 @@ export type AuditAction =
   | "comment.added"
   | "comment.replied"
   | "comment.resolved"
+  | "comment.edited"
   | "comment.deleted"
   | "api_key.created"
   | "api_key.revoked";
