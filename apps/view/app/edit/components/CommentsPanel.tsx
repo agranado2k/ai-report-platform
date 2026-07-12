@@ -21,6 +21,7 @@ import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
+import { initialsFromEmail, relativeTime } from "../comment-format";
 import { addComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
 
@@ -56,10 +57,6 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-/** Human-facing labels for each intent value. The VALUES themselves are
- *  derived from the domain's `COMMENT_INTENTS` (below) so a new intent added
- *  to the enum can't leave the composer out of sync; this map only carries the
- *  display text. A value missing a label falls back to the value itself. */
 /** Human-facing labels, keyed by the domain `Intent` union. Typed as
  *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
  *  fifth member to the domain enum breaks the build here until it gets a label
@@ -86,6 +83,36 @@ function ErrorText({ message }: { readonly message: string | null }) {
     <p className="mt-1 text-xs text-danger" role="alert">
       ✗ {message}
     </p>
+  );
+}
+
+/** A small circular initials avatar (comment-display-polish). Only the email
+ *  is available (no display-name), so initials come from its local-part; `?`
+ *  when absent. Decorative — the author's email is rendered as text right
+ *  beside it, so the avatar is `aria-hidden`. */
+function Avatar({ email }: { readonly email: string | null }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-5 w-5 shrink-0 select-none items-center justify-center rounded-full bg-surface-raised text-[9px] font-semibold text-subtle"
+    >
+      {initialsFromEmail(email)}
+    </span>
+  );
+}
+
+/** The comment's intent as a chip (comment-display-polish). `note` is the
+ *  common default — kept calm by omitting the chip entirely; every other intent
+ *  gets a visible `brand` badge with its human label. `intent` is a bounded
+ *  enum on the wire (typed `string`); the label lookup falls back to the raw
+ *  value, and React auto-escapes it either way. */
+function IntentChip({ intent }: { readonly intent: string }) {
+  if (intent === "note") return null;
+  const label = INTENT_LABELS[intent as Intent] ?? intent;
+  return (
+    <Badge tone="brand" className="text-[10px]">
+      {label}
+    </Badge>
   );
 }
 
@@ -259,7 +286,11 @@ function CommentThread({
   return (
     <Card className="mb-3 p-3">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-fg">{authorLabel(root)}</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Avatar email={root.author?.email ?? null} />
+          <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
+          <IntentChip intent={root.intent} />
+        </div>
         {root.resolved_at ? (
           <Badge tone="success">Resolved</Badge>
         ) : (
@@ -270,13 +301,21 @@ function CommentThread({
         "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
       </p>
       <p className="text-sm text-fg">{root.body}</p>
-      <p className="mt-1 text-[10px] text-subtle">{formatTimestamp(root.created_at)}</p>
+      <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
+        {relativeTime(root.created_at)}
+      </p>
 
       {replies.map((reply) => (
         <div key={reply.id} className="mt-2 border-l border-border pl-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-fg">{authorLabel(reply)}</span>
-            <span className="text-[10px] text-subtle">{formatTimestamp(reply.created_at)}</span>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Avatar email={reply.author?.email ?? null} />
+              <span className="truncate text-xs font-medium text-fg">{authorLabel(reply)}</span>
+              <IntentChip intent={reply.intent} />
+            </div>
+            <span className="text-[10px] text-subtle" title={formatTimestamp(reply.created_at)}>
+              {relativeTime(reply.created_at)}
+            </span>
           </div>
           <p className="text-sm text-fg">{reply.body}</p>
         </div>
