@@ -86,6 +86,7 @@ export function commentBody(c: Comment, ctx: WireContext) {
     author_id: userIdToWire(c.authorUserId),
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
+    intent: c.intent,
     anchor: {
       version_pinned: {
         version_id: versionIdToWire(c.anchor.versionPinned.versionId),

@@ -94,6 +94,29 @@ describe("createComment", () => {
     if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 
+  it("defaults intent to note when absent, and carries a supplied intent", () => {
+    const def = createComment({
+      id: rootId,
+      reportId: report,
+      authorUserId: author,
+      body: "hi",
+      anchor,
+      createdAt: 1,
+    });
+    expect(def.ok && def.value.comment.intent).toBe("note");
+
+    const enhance = createComment({
+      id: rootId,
+      reportId: report,
+      authorUserId: author,
+      body: "hi",
+      anchor,
+      intent: "enhancement",
+      createdAt: 1,
+    });
+    expect(enhance.ok && enhance.value.comment.intent).toBe("enhancement");
+  });
+
   it("accepts an anchor carrying an opaque `relative` payload", () => {
     const withRelative: Anchor = { ...anchor, relative: { pos: 42, type: "yjs-relative" } };
     const r = createComment({
@@ -170,6 +193,28 @@ describe("replyToComment", () => {
     });
     expect(secondReply.ok).toBe(false);
     if (!secondReply.ok) expect(secondReply.error.kind).toBe("ValidationError");
+  });
+
+  it("defaults a reply's intent to note, and carries a supplied one", () => {
+    const root = rootComment();
+    const def = replyToComment(root, {
+      id: replyId,
+      authorUserId: replier,
+      body: "a reply",
+      anchor,
+      createdAt: 2000,
+    });
+    expect(def.ok && def.value.comment.intent).toBe("note");
+
+    const add = replyToComment(root, {
+      id: replyId,
+      authorUserId: replier,
+      body: "a reply",
+      anchor,
+      intent: "add",
+      createdAt: 2000,
+    });
+    expect(add.ok && add.value.comment.intent).toBe("add");
   });
 
   it("validates the reply body and anchor same as createComment", () => {

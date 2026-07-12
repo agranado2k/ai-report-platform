@@ -16,6 +16,7 @@ import {
   type AppError,
   type Comment,
   createComment,
+  type Intent,
   ok,
   type Result,
   type Slug,
@@ -46,6 +47,9 @@ export interface AddCommentInput {
   readonly slug: Slug;
   readonly body: string;
   readonly anchor: Anchor;
+  /** What the author wants done with the comment (ADR-0064 Decision 8).
+   *  Optional — the domain defaults an absent intent to `note`. */
+  readonly intent?: Intent;
 }
 
 export async function addComment(
@@ -62,6 +66,7 @@ export async function addComment(
     authorUserId: actor.userId,
     body: input.body,
     anchor: input.anchor,
+    intent: input.intent,
     createdAt: deps.clock.now(),
   });
   if (!emission.ok) return emission;

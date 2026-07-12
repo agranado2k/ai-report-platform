@@ -14,7 +14,7 @@
 // network round-trip, and no window where a failed refetch would silently
 // leave a stale list after a successful write.
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
-import { Badge, Button, Card, Textarea } from "arp-ui";
+import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
 import { addComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
@@ -47,6 +47,15 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** The comment-intent options surfaced in the composer (ADR-0064 Decision 8).
+ *  `note` is the default. Labels are human-facing; the value is the wire enum. */
+const INTENT_OPTIONS: readonly { readonly value: string; readonly label: string }[] = [
+  { value: "note", label: "Note" },
+  { value: "enhancement", label: "Enhance" },
+  { value: "add", label: "Add" },
+  { value: "remove", label: "Remove" },
+];
+
 function ErrorText({ message }: { readonly message: string | null }) {
   if (!message) return null;
   return (
@@ -76,6 +85,7 @@ function NewCommentComposer({
   readonly onSubmitted: () => void;
 }) {
   const [body, setBody] = useState("");
+  const [intent, setIntent] = useState("note");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +104,7 @@ function NewCommentComposer({
       slug,
       editToken,
       body,
+      intent,
       anchor: {
         versionId: anchor.versionId,
         textQuote: anchor.textQuote,
@@ -106,6 +117,7 @@ function NewCommentComposer({
       return;
     }
     setBody("");
+    setIntent("note");
     onCommentsChange([...comments, result.comment]);
     onSubmitted();
   };
@@ -123,13 +135,31 @@ function NewCommentComposer({
         className="w-full"
       />
       <ErrorText message={error} />
-      <div className="mt-2 flex justify-end gap-2">
-        <Button variant="secondary" size="sm" onClick={onSubmitted} disabled={busy}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" onClick={submit} disabled={busy || !body.trim()}>
-          {busy ? "Posting…" : "Comment"}
-        </Button>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-xs text-subtle">
+          <span id="comment-intent-label">Intent</span>
+          <Select
+            size="sm"
+            aria-labelledby="comment-intent-label"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            disabled={busy}
+          >
+            {INTENT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onSubmitted} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={submit} disabled={busy || !body.trim()}>
+            {busy ? "Posting…" : "Comment"}
+          </Button>
+        </div>
       </div>
     </Card>
   );

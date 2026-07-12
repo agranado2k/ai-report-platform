@@ -108,6 +108,26 @@ describe("addComment use case", () => {
     });
   });
 
+  it("defaults intent to note when omitted, and threads a supplied intent to the domain", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "gggggggggg"));
+
+    const noted = await addComment(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      body: "a plain note",
+      anchor,
+    });
+    expect(noted.ok && noted.value.intent).toBe("note");
+
+    const enhanced = await addComment(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      body: "please enhance this",
+      anchor,
+      intent: "enhancement",
+    });
+    expect(enhanced.ok && enhanced.value.intent).toBe("enhancement");
+  });
+
   it("rejects a non-owner with no write grant with NotAllowed (canWrite = isOwner OR hasWriteGrant, ADR-0064 §3 / ADR-0060 §4)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report(orgA, "bbbbbbbbbb"));

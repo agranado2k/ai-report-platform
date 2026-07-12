@@ -108,6 +108,34 @@ describe("replyToComment use case", () => {
     });
   });
 
+  it("defaults a reply's intent to note, and threads a supplied intent to the domain", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("ffffffffff"));
+    const root = await addComment(deps, ownerActor, {
+      slug: slug("ffffffffff"),
+      body: "root",
+      anchor,
+    });
+    if (!root.ok) throw new Error("fixture failed");
+
+    const noted = await replyToComment(deps, ownerActor, {
+      slug: slug("ffffffffff"),
+      parentCommentId: root.value.id,
+      body: "a reply",
+      anchor,
+    });
+    expect(noted.ok && noted.value.intent).toBe("note");
+
+    const remove = await replyToComment(deps, ownerActor, {
+      slug: slug("ffffffffff"),
+      parentCommentId: root.value.id,
+      body: "drop this",
+      anchor,
+      intent: "remove",
+    });
+    expect(remove.ok && remove.value.intent).toBe("remove");
+  });
+
   it("rejects replying to a reply (single-level threading, ADR-0064 Decision 2/4)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report("bbbbbbbbbb"));

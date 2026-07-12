@@ -13,6 +13,7 @@ export * from "./events";
 export * from "./external-id";
 export * from "./folder";
 export * from "./folder-id";
+export * from "./intent";
 export * from "./magic-link";
 export * from "./org-key";
 export * from "./pipe";

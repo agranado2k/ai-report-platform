@@ -47,6 +47,8 @@ export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "delivered",
 // on an EXISTING enum; a brand-new enum type has precedent in migration 0009,
 // which added the `acl_mode` `private` value the same transaction-safe way).
 export const orgKindEnum = pgEnum("org_kind", ["personal", "team"]);
+// Comment intent (ADR-0064 Decision 8): what the author wants done with a comment.
+export const commentIntentEnum = pgEnum("comment_intent", ["note", "enhancement", "add", "remove"]);
 
 // timestamptz at millisecond precision (db-design.md → Conventions).
 const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
@@ -341,6 +343,9 @@ export const comments = pgTable(
       onDelete: "cascade",
     }),
     body: text("body").notNull(),
+    // What the author wants done with the comment (ADR-0064 Decision 8). A
+    // pre-existing comment (backfilled by the migration) reads as `note`.
+    intent: commentIntentEnum("intent").notNull().default("note"),
     anchorJson: jsonb("anchor_json").notNull(),
     resolvedAt: tstz("resolved_at"),
     createdAt: createdAt(),

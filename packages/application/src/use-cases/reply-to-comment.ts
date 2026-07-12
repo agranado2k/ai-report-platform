@@ -15,6 +15,7 @@ import {
   type Comment,
   type CommentId,
   err,
+  type Intent,
   notFound,
   ok,
   type Result,
@@ -47,6 +48,9 @@ export interface ReplyToCommentInput {
   readonly parentCommentId: CommentId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** What the author wants done with the reply (ADR-0064 Decision 8).
+   *  Optional — the domain defaults an absent intent to `note`. */
+  readonly intent?: Intent;
 }
 
 export async function replyToComment(
@@ -68,6 +72,7 @@ export async function replyToComment(
     authorUserId: actor.userId,
     body: input.body,
     anchor: input.anchor,
+    intent: input.intent,
     createdAt: deps.clock.now(),
   });
   if (!emission.ok) return emission;
