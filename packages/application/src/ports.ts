@@ -457,6 +457,22 @@ export interface ClerkIdentity {
   /** The session's active Clerk org, or null when the user has none yet. */
   readonly clerkOrgId: ClerkOrgId | null;
   readonly email: string;
+  /** The user's human display name as Clerk reports it (ADR-0063 author display) —
+   *  `fullName` / `firstName lastName` / `username`, whichever the adapter could
+   *  resolve, else null. Captured at JIT provisioning alongside the email; a
+   *  best-effort attribute (the wire falls back to email, then a generic label). */
+  readonly displayName: string | null;
+}
+
+/**
+ * A mirrored user's display identity — email + optional human name — resolved by
+ * internal `UserId` for author display (ADR-0063). Distinct from the write-grant
+ * `findEmailByUserId` seam: this one also carries the `displayName` column so the
+ * comments/versions list routes can surface a human name (falling back to email).
+ */
+export interface AuthorIdentity {
+  readonly email: string;
+  readonly displayName: string | null;
 }
 
 /** Our mirrored Identity & Access trio: a User, their Org, and that Org's Root folder. */
@@ -500,6 +516,10 @@ export interface IdentityStore {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
+    /** The user's human display name at first sight (ADR-0063), or null when Clerk
+     *  exposes none. Stored on the mirrored `users` row; refreshed (never nulled)
+     *  on a re-provision so a name captured later still lands. */
+    readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>>;
@@ -518,6 +538,15 @@ export interface IdentityStore {
    * user id is unknown (shouldn't happen for a resolved actor).
    */
   findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>>;
+  /**
+   * The mirrored user's display identity — email + optional `displayName` — by
+   * internal `UserId`, for author display (ADR-0063). One query resolves both
+   * columns (batch-friendly, mirroring `findEmailByUserId`'s single round-trip).
+   * Null when the user is unknown OR soft-deleted (same PII posture as
+   * `findEmailByUserId`: a since-deleted author must not leak name/email into the
+   * comments/versions author surfaces). `displayName` is null when none is stored.
+   */
+  findAuthorIdentityByUserId(userId: UserId): Promise<Result<AuthorIdentity | null, AppError>>;
   /**
    * Our internal `UserId` for an already-mirrored user with this email, or
    * null if none exists yet (ADR-0060 §2 — `grantWrite`'s opportunistic

@@ -28,7 +28,7 @@ import {
   validationError,
 } from "arp-domain";
 import { addCommentToHttp, listCommentsToHttp, parseCursorParams } from "arp-http";
-import { resolveAuthorEmails } from "../server/author-email.server";
+import { resolveAuthorIdentities } from "../server/author-email.server";
 import { uniqueCommentAuthorIds } from "../server/comment-dto.server";
 import { clock, commentRepo, deps, identityStore } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
@@ -78,16 +78,20 @@ export const loader = corsRoute(
       );
       if (!page.ok) return page;
 
-      // ADR-0063 author display: resolve each unique author id → email (ONE
-      // IdentityStore round-trip per distinct author), fold onto the wire below.
-      const emailByAuthor = await resolveAuthorEmails(
+      // ADR-0063 author display: resolve each unique author id → { name, email }
+      // (ONE IdentityStore round-trip per distinct author), fold onto the wire below.
+      const authorByUserId = await resolveAuthorIdentities(
         uniqueCommentAuthorIds(page.value.items),
         identityStore(),
       );
-      return ok({ ...page.value, emailByAuthor });
+      return ok({ ...page.value, authorByUserId });
     },
     toHttp: (result) =>
-      listCommentsToHttp(result, wireContext(), result.ok ? result.value.emailByAuthor : undefined),
+      listCommentsToHttp(
+        result,
+        wireContext(),
+        result.ok ? result.value.authorByUserId : undefined,
+      ),
   }),
 );
 

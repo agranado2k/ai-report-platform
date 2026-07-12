@@ -38,6 +38,7 @@ import type {
   ApiKeyStore,
   ApiKeySummary,
   AuditLogger,
+  AuthorIdentity,
   BlobFile,
   BlobStore,
   BundleProcessor,
@@ -603,6 +604,8 @@ export class InMemoryIdentityStore implements IdentityStore {
   // don't go through the Clerk provisioning flow.
   private readonly emailByUserId = new Map<UserId, string>();
   private readonly userIdByEmail = new Map<string, UserId>(); // normalized email → userId
+  // Internal-UserId → display name (ADR-0063 author display); null when unknown.
+  private readonly displayNameByUserId = new Map<UserId, string | null>();
   private readonly orgByClerkOrgId = new Map<string, OrgId>();
   private readonly rootFolderByOrgId = new Map<OrgId, FolderId>();
   /** Test-only introspection: the `kind` each mirrored org was created with
@@ -630,6 +633,7 @@ export class InMemoryIdentityStore implements IdentityStore {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
+    readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
@@ -641,7 +645,7 @@ export class InMemoryIdentityStore implements IdentityStore {
     // email (review #150 M-2 — grant matching must follow a changed address).
     const existing = this.byClerk.get(this.key(input.clerkUserId, input.clerkOrgId));
     if (existing) {
-      this.seedUser(existing.userId, input.email);
+      this.seedUser(existing.userId, input.email, input.displayName);
       return ok(existing);
     }
 
@@ -669,7 +673,7 @@ export class InMemoryIdentityStore implements IdentityStore {
       rootFolderId: rootFolderIdValue,
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
-    this.seedUser(provisioned.userId, input.email);
+    this.seedUser(provisioned.userId, input.email, input.displayName);
     return ok(provisioned);
   }
 
@@ -687,18 +691,28 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.emailByUserId.get(userId) ?? null);
   }
 
+  async findAuthorIdentityByUserId(
+    userId: UserId,
+  ): Promise<Result<AuthorIdentity | null, AppError>> {
+    const email = this.emailByUserId.get(userId);
+    if (email === undefined) return ok(null); // unknown / never-seeded → miss
+    return ok({ email, displayName: this.displayNameByUserId.get(userId) ?? null });
+  }
+
   async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
     return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
   }
 
-  /** Test-only seam: register a user's email directly, for fixtures (e.g.
-   *  write-grant tests) that need a resolvable user without a full Clerk
-   *  provisioning round-trip. */
-  seedUser(userId: UserId, email: string): void {
+  /** Test-only seam: register a user's email (and optional display name) directly,
+   *  for fixtures (e.g. write-grant tests) that need a resolvable user without a
+   *  full Clerk provisioning round-trip. A null/omitted `displayName` PRESERVES any
+   *  previously-seeded name (mirrors the real store's COALESCE on re-provision). */
+  seedUser(userId: UserId, email: string, displayName: string | null = null): void {
     const prev = this.emailByUserId.get(userId);
     if (prev) this.userIdByEmail.delete(prev.trim().toLowerCase());
     this.emailByUserId.set(userId, email);
     this.userIdByEmail.set(email.trim().toLowerCase(), userId);
+    if (displayName !== null) this.displayNameByUserId.set(userId, displayName);
   }
 }
 

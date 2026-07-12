@@ -96,6 +96,7 @@ Indexes: `clerk_org_id` unique, `plan`, `kind`.
 | `id` | uuid PK | UUIDv7 |
 | `clerk_user_id` | text | unique |
 | `email` | text | denormalized for pre-signup grant resolution |
+| `display_name` | text NULL | human name mirrored from Clerk at JIT provisioning (fullName / firstName lastName / username), for author display (ADR-0063); NULL when Clerk exposes none |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | Clerk `user.deleted` → soft delete (ADR-0054); terminal — never resurrected |
 

@@ -21,7 +21,7 @@ import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
-import { initialsFromEmail, relativeTime } from "../comment-format";
+import { authorInitials, relativeTime } from "../comment-format";
 import { addComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
 
@@ -45,12 +45,12 @@ export interface CommentsPanelProps {
   readonly onSelectionConsumed: () => void;
 }
 
-/** The human label for a comment's author (ADR-0063 author display): the
- *  resolved email when available, else a stable "Unknown user" fallback for a
- *  deleted/never-mirrored author — never the raw `user_…` id, which is exactly
- *  what this replaced. */
+/** The human label for a comment's author (ADR-0063 author display): the display
+ *  NAME when stored, else the resolved email, else a stable "Unknown user"
+ *  fallback for a deleted/never-mirrored author — never the raw `user_…` id,
+ *  which is exactly what this replaced. */
 export function authorLabel(c: Pick<CommentWire, "author">): string {
-  return c.author?.email ?? "Unknown user";
+  return c.author?.name ?? c.author?.email ?? "Unknown user";
 }
 
 function formatTimestamp(iso: string): string {
@@ -86,17 +86,17 @@ function ErrorText({ message }: { readonly message: string | null }) {
   );
 }
 
-/** A small circular initials avatar (comment-display-polish). Only the email
- *  is available (no display-name), so initials come from its local-part; `?`
- *  when absent. Decorative — the author's email is rendered as text right
- *  beside it, so the avatar is `aria-hidden`. */
-function Avatar({ email }: { readonly email: string | null }) {
+/** A small circular initials avatar (ADR-0063 author display). Initials come from
+ *  the display NAME when present, else the email local-part; `?` when neither.
+ *  Decorative — the author's name/email is rendered as text right beside it, so
+ *  the avatar is `aria-hidden`. */
+function Avatar({ name, email }: { readonly name: string | null; readonly email: string | null }) {
   return (
     <span
       aria-hidden="true"
       className="inline-flex h-5 w-5 shrink-0 select-none items-center justify-center rounded-full bg-surface-raised text-[9px] font-semibold text-subtle"
     >
-      {initialsFromEmail(email)}
+      {authorInitials(name, email)}
     </span>
   );
 }
@@ -287,7 +287,7 @@ function CommentThread({
     <Card className="mb-3 p-3">
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <Avatar email={root.author?.email ?? null} />
+          <Avatar name={root.author?.name ?? null} email={root.author?.email ?? null} />
           <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
           <IntentChip intent={root.intent} />
         </div>
@@ -309,7 +309,7 @@ function CommentThread({
         <div key={reply.id} className="mt-2 border-l border-border pl-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">
-              <Avatar email={reply.author?.email ?? null} />
+              <Avatar name={reply.author?.name ?? null} email={reply.author?.email ?? null} />
               <span className="truncate text-xs font-medium text-fg">{authorLabel(reply)}</span>
               <IntentChip intent={reply.intent} />
             </div>

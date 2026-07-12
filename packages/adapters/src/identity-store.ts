@@ -2,7 +2,7 @@
 // (ADR-0048, Identity & Access). find-or-create per entity so it's idempotent and
 // safe when a User already belongs to another Org (shared user pool, ADR-005).
 // Row I/O only; the provisioning policy lives in the provisionIdentity use case.
-import type { IdentityStore, ProvisionedIdentity } from "arp-application";
+import type { AuthorIdentity, IdentityStore, ProvisionedIdentity } from "arp-application";
 import { folders, orgs, users } from "arp-db/schema";
 import {
   type AppError,
@@ -69,6 +69,7 @@ export class DrizzleIdentityStore implements IdentityStore {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
+    readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
@@ -96,10 +97,22 @@ export class DrizzleIdentityStore implements IdentityStore {
         // email changed (review #150 M-2).
         await db
           .insert(users)
-          .values({ id: uuidv7(), clerkUserId: input.clerkUserId, email: input.email })
+          .values({
+            id: uuidv7(),
+            clerkUserId: input.clerkUserId,
+            email: input.email,
+            displayName: input.displayName,
+          })
           .onConflictDoUpdate({
             target: users.clerkUserId,
-            set: { email: input.email, updatedAt: new Date() },
+            // Refresh the mirrored name too (ADR-0063 author display), but COALESCE
+            // so a later claim-less re-provision (displayName null) never wipes a
+            // name captured earlier — unlike `email`, which always overwrites.
+            set: {
+              email: input.email,
+              displayName: sql`coalesce(${input.displayName}, ${users.displayName})`,
+              updatedAt: new Date(),
+            },
           });
         const [u] = await db
           .select({ id: users.id })
@@ -182,6 +195,24 @@ export class DrizzleIdentityStore implements IdentityStore {
       return ok(row?.email ?? null);
     } catch (e) {
       return thrown("identity.findEmailByUserId", e);
+    }
+  }
+
+  async findAuthorIdentityByUserId(uid: UserId): Promise<Result<AuthorIdentity | null, AppError>> {
+    try {
+      // Same soft-delete exclusion as findEmailByUserId: a since-deleted author's
+      // name/email must not leak into the comments/versions author surfaces
+      // (ADR-0054 terminal deletion, ADR-0070 erasure posture). One query resolves
+      // both columns — batch-friendly for the per-author list enrichment (ADR-0063).
+      const [row] = await this.ctx
+        .current()
+        .select({ email: users.email, displayName: users.displayName })
+        .from(users)
+        .where(and(eq(users.id, uid), isNull(users.deletedAt)))
+        .limit(1);
+      return ok(row ? { email: row.email, displayName: row.displayName ?? null } : null);
+    } catch (e) {
+      return thrown("identity.findAuthorIdentityByUserId", e);
     }
   }
 

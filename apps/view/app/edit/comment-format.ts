@@ -8,16 +8,39 @@
 // `arp-domain` barrel drags `node:crypto` into the browser bundle and breaks
 // the Vite/Rollup build).
 
-/** Derive a short circular-avatar label from an author's email. Only the email
- *  is available (no display-name exists, ADR-0063), so we take the first one or
- *  two ALNUM chars of the local-part (before the `@`), uppercased —
- *  `jane@x.com` → `JA`, `j@x.com` → `J`. Returns `"?"` when the email is null,
- *  empty, or its local-part carries no alnum chars. Pure. */
-export function initialsFromEmail(email: string | null): string {
-  if (!email) return "?";
-  const localPart = email.split("@")[0] ?? "";
+/** Derive a short circular-avatar label for an author (ADR-0063 author display).
+ *  Prefers the display NAME when present: the first alnum char of each of the
+ *  first two words — `"Jane Doe"` → `"JD"`, `"Jane"` → `"JA"` (a single word
+ *  falls back to its first two alnum chars, like an email local-part). Otherwise
+ *  derives from the EMAIL local-part (before the `@`) the same way —
+ *  `jane@x.com` → `JA`, `j@x.com` → `J`. Uppercased. Returns `"?"` when neither
+ *  yields any alnum char (both null/empty). Pure. */
+export function authorInitials(name: string | null, email: string | null): string {
+  const fromName = initialsFromName(name);
+  if (fromName) return fromName;
+  return initialsFromLocalPart(email?.split("@")[0] ?? null) ?? "?";
+}
+
+/** Initials from a multi-word display name: first alnum char of the first two
+ *  words. A single word degrades to its first two alnum chars. null when no word
+ *  carries an alnum char. */
+function initialsFromName(name: string | null): string | null {
+  if (!name) return null;
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter((w) => w.length > 0);
+  if (words.length === 0) return null;
+  if (words.length === 1) return initialsFromLocalPart(words[0] ?? null);
+  return `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}`.toUpperCase();
+}
+
+/** First two alnum chars of a local-part-like string, uppercased; null when none. */
+function initialsFromLocalPart(localPart: string | null): string | null {
+  if (!localPart) return null;
   const alnum = localPart.replace(/[^a-zA-Z0-9]/g, "");
-  if (alnum.length === 0) return "?";
+  if (alnum.length === 0) return null;
   return alnum.slice(0, 2).toUpperCase();
 }
 

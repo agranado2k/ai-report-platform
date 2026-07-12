@@ -86,6 +86,10 @@ export const users = pgTable(
     id: uuid("id").primaryKey(),
     clerkUserId: text("clerk_user_id").notNull(),
     email: text("email").notNull(),
+    // Human display name mirrored from Clerk at JIT provisioning (ADR-0063 author
+    // display) — fullName / firstName lastName / username, whichever exists, else
+    // null. Nullable + best-effort: author surfaces fall back to email when absent.
+    displayName: text("display_name"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
