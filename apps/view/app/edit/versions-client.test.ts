@@ -40,7 +40,79 @@ describe("listVersions", () => {
     expect(init.method).toBe("GET");
     expect(init.credentials).toBe("omit");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer tok.sig");
-    expect(result).toEqual({ ok: true, versions: [VERSION] });
+    expect(result).toEqual({ ok: true, versions: [VERSION], has_more: false });
+  });
+
+  it("follows the cursor with starting_after across pages and accumulates every version", async () => {
+    const v1: VersionWire = { ...VERSION, id: "version_1", version_no: 1 };
+    const v2: VersionWire = { ...VERSION, id: "version_2", version_no: 2 };
+    const v3: VersionWire = { ...VERSION, id: "version_3", version_no: 3 };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [v1, v2], has_more: true }))
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [v3], has_more: false }));
+
+    const result = await listVersions({
+      appOrigin: "https://app.centaurspec.com",
+      slug: "abc1234567",
+      editToken: "tok.sig",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const firstUrl = (fetchImpl.mock.calls[0] as [string, RequestInit])[0] as string;
+    const secondUrl = (fetchImpl.mock.calls[1] as [string, RequestInit])[0] as string;
+    expect(firstUrl).toBe(
+      "https://app.centaurspec.com/api/v1/reports/abc1234567/versions?limit=100",
+    );
+    expect(secondUrl).toContain("limit=100");
+    expect(secondUrl).toContain("starting_after=version_2");
+    expect(result).toEqual({ ok: true, versions: [v1, v2, v3], has_more: false });
+  });
+
+  it("stops at the page cap and reports has_more:true when the server never drains", async () => {
+    let n = 0;
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      n += 1;
+      return jsonResponse(200, {
+        object: "list",
+        data: [{ ...VERSION, id: `version_${n}` }],
+        has_more: true,
+      });
+    });
+
+    const result = await listVersions({
+      appOrigin: "https://app.centaurspec.com",
+      slug: "abc1234567",
+      editToken: "tok.sig",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(20);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.has_more).toBe(true);
+      expect(result.versions).toHaveLength(20);
+    }
+  });
+
+  it("propagates a mid-pagination failure instead of returning a partial set", async () => {
+    const v1: VersionWire = { ...VERSION, id: "version_1" };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [v1], has_more: true }))
+      .mockResolvedValueOnce(jsonResponse(500, {}));
+
+    const result = await listVersions({
+      appOrigin: "https://app.centaurspec.com",
+      slug: "abc1234567",
+      editToken: "tok.sig",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.expired).toBe(false);
   });
 
   it("maps a 401/403 to an expired-session failure", async () => {
