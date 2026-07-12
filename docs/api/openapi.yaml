@@ -1353,7 +1353,7 @@ components:
     Comment:
       description: A `comment` resource — the `Comment` aggregate on the wire (ADR-0064).
       type: object
-      required: [object, id, report_id, author_id, parent_id, body, anchor, resolved_at, created_at, mode]
+      required: [object, id, report_id, author_id, parent_id, body, intent, anchor, resolved_at, created_at, mode]
       properties:
         object: { type: string, enum: [comment] }
         id:
@@ -1377,6 +1377,10 @@ components:
         body:
           type: string
           description: Bounded to 2000 characters (JUDGMENT CALL — ADR-0064 gives no exact number).
+        intent:
+          type: string
+          enum: [note, enhancement, add, remove]
+          description: What the author wants done with the comment (ADR-0064 Decision 8). `note` (default) is a plain human note; `enhancement`/`add`/`remove` signal an agent action (semantics deferred). A pre-existing comment reads as `note`.
         anchor: { $ref: '#/components/schemas/Anchor' }
         resolved_at:
           type: [string, 'null']
@@ -1401,6 +1405,10 @@ components:
         body:
           type: string
           description: The comment text (max 2000 chars).
+        intent:
+          type: string
+          enum: [note, enhancement, add, remove]
+          description: What the author wants done with the comment (ADR-0064 Decision 8). Optional — omit (or send `note`) for a plain human note. An explicitly invalid value is rejected with 422.
         anchor: { $ref: '#/components/schemas/Anchor' }
         parent_comment_id:
           type: string

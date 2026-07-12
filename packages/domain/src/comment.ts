@@ -8,6 +8,7 @@ import type { CommentId, ReportId, UserId } from "./brand";
 import type { AppError } from "./errors";
 import { validationError } from "./errors";
 import type { CommentAdded, CommentResolved, DomainEvent } from "./events";
+import { type Intent, makeIntent } from "./intent";
 import { err, ok, type Result } from "./result";
 
 export interface Comment {
@@ -21,6 +22,10 @@ export interface Comment {
    *  reply's parent is always itself a root — enforced by replyToComment, never
    *  a self-referential chain (ADR-0064 Decision 2/4: single-level threading). */
   readonly parentCommentId: CommentId | null;
+  /** What the author wants DONE with this comment (ADR-0064 Decision 8).
+   *  Defaults to `note` (a plain human annotation) — a pre-existing comment
+   *  persisted before this field reads as `note` (backward compat, intent.ts). */
+  readonly intent: Intent;
   readonly resolvedAt: number | null;
   readonly createdAt: number;
 }
@@ -54,6 +59,8 @@ export interface CreateCommentParams {
   readonly authorUserId: UserId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** Optional — defaults to `note` (intent.ts). */
+  readonly intent?: Intent;
   readonly createdAt: number;
 }
 
@@ -64,6 +71,8 @@ export function createComment(p: CreateCommentParams): Result<CommentEmission, A
   if (!body.ok) return body;
   const anchor = validateAnchor(p.anchor);
   if (!anchor.ok) return anchor;
+  const intent = makeIntent(p.intent);
+  if (!intent.ok) return intent;
 
   const comment: Comment = {
     id: p.id,
@@ -72,6 +81,7 @@ export function createComment(p: CreateCommentParams): Result<CommentEmission, A
     body: body.value,
     anchor: anchor.value,
     parentCommentId: null,
+    intent: intent.value,
     resolvedAt: null,
     createdAt: p.createdAt,
   };
@@ -90,6 +100,8 @@ export interface ReplyToCommentParams {
   readonly authorUserId: UserId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** Optional — defaults to `note` (intent.ts). */
+  readonly intent?: Intent;
   readonly createdAt: number;
 }
 
@@ -110,6 +122,8 @@ export function replyToComment(
   if (!body.ok) return body;
   const anchor = validateAnchor(p.anchor);
   if (!anchor.ok) return anchor;
+  const intent = makeIntent(p.intent);
+  if (!intent.ok) return intent;
 
   const comment: Comment = {
     id: p.id,
@@ -118,6 +132,7 @@ export function replyToComment(
     body: body.value,
     anchor: anchor.value,
     parentCommentId: parent.id,
+    intent: intent.value,
     resolvedAt: null,
     createdAt: p.createdAt,
   };

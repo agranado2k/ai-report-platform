@@ -21,6 +21,7 @@ import {
   type AppError,
   err,
   makeCommentId,
+  makeIntent,
   makeVersionId,
   ok,
   type Result,
@@ -99,6 +100,10 @@ export const action = corsRoute(
     run: ({ actor, slug, body }) => {
       const anchor = parseAnchor(body.anchor);
       if (!anchor.ok) return anchor;
+      // Optional; absent → `note`, an explicitly invalid value → 422 (ADR-0064
+      // Decision 8), consistent with the anchor/cursor validation on this route.
+      const intent = makeIntent(body.intent);
+      if (!intent.ok) return intent;
       const commentBody = typeof body.body === "string" ? body.body : "";
 
       // Spreads deps() (already carries `grants`/`identities` for the canWrite
@@ -119,6 +124,7 @@ export const action = corsRoute(
           parentCommentId: parentCommentId.value,
           body: commentBody,
           anchor: anchor.value,
+          intent: intent.value,
         });
       }
 
@@ -126,6 +132,7 @@ export const action = corsRoute(
         slug,
         body: commentBody,
         anchor: anchor.value,
+        intent: intent.value,
       });
     },
     toHttp: (result) => addCommentToHttp(result, wireContext()),

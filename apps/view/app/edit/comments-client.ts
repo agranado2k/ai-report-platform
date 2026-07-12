@@ -101,12 +101,15 @@ async function postComment(
 export interface AddCommentInput extends CommentsRequestInput {
   readonly body: string;
   readonly anchor: WireAnchorInput;
+  /** What the author wants done with the comment (ADR-0064 Decision 8).
+   *  Omit to default to `note` server-side. */
+  readonly intent?: string;
 }
 
 /** POST a root comment (starts a new Thread) — anchored to a fresh editor
  *  selection. */
 export async function addComment(input: AddCommentInput): Promise<CommentWriteResult> {
-  return postComment(input, {});
+  return postComment(input, input.intent === undefined ? {} : { intent: input.intent });
 }
 
 export interface ReplyCommentInput extends AddCommentInput {
@@ -116,7 +119,10 @@ export interface ReplyCommentInput extends AddCommentInput {
 /** POST a reply — a comment resource on the wire too, just with `parent_id`
  *  set (single-level threading, ADR-0064). */
 export async function replyToComment(input: ReplyCommentInput): Promise<CommentWriteResult> {
-  return postComment(input, { parent_comment_id: input.parentCommentId });
+  return postComment(input, {
+    parent_comment_id: input.parentCommentId,
+    ...(input.intent === undefined ? {} : { intent: input.intent }),
+  });
 }
 
 export interface ResolveCommentInput extends CommentsRequestInput {

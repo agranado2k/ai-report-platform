@@ -30,6 +30,9 @@ export interface CommentWire {
   readonly author?: { readonly id: string; readonly email: string | null };
   readonly parent_id: string | null;
   readonly body: string;
+  /** What the author wants done with the comment (ADR-0064 Decision 8):
+   *  `note` | `enhancement` | `add` | `remove`. Defaults to `note`. */
+  readonly intent: string;
   readonly anchor: {
     readonly version_pinned: { readonly version_id: string; readonly text_quote: string };
     readonly relative?: unknown;

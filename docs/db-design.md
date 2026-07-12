@@ -220,7 +220,7 @@ PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists unti
 
 ### Authoring & Collaboration
 
-#### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013)
+#### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013; `intent` added migration 0015)
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
@@ -228,11 +228,12 @@ PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists unti
 | `author_user_id` | uuid FK → users | who wrote it |
 | `parent_comment_id` | uuid FK → comments NULL, **ON DELETE CASCADE** | NULL = root (starts a Thread); set = a reply. Single-level threading enforced at the application layer (ADR-0064 Decision 2), not a self-join depth constraint. The self-FK is CASCADE — see the Conventions FK-policy note above |
 | `body` | text | bounded to 2000 chars at the domain layer (JUDGMENT CALL — ADR-0064 says "bounded... a short annotation," no number given) |
+| `intent` | `comment_intent` enum **NOT NULL DEFAULT 'note'** | what the author wants done with the comment (ADR-0064 Decision 8): `note` (default) / `enhancement` / `add` / `remove`. Migration 0015 backfills every existing row to `note`; a legacy value degrades to `note` on read |
 | `anchor_json` | jsonb | the `Anchor` value object (ADR-0064 §2a): `{ version_pinned: { version_id, text_quote }, relative? }` — `relative` is an opaque, optional Yjs-relative-position slot the editor slice will populate later |
 | `resolved_at` | timestamptz NULL | NULL = open; set = resolved (idempotent transition — resolving twice doesn't change it) |
 | `created_at` | timestamptz | |
 
-Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. No `updated_at` — `body`/`anchor_json` aren't editable in this slice (only `resolved_at` mutates, via `save()`'s upsert).
+Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. No `updated_at` — `body`/`anchor_json`/`intent` aren't editable in this slice (only `resolved_at` mutates, via `save()`'s upsert; `save()` does carry `intent` for a future edit-comment use case).
 
 ### Abuse & Moderation
 

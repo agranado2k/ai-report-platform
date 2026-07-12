@@ -9,6 +9,7 @@ const COMMENT: CommentWire = {
   author_id: "user_1",
   parent_id: null,
   body: "Nice chart.",
+  intent: "note",
   anchor: {
     version_pinned: { version_id: "version_1", text_quote: "the quarterly numbers" },
     relative: { from: 3, to: 9 },
@@ -95,6 +96,32 @@ describe("addComment", () => {
     expect(result).toEqual({ ok: true, comment: COMMENT });
   });
 
+  it("includes the intent in the POST body when supplied, and omits it otherwise", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonResponse(201, COMMENT));
+    await addComment({
+      ...BASE,
+      fetchImpl,
+      body: "please enhance",
+      intent: "enhancement",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withIntent = JSON.parse(
+      (fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(withIntent.intent).toBe("enhancement");
+
+    await addComment({
+      ...BASE,
+      fetchImpl,
+      body: "hi",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withoutIntent = JSON.parse(
+      (fetchImpl.mock.calls[1] as [string, RequestInit])[1].body as string,
+    );
+    expect("intent" in withoutIntent).toBe(false);
+  });
+
   it("omits 'relative' from the wire anchor when absent (version-pinned only)", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(201, COMMENT));
     await addComment({
@@ -148,6 +175,37 @@ describe("replyToComment", () => {
     const parsed = JSON.parse(init.body as string);
     expect(parsed.parent_comment_id).toBe(COMMENT.id);
     expect(result).toEqual({ ok: true, comment: reply });
+  });
+
+  it("includes the intent in the POST body when supplied, and omits it otherwise", async () => {
+    const reply: CommentWire = { ...COMMENT, id: "comment_reply", parent_id: COMMENT.id };
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonResponse(201, reply));
+
+    await replyToComment({
+      ...BASE,
+      fetchImpl,
+      parentCommentId: COMMENT.id,
+      body: "please add this",
+      intent: "add",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withIntent = JSON.parse(
+      (fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(withIntent.intent).toBe("add");
+    expect(withIntent.parent_comment_id).toBe(COMMENT.id);
+
+    await replyToComment({
+      ...BASE,
+      fetchImpl,
+      parentCommentId: COMMENT.id,
+      body: "no intent here",
+      anchor: { versionId: "version_1", textQuote: "quote" },
+    });
+    const withoutIntent = JSON.parse(
+      (fetchImpl.mock.calls[1] as [string, RequestInit])[1].body as string,
+    );
+    expect("intent" in withoutIntent).toBe(false);
   });
 });
 

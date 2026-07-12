@@ -13,8 +13,13 @@
 // append/replace) rather than triggering a full list refetch — one fewer
 // network round-trip, and no window where a failed refetch would silently
 // leave a stale list after a successful write.
+// TYPE-ONLY import (erased at build): pulling a VALUE from the `arp-domain`
+// barrel drags its `node:crypto`-using modules (signed-token) into this browser
+// bundle and breaks the Vite/Rollup build. The `Intent` type costs nothing at
+// runtime, and `Record<Intent, …>` below still gives us drift-safety.
+import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
-import { Badge, Button, Card, Textarea } from "arp-ui";
+import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
 import { addComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
@@ -51,6 +56,30 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** Human-facing labels for each intent value. The VALUES themselves are
+ *  derived from the domain's `COMMENT_INTENTS` (below) so a new intent added
+ *  to the enum can't leave the composer out of sync; this map only carries the
+ *  display text. A value missing a label falls back to the value itself. */
+/** Human-facing labels, keyed by the domain `Intent` union. Typed as
+ *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
+ *  fifth member to the domain enum breaks the build here until it gets a label
+ *  — the same drift-safety a runtime `COMMENT_INTENTS` import would give, but
+ *  without dragging the domain barrel (and its `node:crypto` deps) into the
+ *  browser bundle. */
+const INTENT_LABELS: Record<Intent, string> = {
+  note: "Note",
+  enhancement: "Enhance",
+  add: "Add",
+  remove: "Remove",
+};
+
+/** The comment-intent options surfaced in the composer (ADR-0064 Decision 8),
+ *  derived from the exhaustive label map so they never drift. `note` is the
+ *  default; the value is the wire enum, the label is human-facing. */
+const INTENT_OPTIONS: readonly { readonly value: Intent; readonly label: string }[] = (
+  Object.keys(INTENT_LABELS) as Intent[]
+).map((value) => ({ value, label: INTENT_LABELS[value] }));
+
 function ErrorText({ message }: { readonly message: string | null }) {
   if (!message) return null;
   return (
@@ -80,6 +109,7 @@ function NewCommentComposer({
   readonly onSubmitted: () => void;
 }) {
   const [body, setBody] = useState("");
+  const [intent, setIntent] = useState("note");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +128,7 @@ function NewCommentComposer({
       slug,
       editToken,
       body,
+      intent,
       anchor: {
         versionId: anchor.versionId,
         textQuote: anchor.textQuote,
@@ -110,6 +141,7 @@ function NewCommentComposer({
       return;
     }
     setBody("");
+    setIntent("note");
     onCommentsChange([...comments, result.comment]);
     onSubmitted();
   };
@@ -127,13 +159,31 @@ function NewCommentComposer({
         className="w-full"
       />
       <ErrorText message={error} />
-      <div className="mt-2 flex justify-end gap-2">
-        <Button variant="secondary" size="sm" onClick={onSubmitted} disabled={busy}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" onClick={submit} disabled={busy || !body.trim()}>
-          {busy ? "Posting…" : "Comment"}
-        </Button>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-xs text-subtle">
+          <span id="comment-intent-label">Intent</span>
+          <Select
+            size="sm"
+            aria-labelledby="comment-intent-label"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            disabled={busy}
+          >
+            {INTENT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onSubmitted} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={submit} disabled={busy || !body.trim()}>
+            {busy ? "Posting…" : "Comment"}
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -158,6 +208,7 @@ function CommentThread({
 }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const [replyIntent, setReplyIntent] = useState("note");
   const [replyBusy, setReplyBusy] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [resolveBusy, setResolveBusy] = useState(false);
@@ -175,6 +226,7 @@ function CommentThread({
       editToken,
       parentCommentId: root.id,
       body: replyBody,
+      intent: replyIntent,
       anchor: {
         versionId: root.anchor.version_pinned.version_id,
         textQuote: root.anchor.version_pinned.text_quote,
@@ -187,6 +239,7 @@ function CommentThread({
       return;
     }
     setReplyBody("");
+    setReplyIntent("note");
     setReplyOpen(false);
     onCommentsChange([...comments, result.comment]);
   };
@@ -241,23 +294,41 @@ function CommentThread({
             rows={2}
             className="w-full"
           />
-          <div className="mt-2 flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setReplyOpen(false)}
-              disabled={replyBusy}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={submitReply}
-              disabled={replyBusy || !replyBody.trim()}
-            >
-              {replyBusy ? "Posting…" : "Reply"}
-            </Button>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 text-xs text-subtle">
+              <span id={`reply-intent-label-${root.id}`}>Intent</span>
+              <Select
+                size="sm"
+                aria-labelledby={`reply-intent-label-${root.id}`}
+                value={replyIntent}
+                onChange={(e) => setReplyIntent(e.target.value)}
+                disabled={replyBusy}
+              >
+                {INTENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setReplyOpen(false)}
+                disabled={replyBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={submitReply}
+                disabled={replyBusy || !replyBody.trim()}
+              >
+                {replyBusy ? "Posting…" : "Reply"}
+              </Button>
+            </div>
           </div>
         </div>
       ) : (

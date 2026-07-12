@@ -33,6 +33,7 @@ function comment(overrides: Partial<Comment> = {}): Comment {
     body: "What does this mean?",
     anchor: { versionPinned: { versionId: versionId(V1), textQuote: "the Q3 number" } },
     parentCommentId: null,
+    intent: "note",
     resolvedAt: null,
     createdAt: 1_700_000_000_000,
     ...overrides,
@@ -49,6 +50,7 @@ const commentResource = (overrides: Partial<Comment> = {}) => {
     author: { id: userIdToWire(c.authorUserId), email: null },
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
+    intent: c.intent,
     anchor: {
       version_pinned: {
         version_id: versionIdToWire(c.anchor.versionPinned.versionId),
@@ -75,6 +77,11 @@ describe("addCommentToHttp", () => {
     expect(res.body).toEqual(
       commentResource({ id: commentId(C2), parentCommentId: commentId(C1) }),
     );
+  });
+
+  it("carries the comment's intent in the response body", () => {
+    const res = addCommentToHttp(ok(comment({ intent: "enhancement" })), CTX);
+    expect(res.body).toMatchObject({ intent: "enhancement" });
   });
 
   it("propagates an error as a problem+json response", () => {

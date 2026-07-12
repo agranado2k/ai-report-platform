@@ -11,6 +11,7 @@ import {
   type Comment,
   type CommentId,
   commentId,
+  intentOrDefault,
   ok,
   type ReportId,
   type Result,
@@ -28,6 +29,9 @@ export function rowToComment(row: CommentRow): Comment {
     reportId: reportId(row.reportId),
     authorUserId: userId(row.authorUserId),
     body: row.body,
+    // A legacy row (pre-`intent` column, or a null slipped in) degrades to
+    // `note` (intentOrDefault) — the read never fails on it.
+    intent: intentOrDefault(row.intent),
     anchor: row.anchorJson as Anchor,
     parentCommentId: row.parentCommentId === null ? null : commentId(row.parentCommentId),
     resolvedAt: row.resolvedAt === null ? null : row.resolvedAt.getTime(),
@@ -42,6 +46,7 @@ function commentToRow(c: Comment): typeof comments.$inferInsert {
     authorUserId: c.authorUserId,
     parentCommentId: c.parentCommentId,
     body: c.body,
+    intent: c.intent,
     anchorJson: c.anchor,
     resolvedAt: c.resolvedAt === null ? null : new Date(c.resolvedAt),
   };
@@ -72,6 +77,7 @@ export class DrizzleCommentRepository implements CommentRepository {
           target: comments.id,
           set: {
             body: comment.body,
+            intent: comment.intent,
             anchorJson: comment.anchor,
             resolvedAt: comment.resolvedAt === null ? null : new Date(comment.resolvedAt),
           },
