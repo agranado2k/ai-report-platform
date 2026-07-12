@@ -7,7 +7,7 @@ import { validateAnchor } from "./anchor";
 import type { CommentId, ReportId, UserId } from "./brand";
 import type { AppError } from "./errors";
 import { validationError } from "./errors";
-import type { CommentAdded, CommentResolved, DomainEvent } from "./events";
+import type { CommentAdded, CommentEdited, CommentResolved, DomainEvent } from "./events";
 import { type Intent, makeIntent } from "./intent";
 import { err, ok, type Result } from "./result";
 
@@ -165,4 +165,54 @@ export function resolveComment(comment: Comment, resolvedAt: number): CommentEmi
     resolvedAt,
   };
   return { comment: updated, events: [event] };
+}
+
+export interface EditCommentParams {
+  /** New body — DEFINED means "replace" (validated by validateBody); absent
+   *  (undefined) means "leave the current body unchanged". */
+  readonly body?: string;
+  /** New intent — DEFINED means "replace" (must already be a valid `Intent`,
+   *  validated at the trust boundary by `makeIntent`); absent means "leave the
+   *  current intent unchanged". */
+  readonly intent?: Intent;
+  readonly editedAt: number;
+}
+
+/**
+ * Edit a Comment's `body` and/or `intent` (ADR-0064 §3). v1 scope: only these
+ * two fields are mutable — the anchor is immutable, and there is no `edited_at`
+ * indicator yet (a migration-free fast-follow). At least one of `body`/`intent`
+ * must be provided; neither is a ValidationError (the caller has nothing to
+ * edit). The body is revalidated (non-empty, bounded — same VO as create); the
+ * intent is applied as-is (already a valid `Intent` at this point). Emits
+ * CommentEdited. The use case enforces WHO may call this (author-or-owner,
+ * ADR-0064 §3, mirroring resolve/delete); this transition doesn't check identity.
+ */
+export function editComment(
+  comment: Comment,
+  p: EditCommentParams,
+): Result<CommentEmission, AppError> {
+  if (p.body === undefined && p.intent === undefined) {
+    return err(validationError("nothing to edit: provide body and/or intent", "body"));
+  }
+  let next = comment;
+  if (p.body !== undefined) {
+    const body = validateBody(p.body);
+    if (!body.ok) return body;
+    next = { ...next, body: body.value };
+  }
+  if (p.intent !== undefined) {
+    // Belt-and-braces re-validation (mirrors createComment's makeIntent on an
+    // already-typed Intent): a value cast past the type boundary is still caught.
+    const intent = makeIntent(p.intent);
+    if (!intent.ok) return intent;
+    next = { ...next, intent: intent.value };
+  }
+  const event: CommentEdited = {
+    type: "CommentEdited",
+    commentId: comment.id,
+    reportId: comment.reportId,
+    editedAt: p.editedAt,
+  };
+  return ok({ comment: next, events: [event] });
 }

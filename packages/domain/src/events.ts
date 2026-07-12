@@ -52,9 +52,21 @@ export interface CommentResolved {
   readonly resolvedAt: number;
 }
 
+/** Emitted when a `Comment`'s body and/or intent is edited (ADR-0064 §3/§6).
+ *  Same outbox delivery, no new transport, no consumer wired yet (mirrors
+ *  CommentAdded/CommentResolved). Carries only the aggregate identity — the new
+ *  field values are read back from the persisted Comment, not the event. */
+export interface CommentEdited {
+  readonly type: "CommentEdited";
+  readonly commentId: CommentId;
+  readonly reportId: ReportId;
+  readonly editedAt: number;
+}
+
 export type DomainEvent =
   | ReportVersionUploaded
   | ReportVersionScanned
   | ReportPublished
   | CommentAdded
-  | CommentResolved;
+  | CommentResolved
+  | CommentEdited;
