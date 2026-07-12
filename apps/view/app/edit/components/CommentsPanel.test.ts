@@ -11,6 +11,7 @@ const base: CommentWire = {
   author_id: "user_5mK9pQ2vR4nXtB6cD8eF1g",
   parent_id: null,
   body: "hi",
+  intent: "note",
   anchor: { version_pinned: { version_id: "version_1", text_quote: "q" } },
   resolved_at: null,
   created_at: "2026-07-08T00:00:00.000Z",
