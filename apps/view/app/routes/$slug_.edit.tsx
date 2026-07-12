@@ -31,13 +31,15 @@
 // report's Comments + Versions server-side (Bearer, server-to-server — no
 // CORS involved, see ../edit/comments-client.ts / ../edit/versions-client.ts)
 // once the SAME auth decision below has already resolved to "render". The
-// component adds the app-styled chrome (TopBar), a tabbed Comments|Versions
-// left panel (hidden by default — the document is the dominant element), a
-// View⇄Edit toggle, and Compare (visual diff). View mode and Compare BOTH
-// render through `SandboxedHtml` (a fully sandboxed, no-`allow-scripts`,
-// no-`allow-same-origin` `srcDoc` iframe built by `buildReadOnlyIframeDocument`
-// — arp-editor) — never `dangerouslySetInnerHTML`, never on the app origin
-// (F-1, claude-review #183 / ADR-0063's "4c client" note).
+// component adds the app-styled chrome (TopBar), a COLLAPSIBLE Comments|Versions
+// side panel (collapsed by default behind a badged edge affordance — the
+// document is the dominant element; edit-chrome-cleanup), and Compare (visual
+// diff). On /edit the user is ALWAYS editing — the old View⇄Edit toggle is
+// gone; Compare is the only non-edit mode. Compare renders through
+// `SandboxedHtml` (a fully sandboxed, no-`allow-scripts`, no-`allow-same-origin`
+// `srcDoc` iframe built by `buildReadOnlyIframeDocument` — arp-editor) — never
+// `dangerouslySetInnerHTML`, never on the app origin (F-1, claude-review #183 /
+// ADR-0063's "4c client" note).
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -45,24 +47,25 @@ import { resolveViewableReport } from "arp-application";
 import { makeSlug, versionIdToWire } from "arp-domain";
 import { type EditorSelection, ReportEditor } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
-import {
-  type PMDocJson,
-  parseBody,
-  reinjectShell,
-  type Shell,
-  serializeBody,
-  splitShell,
-} from "arp-report-html";
+import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
 import { Card } from "arp-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
+import { PanelHeader, PanelToggle } from "../edit/components/PanelChrome";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
-import type { PanelTab } from "../edit/components/types";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
 import { EXPIRED_MESSAGE } from "../edit/http";
 import { buildEditLoaderExtras } from "../edit/loader-data";
+import {
+  closePanel,
+  INITIAL_PANEL_STATE,
+  openPanel,
+  type PanelState,
+  selectPanelTab,
+  unresolvedCount,
+} from "../edit/panel";
 import { isEditTokenExpired, nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
 import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
@@ -274,17 +277,15 @@ export default function EditReport() {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  // The unified experience opens READ-ONLY by default — the View⇄Edit
-  // toggle promotes to the editor; it does not open into it.
-  const [mode, setMode] = useState<ViewerMode>("view");
-  // View mode's initial render needs a snapshot ready immediately (default
-  // mode is now "view"), so this is seeded from the loader's doc rather
-  // than left `null` until the first mode switch.
-  const [viewHtml, setViewHtml] = useState<string | null>(() =>
-    reinjectShell(shell, serializeBody(doc as PMDocJson)),
-  );
+  // On /edit the user is ALWAYS editing (edit-chrome-cleanup): the route opens
+  // straight into the editor — no View⇄Edit toggle to promote through. The only
+  // other mode is Compare ("diff"), entered from the Versions panel.
+  const [mode, setMode] = useState<ViewerMode>("edit");
   const [diffData, setDiffData] = useState<DiffWire | null>(null);
-  const [activeTab, setActiveTab] = useState<PanelTab>(null);
+  // The side panel: collapsed by default (document-dominant), with a remembered
+  // inner tab. Replaces the old `activeTab: "comments"|"versions"|null` — see
+  // ../edit/panel.ts for the pure state helpers.
+  const [panel, setPanel] = useState<PanelState>(INITIAL_PANEL_STATE);
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
 
@@ -427,25 +428,15 @@ export default function EditReport() {
     }
   }
 
-  // View mode renders a SNAPSHOT of the current (possibly unsaved) editor
-  // content — recomputed fresh every time the user switches to View, not
-  // continuously while editing (ReportEditor keeps running underneath,
-  // hidden — see below — so no edits are ever lost by toggling modes).
-  function selectMode(next: "edit" | "view") {
-    if (next === "view") {
-      setViewHtml(reinjectShell(shell, serializeBody(docRef.current)));
-    }
-    setMode(next);
-  }
-
   function closeCompare() {
     setDiffData(null);
     setMode("edit");
   }
 
-  function toggleTab(tab: "comments" | "versions") {
-    setActiveTab((current) => (current === tab ? null : tab));
-  }
+  // The collapsed-edge badge + the in-panel Comments tab label both surface the
+  // number of ACTIVE (unresolved root) comment threads — same filter as the
+  // editor's highlight feed, minus the reply exclusion the highlights also make.
+  const activeCommentCount = useMemo(() => unresolvedCount(comments), [comments]);
 
   const diffHtml = diffData ? reinjectShell(shell, diffData.html) : null;
 
@@ -460,20 +451,61 @@ export default function EditReport() {
       <TopBar
         docTitle={docTitle}
         mode={mode}
-        onSelectMode={selectMode}
         onCloseCompare={closeCompare}
-        activeTab={activeTab}
-        onToggleTab={toggleTab}
-        commentCount={comments.length}
         saveStatus={status === "saving" ? "Saving…" : (message ?? "")}
         saveDisabled={status === "saving"}
         onSave={onSave}
       />
 
       <div className="flex min-h-0 flex-1">
-        {activeTab ? (
-          <aside className="w-80 shrink-0 overflow-y-auto border-r border-border bg-surface p-4">
-            {activeTab === "comments" ? (
+        <main className="min-w-0 flex-1 overflow-auto p-8">
+          {/* ReportEditor stays mounted at ALL times (even when hidden) so
+              in-progress edits are never lost by switching to View/Compare —
+              the mode switch only toggles visibility via CSS. */}
+          <div className={mode === "edit" ? "" : "hidden"}>
+            <Card className="p-8">
+              <ReportEditor
+                key={slug}
+                initialDoc={doc as PMDocJson}
+                shell={shell}
+                comments={highlightComments}
+                onChange={(next) => {
+                  docRef.current = next;
+                }}
+                onSelectionChange={setSelection}
+                className="w-full min-h-[32rem] rounded-card border border-border"
+              />
+            </Card>
+          </div>
+
+          {mode === "diff" && diffData && diffHtml ? (
+            <Card className="p-8">
+              <p className="mb-3 text-sm font-medium text-fg">
+                Comparing v{diffData.from.version_no} → v{diffData.to.version_no}
+              </p>
+              {diffData.diff_mode === "fallback" && diffData.label ? (
+                <p className="mb-4 rounded-control border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                  {diffData.label}
+                </p>
+              ) : null}
+              <SandboxedHtml
+                html={diffHtml}
+                title="Version diff"
+                className="w-full min-h-[32rem] rounded-card border border-border"
+              />
+            </Card>
+          ) : null}
+        </main>
+
+        {panel.open ? (
+          <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-border bg-surface p-6">
+            <PanelHeader
+              tab={panel.tab}
+              unresolvedCount={activeCommentCount}
+              onSelectTab={(tab) => setPanel((p) => selectPanelTab(p, tab))}
+              onClose={() => setPanel((p) => closePanel(p))}
+            />
+            {panel.tab === "comments" ? (
               <CommentsPanel
                 appOrigin={appOrigin}
                 slug={slug}
@@ -497,56 +529,16 @@ export default function EditReport() {
               />
             )}
           </aside>
-        ) : null}
-
-        <main className="min-w-0 flex-1 overflow-auto p-6">
-          {/* ReportEditor stays mounted at ALL times (even when hidden) so
-              in-progress edits are never lost by switching to View/Compare —
-              the mode switch only toggles visibility via CSS. */}
-          <div className={mode === "edit" ? "" : "hidden"}>
-            <Card className="p-6">
-              <ReportEditor
-                key={slug}
-                initialDoc={doc as PMDocJson}
-                shell={shell}
-                comments={highlightComments}
-                onChange={(next) => {
-                  docRef.current = next;
-                }}
-                onSelectionChange={setSelection}
-                className="w-full min-h-[32rem] rounded-card border border-border"
-              />
-            </Card>
+        ) : (
+          // Collapsed-edge affordance: a `‹` chevron pinned to the right of the
+          // document, badged with the active-comment count. Opens to Comments.
+          <div className="shrink-0 py-6">
+            <PanelToggle
+              unresolvedCount={activeCommentCount}
+              onOpen={() => setPanel(openPanel("comments"))}
+            />
           </div>
-
-          {mode === "view" && viewHtml ? (
-            <Card className="p-6">
-              <SandboxedHtml
-                html={viewHtml}
-                title="Report preview"
-                className="w-full min-h-[32rem] rounded-card border border-border"
-              />
-            </Card>
-          ) : null}
-
-          {mode === "diff" && diffData && diffHtml ? (
-            <Card className="p-6">
-              <p className="mb-3 text-sm font-medium text-fg">
-                Comparing v{diffData.from.version_no} → v{diffData.to.version_no}
-              </p>
-              {diffData.diff_mode === "fallback" && diffData.label ? (
-                <p className="mb-4 rounded-control border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-                  {diffData.label}
-                </p>
-              ) : null}
-              <SandboxedHtml
-                html={diffHtml}
-                title="Version diff"
-                className="w-full min-h-[32rem] rounded-card border border-border"
-              />
-            </Card>
-          ) : null}
-        </main>
+        )}
       </div>
     </div>
   );
