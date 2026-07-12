@@ -232,6 +232,27 @@ export class ApiClient {
     );
   }
 
+  /** Edit a comment's body and/or intent (ADR-0064 §3) — PATCH carrying the
+   *  changed fields; returns the updated comment resource (200). Author-or-report-
+   *  owner gated (the same rule as resolve/delete). At least one of body/intent
+   *  must be supplied. */
+  editComment(
+    slug: string,
+    commentId: string,
+    params: { readonly body?: string; readonly intent?: string },
+  ): Promise<ApiResult<Record<string, unknown>>> {
+    return this.request<Record<string, unknown>>(
+      "PATCH",
+      `/api/v1/reports/${encodeURIComponent(slug)}/comments/${encodeURIComponent(commentId)}`,
+      {
+        json: {
+          ...(params.body !== undefined ? { body: params.body } : {}),
+          ...(params.intent !== undefined ? { intent: params.intent } : {}),
+        },
+      },
+    );
+  }
+
   /** Delete a comment (ADR-0064) — 204 no content. Author-or-report-owner gated. */
   deleteComment(slug: string, commentId: string): Promise<ApiResult<unknown>> {
     return this.request<unknown>(
