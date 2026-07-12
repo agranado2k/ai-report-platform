@@ -13,7 +13,11 @@
 // append/replace) rather than triggering a full list refetch — one fewer
 // network round-trip, and no window where a failed refetch would silently
 // leave a stale list after a successful write.
-import { COMMENT_INTENTS } from "arp-domain";
+// TYPE-ONLY import (erased at build): pulling a VALUE from the `arp-domain`
+// barrel drags its `node:crypto`-using modules (signed-token) into this browser
+// bundle and breaks the Vite/Rollup build. The `Intent` type costs nothing at
+// runtime, and `Record<Intent, …>` below still gives us drift-safety.
+import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
@@ -52,7 +56,13 @@ function formatTimestamp(iso: string): string {
  *  derived from the domain's `COMMENT_INTENTS` (below) so a new intent added
  *  to the enum can't leave the composer out of sync; this map only carries the
  *  display text. A value missing a label falls back to the value itself. */
-const INTENT_LABELS: Readonly<Record<string, string>> = {
+/** Human-facing labels, keyed by the domain `Intent` union. Typed as
+ *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
+ *  fifth member to the domain enum breaks the build here until it gets a label
+ *  — the same drift-safety a runtime `COMMENT_INTENTS` import would give, but
+ *  without dragging the domain barrel (and its `node:crypto` deps) into the
+ *  browser bundle. */
+const INTENT_LABELS: Record<Intent, string> = {
   note: "Note",
   enhancement: "Enhance",
   add: "Add",
@@ -60,10 +70,11 @@ const INTENT_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** The comment-intent options surfaced in the composer (ADR-0064 Decision 8),
- *  derived from the domain enum so they never drift. `note` is the default;
- *  the value is the wire enum, the label is human-facing. */
-const INTENT_OPTIONS: readonly { readonly value: string; readonly label: string }[] =
-  COMMENT_INTENTS.map((value) => ({ value, label: INTENT_LABELS[value] ?? value }));
+ *  derived from the exhaustive label map so they never drift. `note` is the
+ *  default; the value is the wire enum, the label is human-facing. */
+const INTENT_OPTIONS: readonly { readonly value: Intent; readonly label: string }[] = (
+  Object.keys(INTENT_LABELS) as Intent[]
+).map((value) => ({ value, label: INTENT_LABELS[value] }));
 
 function ErrorText({ message }: { readonly message: string | null }) {
   if (!message) return null;
