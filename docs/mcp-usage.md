@@ -52,11 +52,15 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 | `reports_search` | read | Find reports by title/slug text (paginated). Omit `q` to list all. |
 | `reports_get` | read | Fetch one report by slug (slug, title, is_published, folder_id). |
 | `reports_list_versions` | read | List a report's version history, newest-created first (version_no, uploaded_by, uploaded_at, scan_status, size_bytes, origin). |
+| `reports_list_comments` | read | List a report's comments, newest-created first (id, author_id, parent_id for replies, body, anchor, resolved_at, created_at). Comments never appear on the public viewer. |
 | `folders_list` | read | The folder tree (id, name, parent id). |
 | `reports_upload` | create | Create a report from HTML, or re-upload a new version of an existing slug. Returns the slug + permanent `view_url`. |
+| `reports_add_comment` | create | Add a comment, or a reply (pass `parent_comment_id`), anchored to a version + quoted text. Requires write access. |
 | `reports_update` | mutate | Rename a report's title. |
 | `reports_move` | mutate | Move a report to a folder. |
+| `reports_resolve_comment` | mutate | Mark a comment resolved (author or report owner; one-way, idempotent). |
 | `reports_delete` | destructive | Soft-delete a report (viewer then returns 410 Gone). |
+| `reports_delete_comment` | destructive | Delete a comment (author or report owner). |
 | `folders_create` | create | Create a folder under a parent. |
 | `folders_rename` | mutate | Rename a folder. |
 | `folders_delete` | destructive | Delete a folder (blocked if it still has reports/subfolders). |
