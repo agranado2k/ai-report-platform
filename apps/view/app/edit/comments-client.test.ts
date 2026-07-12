@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { addComment, listComments, replyToComment, resolveComment } from "./comments-client";
+import {
+  addComment,
+  editComment,
+  listComments,
+  replyToComment,
+  resolveComment,
+} from "./comments-client";
 import type { CommentWire } from "./wire-types";
 
 const COMMENT: CommentWire = {
@@ -228,5 +234,57 @@ describe("resolveComment", () => {
     const result = await resolveComment({ ...BASE, fetchImpl, commentId: COMMENT.id });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.expired).toBe(true);
+  });
+});
+
+describe("editComment", () => {
+  it("PATCHes with a JSON body carrying body + intent, Bearer auth, credentials omitted", async () => {
+    const edited: CommentWire = { ...COMMENT, body: "fixed typo", intent: "enhancement" };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, edited));
+
+    const result = await editComment({
+      ...BASE,
+      fetchImpl,
+      commentId: COMMENT.id,
+      body: "fixed typo",
+      intent: "enhancement",
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://app.centaurspec.com/api/v1/reports/abc1234567/comments/comment_abc");
+    expect(init.method).toBe("PATCH");
+    expect(init.credentials).toBe("omit");
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer tok.sig");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual({ body: "fixed typo", intent: "enhancement" });
+    expect(result).toEqual({ ok: true, comment: edited });
+  });
+
+  it("sends only the fields supplied — a body-only edit omits intent", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, COMMENT));
+    await editComment({ ...BASE, fetchImpl, commentId: COMMENT.id, body: "just the body" });
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const parsed = JSON.parse(init.body as string);
+    expect(parsed).toEqual({ body: "just the body" });
+    expect("intent" in parsed).toBe(false);
+  });
+
+  it("maps a validation failure (empty body) to its problem+json detail", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(422, {
+        type: "about:blank",
+        title: "Validation error",
+        status: 422,
+        detail: "comment body must be a non-empty string",
+        code: "validation_error",
+      }),
+    );
+    const result = await editComment({ ...BASE, fetchImpl, commentId: COMMENT.id, body: "  " });
+    expect(result).toEqual({
+      ok: false,
+      expired: false,
+      message: "comment body must be a non-empty string",
+    });
   });
 });

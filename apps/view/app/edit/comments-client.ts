@@ -151,3 +151,42 @@ export async function resolveComment(input: ResolveCommentInput): Promise<Commen
   const comment = (await response.json()) as CommentWire;
   return { ok: true, comment };
 }
+
+export interface EditCommentInput extends CommentsRequestInput {
+  readonly commentId: string;
+  /** New body — omit to leave it unchanged. */
+  readonly body?: string;
+  /** New intent — omit to leave it unchanged. */
+  readonly intent?: string;
+}
+
+/** PATCH .../comments/{comment_id} — EDIT body and/or intent. Distinguished from
+ *  resolve by the presence of a JSON body: the app-origin PATCH handler
+ *  dispatches on the body shape (a `body`/`intent` field → edit; no body →
+ *  resolve). Returns the updated comment resource (200). */
+export async function editComment(input: EditCommentInput): Promise<CommentWriteResult> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${input.appOrigin}/api/v1/reports/${input.slug}/comments/${input.commentId}`,
+      {
+        method: "PATCH",
+        credentials: "omit",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${input.editToken}`,
+        },
+        body: JSON.stringify({
+          ...(input.body !== undefined ? { body: input.body } : {}),
+          ...(input.intent !== undefined ? { intent: input.intent } : {}),
+        }),
+      },
+    );
+  } catch {
+    return networkFailure(NETWORK_ERROR_MESSAGE);
+  }
+  if (!response.ok) return apiFailureFromResponse(response, "Failed to edit comment");
+  const comment = (await response.json()) as CommentWire;
+  return { ok: true, comment };
+}
