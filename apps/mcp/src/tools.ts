@@ -191,6 +191,41 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_list_comments",
+    {
+      title: "List a report's comments",
+      description:
+        "List a report's Comments (ADR-0064) as a cursor-paginated list " +
+        "({object:'list', data, has_more}), newest-created first; each item has id " +
+        "(comment_…), report_id, author_id (user_…), parent_id (a comment_ id when it's a " +
+        "reply, else null), body, anchor ({ version_pinned: { version_id, text_quote } }), " +
+        "resolved_at (null until resolved), and created_at. Read-only; comments never appear " +
+        "on the public viewer. Page with starting_after.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+        starting_after: z
+          .string()
+          .optional()
+          .describe("Cursor: a comment_ id; returns items AFTER it (page forward)."),
+        ending_before: z
+          .string()
+          .optional()
+          .describe("Cursor: a comment_ id; returns items BEFORE it (page back)."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) =>
+      toToolResult(
+        await client.listComments(args.slug, {
+          limit: args.limit,
+          startingAfter: args.starting_after,
+          endingBefore: args.ending_before,
+        }),
+      ),
+  );
+
+  server.registerTool(
     "folders_list",
     {
       title: "List folders",
@@ -386,6 +421,86 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       annotations: DESTROY,
     },
     async (args) => toToolResult(await client.deleteReport(args.slug)),
+  );
+
+  server.registerTool(
+    "reports_add_comment",
+    {
+      title: "Add a comment (or reply) to a report",
+      description:
+        "Create a comment on a report (ADR-0064), or a REPLY to an existing comment when you " +
+        "pass parent_comment_id. Requires write access (canWrite, ADR-0064 §3): the report's " +
+        "owner or a write grantee. The comment is anchored to a specific ReportVersion and the " +
+        "exact quoted text it refers to (version_id + text_quote — get a version_ id from " +
+        "reports_list_versions). Returns the created comment resource (id comment_…, parent_id " +
+        "set for a reply else null, body, anchor, resolved_at:null, created_at). Comments are " +
+        "private to the org — they never show on the public viewer.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        body: z.string().describe("The comment text."),
+        version_id: z
+          .string()
+          .describe("The version_ id this comment is pinned to (from reports_list_versions)."),
+        text_quote: z
+          .string()
+          .describe("The exact quoted text in that version the comment refers to."),
+        relative: z
+          .unknown()
+          .optional()
+          .describe(
+            "Optional editor anchor hint, forwarded opaquely (position within the quoted text).",
+          ),
+        parent_comment_id: z
+          .string()
+          .optional()
+          .describe("Reply to this comment_ id. Omit to create a top-level (root) comment."),
+      },
+      annotations: CREATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.addComment(args.slug, {
+          body: args.body,
+          versionId: args.version_id,
+          textQuote: args.text_quote,
+          relative: args.relative,
+          parentCommentId: args.parent_comment_id,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "reports_resolve_comment",
+    {
+      title: "Resolve a comment",
+      description:
+        "Mark a comment as resolved (ADR-0064) — sets its resolved_at. Allowed for the comment's " +
+        "AUTHOR or the report's OWNER (a different rule from the write-access gate on add). " +
+        "One-way and idempotent: there is only one resolved transition (no un-resolve today), so " +
+        "resolving an already-resolved comment is safe. Returns the updated comment resource.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to resolve (from reports_list_comments)."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.resolveComment(args.slug, args.comment_id)),
+  );
+
+  server.registerTool(
+    "reports_delete_comment",
+    {
+      title: "Delete a comment",
+      description:
+        "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. " +
+        "Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to delete (from reports_list_comments)."),
+      },
+      annotations: DESTROY,
+    },
+    async (args) => toToolResult(await client.deleteComment(args.slug, args.comment_id)),
   );
 
   server.registerTool(
