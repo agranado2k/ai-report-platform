@@ -10,13 +10,16 @@
 // JUDGMENT CALL (flagged per the task brief): ADR-0064 §7 lists "get/update/
 // resolve/delete" on this route without pinning verbs. This repo's closest
 // precedent is api.v1.reports.$slug.ts (PATCH = mutate a field in place, DELETE
-// = remove) — resolving is exactly that shape ("mutate resolved_at"), so PATCH
-// carries it (idempotent; the body is ignored — there is only one resolved
-// transition today, no un-resolve). GET (fetch one comment) and general
-// field-editing PATCH (body/anchor) are NOT built — out of scope for this
-// slice; only resolve+delete were requested. A future edit-comment PATCH could
-// reuse this same route by inspecting the body shape, same as this file's
-// sibling reuses POST for both create and reply.
+// = remove). PATCH is OVERLOADED on the request-body shape (same way this
+// file's sibling reuses POST for both create and reply): a body carrying `body`
+// and/or `intent` EDITS those fields (ADR-0064 §3); an empty/absent body is the
+// idempotent RESOLVE ("mutate resolved_at" — there is only one resolved
+// transition today, no un-resolve). The resolve path is byte-for-byte unchanged
+// (its callers send no JSON body, so `parseCommentPatch(undefined)` → resolve).
+// Editing is author-or-owner gated (ADR-0064 §3), the SAME rule as resolve/
+// delete — NOT the create/reply `canWrite` gate. GET (fetch one comment) and
+// editing the anchor are still NOT built — out of scope (the anchor is immutable
+// in v1, ADR-0064).
 //
 // CORS + `loader` (ADR-0063 API slice): this resource only ever had an
 // `action` (PATCH/DELETE) — no `loader` at all — so a GET/HEAD/OPTIONS
@@ -30,9 +33,15 @@
 // 405s a stray GET — a more correct response than the old 404, and the only
 // way to make CORS work on this resource at all.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { deleteComment, resolveComment } from "arp-application";
-import { makeCommentId, methodNotAllowed } from "arp-domain";
-import { deleteCommentToHttp, errorToHttp, resolveCommentToHttp } from "arp-http";
+import { deleteComment, editComment, resolveComment } from "arp-application";
+import { type AppError, makeCommentId, methodNotAllowed, ok, type Result } from "arp-domain";
+import {
+  deleteCommentToHttp,
+  errorToHttp,
+  parseCommentPatch,
+  parseJsonBody,
+  resolveCommentToHttp,
+} from "arp-http";
 import { clock, commentRepo, deps } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
@@ -54,19 +63,46 @@ async function dispatchAction(args: ActionFunctionArgs) {
   return toResponse(errorToHttp(methodNotAllowed("PATCH, DELETE")));
 }
 
+// Read the PATCH body WITHOUT `handle`'s `parseBody` (which 415s a bodyless
+// request — and the resolve path deliberately sends none): a request with no
+// `application/json` content-type carries no edit fields → resolve; a JSON body
+// is parsed (malformed → 422) and classified by `parseCommentPatch`.
+async function readCommentPatchBody(
+  request: Request,
+): Promise<Result<Record<string, unknown> | undefined, AppError>> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return ok(undefined);
+  return parseJsonBody(request);
+}
+
 const patchHandler = handle({
   mode: "write",
   slug: true,
-  run: ({ args, actor, slug }) => {
+  // Both branches (resolve + edit) yield a `Result<Comment>` mapped to a 200
+  // comment resource — resolveCommentToHttp is that mapper, reused for edit.
+  run: async ({ args, actor, slug }) => {
     const commentId = makeCommentId(String(args.params.comment_id ?? ""));
     if (!commentId.ok) return commentId;
+
+    const parsedBody = await readCommentPatchBody(args.request);
+    if (!parsedBody.ok) return parsedBody;
+    const patch = parseCommentPatch(parsedBody.value);
+    if (!patch.ok) return patch; // 422 on a bad body/intent
+
     // Spreads deps() (carries `grants`/`identities` for the loadReadableReport
     // gate, ADR-0060 §4) + the comment-specific repo/clock.
-    return resolveComment(
-      { ...deps(), comments: commentRepo(), clock: clock() },
-      { orgId: actor.orgId, userId: actor.userId },
-      { slug, commentId: commentId.value },
-    );
+    const commentDeps = { ...deps(), comments: commentRepo(), clock: clock() };
+    const commentActor = { orgId: actor.orgId, userId: actor.userId };
+
+    if (patch.value.kind === "edit") {
+      return editComment(commentDeps, commentActor, {
+        slug,
+        commentId: commentId.value,
+        body: patch.value.body,
+        intent: patch.value.intent,
+      });
+    }
+    return resolveComment(commentDeps, commentActor, { slug, commentId: commentId.value });
   },
   toHttp: (result) => resolveCommentToHttp(result, wireContext()),
 });
