@@ -23,6 +23,11 @@ export interface CommentWire {
   readonly id: string;
   readonly report_id: string;
   readonly author_id: string;
+  /** The author's resolvable identity (ADR-0063 author display). `id` mirrors
+   *  `author_id`; `email` is the best available identity (no display-name
+   *  exists) and is null for a deleted/never-mirrored user. Optional here
+   *  defensively — the field is additive, so a pre-ADR-0063 server may omit it. */
+  readonly author?: { readonly id: string; readonly email: string | null };
   readonly parent_id: string | null;
   readonly body: string;
   readonly anchor: {
@@ -40,6 +45,10 @@ export interface VersionWire {
   readonly id: string;
   readonly version_no: number;
   readonly uploaded_by: string;
+  /** The uploader's resolvable identity (ADR-0063 author display). `id` mirrors
+   *  `uploaded_by`; `email` is null for a deleted/never-mirrored user. Optional
+   *  defensively — additive, so a pre-ADR-0063 server may omit it. */
+  readonly author?: { readonly id: string; readonly email: string | null };
   readonly uploaded_at: string;
   readonly scan_status: string;
   readonly size_bytes: number;

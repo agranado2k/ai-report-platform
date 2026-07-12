@@ -39,8 +39,12 @@ export interface CommentsPanelProps {
   readonly onSelectionConsumed: () => void;
 }
 
-function authorLabel(c: CommentWire): string {
-  return c.author_id;
+/** The human label for a comment's author (ADR-0063 author display): the
+ *  resolved email when available, else a stable "Unknown user" fallback for a
+ *  deleted/never-mirrored author — never the raw `user_…` id, which is exactly
+ *  what this replaced. */
+export function authorLabel(c: Pick<CommentWire, "author">): string {
+  return c.author?.email ?? "Unknown user";
 }
 
 function formatTimestamp(iso: string): string {

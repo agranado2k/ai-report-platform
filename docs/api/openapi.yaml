@@ -1112,6 +1112,28 @@ components:
           type: boolean
           description: True if more items follow; page on with `starting_after` = the last id.
 
+    AuthorIdentity:
+      description: >
+        The responsible user's display identity (ADR-0063 author display),
+        carried alongside the raw `user_…` id (`author_id` / `uploaded_by`) on
+        comment and version resources. `email` is the best-available identity —
+        there is NO stored display-name — and is `null` for a deleted or
+        never-mirrored user; clients fall back to a generic label, never the raw
+        id. Only ever returned on the authenticated, org-scoped API — never the
+        public viewer.
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          pattern: '^user_[0-9A-Za-z]{22}$'
+          example: user_5mK9pQ2vR4nXtB6cD8eF1g
+          description: The author's `user_…` External Id (mirrors `author_id`/`uploaded_by`).
+        email:
+          type: [string, 'null']
+          format: email
+          description: The author's email, or `null` when it can't be resolved.
+
     VersionSummary:
       description: A `version` resource — the ReportVersionSummary projection (ADR-0065).
       type: object
@@ -1132,6 +1154,8 @@ components:
           pattern: '^user_[0-9A-Za-z]{22}$'
           example: user_5mK9pQ2vR4nXtB6cD8eF1g
           description: The user who created this version, as a `user_…` External Id (ADR-0052).
+        author:
+          $ref: '#/components/schemas/AuthorIdentity'
         uploaded_at:
           type: string
           format: date-time
@@ -1344,6 +1368,8 @@ components:
           type: string
           pattern: '^user_[0-9A-Za-z]{22}$'
           description: The comment's author, as a `user_…` External Id (ADR-0052).
+        author:
+          $ref: '#/components/schemas/AuthorIdentity'
         parent_id:
           type: [string, 'null']
           pattern: '^comment_[0-9A-Za-z]{22}$'

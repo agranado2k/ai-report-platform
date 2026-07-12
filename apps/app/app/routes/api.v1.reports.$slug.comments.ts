@@ -27,7 +27,9 @@ import {
   validationError,
 } from "arp-domain";
 import { addCommentToHttp, listCommentsToHttp, parseCursorParams } from "arp-http";
-import { clock, commentRepo, deps } from "../server/container.server";
+import { resolveAuthorEmails } from "../server/author-email.server";
+import { uniqueCommentAuthorIds } from "../server/comment-dto.server";
+import { clock, commentRepo, deps, identityStore } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
@@ -63,18 +65,28 @@ export const loader = corsRoute(
   handle({
     mode: "read",
     slug: true,
-    run: ({ args, actor, slug }) => {
+    run: async ({ args, actor, slug }) => {
       const url = new URL(args.request.url);
       const cursor = parseCursorParams(url.searchParams, makeCommentId);
       if (!cursor.ok) return cursor; // malformed cursor → 422
 
-      return listComments(
+      const page = await listComments(
         { reports: deps().reports, comments: commentRepo() },
         { orgId: actor.orgId },
         { slug, ...cursor.value },
       );
+      if (!page.ok) return page;
+
+      // ADR-0063 author display: resolve each unique author id → email (ONE
+      // IdentityStore round-trip per distinct author), fold onto the wire below.
+      const emailByAuthor = await resolveAuthorEmails(
+        uniqueCommentAuthorIds(page.value.items),
+        identityStore(),
+      );
+      return ok({ ...page.value, emailByAuthor });
     },
-    toHttp: (result) => listCommentsToHttp(result, wireContext()),
+    toHttp: (result) =>
+      listCommentsToHttp(result, wireContext(), result.ok ? result.value.emailByAuthor : undefined),
   }),
 );
 
