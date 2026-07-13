@@ -205,6 +205,20 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   ]);
   const { comments, versions } = buildEditLoaderExtras(commentsResult, versionsResult);
 
+  // The list clients now follow the ADR-0053 cursor envelope to load the FULL
+  // comment/version set (closing claude-review #184's silent >100 truncation),
+  // so `has_more` here is normally false. It can only be true if the fetch-all
+  // loop hit its safety page cap — a report so large the client bailed. Rather
+  // than DISCARD that signal (the old bug), emit it: same dependency-free
+  // `console.warn`-to-Vercel-logs pattern as the owner-degrade log above
+  // (ADR-0038 keeps this origin logger-less). Never blocks the render.
+  if (commentsResult.ok && commentsResult.has_more) {
+    console.warn(JSON.stringify({ event: "edit-comments-truncated-at-cap", slug }));
+  }
+  if (versionsResult.ok && versionsResult.has_more) {
+    console.warn(JSON.stringify({ event: "edit-versions-truncated-at-cap", slug }));
+  }
+
   const headers = editViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 

@@ -46,7 +46,67 @@ describe("listComments", () => {
     expect(init.method).toBe("GET");
     expect(init.credentials).toBe("omit");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer tok.sig");
-    expect(result).toEqual({ ok: true, comments: [COMMENT] });
+    expect(result).toEqual({ ok: true, comments: [COMMENT], has_more: false });
+  });
+
+  it("follows the cursor with starting_after across pages and accumulates every comment", async () => {
+    const c1: CommentWire = { ...COMMENT, id: "comment_1" };
+    const c2: CommentWire = { ...COMMENT, id: "comment_2" };
+    const c3: CommentWire = { ...COMMENT, id: "comment_3" };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [c1, c2], has_more: true }))
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [c3], has_more: false }));
+
+    const result = await listComments({ ...BASE, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const firstUrl = (fetchImpl.mock.calls[0] as [string, RequestInit])[0] as string;
+    const secondUrl = (fetchImpl.mock.calls[1] as [string, RequestInit])[0] as string;
+    // Page 1 carries no cursor; page 2 pins starting_after to the last id of page 1.
+    expect(firstUrl).toBe(
+      "https://app.centaurspec.com/api/v1/reports/abc1234567/comments?limit=100",
+    );
+    expect(secondUrl).toContain("limit=100");
+    expect(secondUrl).toContain("starting_after=comment_2");
+    // The full set is returned in page order, and has_more is now false (drained).
+    expect(result).toEqual({ ok: true, comments: [c1, c2, c3], has_more: false });
+  });
+
+  it("stops at the page cap and reports has_more:true when the server never drains", async () => {
+    let n = 0;
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      n += 1;
+      return jsonResponse(200, {
+        object: "list",
+        data: [{ ...COMMENT, id: `comment_${n}` }],
+        has_more: true,
+      });
+    });
+
+    const result = await listComments({ ...BASE, fetchImpl });
+
+    // Bounded: the loop never spins forever — it caps the number of pages.
+    expect(fetchImpl).toHaveBeenCalledTimes(20);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.has_more).toBe(true); // signals the set was truncated at the cap
+      expect(result.comments).toHaveLength(20);
+    }
+  });
+
+  it("propagates a mid-pagination failure instead of returning a partial set", async () => {
+    const c1: CommentWire = { ...COMMENT, id: "comment_1" };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { object: "list", data: [c1], has_more: true }))
+      .mockResolvedValueOnce(jsonResponse(401, {}));
+
+    const result = await listComments({ ...BASE, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.expired).toBe(true);
   });
 
   it("maps a 401 to an expired-session failure", async () => {
