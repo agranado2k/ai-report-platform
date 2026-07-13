@@ -483,6 +483,18 @@ export interface ProvisionedIdentity {
 }
 
 /**
+ * A minimal reference to a mirrored user for the one-time display_name backfill
+ * (roadmap #59): our internal `UserId` plus the `clerkUserId` needed to fetch the
+ * source name from Clerk. Deliberately NOT `AuthorIdentity` — the backfill never
+ * reads the (null) name it's about to populate, and must NOT pull email into the
+ * job's memory/logs (PII minimization). Keyset-paginated on `userId` (UUIDv7).
+ */
+export interface MirroredUserRef {
+  readonly userId: UserId;
+  readonly clerkUserId: string;
+}
+
+/**
  * Mirrors a Clerk identity into our `users`/`orgs`/`folders` (ADR-0048). The
  * Drizzle adapter owns the SQL; the in-memory fake backs use-case tests.
  */
@@ -554,6 +566,27 @@ export interface IdentityStore {
    * account, else leave it null and match by email at check time).
    */
   findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>>;
+  /**
+   * The mirrored users still missing a display name — `display_name IS NULL AND
+   * deleted_at IS NULL` — as `(userId, clerkUserId)` refs, keyset-paginated on
+   * `userId` DESC (ADR-0053). The one-time backfill (roadmap #59) pages through
+   * these to re-fetch each name from Clerk; bounded so a single page can never
+   * load the whole table into memory. Excludes soft-deleted users (ADR-0054/0070
+   * PII posture — a deleted account is never re-populated).
+   */
+  listUsersMissingDisplayName(
+    q: CursorParams<UserId>,
+  ): Promise<Result<CursorPage<MirroredUserRef>, AppError>>;
+  /**
+   * Set `display_name` for a user ONLY when it is currently null (and the user is
+   * live). Returns `true` iff a row transitioned null → value, `false` when the
+   * name was already set / the user is unknown or soft-deleted. The `IS NULL`
+   * guard lives in the SQL predicate, so the backfill is idempotent by
+   * construction (a re-run, or a race with live JIT provisioning, never
+   * overwrites a name captured elsewhere). The caller has already derived +
+   * capped `displayName` via the shared `clerkDisplayName`/`capDisplayName`.
+   */
+  setDisplayNameIfNull(userId: UserId, displayName: string): Promise<Result<boolean, AppError>>;
 }
 
 /**

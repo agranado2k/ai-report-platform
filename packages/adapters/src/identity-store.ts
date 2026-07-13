@@ -2,7 +2,14 @@
 // (ADR-0048, Identity & Access). find-or-create per entity so it's idempotent and
 // safe when a User already belongs to another Org (shared user pool, ADR-005).
 // Row I/O only; the provisioning policy lives in the provisionIdentity use case.
-import type { AuthorIdentity, IdentityStore, ProvisionedIdentity } from "arp-application";
+import type {
+  AuthorIdentity,
+  CursorPage,
+  CursorParams,
+  IdentityStore,
+  MirroredUserRef,
+  ProvisionedIdentity,
+} from "arp-application";
 import { folders, orgs, users } from "arp-db/schema";
 import {
   type AppError,
@@ -18,7 +25,7 @@ import {
   type UserId,
   userId,
 } from "arp-domain";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbContext } from "./client";
 
@@ -235,6 +242,50 @@ export class DrizzleIdentityStore implements IdentityStore {
       return ok(row ? userId(row.id) : null);
     } catch (e) {
       return thrown("identity.findUserIdByEmail", e);
+    }
+  }
+
+  async listUsersMissingDisplayName(
+    q: CursorParams<UserId>,
+  ): Promise<Result<CursorPage<MirroredUserRef>, AppError>> {
+    try {
+      // Target set for the one-time backfill (roadmap #59): live users whose
+      // mirrored name was never captured. Keyset on the UUIDv7 id DESC (ADR-0053),
+      // fetch limit+1 to derive hasMore without a COUNT.
+      const conditions = [isNull(users.displayName), isNull(users.deletedAt)];
+      if (q.startingAfter) conditions.push(lt(users.id, q.startingAfter));
+      const rows = await this.ctx
+        .current()
+        .select({ id: users.id, clerkUserId: users.clerkUserId })
+        .from(users)
+        .where(and(...conditions))
+        .orderBy(desc(users.id))
+        .limit(q.limit + 1);
+      const hasMore = rows.length > q.limit;
+      const items = rows
+        .slice(0, q.limit)
+        .map((r) => ({ userId: userId(r.id), clerkUserId: r.clerkUserId }));
+      return ok({ items, hasMore });
+    } catch (e) {
+      return thrown("identity.listUsersMissingDisplayName", e);
+    }
+  }
+
+  async setDisplayNameIfNull(uid: UserId, displayName: string): Promise<Result<boolean, AppError>> {
+    try {
+      // The `IS NULL` predicate makes the backfill idempotent + race-safe: a
+      // concurrent live JIT provision that set the name first leaves 0 rows
+      // updated here (returns false), and a re-run never overwrites. deleted_at
+      // guard keeps us from resurrecting name onto a soft-deleted row (ADR-0054).
+      const [row] = await this.ctx
+        .current()
+        .update(users)
+        .set({ displayName, updatedAt: new Date() })
+        .where(and(eq(users.id, uid), isNull(users.displayName), isNull(users.deletedAt)))
+        .returning({ id: users.id });
+      return ok(!!row);
+    } catch (e) {
+      return thrown("identity.setDisplayNameIfNull", e);
     }
   }
 

@@ -2,6 +2,7 @@
 // to the real Drizzle/R2 adapters, using validated env from defineEnv() (arp-env,
 // ADR-0043). One DbContext + deps set per warm lambda. Boundary layer (ADR-0020):
 // this is the ONLY place the concrete adapters are assembled.
+import { createClerkClient } from "@clerk/backend";
 import {
   AllowAllPlanLimiter,
   ApiKeyService,
@@ -33,6 +34,7 @@ import {
   UuidV7IdGenerator,
 } from "arp-adapters";
 import type {
+  BackfillDisplayNamesDeps,
   Clock,
   DrainScansDeps,
   EmailSender,
@@ -44,7 +46,9 @@ import type {
   UploadReportDeps,
   WriteGrantStore,
 } from "arp-application";
+import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
+import { clerkDisplayName } from "./clerk-display-name";
 
 let _ctx: DbContext | undefined;
 let _deps: UploadReportDeps | undefined;
@@ -243,6 +247,41 @@ export function provisionDeps(): ProvisionIdentityDeps {
  */
 export function userWebhookDeps(): HandleUserDeletedDeps {
   return { identities: identityStore(), apiKeys: apiKeyStore() };
+}
+
+/**
+ * Deps for the one-time `display_name` backfill (roadmap #59). Wires the real
+ * DrizzleIdentityStore (target-set query + null-guarded write) to a NARROW Clerk
+ * source that derives each name with the SAME shared `clerkDisplayName` rule live
+ * JIT provisioning uses (auth.server.ts) — so a backfilled name is identical to
+ * one captured on sign-in. A Clerk fetch failure for one user resolves to `err`
+ * (the use case isolates it into the summary's `errors`, never aborting). PII:
+ * the fetched name is passed straight to the store; it is never logged here.
+ */
+export function backfillDisplayNamesDeps(): BackfillDisplayNamesDeps {
+  const env = defineEnv();
+  const client = createClerkClient({
+    secretKey: env.CLERK_SECRET_KEY,
+    publishableKey: env.PUBLIC_CLERK_PUBLISHABLE_KEY,
+  });
+  return {
+    identities: identityStore(),
+    clerk: {
+      async getDisplayName(clerkUserId: string): Promise<Result<string | null, AppError>> {
+        try {
+          const user = await client.users.getUser(clerkUserId);
+          return ok(clerkDisplayName(user));
+        } catch (e) {
+          // A deleted/unknown Clerk user or an API outage — isolate as an error
+          // for THIS user (no name/id logged: the message stays generic).
+          return err({
+            kind: "Unexpected",
+            message: `clerk getUser failed: ${e instanceof Error ? e.name : "error"}`,
+          });
+        }
+      },
+    },
+  };
 }
 
 /**

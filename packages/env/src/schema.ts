@@ -17,6 +17,12 @@ export const serverSchema = {
   // boot without it) — the drain route itself is fail-closed: it returns 503
   // when this is unset and 401 on a mismatch.
   SCAN_DRAIN_SECRET: trimmedString.optional(),
+  // One-time display_name backfill (roadmap #59). Shared secret the OPERATOR
+  // presents to POST /internal/backfill-display-names. OPTIONAL at the env layer
+  // and normally UNSET — the route is fail-closed (503 when unset, 401 on
+  // mismatch), so the endpoint is inert until an operator transiently provisions
+  // the secret to run the job, then removes it. Never set as part of a deploy.
+  DISPLAY_NAME_BACKFILL_SECRET: trimmedString.optional(),
   // pg-boss connection string (node-postgres TCP). Defaults to DATABASE_URL when
   // unset; set it to Neon's POOLED endpoint so the drain doesn't exhaust
   // connections under serverless cold starts. Optional.

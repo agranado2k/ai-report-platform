@@ -35,6 +35,7 @@ import {
   clerkUserId as toClerkUserId,
 } from "arp-domain";
 import { defineEnv } from "arp-env";
+import { capDisplayName, clerkDisplayName } from "./clerk-display-name";
 import {
   accessTokenSecret,
   apiKeyStore,
@@ -367,16 +368,8 @@ function readEmailClaim(claims: unknown): string | null {
 /** Read the `name` custom claim off a Clerk session token (ADR-0063 author
  *  display), if the instance sets one. Best-effort: a non-string / blank / absent
  *  claim → null (author surfaces fall back to email). Trimmed to drop stray
- *  whitespace-only values. */
-// Bound the mirrored display name so an over-long Clerk name can't blow out the
-// stored row / panel layout (claude-review #200). It's React-escaped at render
-// and only shown to in-org collaborators, so this is defense-in-depth, applied
-// at every capture point below.
-const DISPLAY_NAME_MAX = 120;
-function capDisplayName(name: string): string {
-  return name.length > DISPLAY_NAME_MAX ? name.slice(0, DISPLAY_NAME_MAX) : name;
-}
-
+ *  whitespace-only values. Capped via the shared `capDisplayName` (claude-review
+ *  #200) so this capture point matches every other one. */
 function readNameClaim(claims: unknown): string | null {
   if (claims && typeof claims === "object" && "name" in claims) {
     const value = (claims as { name?: unknown }).name;
@@ -386,23 +379,4 @@ function readNameClaim(claims: unknown): string | null {
     }
   }
   return null;
-}
-
-/** Derive a human display name from a Clerk backend user object (ADR-0063):
- *  prefer `fullName`, else `firstName lastName`, else `username`, else null. */
-function clerkDisplayName(user: {
-  readonly fullName?: string | null;
-  readonly firstName?: string | null;
-  readonly lastName?: string | null;
-  readonly username?: string | null;
-}): string | null {
-  const full = user.fullName?.trim();
-  if (full) return capDisplayName(full);
-  const composed = [user.firstName, user.lastName]
-    .map((p) => p?.trim())
-    .filter((p): p is string => !!p)
-    .join(" ");
-  if (composed) return capDisplayName(composed);
-  const username = user.username?.trim();
-  return username && username.length > 0 ? capDisplayName(username) : null;
 }

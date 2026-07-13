@@ -703,6 +703,57 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
   }
 
+  /** The clerkUserId behind an internal UserId (reverse of `byClerk`), or null. */
+  private clerkIdFor(userId: UserId): string | null {
+    for (const [key, id] of this.byClerk) {
+      if (id.userId === userId) return key.split("|")[0] ?? null;
+    }
+    return null;
+  }
+
+  async listUsersMissingDisplayName(q: {
+    readonly limit: number;
+    readonly startingAfter?: UserId;
+    readonly endingBefore?: UserId;
+  }): Promise<
+    Result<
+      { items: readonly { userId: UserId; clerkUserId: string }[]; hasMore: boolean },
+      AppError
+    >
+  > {
+    // Dedup mirrored users by internal UserId, keep only those with no stored name
+    // and not soft-deleted, keyset DESC on UserId (mirrors the Drizzle adapter).
+    const seen = new Set<UserId>();
+    const eligible: { userId: UserId; clerkUserId: string }[] = [];
+    for (const [key, id] of this.byClerk) {
+      if (seen.has(id.userId)) continue;
+      seen.add(id.userId);
+      const clerkUserId = key.split("|")[0] ?? "";
+      const name = this.displayNameByUserId.get(id.userId) ?? null;
+      if (name === null && !this.deleted.has(clerkUserId)) {
+        eligible.push({ userId: id.userId, clerkUserId });
+      }
+    }
+    eligible.sort((a, b) => (a.userId < b.userId ? 1 : a.userId > b.userId ? -1 : 0));
+    // Range keyset (mirrors the adapter's `lt(users.id, cursor)`) so a cursor row
+    // that was just written (and dropped from the target set) still pages cleanly.
+    const after = q.startingAfter;
+    const pool = after ? eligible.filter((r) => r.userId < after) : eligible;
+    return ok({ items: pool.slice(0, q.limit), hasMore: pool.length > q.limit });
+  }
+
+  async setDisplayNameIfNull(
+    userId: UserId,
+    displayName: string,
+  ): Promise<Result<boolean, AppError>> {
+    const clerkUserId = this.clerkIdFor(userId);
+    if (clerkUserId === null || this.deleted.has(clerkUserId)) return ok(false);
+    const current = this.displayNameByUserId.get(userId) ?? null;
+    if (current !== null) return ok(false); // already set → no-op (idempotent)
+    this.displayNameByUserId.set(userId, displayName);
+    return ok(true);
+  }
+
   /** Test-only seam: register a user's email (and optional display name) directly,
    *  for fixtures (e.g. write-grant tests) that need a resolvable user without a
    *  full Clerk provisioning round-trip. A null/omitted `displayName` PRESERVES any

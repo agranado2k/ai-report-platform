@@ -268,6 +268,88 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
     expect(found.ok && found.value).toBeNull();
   });
 
+  // ── display_name backfill target-set + null-guarded write (roadmap #59) ───
+  describe("listUsersMissingDisplayName / setDisplayNameIfNull", () => {
+    const seedUser = (clerkId: string, name: string | null) =>
+      store.createIdentity({
+        clerkUserId: clerkId,
+        clerkOrgId: `org_${clerkId}`,
+        email: `${clerkId}@example.com`,
+        displayName: name,
+        orgName: `${clerkId}'s workspace`,
+        kind: "personal",
+      });
+
+    it("returns only users with a null display name, excluding soft-deleted", async () => {
+      const noName1 = await seedUser("cu_noname1", null);
+      const withName = await seedUser("cu_hasname", "Has Name");
+      const noName2 = await seedUser("cu_noname2", null);
+      const deleted = await seedUser("cu_deleted", null);
+      if (!noName1.ok || !withName.ok || !noName2.ok || !deleted.ok) throw new Error("seed failed");
+      await store.softDeleteByClerkId("cu_deleted");
+
+      const page = await store.listUsersMissingDisplayName({ limit: 50 });
+      expect(page.ok).toBe(true);
+      if (!page.ok) return;
+      const ids = page.value.items.map((i) => i.userId).sort();
+      expect(ids).toEqual([noName1.value.userId, noName2.value.userId].sort());
+      // Neither the named user nor the soft-deleted one appears.
+      expect(ids).not.toContain(withName.value.userId);
+      expect(ids).not.toContain(deleted.value.userId);
+      // Each ref carries the clerkUserId needed to re-fetch from Clerk.
+      const ref = page.value.items.find((i) => i.userId === noName1.value.userId);
+      expect(ref?.clerkUserId).toBe("cu_noname1");
+    });
+
+    it("paginates with keyset (hasMore + startingAfter)", async () => {
+      for (let i = 0; i < 3; i += 1) await seedUser(`cu_page_${i}`, null);
+      const first = await store.listUsersMissingDisplayName({ limit: 2 });
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      expect(first.value.items).toHaveLength(2);
+      expect(first.value.hasMore).toBe(true);
+
+      const cursor = first.value.items[1]?.userId;
+      const second = await store.listUsersMissingDisplayName({ limit: 2, startingAfter: cursor });
+      expect(second.ok).toBe(true);
+      if (!second.ok) return;
+      expect(second.value.items).toHaveLength(1);
+      expect(second.value.hasMore).toBe(false);
+      // No overlap between pages.
+      const firstIds = new Set(first.value.items.map((i) => i.userId));
+      expect(second.value.items.every((i) => !firstIds.has(i.userId))).toBe(true);
+    });
+
+    it("setDisplayNameIfNull writes when null and returns true; then drops out of the target set", async () => {
+      const u = await seedUser("cu_write", null);
+      if (!u.ok) return;
+      const wrote = await store.setDisplayNameIfNull(u.value.userId, "Written Name");
+      expect(wrote.ok && wrote.value).toBe(true);
+
+      const author = await store.findAuthorIdentityByUserId(u.value.userId);
+      expect(author.ok && author.value?.displayName).toBe("Written Name");
+      const page = await store.listUsersMissingDisplayName({ limit: 50 });
+      expect(page.ok && page.value.items.map((i) => i.userId)).not.toContain(u.value.userId);
+    });
+
+    it("setDisplayNameIfNull is a no-op on an already-named user (returns false, never overwrites)", async () => {
+      const u = await seedUser("cu_named", "Original Name");
+      if (!u.ok) return;
+      const wrote = await store.setDisplayNameIfNull(u.value.userId, "Should Not Apply");
+      expect(wrote.ok && wrote.value).toBe(false);
+      const author = await store.findAuthorIdentityByUserId(u.value.userId);
+      expect(author.ok && author.value?.displayName).toBe("Original Name");
+    });
+
+    it("setDisplayNameIfNull returns false for a soft-deleted user (no PII resurrection)", async () => {
+      const u = await seedUser("cu_softdel", null);
+      if (!u.ok) return;
+      await store.softDeleteByClerkId("cu_softdel");
+      const wrote = await store.setDisplayNameIfNull(u.value.userId, "Nope");
+      expect(wrote.ok && wrote.value).toBe(false);
+    });
+  });
+
   // ── Team orgs — JIT join-or-create mirroring (ADR-0068 §3) ───────────────
   describe("createIdentity with kind: 'team'", () => {
     const TEAM_ORG = "clerk_org_team_housenumbers";
