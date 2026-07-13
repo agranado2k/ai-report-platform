@@ -38,7 +38,9 @@ Creating, editing, or resolving a comment requires authentication **and** report
 
 **Decision: no, not in v1.** Commenting requires `canWrite`. Rationale: comments in this epic exist to steer content changes on a report someone can already edit — the collaboration surface is the edit route (ADR-0063), and read-only sharing (ADR-0056's `password`/`org`/`allowlist` view modes) is a content-consumption grant, not a collaboration grant. Read-only commenting (a lighter-weight "suggest via comment without write access" mode) is a **considered, deferred** option — noted here so it isn't rediscovered as a surprise later, but it is out of scope for this ADR.
 
-Resolving/deleting a comment: the comment's **author** or the report's **owner** may resolve or delete it. The owner can additionally moderate (resolve/delete) any comment on their report, matching the existing owner-is-final-authority pattern from ADR-0059 (owner-only delete/set_acl/grant-management).
+Resolving/deleting/**editing** a comment: the comment's **author** or the report's **owner** may resolve, delete, or edit it. The owner can additionally moderate (resolve/delete/edit) any comment on their report, matching the existing owner-is-final-authority pattern from ADR-0059 (owner-only delete/set_acl/grant-management).
+
+> **Amendment (2026-07-12): comment editing is now supported.** The §3 fork above listed "editing" under `canWrite`, but editing a comment's own text is a moderation-shaped act on your own content, so it is gated by the **author-or-owner** rule (the same gate as resolve/delete, via `loadReadableReport` + an author-or-owner check — ADR-0060 §4), NOT `canWrite`. This is the defensible mirror and keeps all three post-creation comment mutations under one rule. **v1 scope: `body` and/or `intent` only.** The anchor is **immutable** (re-anchoring is a separate, unbuilt concern), and there is **no `edited_at` column / "edited" indicator** yet — that is a migration-free fast-follow. A present `body` must be a non-empty bounded string; a present `intent` is validated by `makeIntent` (invalid → 422), exactly as on create. Emits a new `CommentEdited` domain event and writes a `comment.edited` audit row (ADR-0070).
 
 ### 4. No anonymous read of comments, either
 
@@ -55,6 +57,8 @@ Two new domain events, added to `docs/events.md` in the same PR (the integration
 ### 7. API
 
 Comment CRUD lives under `/api/v1/reports/{slug}/comments` (list/create) and `/api/v1/reports/{slug}/comments/{comment_id}` (get/update/resolve/delete), auth-required on every route, following the existing wire conventions (ADR-0053: flat snake_case resources, list envelope, cursor pagination for the list endpoint, RFC-9457 errors per ADR-0040). The full `openapi.yaml` addition and Bruno regen happen in the implementation PR, per the doc-trigger matrix (ADR-026) — noted here as a requirement, not performed by this ADR.
+
+**PATCH is overloaded on the request-body shape** (2026-07-12, mirroring how POST /comments serves both create and reply): a body carrying `body` and/or `intent` is an **edit**; an empty/absent body is the idempotent **resolve** (the resolve callers send no JSON body, so the dispatch defaults them to resolve — the resolve contract is byte-for-byte unchanged). A dedicated `reports_edit_comment` MCP tool wraps the edit path.
 
 ### 8. Comment intent (added post-implementation)
 

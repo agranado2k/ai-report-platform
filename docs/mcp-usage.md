@@ -59,6 +59,7 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 | `reports_update` | mutate | Rename a report's title. |
 | `reports_move` | mutate | Move a report to a folder. |
 | `reports_resolve_comment` | mutate | Mark a comment resolved (author or report owner; one-way, idempotent). |
+| `reports_edit_comment` | mutate | Edit a comment's `body` and/or `intent` (author or report owner). At least one field; omitted fields unchanged. The anchor is immutable. |
 | `reports_delete` | destructive | Soft-delete a report (viewer then returns 410 Gone). |
 | `reports_delete_comment` | destructive | Delete a comment (author or report owner). |
 | `folders_create` | create | Create a folder under a parent. |

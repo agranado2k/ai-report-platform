@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Anchor } from "./anchor";
 import { commentId, reportId, userId, versionId } from "./brand";
-import { type Comment, createComment, replyToComment, resolveComment } from "./comment";
+import {
+  type Comment,
+  createComment,
+  editComment,
+  replyToComment,
+  resolveComment,
+} from "./comment";
 
 const report = reportId("00000000-0000-7000-8000-0000000000a1");
 const version = versionId("00000000-0000-7000-8000-0000000000b1");
@@ -259,5 +265,67 @@ describe("resolveComment", () => {
     const twice = resolveComment(once.comment, 9999);
     expect(twice.comment.resolvedAt).toBe(5000); // unchanged
     expect(twice.events).toEqual([]); // no duplicate event
+  });
+});
+
+describe("editComment", () => {
+  function rootComment(): Comment {
+    const r = createComment({
+      id: rootId,
+      reportId: report,
+      authorUserId: author,
+      body: "original body",
+      anchor,
+      intent: "note",
+      createdAt: 1000,
+    });
+    if (!r.ok) throw new Error("fixture failed");
+    return r.value.comment;
+  }
+
+  it("replaces the body, emitting CommentEdited", () => {
+    const r = editComment(rootComment(), { body: "edited body", editedAt: 5000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.comment.body).toBe("edited body");
+    expect(r.value.comment.intent).toBe("note"); // unchanged
+    expect(r.value.events).toEqual([
+      { type: "CommentEdited", commentId: rootId, reportId: report, editedAt: 5000 },
+    ]);
+  });
+
+  it("replaces the intent while leaving the body unchanged", () => {
+    const r = editComment(rootComment(), { intent: "enhancement", editedAt: 5000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.comment.intent).toBe("enhancement");
+    expect(r.value.comment.body).toBe("original body"); // unchanged
+  });
+
+  it("replaces both body and intent together", () => {
+    const r = editComment(rootComment(), { body: "new", intent: "add", editedAt: 5000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.comment.body).toBe("new");
+    expect(r.value.comment.intent).toBe("add");
+  });
+
+  it("trims and re-validates the body — an empty/whitespace body is rejected", () => {
+    const r = editComment(rootComment(), { body: "   ", editedAt: 5000 });
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+  });
+
+  it("rejects an edit that provides neither body nor intent", () => {
+    const r = editComment(rootComment(), { editedAt: 5000 });
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+  });
+
+  it("leaves the anchor and resolved state immutable", () => {
+    const resolved = resolveComment(rootComment(), 2000).comment;
+    const r = editComment(resolved, { body: "edited", editedAt: 5000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.comment.anchor).toEqual(anchor);
+    expect(r.value.comment.resolvedAt).toBe(2000); // unchanged by an edit
   });
 });

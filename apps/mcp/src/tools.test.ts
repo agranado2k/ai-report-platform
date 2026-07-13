@@ -193,6 +193,41 @@ describe("comment tools", () => {
     expect(calls).toEqual([{ method: "resolveComment", args: ["abc12345", "comment_1"] }]);
   });
 
+  it("reports_edit_comment maps slug + comment_id + fields and is a non-destructive mutate", async () => {
+    const { client, calls } = recordingClient({
+      ok: true,
+      data: { object: "comment", id: "comment_1" },
+    });
+    const tool = collectTools(registerWriteTools, client).get("reports_edit_comment");
+    expect(tool).toBeDefined();
+    expect(tool?.config.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.config.annotations?.destructiveHint).toBe(false);
+    expect(tool?.config.annotations?.idempotentHint).toBe(true);
+
+    await tool?.handler({
+      slug: "abc12345",
+      comment_id: "comment_1",
+      body: "fixed typo",
+      intent: "enhancement",
+    });
+    expect(calls).toEqual([
+      {
+        method: "editComment",
+        args: ["abc12345", "comment_1", { body: "fixed typo", intent: "enhancement" }],
+      },
+    ]);
+  });
+
+  it("reports_edit_comment forwards only the fields supplied (body-only edit)", async () => {
+    const { client, calls } = recordingClient();
+    const tool = collectTools(registerWriteTools, client).get("reports_edit_comment");
+    await tool?.handler({ slug: "abc12345", comment_id: "comment_1", body: "just the body" });
+    expect(calls[0]).toEqual({
+      method: "editComment",
+      args: ["abc12345", "comment_1", { body: "just the body", intent: undefined }],
+    });
+  });
+
   it("reports_delete_comment maps slug + comment_id and is destructive", async () => {
     const { client, calls } = recordingClient({ ok: true, data: undefined });
     const tool = collectTools(registerWriteTools, client).get("reports_delete_comment");
