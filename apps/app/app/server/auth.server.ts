@@ -139,8 +139,11 @@ async function resolveOAuthUserId(args: LoaderFunctionArgs): Promise<string | nu
  * deliberately distinct from the verification's fail-closed 401. No email on the
  * account → `Unauthenticated` (we can't provision without one).
  */
-async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>> {
+async function fetchOAuthIdentity(
+  userId: string,
+): Promise<Result<{ email: string; displayName: string | null }, AppError>> {
   let email: string | undefined;
+  let displayName: string | null = null;
   try {
     const user = await clerkBackend().users.getUser(userId);
     // VERIFIED addresses only (review #158 H-3): under ADR-0068 the email
@@ -151,6 +154,9 @@ async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>
     const verified = user.emailAddresses.filter((e) => e.verification?.status === "verified");
     const primary = verified.find((e) => e.id === user.primaryEmailAddressId) ?? verified[0];
     email = primary?.emailAddress;
+    // Best-effort display name (ADR-0063 author display): the OAuth path already
+    // has the full Clerk user, so we capture it here for free — no extra round-trip.
+    displayName = clerkDisplayName(user);
   } catch {
     // Clerk unreachable — infra, not a client auth failure (distinct from the 401).
     return err({ kind: "Unexpected", message: `failed to fetch Clerk user ${userId}` });
@@ -161,7 +167,7 @@ async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>
       message: "OAuth identity has no verified email; cannot provision",
     });
   }
-  return ok(email);
+  return ok({ email, displayName });
 }
 
 /**
@@ -202,6 +208,11 @@ export async function resolveUploadActor(
       clerkUserId: toClerkUserId(userId),
       clerkOrgId: orgId ? toClerkOrgId(orgId) : null,
       email,
+      // Best-effort display name (ADR-0063): read from the session token's `name`
+      // custom claim if the Clerk instance sets one (like the `email` claim, an
+      // ADR-0048 dependency). Absent → null; author surfaces fall back to email.
+      // No Clerk backend round-trip here — the session path deliberately avoids one.
+      displayName: readNameClaim(sessionClaims),
     });
   }
 
@@ -210,15 +221,16 @@ export async function resolveUploadActor(
   // Email is fetched only here (the write path) — reads don't pay that round-trip.
   const oauthUserId = await resolveOAuthUserId(args);
   if (oauthUserId) {
-    const email = await fetchOAuthEmail(oauthUserId);
-    if (!email.ok) return email; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
+    const identity = await fetchOAuthIdentity(oauthUserId);
+    if (!identity.ok) return identity; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
     const deps = provisionDeps();
     const personal = await deps.clerkOrgs.findPersonalOrg(oauthUserId);
     if (!personal.ok) return personal; // Clerk outage → propagate (→ 500)
     return provisionIdentity(deps, {
       clerkUserId: toClerkUserId(oauthUserId),
       clerkOrgId: personal.value ? toClerkOrgId(personal.value) : null,
-      email: email.value,
+      email: identity.value.email,
+      displayName: identity.value.displayName,
     });
   }
 
@@ -350,4 +362,47 @@ function readEmailClaim(claims: unknown): string | null {
     if (typeof value === "string" && /^[^@\s]+@[^@\s]+$/.test(value)) return value;
   }
   return null;
+}
+
+/** Read the `name` custom claim off a Clerk session token (ADR-0063 author
+ *  display), if the instance sets one. Best-effort: a non-string / blank / absent
+ *  claim → null (author surfaces fall back to email). Trimmed to drop stray
+ *  whitespace-only values. */
+// Bound the mirrored display name so an over-long Clerk name can't blow out the
+// stored row / panel layout (claude-review #200). It's React-escaped at render
+// and only shown to in-org collaborators, so this is defense-in-depth, applied
+// at every capture point below.
+const DISPLAY_NAME_MAX = 120;
+function capDisplayName(name: string): string {
+  return name.length > DISPLAY_NAME_MAX ? name.slice(0, DISPLAY_NAME_MAX) : name;
+}
+
+function readNameClaim(claims: unknown): string | null {
+  if (claims && typeof claims === "object" && "name" in claims) {
+    const value = (claims as { name?: unknown }).name;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return capDisplayName(trimmed);
+    }
+  }
+  return null;
+}
+
+/** Derive a human display name from a Clerk backend user object (ADR-0063):
+ *  prefer `fullName`, else `firstName lastName`, else `username`, else null. */
+function clerkDisplayName(user: {
+  readonly fullName?: string | null;
+  readonly firstName?: string | null;
+  readonly lastName?: string | null;
+  readonly username?: string | null;
+}): string | null {
+  const full = user.fullName?.trim();
+  if (full) return capDisplayName(full);
+  const composed = [user.firstName, user.lastName]
+    .map((p) => p?.trim())
+    .filter((p): p is string => !!p)
+    .join(" ");
+  if (composed) return capDisplayName(composed);
+  const username = user.username?.trim();
+  return username && username.length > 0 ? capDisplayName(username) : null;
 }

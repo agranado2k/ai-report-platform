@@ -3,31 +3,51 @@
 // (vitest `environment: "node"`), so these helpers are extracted from the TSX
 // components precisely so their logic is unit-testable without a mounted tree.
 import { describe, expect, it } from "vitest";
-import { initialsFromEmail, relativeTime } from "./comment-format";
+import { authorInitials, relativeTime } from "./comment-format";
 
-describe("initialsFromEmail", () => {
-  it("derives up-to-two uppercased alnum initials from the local-part", () => {
-    expect(initialsFromEmail("jane@example.com")).toBe("JA");
+describe("authorInitials", () => {
+  it("prefers the NAME: first char of each of the first two words → 'JD'", () => {
+    expect(authorInitials("Jane Doe", "jane@example.com")).toBe("JD");
   });
 
-  it("uses the single available char for a one-char local-part", () => {
-    expect(initialsFromEmail("j@example.com")).toBe("J");
+  it("uses the first two alnum chars of a single-word name → 'JA'", () => {
+    expect(authorInitials("Jane", null)).toBe("JA");
   });
 
-  it("skips leading non-alnum chars in the local-part", () => {
-    expect(initialsFromEmail("_bob.smith@example.com")).toBe("BO");
+  it("ignores extra words / whitespace, taking only the first two words", () => {
+    expect(authorInitials("  Mary  Jane  Watson ", null)).toBe("MJ");
   });
 
-  it("returns '?' when the email is null", () => {
-    expect(initialsFromEmail(null)).toBe("?");
+  it("strips non-alnum chars within name words", () => {
+    expect(authorInitials("Jean-Luc Picard", null)).toBe("JP");
   });
 
-  it("returns '?' when the local-part has no alnum chars", () => {
-    expect(initialsFromEmail("...@example.com")).toBe("?");
+  it("falls back to the EMAIL local-part when the name is null", () => {
+    expect(authorInitials(null, "jane@example.com")).toBe("JA");
   });
 
-  it("returns '?' for an empty string", () => {
-    expect(initialsFromEmail("")).toBe("?");
+  it("falls back to the email when the name has no alnum chars", () => {
+    expect(authorInitials("...", "bob@example.com")).toBe("BO");
+  });
+
+  it("uses the single available email char for a one-char local-part", () => {
+    expect(authorInitials(null, "j@example.com")).toBe("J");
+  });
+
+  it("skips leading non-alnum chars in the email local-part", () => {
+    expect(authorInitials(null, "_bob.smith@example.com")).toBe("BO");
+  });
+
+  it("returns '?' when both name and email are null", () => {
+    expect(authorInitials(null, null)).toBe("?");
+  });
+
+  it("returns '?' when neither name nor email carry an alnum char", () => {
+    expect(authorInitials("...", "...@example.com")).toBe("?");
+  });
+
+  it("returns '?' for empty strings", () => {
+    expect(authorInitials("", "")).toBe("?");
   });
 });
 

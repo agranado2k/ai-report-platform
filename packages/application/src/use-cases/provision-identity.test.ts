@@ -10,11 +10,13 @@ const withOrg: ClerkIdentity = {
   clerkUserId: clerkUserId("u_1"),
   clerkOrgId: clerkOrgId("org_1"),
   email: "ann@gmail.com",
+  displayName: "Ann Adams",
 };
 const noOrg: ClerkIdentity = {
   clerkUserId: clerkUserId("u_2"),
   clerkOrgId: null,
   email: "bob@gmail.com",
+  displayName: null, // no name from Clerk — the wire falls back to email
 };
 
 // housenumbers.io is NOT on the public-provider list — a `team` org, shared by
@@ -23,11 +25,13 @@ const firstAtDomain: ClerkIdentity = {
   clerkUserId: clerkUserId("u_carol"),
   clerkOrgId: null,
   email: "carol@housenumbers.io",
+  displayName: "Carol Chen",
 };
 const secondAtDomain: ClerkIdentity = {
   clerkUserId: clerkUserId("u_dave"),
   clerkOrgId: null,
   email: "dave@housenumbers.io",
+  displayName: "Dave Diaz",
 };
 
 function deps() {
@@ -70,6 +74,24 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
     }
   });
 
+  it("threads the Clerk display name into the mirror (ADR-0063 author display)", async () => {
+    const d = deps();
+    const r = await provisionIdentity(d, withOrg);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const author = await d.identities.findAuthorIdentityByUserId(r.value.userId);
+    expect(author.ok && author.value).toEqual({ email: "ann@gmail.com", displayName: "Ann Adams" });
+  });
+
+  it("stores a null display name when Clerk exposes none — email still resolves", async () => {
+    const d = deps();
+    const r = await provisionIdentity(d, noOrg);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const author = await d.identities.findAuthorIdentityByUserId(r.value.userId);
+    expect(author.ok && author.value).toEqual({ email: "bob@gmail.com", displayName: null });
+  });
+
   it("propagates a Clerk personal-org-creation failure", async () => {
     const failingClerk: ClerkOrgProvisioner = {
       async createPersonalOrg(): Promise<Result<string, AppError>> {
@@ -102,6 +124,7 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
       clerkUserId: clerkUserId("u_bad"),
       clerkOrgId: null,
       email: "not-an-email",
+      displayName: null,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe("ValidationError");

@@ -32,6 +32,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
+      displayName: "Ann Anderson",
       orgName: "ann's workspace",
       kind: "personal",
     });
@@ -55,6 +56,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
+      displayName: "Ann Anderson",
       orgName: "ann's workspace",
       kind: "personal",
     });
@@ -62,6 +64,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
+      displayName: "Ann Anderson",
       orgName: "ann's workspace",
       kind: "personal",
     });
@@ -78,6 +81,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
+      displayName: null,
       orgName: "ann's workspace",
       kind: "personal",
     });
@@ -103,6 +107,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann@example.com",
+      displayName: "Ann Anderson",
       orgName: "ann's workspace",
       kind: "personal",
     });
@@ -176,12 +181,61 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
       clerkUserId: CU,
       clerkOrgId: CO,
       email: "ann.new@example.com",
+      displayName: null,
       orgName: "ann's workspace",
       kind: "personal",
     });
     expect(again.ok).toBe(true);
     const email = await store.findEmailByUserId(created.value.userId);
     expect(email.ok && email.value).toBe("ann.new@example.com");
+  });
+
+  it("createIdentity stores the display name; findAuthorIdentityByUserId round-trips it (ADR-0063)", async () => {
+    const created = await mirror(); // seeded with displayName "Ann Anderson"
+    if (!created.ok) return;
+    const author = await store.findAuthorIdentityByUserId(created.value.userId);
+    expect(author.ok && author.value).toEqual({
+      email: "ann@example.com",
+      displayName: "Ann Anderson",
+    });
+  });
+
+  it("createIdentity stores a null display name when none is given (name column nullable)", async () => {
+    const created = await store.createIdentity({
+      clerkUserId: "clerk_user_noname",
+      clerkOrgId: "clerk_org_noname",
+      email: "noname@example.com",
+      displayName: null,
+      orgName: "noname's workspace",
+      kind: "personal",
+    });
+    if (!created.ok) return;
+    const author = await store.findAuthorIdentityByUserId(created.value.userId);
+    expect(author.ok && author.value).toEqual({ email: "noname@example.com", displayName: null });
+  });
+
+  it("re-provision with a null display name PRESERVES a previously stored name (COALESCE)", async () => {
+    const first = await mirror(); // stores "Ann Anderson"
+    if (!first.ok) return;
+    // A later claim-less session (displayName null) must not wipe the name.
+    await store.createIdentity({
+      clerkUserId: CU,
+      clerkOrgId: CO,
+      email: "ann@example.com",
+      displayName: null,
+      orgName: "ann's workspace",
+      kind: "personal",
+    });
+    const author = await store.findAuthorIdentityByUserId(first.value.userId);
+    expect(author.ok && author.value?.displayName).toBe("Ann Anderson");
+  });
+
+  it("findAuthorIdentityByUserId returns null for a soft-deleted user (no PII leak, ADR-0054/0070)", async () => {
+    const created = await mirror();
+    if (!created.ok) return;
+    await store.softDeleteByClerkId(CU);
+    const author = await store.findAuthorIdentityByUserId(created.value.userId);
+    expect(author.ok && author.value).toBeNull();
   });
 
   it("findEmailByUserId returns the mirrored email; null for an unknown id", async () => {
@@ -223,6 +277,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
         clerkUserId: "clerk_user_alice",
         clerkOrgId: TEAM_ORG,
         email: "alice@housenumbers.io",
+        displayName: "Alice Ackerman",
         orgName: "housenumbers.io",
         kind: "team",
       });
@@ -242,6 +297,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
         clerkUserId: "clerk_user_alice",
         clerkOrgId: TEAM_ORG,
         email: "alice@housenumbers.io",
+        displayName: "Alice Ackerman",
         orgName: "housenumbers.io",
         kind: "team",
       });
@@ -252,6 +308,7 @@ describe("DrizzleIdentityStore (pglite integration)", () => {
         clerkUserId: "clerk_user_bob",
         clerkOrgId: TEAM_ORG,
         email: "bob@housenumbers.io",
+        displayName: "Bob Baxter",
         orgName: "housenumbers.io",
         kind: "team",
       });

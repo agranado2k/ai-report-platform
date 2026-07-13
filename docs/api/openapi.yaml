@@ -1143,11 +1143,12 @@ components:
       description: >
         The responsible user's display identity (ADR-0063 author display),
         carried alongside the raw `user_…` id (`author_id` / `uploaded_by`) on
-        comment and version resources. `email` is the best-available identity —
-        there is NO stored display-name — and is `null` for a deleted or
-        never-mirrored user; clients fall back to a generic label, never the raw
-        id. Only ever returned on the authenticated, org-scoped API — never the
-        public viewer.
+        comment and version resources. `name` is the human display name mirrored
+        from Clerk (fullName / firstName lastName / username) when one is stored,
+        else `null`; `email` is the fallback identity and is `null` for a deleted
+        or never-mirrored user. Clients prefer `name`, then `email`, then a
+        generic label — never the raw id. Only ever returned on the
+        authenticated, org-scoped API — never the public viewer.
       type: object
       required: [id, email]
       properties:
@@ -1160,6 +1161,13 @@ components:
           type: [string, 'null']
           format: email
           description: The author's email, or `null` when it can't be resolved.
+        name:
+          type: [string, 'null']
+          description: >
+            The author's human display name, or `null` when none is stored.
+            Optional + additive (a server predating display names may omit it) —
+            not in `required`.
+          example: Jane Doe
 
     VersionSummary:
       description: A `version` resource — the ReportVersionSummary projection (ADR-0065).

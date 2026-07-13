@@ -11,6 +11,7 @@ import {
   listBody,
   reportBody,
   versionBody,
+  type WireAuthor,
   type WireContext,
 } from "./resource";
 
@@ -53,7 +54,7 @@ export function listFoldersToHttp(
 export function listReportVersionsToHttp(
   result: Result<VersionPage, AppError>,
   ctx: WireContext,
-  emailByAuthor?: ReadonlyMap<UserId, string | null>,
+  authorByUserId?: ReadonlyMap<UserId, WireAuthor>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   const { items, hasMore } = result.value;
@@ -61,7 +62,7 @@ export function listReportVersionsToHttp(
     status: 200,
     contentType: "application/json",
     body: listBody(
-      items.map((v) => versionBody(v, ctx, emailByAuthor?.get(v.uploadedBy) ?? null)),
+      items.map((v) => versionBody(v, ctx, authorByUserId?.get(v.uploadedBy) ?? null)),
       hasMore,
     ),
   };
@@ -73,7 +74,7 @@ export function listReportVersionsToHttp(
 export function listCommentsToHttp(
   result: Result<CommentPage, AppError>,
   ctx: WireContext,
-  emailByAuthor?: ReadonlyMap<UserId, string | null>,
+  authorByUserId?: ReadonlyMap<UserId, WireAuthor>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   const { items, hasMore } = result.value;
@@ -81,7 +82,7 @@ export function listCommentsToHttp(
     status: 200,
     contentType: "application/json",
     body: listBody(
-      items.map((c) => commentBody(c, ctx, emailByAuthor?.get(c.authorUserId) ?? null)),
+      items.map((c) => commentBody(c, ctx, authorByUserId?.get(c.authorUserId) ?? null)),
       hasMore,
     ),
   };

@@ -1,5 +1,5 @@
-// versionAuthorLabel (ADR-0063 author display): render the uploader's resolved
-// email, falling back to a stable label — never the raw user_… id.
+// versionAuthorLabel (ADR-0063 author display): prefer the uploader's display
+// name, else their resolved email, else a stable label — never the raw user_… id.
 import { describe, expect, it } from "vitest";
 import type { VersionWire } from "../wire-types";
 import { versionAuthorLabel } from "./VersionsPanel";
@@ -17,7 +17,25 @@ const base: VersionWire = {
 };
 
 describe("versionAuthorLabel", () => {
-  it("shows the uploader's email when resolved", () => {
+  it("prefers the display name when present", () => {
+    expect(
+      versionAuthorLabel({
+        ...base,
+        author: { id: base.uploaded_by, email: "bob@example.com", name: "Bob Baxter" },
+      }),
+    ).toBe("Bob Baxter");
+  });
+
+  it("shows the uploader's email when no display name is present", () => {
+    expect(
+      versionAuthorLabel({
+        ...base,
+        author: { id: base.uploaded_by, email: "bob@example.com", name: null },
+      }),
+    ).toBe("bob@example.com");
+  });
+
+  it("shows the email when the name field is omitted entirely (pre-display-name server)", () => {
     expect(
       versionAuthorLabel({ ...base, author: { id: base.uploaded_by, email: "bob@example.com" } }),
     ).toBe("bob@example.com");

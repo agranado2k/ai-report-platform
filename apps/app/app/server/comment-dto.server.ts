@@ -1,8 +1,8 @@
 // Comment author-id dedupe for the comments Bearer list route (ADR-0063 author
 // display). Mirrors version-dto.server.ts's `uniqueVersionAuthorIds`: collapse
 // a page of comments to the UNIQUE author ids (first-seen order) so the route
-// makes exactly ONE IdentityStore.findEmailByUserId round-trip per distinct
-// author (via author-email.server.ts's `resolveAuthorEmails`), then lets the
+// makes exactly ONE IdentityStore.findAuthorIdentityByUserId round-trip per distinct
+// author (via author-email.server.ts's `resolveAuthorIdentities`), then lets the
 // arp-http mapper fold each resolved email back onto its comment resource.
 //
 // Unlike version-dto.server.ts there is NO `commentsToDto` half here: the

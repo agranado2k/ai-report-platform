@@ -12,6 +12,7 @@ async function seed() {
     clerkUserId: CLERK_USER,
     clerkOrgId: CLERK_ORG,
     email: "a@example.com",
+    displayName: null,
     orgName: "A",
     kind: "personal",
   });
@@ -44,6 +45,7 @@ describe("handleUserDeleted (Clerk user.deleted mirror, ADR-0054)", () => {
       clerkUserId: CLERK_USER,
       clerkOrgId: CLERK_ORG,
       email: "a@example.com",
+      displayName: null,
       orgName: "A",
       kind: "personal",
     });

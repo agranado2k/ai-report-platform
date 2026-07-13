@@ -30,7 +30,7 @@ import { listReportVersions } from "arp-application";
 import { err, makeVersionId, ok, validationError } from "arp-domain";
 import { listReportVersionsToHttp, parseCursorParams, uploadResultToHttp } from "arp-http";
 import type { PMDocJson } from "arp-report-html";
-import { resolveAuthorEmails } from "../server/author-email.server";
+import { resolveAuthorIdentities } from "../server/author-email.server";
 import { deps, identityStore, viewOrigin } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
@@ -57,19 +57,19 @@ export const loader = corsRoute(
       );
       if (!page.ok) return page;
 
-      // ADR-0063 author display: resolve each unique uploader id → email (ONE
-      // IdentityStore round-trip per distinct author), fold onto the wire below.
-      const emailByAuthor = await resolveAuthorEmails(
+      // ADR-0063 author display: resolve each unique uploader id → { name, email }
+      // (ONE IdentityStore round-trip per distinct author), fold onto the wire below.
+      const authorByUserId = await resolveAuthorIdentities(
         uniqueVersionAuthorIds(page.value.items),
         identityStore(),
       );
-      return ok({ ...page.value, emailByAuthor });
+      return ok({ ...page.value, authorByUserId });
     },
     toHttp: (result) =>
       listReportVersionsToHttp(
         result,
         wireContext(),
-        result.ok ? result.value.emailByAuthor : undefined,
+        result.ok ? result.value.authorByUserId : undefined,
       ),
   }),
 );

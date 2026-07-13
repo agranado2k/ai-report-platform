@@ -24,10 +24,15 @@ export interface CommentWire {
   readonly report_id: string;
   readonly author_id: string;
   /** The author's resolvable identity (ADR-0063 author display). `id` mirrors
-   *  `author_id`; `email` is the best available identity (no display-name
-   *  exists) and is null for a deleted/never-mirrored user. Optional here
-   *  defensively — the field is additive, so a pre-ADR-0063 server may omit it. */
-  readonly author?: { readonly id: string; readonly email: string | null };
+   *  `author_id`; `name` is the human display name when stored (else null);
+   *  `email` is the fallback identity, null for a deleted/never-mirrored user.
+   *  `author` is optional here defensively (additive — a pre-ADR-0063 server may
+   *  omit it); `name` is likewise optional (a server predating display names). */
+  readonly author?: {
+    readonly id: string;
+    readonly email: string | null;
+    readonly name?: string | null;
+  };
   readonly parent_id: string | null;
   readonly body: string;
   /** What the author wants done with the comment (ADR-0064 Decision 8):
@@ -49,9 +54,14 @@ export interface VersionWire {
   readonly version_no: number;
   readonly uploaded_by: string;
   /** The uploader's resolvable identity (ADR-0063 author display). `id` mirrors
-   *  `uploaded_by`; `email` is null for a deleted/never-mirrored user. Optional
-   *  defensively — additive, so a pre-ADR-0063 server may omit it. */
-  readonly author?: { readonly id: string; readonly email: string | null };
+   *  `uploaded_by`; `name` is the human display name when stored (else null);
+   *  `email` is the fallback, null for a deleted/never-mirrored user. `author` is
+   *  optional defensively (additive); `name` likewise (a pre-display-name server). */
+  readonly author?: {
+    readonly id: string;
+    readonly email: string | null;
+    readonly name?: string | null;
+  };
   readonly uploaded_at: string;
   readonly scan_status: string;
   readonly size_bytes: number;

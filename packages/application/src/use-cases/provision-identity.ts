@@ -82,6 +82,7 @@ export async function provisionIdentity(
       clerkUserId: identity.clerkUserId,
       clerkOrgId,
       email: identity.email,
+      displayName: identity.displayName,
       orgName,
       kind,
     });

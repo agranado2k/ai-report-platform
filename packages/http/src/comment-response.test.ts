@@ -47,7 +47,7 @@ const commentResource = (overrides: Partial<Comment> = {}) => {
     id: commentIdToWire(c.id),
     report_id: reportIdToWire(c.reportId),
     author_id: userIdToWire(c.authorUserId),
-    author: { id: userIdToWire(c.authorUserId), email: null },
+    author: { id: userIdToWire(c.authorUserId), email: null, name: null },
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
     intent: c.intent,
@@ -134,19 +134,38 @@ describe("listCommentsToHttp", () => {
     });
   });
 
-  it("folds each comment's resolved author email in from the emailByAuthor map", () => {
+  it("folds each comment's resolved author { name, email } in from the map", () => {
     const items = [comment({ id: commentId(C1) })];
-    const emailByAuthor = new Map([[userId(U1), "alice@example.com"]]);
-    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, emailByAuthor);
-    const data = (res.body as { data: { author: { id: string; email: string | null } }[] }).data;
-    expect(data[0]?.author).toEqual({ id: userIdToWire(userId(U1)), email: "alice@example.com" });
+    const authorByUserId = new Map([
+      [userId(U1), { email: "alice@example.com", name: "Alice Ackerman" }],
+    ]);
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, authorByUserId);
+    const data = (
+      res.body as { data: { author: { id: string; email: string | null; name: string | null } }[] }
+    ).data;
+    expect(data[0]?.author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: "alice@example.com",
+      name: "Alice Ackerman",
+    });
   });
 
-  it("falls back to author.email null when the map has no entry for the author", () => {
+  it("emits author.name null when the author has no display name (email only)", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const authorByUserId = new Map([[userId(U1), { email: "alice@example.com", name: null }]]);
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, authorByUserId);
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
+    expect(data[0]?.author).toMatchObject({ email: "alice@example.com", name: null });
+  });
+
+  it("falls back to author null name+email when the map has no entry for the author", () => {
     const items = [comment({ id: commentId(C1) })];
     const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, new Map());
-    const data = (res.body as { data: { author: { email: string | null } }[] }).data;
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
     expect(data[0]?.author.email).toBeNull();
+    expect(data[0]?.author.name).toBeNull();
   });
 
   it("propagates a NotAllowed (cross-org) error as a problem", () => {
