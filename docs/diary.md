@@ -3059,3 +3059,41 @@ fixed by switching to a type-only import (#194). Lesson logged: never import a r
 The `yRlDEWhlfF` concept report (title "One Document Experience") was refreshed to v4 to reflect the
 shipped design. New MCP surface: comment tools (`reports_list_comments|add_comment|resolve_comment|delete_comment`)
 on `arp-mcp`, thin client over the existing `/api/v1` comment routes (ADR-003).
+
+## 2026-07-13 — Unified-editor round 2: pagination, comment editing, display-names, panel polish
+
+Second wave of `view.<domain>/<slug>/edit` improvements (ADR-0063), from the "what's missing" review of
+round 1. All merged; `main` green (turbo typecheck 14/14 on the merged tree):
+
+- **#197 panel polish** — intent chip on each comment (calm `note` = no chip), initials avatar, relative
+  timestamps ("2h ago", absolute in `title`). Pure helpers in `comment-format.ts` (apps/view has no jsdom
+  tier — pure logic is the test seam).
+- **#199 pagination** — the `/edit` loader consumed only the first `limit=100` page and dropped `has_more`
+  (silent truncation, the #184 "v1 cap"). Now fetch-all via the ADR-0053 cursor envelope, with a
+  `MAX_PAGES=20` (2000-item) safety cap that logs on truncation.
+- **#200 author display-names** — `users.display_name` (migration 0016, nullable), captured from Clerk at
+  JIT provisioning (a `name` session claim on the browser hot path — no extra round-trip; `fullName`/
+  `firstName lastName`/`username` on OAuth), length-capped, COALESCE-preserved. Rendered `name → email →
+  "Unknown user"`; avatar initials derive from the name. New glossary terms **Display name** + **Author
+  Identity** (a route-layer DTO, not a domain aggregate — really an ADR-0048 identity-mirror extension;
+  a dedicated ADR to correct the inherited "ADR-0063 author display" mis-citation is a tracked follow-up).
+- **#201 comment editing** — edit a comment's `body`/`intent` after posting. `PATCH …/comments/{id}` is
+  overloaded on body shape (no JSON body → the unchanged resolve; `{body?,intent?}` → edit), author-or-owner
+  gated (mirroring resolve/delete, ADR-0064 §3/§7 amended), + a `reports_edit_comment` MCP tool + inline
+  edit UI. Anchor immutable; no `edited_at` indicator yet (fast-follow). `{intent:null}` treated as
+  unchanged (not a reset to note).
+
+Both #200 and #201 passed an independent `/security-review` clean (PII fenced to the authenticated
+org-scoped API; the new PATCH write path preserves resolve + author-or-owner gating, no prototype-pollution
+/ IDOR). Also merged: **#196** removed dead `versionsToDto` and repaired the last of a 3-way-merge
+`arp-app` typecheck drift (each parallel PR was green in isolation; the union wasn't — a recurring hazard
+worth a post-merge main-typecheck guard).
+
+**Recurring lesson (logged):** never import a runtime VALUE from the `arp-domain` barrel into an
+`apps/view` client component — it drags `node:crypto` (signed-token) into the browser bundle and fails the
+Vite/Rollup build, which `tsc`/`vitest` (node env) don't catch; only `pnpm --filter arp-view build` does.
+Use `import type` only.
+
+**Next:** the intent **agent-action pipeline** (PRD issue #198, design-first — needs an ADR; it's the
+ADR-0069 lethal-trifecta surface) is the real remaining payoff; the collaboration epics (real-time,
+notifications, @mentions/assignment) still need PRDs.
