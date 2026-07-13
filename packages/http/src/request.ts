@@ -53,7 +53,11 @@ export function parseCommentPatch(
   body: Record<string, unknown> | undefined,
 ): Result<CommentPatch, AppError> {
   const hasBody = body !== undefined && "body" in body;
-  const hasIntent = body !== undefined && "intent" in body;
+  // An explicit `intent: null` means "leave the intent unchanged" (absent), NOT
+  // "reset to note" — `makeIntent(null)` defaults to note, which would silently
+  // clobber the field, so treat null the same as omitted (claude-review #201).
+  const hasIntent =
+    body !== undefined && "intent" in body && (body as Record<string, unknown>).intent !== null;
   if (!hasBody && !hasIntent) return ok({ kind: "resolve" });
 
   let editBody: string | undefined;

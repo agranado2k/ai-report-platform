@@ -56,6 +56,16 @@ describe("parseCommentPatch (resolve-vs-edit dispatch, ADR-0064 §7)", () => {
     expect(r.ok && r.value).toEqual({ kind: "edit", body: "new", intent: "add" });
   });
 
+  it("treats an explicit intent:null as absent — edits body only, never resets to note", () => {
+    const r = parseCommentPatch({ body: "new", intent: null });
+    expect(r.ok && r.value).toEqual({ kind: "edit", body: "new", intent: undefined });
+  });
+
+  it("classifies an intent:null-only patch as resolve (nothing to edit)", () => {
+    const r = parseCommentPatch({ intent: null });
+    expect(r.ok && r.value).toEqual({ kind: "resolve" });
+  });
+
   it("rejects a present-but-empty body with ValidationError (→422)", () => {
     const r = parseCommentPatch({ body: "   " });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
