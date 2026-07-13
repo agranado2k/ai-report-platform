@@ -368,12 +368,21 @@ function readEmailClaim(claims: unknown): string | null {
  *  display), if the instance sets one. Best-effort: a non-string / blank / absent
  *  claim → null (author surfaces fall back to email). Trimmed to drop stray
  *  whitespace-only values. */
+// Bound the mirrored display name so an over-long Clerk name can't blow out the
+// stored row / panel layout (claude-review #200). It's React-escaped at render
+// and only shown to in-org collaborators, so this is defense-in-depth, applied
+// at every capture point below.
+const DISPLAY_NAME_MAX = 120;
+function capDisplayName(name: string): string {
+  return name.length > DISPLAY_NAME_MAX ? name.slice(0, DISPLAY_NAME_MAX) : name;
+}
+
 function readNameClaim(claims: unknown): string | null {
   if (claims && typeof claims === "object" && "name" in claims) {
     const value = (claims as { name?: unknown }).name;
     if (typeof value === "string") {
       const trimmed = value.trim();
-      if (trimmed.length > 0) return trimmed;
+      if (trimmed.length > 0) return capDisplayName(trimmed);
     }
   }
   return null;
@@ -388,12 +397,12 @@ function clerkDisplayName(user: {
   readonly username?: string | null;
 }): string | null {
   const full = user.fullName?.trim();
-  if (full) return full;
+  if (full) return capDisplayName(full);
   const composed = [user.firstName, user.lastName]
     .map((p) => p?.trim())
     .filter((p): p is string => !!p)
     .join(" ");
-  if (composed) return composed;
+  if (composed) return capDisplayName(composed);
   const username = user.username?.trim();
-  return username && username.length > 0 ? username : null;
+  return username && username.length > 0 ? capDisplayName(username) : null;
 }
