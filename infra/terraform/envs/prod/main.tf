@@ -66,6 +66,20 @@ resource "random_password" "scan_drain_secret" {
 resource "random_password" "view_access_token_secret" {
   length  = 48
   special = false
+  keepers = {
+    # Rotate THROUGH the pipeline (ADR-017/018 — terraform runs via CI only,
+    # never a manual `tf.sh apply`). Changing this value forces `apply-prod` to
+    # regenerate the password on the next merge; the new value propagates to
+    # VIEW_ACCESS_TOKEN_SECRET on BOTH arp-app-prod + arp-view-prod together
+    # (same `.result`), so the two origins can never land mismatched.
+    #
+    # This initial keeper reconciles the drift from the 2026-06 P0 hotfix, where
+    # the secret was set out-of-band via the Vercel API — a pipeline-owned value
+    # restores IaC as the single source of truth. Rotation invalidates in-flight
+    # edit/unlock tokens (users just re-open; the 8h session cap bounds it).
+    # Bump the date suffix to force a future rotation.
+    rotation = "2026-07-13-p0-reconcile"
+  }
 }
 
 # Server-side HMAC pepper for `arp_` API keys (ADR-0008). Self-generated, never
