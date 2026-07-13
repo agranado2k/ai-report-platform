@@ -4,13 +4,9 @@
 // Called from the `/<slug>/edit` route's LOADER (server-to-server, no CORS
 // involved) — there is no client-side version-history mutation, so this is
 // the only entry point (Compare itself is a separate read, diff-client.ts).
-import {
-  type ApiFailure,
-  apiFailureFromResponse,
-  NETWORK_ERROR_MESSAGE,
-  networkFailure,
-} from "./http";
-import type { ListEnvelope, VersionWire } from "./wire-types";
+import { fetchAllPages } from "./fetch-all-pages";
+import type { ApiFailure } from "./http";
+import type { VersionWire } from "./wire-types";
 
 export interface ListVersionsInput {
   readonly appOrigin: string;
@@ -32,47 +28,19 @@ export type ListVersionsResult =
     }
   | ApiFailure;
 
-/** Envelope page size. The API caps `limit` at 100 (ADR-0053). */
-const PAGE_LIMIT = 100;
-/** Safety bound on the fetch-all cursor loop (see comments-client.ts's
- *  `MAX_PAGES` for the full rationale): up to `MAX_PAGES * PAGE_LIMIT`
- *  versions before giving up with `has_more: true`. */
-const MAX_PAGES = 20;
-
-// PAGINATION (this change; supersedes the #184 "v1 cap"): follow the ADR-0053
-// cursor envelope (`{ data, has_more }` + `starting_after=<last id>`) to load
-// the COMPLETE version history, so a report with >100 versions no longer
-// silently truncates. Same approach-A choice (fetch-all, no "Load more"
-// button) as comments-client.ts — see its header for the why.
+// PAGINATION (ADR-0053): the shared `fetchAllPages` helper walks the cursor
+// envelope to load the COMPLETE version history — the same loop
+// comments-client.ts uses (DRY). `has_more` stays observable (true only when
+// truncated at the page cap).
 export async function listVersions(input: ListVersionsInput): Promise<ListVersionsResult> {
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const versions: VersionWire[] = [];
-  let startingAfter: string | undefined;
-
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = new URL(`${input.appOrigin}/api/v1/reports/${input.slug}/versions`);
-    url.searchParams.set("limit", String(PAGE_LIMIT));
-    if (startingAfter) url.searchParams.set("starting_after", startingAfter);
-
-    let response: Response;
-    try {
-      response = await fetchImpl(url.toString(), {
-        method: "GET",
-        credentials: "omit",
-        headers: { authorization: `Bearer ${input.editToken}` },
-      });
-    } catch {
-      return networkFailure(NETWORK_ERROR_MESSAGE);
-    }
-    if (!response.ok) return apiFailureFromResponse(response, "Failed to load versions");
-
-    const body = (await response.json()) as ListEnvelope<VersionWire>;
-    versions.push(...body.data);
-
-    const last = body.data[body.data.length - 1];
-    if (!body.has_more || !last) return { ok: true, versions, has_more: false };
-    startingAfter = last.id;
-  }
-
-  return { ok: true, versions, has_more: true };
+  const result = await fetchAllPages<VersionWire>({
+    appOrigin: input.appOrigin,
+    slug: input.slug,
+    editToken: input.editToken,
+    resource: "versions",
+    errorMessage: "Failed to load versions",
+    fetchImpl: input.fetchImpl,
+  });
+  if (!result.ok) return result;
+  return { ok: true, versions: result.items, has_more: result.has_more };
 }

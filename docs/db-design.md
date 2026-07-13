@@ -234,7 +234,9 @@ PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists unti
 | `resolved_at` | timestamptz NULL | NULL = open; set = resolved (idempotent transition — resolving twice doesn't change it) |
 | `created_at` | timestamptz | |
 
-Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. No `updated_at` — `body`/`anchor_json`/`intent` aren't editable in this slice (only `resolved_at` mutates, via `save()`'s upsert; `save()` does carry `intent` for a future edit-comment use case).
+| `edited_at` | timestamptz NULL | migration 0017 — set to the last edit time when `body`/`intent` is changed (surfaces an "· edited" indicator); also the optimistic-concurrency token (`expected_edited_at` → 409). NULL = never edited |
+
+Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. `body`/`intent` ARE editable (edit-comment use case, migration 0017 added `edited_at`); the anchor stays immutable. `resolved_at` mutates via `save()`'s upsert.
 
 ### Abuse & Moderation
 

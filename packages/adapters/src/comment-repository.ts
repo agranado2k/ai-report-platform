@@ -34,6 +34,8 @@ export function rowToComment(row: CommentRow): Comment {
     intent: intentOrDefault(row.intent),
     anchor: row.anchorJson as Anchor,
     parentCommentId: row.parentCommentId === null ? null : commentId(row.parentCommentId),
+    // A legacy row (pre-`edited_at` column) reads back NULL → never edited.
+    editedAt: row.editedAt === null ? null : row.editedAt.getTime(),
     resolvedAt: row.resolvedAt === null ? null : row.resolvedAt.getTime(),
     createdAt: row.createdAt.getTime(),
   };
@@ -48,6 +50,7 @@ function commentToRow(c: Comment): typeof comments.$inferInsert {
     body: c.body,
     intent: c.intent,
     anchorJson: c.anchor,
+    editedAt: c.editedAt === null ? null : new Date(c.editedAt),
     resolvedAt: c.resolvedAt === null ? null : new Date(c.resolvedAt),
   };
 }
@@ -69,7 +72,7 @@ export class DrizzleCommentRepository implements CommentRepository {
     try {
       const db = this.ctx.current();
       // Insert, or update the mutable fields on conflict by id (resolve →
-      // resolvedAt; body/anchor stay editable for a future edit-comment use case).
+      // resolvedAt; edit → body/intent/editedAt).
       await db
         .insert(comments)
         .values(commentToRow(comment))
@@ -79,6 +82,7 @@ export class DrizzleCommentRepository implements CommentRepository {
             body: comment.body,
             intent: comment.intent,
             anchorJson: comment.anchor,
+            editedAt: comment.editedAt === null ? null : new Date(comment.editedAt),
             resolvedAt: comment.resolvedAt === null ? null : new Date(comment.resolvedAt),
           },
         });

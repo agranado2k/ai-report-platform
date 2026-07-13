@@ -129,6 +129,11 @@ export function commentBody(c: Comment, ctx: WireContext, author: WireAuthor | n
       },
       ...(c.anchor.relative !== undefined ? { relative: c.anchor.relative } : {}),
     },
+    // When the comment was last edited (ADR-0064 §3), or null if never edited —
+    // drives the client's "· edited" indicator, and the value a client echoes
+    // back as the optimistic-concurrency token on its next edit. Additive: an
+    // ISO-8601 date-time like `resolved_at`/`created_at`.
+    edited_at: c.editedAt === null ? null : new Date(c.editedAt).toISOString(),
     resolved_at: c.resolvedAt === null ? null : new Date(c.resolvedAt).toISOString(),
     created_at: new Date(c.createdAt).toISOString(),
     mode: ctx.mode,

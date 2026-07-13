@@ -22,6 +22,7 @@ function comment(id: string, author = authorA): Comment {
       },
     },
     parentCommentId: null,
+    editedAt: null,
     resolvedAt: null,
     createdAt: 1_700_000_000_000,
   };

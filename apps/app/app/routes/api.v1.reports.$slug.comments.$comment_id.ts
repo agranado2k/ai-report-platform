@@ -100,6 +100,7 @@ const patchHandler = handle({
         commentId: commentId.value,
         body: patch.value.body,
         intent: patch.value.intent,
+        expectedEditedAt: patch.value.expectedEditedAt,
       });
     }
     return resolveComment(commentDeps, commentActor, { slug, commentId: commentId.value });

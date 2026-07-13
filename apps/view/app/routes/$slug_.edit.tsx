@@ -203,7 +203,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     listComments({ appOrigin, slug, editToken: decision.token }),
     listVersions({ appOrigin, slug, editToken: decision.token }),
   ]);
-  const { comments, versions } = buildEditLoaderExtras(commentsResult, versionsResult);
+  const { comments, versions, commentsHasMore, versionsHasMore } = buildEditLoaderExtras(
+    commentsResult,
+    versionsResult,
+  );
 
   // The list clients now follow the ADR-0053 cursor envelope to load the FULL
   // comment/version set (closing claude-review #184's silent >100 truncation),
@@ -254,6 +257,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       versionId: versionIdToWire(version.id),
       comments,
       versions,
+      // Whether either list was truncated at the fetch-all page cap — drives the
+      // "some older items are hidden" note in the panels (normally false).
+      commentsHasMore,
+      versionsHasMore,
     },
     { headers },
   );
@@ -284,6 +291,8 @@ export default function EditReport() {
     versionId: initialVersionId,
     comments: initialComments,
     versions: initialVersions,
+    commentsHasMore,
+    versionsHasMore: initialVersionsHasMore,
   } = useLoaderData<typeof loader>();
 
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
@@ -321,6 +330,9 @@ export default function EditReport() {
   // post-save re-fetch below (claude-review #184 finding #1).
   const [versionId, setVersionId] = useState(initialVersionId);
   const [versions, setVersions] = useState<readonly VersionWire[]>(initialVersions);
+  // Whether the version history was truncated at the fetch-all cap — kept in
+  // state because onSave re-fetches the list (below) and can flip it.
+  const [versionsHasMore, setVersionsHasMore] = useState(initialVersionsHasMore);
 
   // Silent token refresh (ADR-0063 Phase 5): the edit token is short-lived
   // (15 min) — without this, an editing session dies mid-edit the moment it
@@ -432,6 +444,7 @@ export default function EditReport() {
       const refreshed = await listVersions({ appOrigin, slug, editToken });
       if (refreshed.ok) {
         setVersions(refreshed.versions);
+        setVersionsHasMore(refreshed.has_more);
         const newest = [...refreshed.versions].sort((a, b) => b.version_no - a.version_no)[0];
         if (newest) setVersionId(newest.id);
       }
@@ -535,6 +548,7 @@ export default function EditReport() {
                   editToken={editToken}
                   currentVersionId={versionId}
                   comments={comments}
+                  hasMore={commentsHasMore}
                   onCommentsChange={setComments}
                   pendingSelection={mode === "edit" ? selection : null}
                   onSelectionConsumed={() => setSelection(null)}
@@ -545,6 +559,7 @@ export default function EditReport() {
                   slug={slug}
                   editToken={editToken}
                   versions={versions}
+                  hasMore={versionsHasMore}
                   onCompare={(diff) => {
                     setDiffData(diff);
                     setMode("diff");

@@ -34,7 +34,12 @@ describe("buildEditLoaderExtras", () => {
       { ok: true, comments: [COMMENT], has_more: false },
       { ok: true, versions: [VERSION], has_more: false },
     );
-    expect(result).toEqual({ comments: [COMMENT], versions: [VERSION] });
+    expect(result).toEqual({
+      comments: [COMMENT],
+      versions: [VERSION],
+      commentsHasMore: false,
+      versionsHasMore: false,
+    });
   });
 
   it("degrades comments to an empty list when the comments load fails, without touching versions", () => {
@@ -42,7 +47,12 @@ describe("buildEditLoaderExtras", () => {
       { ok: false, expired: false, message: "boom" },
       { ok: true, versions: [VERSION], has_more: false },
     );
-    expect(result).toEqual({ comments: [], versions: [VERSION] });
+    expect(result).toEqual({
+      comments: [],
+      versions: [VERSION],
+      commentsHasMore: false,
+      versionsHasMore: false,
+    });
   });
 
   it("degrades versions to an empty list when the versions load fails, without touching comments", () => {
@@ -50,7 +60,12 @@ describe("buildEditLoaderExtras", () => {
       { ok: true, comments: [COMMENT], has_more: false },
       { ok: false, expired: true, message: "session expired" },
     );
-    expect(result).toEqual({ comments: [COMMENT], versions: [] });
+    expect(result).toEqual({
+      comments: [COMMENT],
+      versions: [],
+      commentsHasMore: false,
+      versionsHasMore: false,
+    });
   });
 
   it("degrades both to empty lists when both loads fail — never throws", () => {
@@ -58,6 +73,11 @@ describe("buildEditLoaderExtras", () => {
       { ok: false, expired: false, message: "boom" },
       { ok: false, expired: false, message: "boom" },
     );
-    expect(result).toEqual({ comments: [], versions: [] });
+    expect(result).toEqual({
+      comments: [],
+      versions: [],
+      commentsHasMore: false,
+      versionsHasMore: false,
+    });
   });
 });

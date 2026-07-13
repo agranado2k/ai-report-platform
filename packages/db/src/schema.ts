@@ -351,6 +351,10 @@ export const comments = pgTable(
     // pre-existing comment (backfilled by the migration) reads as `note`.
     intent: commentIntentEnum("intent").notNull().default("note"),
     anchorJson: jsonb("anchor_json").notNull(),
+    // When the comment was last edited (ADR-0064 §3), or NULL if never edited. A
+    // pre-existing (backfilled) comment reads as NULL. Doubles as the
+    // optimistic-concurrency token the edit use case checks.
+    editedAt: tstz("edited_at"),
     resolvedAt: tstz("resolved_at"),
     createdAt: createdAt(),
   },

@@ -814,10 +814,13 @@ paths:
         `canWrite`) — the owner moderates every comment on their report. An
         `editToken` actor acts under their real, mirrored `userId`, so this
         rule applies to them identically. Editing is v1-scoped to `body` +
-        `intent`; the anchor is immutable and there is no `edited_at` indicator
-        yet. A present `body` must be a non-empty string, and a present `intent`
-        must be a valid value (both → 422 otherwise). CORS-enabled for
-        `VIEW_ORIGIN` (ADR-0063).
+        `intent`; the anchor is immutable. An edit stamps `edited_at` (surfaced
+        as an "· edited" indicator). For optimistic concurrency an edit MAY send
+        `expected_edited_at` (the `edited_at` it last saw); if the stored value
+        has since moved, the edit is rejected **409** (reload and retry). A
+        present `body` must be a non-empty string, and a present `intent` must be
+        a valid value (both → 422 otherwise). CORS-enabled for `VIEW_ORIGIN`
+        (ADR-0063).
       security:
         - apiKey: []
         - editToken: []
@@ -855,6 +858,14 @@ paths:
                   type: string
                   enum: [note, enhancement, add, remove]
                   description: New comment intent.
+                expected_edited_at:
+                  type: [string, 'null']
+                  format: date-time
+                  description: >
+                    Optimistic-concurrency token — the `edited_at` the client
+                    last saw for this comment. When present, the edit is rejected
+                    409 if the stored `edited_at` has since changed. Omit to skip
+                    the check (first edit sends null).
               additionalProperties: false
       responses:
         '200':
@@ -865,6 +876,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            Optimistic-concurrency conflict — the comment was edited since
+            `expected_edited_at` was read. Reload the latest and retry.
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
     delete:
@@ -1421,6 +1436,10 @@ components:
           type: [string, 'null']
           format: date-time
           description: Null = open; set = resolved.
+        edited_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null = never edited; set = the last edit time (surfaces an "· edited" indicator). Additive (a pre-edit server may omit it).
         created_at:
           type: string
           format: date-time
