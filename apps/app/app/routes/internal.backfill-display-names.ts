@@ -80,9 +80,18 @@ export async function action({ request }: ActionFunctionArgs) {
   // Fail-safe: apply ONLY on an explicit `apply=true`; anything else is a dry run.
   const dryRun = url.searchParams.get("apply") !== "true";
   const batchSize = intParam(url, "batchSize", DEFAULT_BATCH_SIZE, 1, MAX_BATCH_SIZE);
+  // `maxUsers` omitted → drain (undefined). But an EXPLICIT, unparseable value
+  // must NOT silently fall back to a cap — a fat-fingered `?maxUsers=abc` on an
+  // intended-unbounded run would then silently stop at 100. Reject it (400).
   const maxUsersRaw = url.searchParams.get("maxUsers");
-  const maxUsers =
-    maxUsersRaw === null ? undefined : intParam(url, "maxUsers", DEFAULT_BATCH_SIZE, 1, 1_000_000);
+  let maxUsers: number | undefined;
+  if (maxUsersRaw !== null) {
+    const n = Number.parseInt(maxUsersRaw, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      return jsonResponse(400, { error: "invalid_maxUsers" });
+    }
+    maxUsers = Math.min(n, 1_000_000);
+  }
 
   const result = await backfillDisplayNames(backfillDisplayNamesDeps(), {
     batchSize,
