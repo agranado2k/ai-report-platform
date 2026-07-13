@@ -28,31 +28,70 @@ export interface CommentsRequestInput {
 }
 
 export type ListCommentsResult =
-  | { readonly ok: true; readonly comments: readonly CommentWire[] }
+  | {
+      readonly ok: true;
+      readonly comments: readonly CommentWire[];
+      /** Cursor exhausted? `false` means the full set is loaded. It can only be
+       *  `true` if the fetch-all loop hit its `MAX_PAGES` safety cap while the
+       *  server still had more — i.e. the returned set is TRUNCATED (see the
+       *  loop below). The loader surfaces that pathological case rather than
+       *  silently claiming completeness (the exact claude-review #184 bug). */
+      readonly has_more: boolean;
+    }
   | ApiFailure;
 
+/** Envelope page size. The API caps `limit` at 100 (ADR-0053). */
+const PAGE_LIMIT = 100;
+/** Safety bound on the fetch-all cursor loop: a report can never make the
+ *  in-viewer client spin forever / exhaust memory. At `PAGE_LIMIT=100` this
+ *  loads up to `MAX_PAGES * PAGE_LIMIT` comments before giving up and
+ *  reporting `has_more: true` (truncated). No realistic report approaches
+ *  this; it exists to fail loud (a logged truncation) instead of hanging. */
+const MAX_PAGES = 20;
+
+// PAGINATION (this change; supersedes the #184 "v1 cap"): follow the ADR-0053
+// cursor envelope (`{ data, has_more }` + `starting_after=<last id>`) to load
+// the COMPLETE comment set, so a report with >100 comments no longer silently
+// truncates. Chosen over a "Load more" button (approach B) because the set is
+// bounded by report size — no huge-list concern for a single report — and it
+// needs no client-side accumulating state or panel affordance. `has_more` is
+// consumed to drive the loop and returned (never discarded) so a cap-truncated
+// set stays observable to the loader.
 export async function listComments(input: CommentsRequestInput): Promise<ListCommentsResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  let response: Response;
-  try {
-    // v1 cap (claude-review #184): a single `limit=100` page — the envelope's
-    // `has_more` is intentionally not consumed, so a report with >100 comments
-    // silently shows only the first page. A "load more"/cursor follow is
-    // deferred to the Phase 5 cutover; this is NOT "shows everything".
-    response = await fetchImpl(
-      `${input.appOrigin}/api/v1/reports/${input.slug}/comments?limit=100`,
-      {
+  const comments: CommentWire[] = [];
+  let startingAfter: string | undefined;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL(`${input.appOrigin}/api/v1/reports/${input.slug}/comments`);
+    url.searchParams.set("limit", String(PAGE_LIMIT));
+    if (startingAfter) url.searchParams.set("starting_after", startingAfter);
+
+    let response: Response;
+    try {
+      response = await fetchImpl(url.toString(), {
         method: "GET",
         credentials: "omit",
         headers: { authorization: `Bearer ${input.editToken}` },
-      },
-    );
-  } catch {
-    return networkFailure(NETWORK_ERROR_MESSAGE);
+      });
+    } catch {
+      return networkFailure(NETWORK_ERROR_MESSAGE);
+    }
+    // A mid-pagination failure aborts the whole load (never a silent partial):
+    // callers already degrade an errored list to empty (buildEditLoaderExtras).
+    if (!response.ok) return apiFailureFromResponse(response, "Failed to load comments");
+
+    const body = (await response.json()) as ListEnvelope<CommentWire>;
+    comments.push(...body.data);
+
+    const last = body.data[body.data.length - 1];
+    // Drained (or a defensive empty page that still claims `has_more`): done.
+    if (!body.has_more || !last) return { ok: true, comments, has_more: false };
+    startingAfter = last.id;
   }
-  if (!response.ok) return apiFailureFromResponse(response, "Failed to load comments");
-  const body = (await response.json()) as ListEnvelope<CommentWire>;
-  return { ok: true, comments: body.data };
+
+  // Hit the page cap with the cursor still open → the set is truncated.
+  return { ok: true, comments, has_more: true };
 }
 
 /** The anchor shape `buildSelectionAnchor` (arp-editor) produces, wire-encoded
@@ -148,6 +187,45 @@ export async function resolveComment(input: ResolveCommentInput): Promise<Commen
     return networkFailure(NETWORK_ERROR_MESSAGE);
   }
   if (!response.ok) return apiFailureFromResponse(response, "Failed to resolve comment");
+  const comment = (await response.json()) as CommentWire;
+  return { ok: true, comment };
+}
+
+export interface EditCommentInput extends CommentsRequestInput {
+  readonly commentId: string;
+  /** New body — omit to leave it unchanged. */
+  readonly body?: string;
+  /** New intent — omit to leave it unchanged. */
+  readonly intent?: string;
+}
+
+/** PATCH .../comments/{comment_id} — EDIT body and/or intent. Distinguished from
+ *  resolve by the presence of a JSON body: the app-origin PATCH handler
+ *  dispatches on the body shape (a `body`/`intent` field → edit; no body →
+ *  resolve). Returns the updated comment resource (200). */
+export async function editComment(input: EditCommentInput): Promise<CommentWriteResult> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${input.appOrigin}/api/v1/reports/${input.slug}/comments/${input.commentId}`,
+      {
+        method: "PATCH",
+        credentials: "omit",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${input.editToken}`,
+        },
+        body: JSON.stringify({
+          ...(input.body !== undefined ? { body: input.body } : {}),
+          ...(input.intent !== undefined ? { intent: input.intent } : {}),
+        }),
+      },
+    );
+  } catch {
+    return networkFailure(NETWORK_ERROR_MESSAGE);
+  }
+  if (!response.ok) return apiFailureFromResponse(response, "Failed to edit comment");
   const comment = (await response.json()) as CommentWire;
   return { ok: true, comment };
 }

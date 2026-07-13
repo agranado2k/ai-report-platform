@@ -488,6 +488,37 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_edit_comment",
+    {
+      title: "Edit a comment",
+      description:
+        "Edit a comment's text (`body`) and/or its `intent` (ADR-0064) — fix a typo or change " +
+        "what the comment asks an agent to do. Allowed for the comment's AUTHOR or the report's " +
+        "OWNER (the same rule as resolve/delete, NOT the write-access gate on add). Supply at " +
+        "least one of body/intent; an omitted field is left unchanged. intent is one of note | " +
+        "enhancement | add | remove (an invalid value is rejected). The anchor is immutable and " +
+        "cannot be edited. Returns the updated comment resource.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to edit (from reports_list_comments)."),
+        body: z.string().optional().describe("New comment text. Omit to leave the body unchanged."),
+        intent: z
+          .enum(["note", "enhancement", "add", "remove"])
+          .optional()
+          .describe("New intent. Omit to leave the intent unchanged."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.editComment(args.slug, args.comment_id, {
+          body: args.body,
+          intent: args.intent,
+        }),
+      ),
+  );
+
+  server.registerTool(
     "reports_delete_comment",
     {
       title: "Delete a comment",

@@ -31,8 +31,8 @@ const VERSION: VersionWire = {
 describe("buildEditLoaderExtras", () => {
   it("passes through both lists when both loads succeed", () => {
     const result = buildEditLoaderExtras(
-      { ok: true, comments: [COMMENT] },
-      { ok: true, versions: [VERSION] },
+      { ok: true, comments: [COMMENT], has_more: false },
+      { ok: true, versions: [VERSION], has_more: false },
     );
     expect(result).toEqual({ comments: [COMMENT], versions: [VERSION] });
   });
@@ -40,14 +40,14 @@ describe("buildEditLoaderExtras", () => {
   it("degrades comments to an empty list when the comments load fails, without touching versions", () => {
     const result = buildEditLoaderExtras(
       { ok: false, expired: false, message: "boom" },
-      { ok: true, versions: [VERSION] },
+      { ok: true, versions: [VERSION], has_more: false },
     );
     expect(result).toEqual({ comments: [], versions: [VERSION] });
   });
 
   it("degrades versions to an empty list when the versions load fails, without touching comments", () => {
     const result = buildEditLoaderExtras(
-      { ok: true, comments: [COMMENT] },
+      { ok: true, comments: [COMMENT], has_more: false },
       { ok: false, expired: true, message: "session expired" },
     );
     expect(result).toEqual({ comments: [COMMENT], versions: [] });

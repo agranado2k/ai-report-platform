@@ -22,7 +22,7 @@ import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
 import { authorInitials, relativeTime } from "../comment-format";
-import { addComment, replyToComment, resolveComment } from "../comments-client";
+import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
 
 export interface CommentsPanelProps {
@@ -240,6 +240,43 @@ function CommentThread({
   const [replyError, setReplyError] = useState<string | null>(null);
   const [resolveBusy, setResolveBusy] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBody, setEditBody] = useState(root.body);
+  const [editIntent, setEditIntent] = useState(root.intent);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEdit = () => {
+    // Prefill from the current root each time it opens (it may have changed
+    // under us via another edit) — then reveal the inline form.
+    setEditBody(root.body);
+    setEditIntent(root.intent);
+    setEditError(null);
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    if (!editBody.trim()) return;
+    setEditBusy(true);
+    setEditError(null);
+    const result = await editComment({
+      appOrigin,
+      slug,
+      editToken,
+      commentId: root.id,
+      body: editBody,
+      intent: editIntent,
+    });
+    setEditBusy(false);
+    if (!result.ok) {
+      setEditError(result.message);
+      return;
+    }
+    setEditOpen(false);
+    // Optimistically replace the edited comment in the parent's list (same
+    // pattern as resolve) — no cross-origin refetch is available.
+    onCommentsChange(comments.map((c) => (c.id === result.comment.id ? result.comment : c)));
+  };
 
   const submitReply = async () => {
     if (!replyBody.trim()) return;
@@ -300,7 +337,57 @@ function CommentThread({
       <p className="mb-1 text-xs italic text-subtle">
         "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
       </p>
-      <p className="text-sm text-fg">{root.body}</p>
+      {editOpen ? (
+        <div className="mt-1">
+          <Textarea
+            value={editBody}
+            onChange={(e) => setEditBody(e.target.value)}
+            placeholder="Edit comment…"
+            rows={3}
+            className="w-full"
+            aria-label="Edit comment body"
+          />
+          <ErrorText message={editError} />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 text-xs text-subtle">
+              <span id={`edit-intent-label-${root.id}`}>Intent</span>
+              <Select
+                size="sm"
+                aria-labelledby={`edit-intent-label-${root.id}`}
+                value={editIntent}
+                onChange={(e) => setEditIntent(e.target.value)}
+                disabled={editBusy}
+              >
+                {INTENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditOpen(false)}
+                disabled={editBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={submitEdit}
+                disabled={editBusy || !editBody.trim()}
+              >
+                {editBusy ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-fg">{root.body}</p>
+      )}
       <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
         {relativeTime(root.created_at)}
       </p>
@@ -370,10 +457,13 @@ function CommentThread({
             </div>
           </div>
         </div>
-      ) : (
+      ) : editOpen ? null : (
         <div className="mt-2 flex gap-2">
           <Button variant="ghost" size="sm" onClick={() => setReplyOpen(true)}>
             Reply
+          </Button>
+          <Button variant="ghost" size="sm" onClick={openEdit}>
+            Edit
           </Button>
           {root.resolved_at ? null : (
             <Button variant="ghost" size="sm" onClick={resolve} disabled={resolveBusy}>
