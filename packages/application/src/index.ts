@@ -7,6 +7,7 @@ export * from "./audit";
 export * from "./load-owned";
 export * from "./ports";
 export * from "./use-cases/add-comment";
+export * from "./use-cases/backfill-display-names";
 export * from "./use-cases/create-api-key";
 export * from "./use-cases/create-folder";
 export * from "./use-cases/delete-comment";
