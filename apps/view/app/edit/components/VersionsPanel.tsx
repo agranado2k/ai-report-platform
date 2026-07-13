@@ -66,6 +66,7 @@ export function VersionsPanel({
   hasMore,
 }: VersionsPanelProps) {
   const sorted = [...versions].sort((a, b) => b.version_no - a.version_no);
+  const truncNote = truncationNote(sorted.length, hasMore ?? false);
   const [fromId, setFromId] = useState(sorted[1]?.id ?? "");
   const [toId, setToId] = useState(sorted[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
@@ -154,11 +155,7 @@ export function VersionsPanel({
           </li>
         ))}
       </ul>
-      {truncationNote(sorted.length, hasMore ?? false) ? (
-        <p className="px-1 text-[11px] text-subtle">
-          {truncationNote(sorted.length, hasMore ?? false)}
-        </p>
-      ) : null}
+      {truncNote ? <p className="px-1 text-[11px] text-subtle">{truncNote}</p> : null}
     </section>
   );
 }

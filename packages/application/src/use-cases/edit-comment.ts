@@ -87,11 +87,19 @@ export async function editComment(
     return err(notAllowed("only the comment's author or the report's owner may edit it"));
   }
 
-  // Optimistic-concurrency guard (last-writer-wins prevention): when the client
-  // presents the `editedAt` it last saw, reject if the stored value has since
-  // moved (another author/owner edited it in the meantime). Checked here, AFTER
-  // authz — a 409 is a NEW failure mode for an already-permitted editor, not a
-  // permission decision. Skipped entirely when the token is omitted (undefined).
+  // Optimistic-concurrency guard: when the client presents the `editedAt` it
+  // last saw, reject if the stored value has since moved (another author/owner
+  // edited it in the meantime). Checked here, AFTER authz — a 409 is a NEW
+  // failure mode for an already-permitted editor, not a permission decision.
+  // Skipped entirely when the token is omitted (undefined).
+  //
+  // CAVEAT: this is read-then-write (TOCTOU), not an atomic conditional UPDATE,
+  // so it NARROWS but does not fully close the concurrent-write window — two
+  // permitted editors who both read the same `editedAt` before either saves can
+  // still race, and the second write wins. A fully atomic guard would push the
+  // predicate into the write (`UPDATE … WHERE edited_at IS NOT DISTINCT FROM
+  // :expected`); deferred as a follow-up. Good enough for the common
+  // sequential-stale-edit case this slice targets.
   if (input.expectedEditedAt !== undefined && comment.editedAt !== input.expectedEditedAt) {
     return err(conflict("this comment was edited since you loaded it; reload and try again"));
   }

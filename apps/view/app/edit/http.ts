@@ -16,6 +16,10 @@ export interface ApiFailure {
    *  SAME "reopen from the dashboard" message saveEdit does for these — there
    *  is nothing the in-viewer client can do to recover either case. */
   readonly expired: boolean;
+  /** True for 409 — an optimistic-concurrency conflict (the comment changed
+   *  since it was loaded). Distinct from `expired`: the caller CAN recover by
+   *  reloading the latest and retrying, so it warrants its own affordance. */
+  readonly conflict?: boolean;
   readonly message: string;
 }
 
@@ -29,6 +33,9 @@ export async function apiFailureFromResponse(
 ): Promise<ApiFailure> {
   if (response.status === 401 || response.status === 403) {
     return { ok: false, expired: true, message: EXPIRED_MESSAGE };
+  }
+  if (response.status === 409) {
+    return { ok: false, expired: false, conflict: true, message: "conflict" };
   }
   let detail: string | undefined;
   try {

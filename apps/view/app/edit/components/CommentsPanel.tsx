@@ -219,6 +219,138 @@ function NewCommentComposer({
   );
 }
 
+/** A single reply, with its own inline edit affordance (body + intent). Mirrors
+ *  the root edit form; its own state so multiple replies edit independently.
+ *  Passes `expectedEditedAt` so the optimistic-concurrency 409 guard engages. */
+function ReplyItem({
+  reply,
+  appOrigin,
+  slug,
+  editToken,
+  comments,
+  onCommentsChange,
+}: {
+  readonly reply: CommentWire;
+  readonly appOrigin: string;
+  readonly slug: string;
+  readonly editToken: string;
+  readonly comments: readonly CommentWire[];
+  readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBody, setEditBody] = useState(reply.body);
+  const [editIntent, setEditIntent] = useState(reply.intent);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEdit = () => {
+    setEditBody(reply.body);
+    setEditIntent(reply.intent);
+    setEditError(null);
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    if (!editBody.trim()) return;
+    setEditBusy(true);
+    setEditError(null);
+    const result = await editComment({
+      appOrigin,
+      slug,
+      editToken,
+      commentId: reply.id,
+      body: editBody,
+      intent: editIntent,
+      expectedEditedAt: reply.edited_at ?? null,
+    });
+    setEditBusy(false);
+    if (!result.ok) {
+      setEditError(
+        result.conflict
+          ? "This reply changed since you opened it — reopen Edit to get the latest, then retry."
+          : result.message,
+      );
+      return;
+    }
+    setEditOpen(false);
+    onCommentsChange(comments.map((c) => (c.id === result.comment.id ? result.comment : c)));
+  };
+
+  return (
+    <div className="mt-2 border-l border-border pl-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Avatar name={reply.author?.name ?? null} email={reply.author?.email ?? null} />
+          <span className="truncate text-xs font-medium text-fg">{authorLabel(reply)}</span>
+          <IntentChip intent={reply.intent} />
+        </div>
+        <span className="text-[10px] text-subtle" title={formatTimestamp(reply.created_at)}>
+          {relativeTime(reply.created_at)}
+          {isEdited(reply.edited_at) ? " · edited" : ""}
+        </span>
+      </div>
+      {editOpen ? (
+        <div className="mt-1">
+          <Textarea
+            value={editBody}
+            onChange={(e) => setEditBody(e.target.value)}
+            placeholder="Edit reply…"
+            rows={2}
+            className="w-full"
+            aria-label="Edit reply body"
+          />
+          <ErrorText message={editError} />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 text-xs text-subtle">
+              <span id={`edit-reply-intent-label-${reply.id}`}>Intent</span>
+              <Select
+                size="sm"
+                aria-labelledby={`edit-reply-intent-label-${reply.id}`}
+                value={editIntent}
+                onChange={(e) => setEditIntent(e.target.value)}
+                disabled={editBusy}
+              >
+                {INTENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditOpen(false)}
+                disabled={editBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={submitEdit}
+                disabled={editBusy || !editBody.trim()}
+              >
+                {editBusy ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm text-fg">{reply.body}</p>
+          <div className="mt-1">
+            <Button variant="ghost" size="sm" onClick={openEdit}>
+              Edit
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CommentThread({
   appOrigin,
   slug,
@@ -269,10 +401,18 @@ function CommentThread({
       commentId: root.id,
       body: editBody,
       intent: editIntent,
+      // Optimistic-concurrency token: the edited_at we loaded. If it moved under
+      // us, the server 409s and we surface a reload-and-retry message rather than
+      // clobbering the newer edit.
+      expectedEditedAt: root.edited_at ?? null,
     });
     setEditBusy(false);
     if (!result.ok) {
-      setEditError(result.message);
+      setEditError(
+        result.conflict
+          ? "This comment changed since you opened it — reopen Edit to get the latest, then retry."
+          : result.message,
+      );
       return;
     }
     setEditOpen(false);
@@ -397,20 +537,15 @@ function CommentThread({
       </p>
 
       {replies.map((reply) => (
-        <div key={reply.id} className="mt-2 border-l border-border pl-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <Avatar name={reply.author?.name ?? null} email={reply.author?.email ?? null} />
-              <span className="truncate text-xs font-medium text-fg">{authorLabel(reply)}</span>
-              <IntentChip intent={reply.intent} />
-            </div>
-            <span className="text-[10px] text-subtle" title={formatTimestamp(reply.created_at)}>
-              {relativeTime(reply.created_at)}
-              {isEdited(reply.edited_at) ? " · edited" : ""}
-            </span>
-          </div>
-          <p className="text-sm text-fg">{reply.body}</p>
-        </div>
+        <ReplyItem
+          key={reply.id}
+          reply={reply}
+          appOrigin={appOrigin}
+          slug={slug}
+          editToken={editToken}
+          comments={comments}
+          onCommentsChange={onCommentsChange}
+        />
       ))}
 
       <ErrorText message={resolveError} />
@@ -500,6 +635,10 @@ export function CommentsPanel({
     list.push(c);
     repliesByRoot.set(c.parent_id, list);
   }
+  // Note: shownCount is the ROOT-thread count; the fetch cap counts all comments
+  // (incl. replies), so in a reply-heavy truncated set this number is an
+  // approximation of how many were fetched — acceptable for a "some hidden" hint.
+  const truncNote = truncationNote(roots.length, hasMore ?? false);
   const sortedRoots = [...roots].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
@@ -537,11 +676,7 @@ export function CommentsPanel({
           />
         ))
       )}
-      {truncationNote(sortedRoots.length, hasMore ?? false) ? (
-        <p className="px-1 text-[11px] text-subtle">
-          {truncationNote(sortedRoots.length, hasMore ?? false)}
-        </p>
-      ) : null}
+      {truncNote ? <p className="px-1 text-[11px] text-subtle">{truncNote}</p> : null}
     </section>
   );
 }
