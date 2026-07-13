@@ -20,6 +20,7 @@ function baseRow(overrides: Partial<Row> = {}): Row {
         textQuote: "the Q3 number",
       },
     },
+    editedAt: null,
     resolvedAt: null,
     createdAt: new Date(1_700_000_000_000),
     ...overrides,

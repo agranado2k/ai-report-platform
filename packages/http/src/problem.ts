@@ -51,6 +51,8 @@ function problemFor(error: AppError): ProblemSpec {
       return { status: 403, code: "forbidden", title: "Forbidden" };
     case "NotFound":
       return { status: 404, code: "not_found", title: "Not found" };
+    case "Conflict":
+      return { status: 409, code: "conflict", title: "Conflict" };
     case "UnsupportedMediaType":
       return { status: 415, code: "unsupported_media_type", title: "Unsupported media type" };
     case "PayloadTooLarge":

@@ -31,6 +31,7 @@ describeCommentRepositoryContract("in-memory", async () => {
         anchor: { versionPinned: { versionId: VERSION_ID, textQuote: `quote ${seq}` } },
         parentCommentId: overrides.parentCommentId ?? null,
         intent: overrides.intent ?? "note",
+        editedAt: null,
         resolvedAt: null,
         createdAt: seq,
       };

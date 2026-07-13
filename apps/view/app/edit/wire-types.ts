@@ -42,6 +42,11 @@ export interface CommentWire {
     readonly version_pinned: { readonly version_id: string; readonly text_quote: string };
     readonly relative?: unknown;
   };
+  /** When the comment was last edited (ADR-0064 §3, ISO-8601), or null if never
+   *  edited. Optional here defensively (additive — a pre-`edited_at` server may
+   *  omit it, which reads as "never edited"). Drives the "· edited" marker and is
+   *  echoed back (converted to epoch ms) as the edit optimistic-concurrency token. */
+  readonly edited_at?: string | null;
   readonly resolved_at: string | null;
   readonly created_at: string;
   readonly mode: string;

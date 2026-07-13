@@ -9,7 +9,7 @@
 // `SandboxedHtml` (F-1) — this component never touches the diff HTML.
 import { Badge, Button, Select } from "arp-ui";
 import { useState } from "react";
-import { authorInitials, relativeTime } from "../comment-format";
+import { authorInitials, relativeTime, truncationNote } from "../comment-format";
 import { getDiff } from "../diff-client";
 import type { DiffWire, VersionWire } from "../wire-types";
 
@@ -19,6 +19,9 @@ export interface VersionsPanelProps {
   readonly editToken: string;
   readonly versions: readonly VersionWire[];
   readonly onCompare: (diff: DiffWire) => void;
+  /** True when the fetch-all cursor loop hit its cap and older versions are not
+   *  loaded — surfaces a "some older items are hidden" note at the foot. */
+  readonly hasMore?: boolean;
 }
 
 function formatTimestamp(iso: string): string {
@@ -60,6 +63,7 @@ export function VersionsPanel({
   editToken,
   versions,
   onCompare,
+  hasMore,
 }: VersionsPanelProps) {
   const sorted = [...versions].sort((a, b) => b.version_no - a.version_no);
   const [fromId, setFromId] = useState(sorted[1]?.id ?? "");
@@ -150,6 +154,11 @@ export function VersionsPanel({
           </li>
         ))}
       </ul>
+      {truncationNote(sorted.length, hasMore ?? false) ? (
+        <p className="px-1 text-[11px] text-subtle">
+          {truncationNote(sorted.length, hasMore ?? false)}
+        </p>
+      ) : null}
     </section>
   );
 }

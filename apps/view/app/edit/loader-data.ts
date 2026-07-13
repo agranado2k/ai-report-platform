@@ -14,6 +14,12 @@ import type { CommentWire, VersionWire } from "./wire-types";
 export interface EditLoaderExtras {
   readonly comments: readonly CommentWire[];
   readonly versions: readonly VersionWire[];
+  /** True when the comment set was TRUNCATED at the fetch-all page cap (the
+   *  panel renders a "some older items are hidden" note). A failed load degrades
+   *  to false — the empty list isn't "truncated", it just didn't load. */
+  readonly commentsHasMore: boolean;
+  /** As `commentsHasMore`, for the version history. */
+  readonly versionsHasMore: boolean;
 }
 
 export function buildEditLoaderExtras(
@@ -23,5 +29,7 @@ export function buildEditLoaderExtras(
   return {
     comments: commentsResult.ok ? commentsResult.comments : [],
     versions: versionsResult.ok ? versionsResult.versions : [],
+    commentsHasMore: commentsResult.ok ? commentsResult.has_more : false,
+    versionsHasMore: versionsResult.ok ? versionsResult.has_more : false,
   };
 }

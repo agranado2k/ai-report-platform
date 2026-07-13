@@ -35,7 +35,18 @@ export async function parseJsonBody(
  *  empty/absent body is the (unchanged) RESOLVE. */
 export type CommentPatch =
   | { readonly kind: "resolve" }
-  | { readonly kind: "edit"; readonly body?: string; readonly intent?: Intent };
+  | {
+      readonly kind: "edit";
+      readonly body?: string;
+      readonly intent?: Intent;
+      /** Optimistic-concurrency token (epoch ms) parsed from the request's
+       *  `expected_edited_at` (an ISO-8601 date-time, or explicit null): the
+       *  `edited_at` the client last saw. `undefined` when the field is omitted
+       *  (concurrency check skipped); `null` when the client asserts the comment
+       *  had never been edited. Only carried on the EDIT path — the resolve path
+       *  ignores it. */
+      readonly expectedEditedAt?: number | null;
+    };
 
 /**
  * Classify a PATCH /comments/{comment_id} request body into resolve-vs-edit
@@ -46,6 +57,9 @@ export type CommentPatch =
  *    also re-validates length/emptiness on the trimmed value).
  *  - `intent` present → validated by `makeIntent` (422 on an invalid value,
  *    same as create/reply); the validated `Intent` is carried forward.
+ *  - `expected_edited_at` present (EDIT path only) → an ISO-8601 date-time
+ *    (parsed to epoch ms) or explicit null; anything else → 422. Ignored on the
+ *    resolve path (a body carrying only `expected_edited_at` is still a resolve).
  * Keeping this a pure function (no `Request`) makes the dispatch unit-testable
  * without a live route.
  */
@@ -74,5 +88,37 @@ export function parseCommentPatch(
     if (!intent.ok) return intent;
     editIntent = intent.value;
   }
-  return ok({ kind: "edit", body: editBody, intent: editIntent });
+
+  // Optimistic-concurrency token (optional). Absent → `undefined` (check
+  // skipped downstream). `null` → the client asserts "never edited". A string →
+  // parsed as an ISO-8601 date-time to epoch ms (mirrors how `edited_at` is
+  // rendered on the wire); an unparseable string, or any non-string/non-null,
+  // is a 422.
+  let expectedEditedAt: number | null | undefined;
+  if (body !== undefined && "expected_edited_at" in body) {
+    const raw = (body as Record<string, unknown>).expected_edited_at;
+    if (raw === null) {
+      expectedEditedAt = null;
+    } else if (typeof raw === "string") {
+      const ms = Date.parse(raw);
+      if (Number.isNaN(ms)) {
+        return err(
+          validationError(
+            "expected_edited_at must be an ISO-8601 date-time or null",
+            "expected_edited_at",
+          ),
+        );
+      }
+      expectedEditedAt = ms;
+    } else {
+      return err(
+        validationError(
+          "expected_edited_at must be an ISO-8601 date-time or null",
+          "expected_edited_at",
+        ),
+      );
+    }
+  }
+
+  return ok({ kind: "edit", body: editBody, intent: editIntent, expectedEditedAt });
 }

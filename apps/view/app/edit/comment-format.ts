@@ -52,6 +52,22 @@ const RELATIVE_FORMAT = new Intl.RelativeTimeFormat("en", {
   style: "narrow",
 });
 
+/** Whether a comment has been edited — true when `edited_at` carries a value
+ *  (ADR-0064 §3). Drives the "· edited" marker in the Comments panel. Undefined
+ *  (a pre-`edited_at` server) and null both read as "never edited". Pure. */
+export function isEdited(editedAt: string | null | undefined): boolean {
+  return typeof editedAt === "string" && editedAt.length > 0;
+}
+
+/** The "some older items are hidden" truncation note for a list that hit the
+ *  fetch-all page cap (`has_more`), or null when the full set loaded. `shownCount`
+ *  is how many items ARE displayed. Pure, so the Comments/Versions panels (which
+ *  have no DOM test tier) can unit-test the copy + the show/hide decision. */
+export function truncationNote(shownCount: number, hasMore: boolean): string | null {
+  if (!hasMore) return null;
+  return `Showing the most recent ${shownCount} — some older items are hidden.`;
+}
+
 /** Format an ISO timestamp as a compact relative string against `nowMs`:
  *  `"just now"` under a minute, else `"5m ago"` / `"2h ago"` / `"3d ago"` via
  *  the built-in `Intl.RelativeTimeFormat` (no dependency). `nowMs` is injectable

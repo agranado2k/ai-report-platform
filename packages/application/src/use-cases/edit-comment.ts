@@ -1,6 +1,8 @@
 // editComment — edit a Comment's `body` and/or `intent` (ADR-0064 §3). v1 scope:
-// only those two fields are mutable (the anchor is immutable, and there is no
-// `edited_at` indicator yet — a migration-free fast-follow). Authorization is a
+// only those two fields are mutable (the anchor is immutable). The edit stamps
+// `editedAt` (the domain transition), which drives the "· edited" indicator and
+// serves as the optimistic-concurrency token this use case checks against the
+// client's presented `expectedEditedAt` (a mismatch → 409 Conflict). Authorization is a
 // DELIBERATE mirror of resolve/delete (author-OR-report-owner, ADR-0064 §3 /
 // ADR-0060 §4), NOT the create/reply `canWrite` gate: editing your own comment's
 // text is a moderation-shaped act on your own content, and the owner is the final
@@ -18,6 +20,7 @@ import {
   editComment as applyEdit,
   type Comment,
   type CommentId,
+  conflict,
   err,
   type Intent,
   notAllowed,
@@ -54,6 +57,13 @@ export interface EditCommentInput {
   /** New intent (already validated at the trust boundary) — present means
    *  replace; absent means leave unchanged. */
   readonly intent?: Intent;
+  /** Optimistic-concurrency token: the `editedAt` (epoch ms) the client last
+   *  saw for this comment, or `null` if it had never been edited. When PRESENT
+   *  (including `null`), the use case rejects the edit with a 409 Conflict if the
+   *  stored `editedAt` differs — the comment changed since the client loaded it.
+   *  `undefined` (the field omitted) SKIPS the check (backward-compatible: an API
+   *  caller not opting into optimistic concurrency behaves as before). */
+  readonly expectedEditedAt?: number | null;
 }
 
 export async function editComment(
@@ -75,6 +85,15 @@ export async function editComment(
     actor.userId === report.value.ownerId || actor.userId === comment.authorUserId;
   if (!canModerate) {
     return err(notAllowed("only the comment's author or the report's owner may edit it"));
+  }
+
+  // Optimistic-concurrency guard (last-writer-wins prevention): when the client
+  // presents the `editedAt` it last saw, reject if the stored value has since
+  // moved (another author/owner edited it in the meantime). Checked here, AFTER
+  // authz — a 409 is a NEW failure mode for an already-permitted editor, not a
+  // permission decision. Skipped entirely when the token is omitted (undefined).
+  if (input.expectedEditedAt !== undefined && comment.editedAt !== input.expectedEditedAt) {
+    return err(conflict("this comment was edited since you loaded it; reload and try again"));
   }
 
   const emission = applyEdit(comment, {

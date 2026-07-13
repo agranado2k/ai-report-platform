@@ -26,6 +26,11 @@ export interface Comment {
    *  Defaults to `note` (a plain human annotation) — a pre-existing comment
    *  persisted before this field reads as `note` (backward compat, intent.ts). */
   readonly intent: Intent;
+  /** When this comment was last edited (epoch ms), or null if it has never been
+   *  edited (ADR-0064 §3). Set by the `editComment` transition; also doubles as
+   *  the optimistic-concurrency token the edit use case checks (a client presents
+   *  the `editedAt` it last saw; a mismatch is a 409 Conflict). */
+  readonly editedAt: number | null;
   readonly resolvedAt: number | null;
   readonly createdAt: number;
 }
@@ -82,6 +87,7 @@ export function createComment(p: CreateCommentParams): Result<CommentEmission, A
     anchor: anchor.value,
     parentCommentId: null,
     intent: intent.value,
+    editedAt: null,
     resolvedAt: null,
     createdAt: p.createdAt,
   };
@@ -133,6 +139,7 @@ export function replyToComment(
     anchor: anchor.value,
     parentCommentId: parent.id,
     intent: intent.value,
+    editedAt: null,
     resolvedAt: null,
     createdAt: p.createdAt,
   };
@@ -180,12 +187,13 @@ export interface EditCommentParams {
 
 /**
  * Edit a Comment's `body` and/or `intent` (ADR-0064 §3). v1 scope: only these
- * two fields are mutable — the anchor is immutable, and there is no `edited_at`
- * indicator yet (a migration-free fast-follow). At least one of `body`/`intent`
- * must be provided; neither is a ValidationError (the caller has nothing to
- * edit). The body is revalidated (non-empty, bounded — same VO as create); the
- * intent is applied as-is (already a valid `Intent` at this point). Emits
- * CommentEdited. The use case enforces WHO may call this (author-or-owner,
+ * two fields are mutable — the anchor is immutable. At least one of
+ * `body`/`intent` must be provided; neither is a ValidationError (the caller has
+ * nothing to edit). The body is revalidated (non-empty, bounded — same VO as
+ * create); the intent is applied as-is (already a valid `Intent` at this point).
+ * Stamps `editedAt` (which the "· edited" indicator reads, and the edit use case
+ * reads back as the optimistic-concurrency token). Emits CommentEdited. The use
+ * case enforces WHO may call this and the concurrency check (author-or-owner,
  * ADR-0064 §3, mirroring resolve/delete); this transition doesn't check identity.
  */
 export function editComment(
@@ -208,6 +216,7 @@ export function editComment(
     if (!intent.ok) return intent;
     next = { ...next, intent: intent.value };
   }
+  next = { ...next, editedAt: p.editedAt };
   const event: CommentEdited = {
     type: "CommentEdited",
     commentId: comment.id,

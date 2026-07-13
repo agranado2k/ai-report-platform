@@ -21,7 +21,7 @@ import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
-import { authorInitials, relativeTime } from "../comment-format";
+import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
 import type { CommentWire } from "../wire-types";
 
@@ -34,6 +34,9 @@ export interface CommentsPanelProps {
    *  populated). */
   readonly currentVersionId: string;
   readonly comments: readonly CommentWire[];
+  /** True when the comment set was truncated at the fetch-all page cap — renders
+   *  a "some older items are hidden" note at the foot of the list. */
+  readonly hasMore?: boolean;
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
   /** The editor's current non-empty selection, or `null` — gates whether the
    *  "new comment" composer renders at all (only present while `mode ===
@@ -390,6 +393,7 @@ function CommentThread({
       )}
       <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
         {relativeTime(root.created_at)}
+        {isEdited(root.edited_at) ? " · edited" : ""}
       </p>
 
       {replies.map((reply) => (
@@ -402,6 +406,7 @@ function CommentThread({
             </div>
             <span className="text-[10px] text-subtle" title={formatTimestamp(reply.created_at)}>
               {relativeTime(reply.created_at)}
+              {isEdited(reply.edited_at) ? " · edited" : ""}
             </span>
           </div>
           <p className="text-sm text-fg">{reply.body}</p>
@@ -485,6 +490,7 @@ export function CommentsPanel({
   onCommentsChange,
   pendingSelection,
   onSelectionConsumed,
+  hasMore,
 }: CommentsPanelProps) {
   const roots = comments.filter((c) => c.parent_id === null);
   const repliesByRoot = new Map<string, CommentWire[]>();
@@ -531,6 +537,11 @@ export function CommentsPanel({
           />
         ))
       )}
+      {truncationNote(sortedRoots.length, hasMore ?? false) ? (
+        <p className="px-1 text-[11px] text-subtle">
+          {truncationNote(sortedRoots.length, hasMore ?? false)}
+        </p>
+      ) : null}
     </section>
   );
 }
