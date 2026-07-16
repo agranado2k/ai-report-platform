@@ -1,6 +1,11 @@
 # ADR-0072: MCP agent onboarding — a layered rollout to teach host agents the workflow
 
 - **Status**: Accepted (Layer 0 implemented this PR; Layer 1/2 tracked as follow-ups)
+  - **2026-07-16**: Layer 1 (portable `SKILL.md`) and Layer 2 (MCP prompts, Claude Code
+    plugin, Gemini extension) implemented — see `apps/mcp/src/prompts.ts`,
+    `apps/mcp/packaging/claude-code-plugin/`, `apps/mcp/packaging/gemini-extension/`, and
+    the "One-step packaging (Layer 2)" section of `docs/mcp-usage.md`. All three layers of
+    the rollout described below are now shipped.
 - **Date**: 2026-07-16
 - **Deciders**: agranado2k
 - **Relates to / amends**: refines ADR-0051 (remote MCP server, thin client over `/api/v1`) and ADR-003 (HTTP API is the source of truth; MCP is a thin client) — adds an onboarding layer on top of the existing tool surface, no transport/auth change. Applies ADR-0069's trust-boundary classification (first-party-authored content vs. untrusted tool output) to the new onboarding text itself.

@@ -4,6 +4,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ApiClient } from "./client";
 import { INSTRUCTIONS } from "./instructions";
+import { registerPrompts } from "./prompts";
 import { registerReadTools, registerWriteTools } from "./tools";
 
 export function buildMcpServer(client: ApiClient): McpServer {
@@ -13,5 +14,6 @@ export function buildMcpServer(client: ApiClient): McpServer {
   );
   registerReadTools(server, client);
   registerWriteTools(server, client);
+  registerPrompts(server);
   return server;
 }

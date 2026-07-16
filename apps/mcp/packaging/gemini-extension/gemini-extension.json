@@ -1,0 +1,11 @@
+{
+  "name": "centaur-spec",
+  "version": "0.1.0",
+  "description": "Connect to the Centaur Spec reports MCP server and teach Gemini the publish/version/organize/share/comment workflow in one step.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "arp-mcp": {
+      "httpUrl": "https://mcp.centaurspec.com/mcp"
+    }
+  }
+}

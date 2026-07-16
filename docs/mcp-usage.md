@@ -91,6 +91,51 @@ Desktop that don't surface `instructions`, and installable in Claude Code, Claud
 Codex, and (reportedly) Gemini — see the standalone skill at
 `apps/mcp/skill/centaur-spec/SKILL.md` (install notes per host in the sibling `README.md`).
 
+## One-step packaging (Layer 2)
+
+The deepest onboarding layer wraps the server connection and the Layer 1 skill into
+installable, per-host packages, plus adds MCP **prompts** — a distinct SDK capability from
+`instructions` — so a client can list and insert a ready-made instruction on demand. See
+`docs/adr/0072-mcp-agent-onboarding.md` for the full rationale.
+
+### Claude Code plugin
+
+`apps/mcp/packaging/claude-code-plugin/` bundles the `arp-mcp` server connection
+(`.mcp.json`, Streamable HTTP, no embedded secret — auth happens at connect time) together
+with a packaged copy of the Layer 1 skill (`skills/centaur-spec/SKILL.md`) and a plugin
+manifest (`.claude-plugin/plugin.json`). Install it as a Claude Code plugin (see the
+package's own `README.md` for the current `/plugin` install flow) to get both the tool
+connection and the workflow-teaching skill in one step, instead of connecting the MCP
+server and separately finding the skill.
+
+### Gemini extension
+
+`apps/mcp/packaging/gemini-extension/` is the equivalent for Gemini CLI: a
+`gemini-extension.json` manifest registers the same remote `arp-mcp` server under
+`mcpServers` (via the `httpUrl` key for Streamable HTTP) and points `contextFileName` at a
+bundled, trimmed context file (`GEMINI.md`) covering the core workflow and the
+caller-scoped-access security note. See the package's `README.md` for the install command.
+
+### MCP prompts
+
+`apps/mcp/src/prompts.ts` registers three discoverable entry-point prompts on the server
+itself via the SDK's `registerPrompt` — a distinct capability from `instructions` (sent
+once at connect) and tool descriptions (attached to each tool). Hosts that support the
+prompts capability (Claude Code, Gemini) surface these as `/mcp__arp-mcp__<name>` slash
+commands the user can invoke directly:
+
+| Prompt | What it does |
+|---|---|
+| `publish_report` | Upload an HTML document with `reports_upload` and return its shareable `view_url`. |
+| `share_report` | Set who can view (`reports_get_acl`/`reports_set_acl`) or write (`reports_grant_write`/`reports_revoke_write`) an existing report. |
+| `find_report` | Search reports with `reports_search` and open one with `reports_get`. |
+
+Each prompt's message references the real tool names above and restates the
+caller-scoped-access caveat — it performs no I/O of its own; the named tools remain the
+only place a call actually reaches `/api/v1`. **Codex does not consume MCP prompts** — it
+reads the skill and the sharpened tool descriptions (Layers 0/1) instead, which is why
+those two layers, not prompts, are this project's cross-client baseline.
+
 ## Notes
 
 - **Auth is downstream-honest:** whichever credential you present, the server resolves it to *your* org and the `/api/v1` use cases enforce ownership — an agent only ever sees your reports.
