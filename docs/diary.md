@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-07-06
+## Current state — 2026-07-16
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** **Editing & comments epic SHIPPED + CLOSED (ADR-0062–0067):** the unified in-viewer editor lives at `view.<domain>/<slug>/edit` — one authenticated surface consolidating the ProseMirror editor, comments (ADR-0064, closed-enum `intent` note/enhancement/add/remove + author-or-owner edit), version history + visual diff (ADR-0065), and author display-names from the Clerk identity mirror (ADR-0048, migration 0016 + one-time backfill #205). Reached one-click from the dashboard by any canWrite user; the standalone dashboard editor/versions/diff pages were retired in the Phase-5 cutover. Feedback rounds 1 (#189–#195) + 2 (#196–#201) + polish batch (#204) + backfill (#205) all merged. **Remaining editor payoff: the comment-`intent` agent-action pipeline (PRD #198) — design-first, needs an ADR (ADR-0069 lethal-trifecta surface).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `e2986b3` — Merge PR #150 (ownership epic completion — org ACL mode + per-report write grants, ADR-0056 P2 / ADR-0060). |
+| **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/comments` (ADR-0064 comments & annotations slice 1 — full vertical, branch `feat/comments`, not yet merged; rebased onto PR #150). `worktree/editor-mvp` (ADR-0062 in-dashboard editor, branch `feat/editor-mvp`, not yet merged). `worktree/visual-diff` (ADR-0065 §3/§4 version-history UI + visual diff, branch `feat/visual-diff`, not yet merged). `worktree/sharing-completion` merged (PR #150 — org ACL mode + per-report write grants); `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
+| **Active worktrees**   | `worktree/diary-round2-close` (this housekeeping entry — Current-state refresh + the #204/#205/#206 log entry, branch `docs/diary-round2-close`). All editing-epic worktrees are merged and cleaned up: `adr-editing-epic`, `comments`, `editor-mvp`, `visual-diff`, `comment-ui`, `phase5-cutover`, and the round-1/round-2 feature worktrees (#189–#205). No feature worktree is open — the next build (intent agent-action pipeline, PRD #198) starts design-first. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -3097,3 +3097,62 @@ Use `import type` only.
 **Next:** the intent **agent-action pipeline** (PRD issue #198, design-first — needs an ADR; it's the
 ADR-0069 lethal-trifecta surface) is the real remaining payoff; the collaboration epics (real-time,
 notifications, @mentions/assignment) still need PRDs.
+
+### 2026-07-16 — Round-2 close-out: comment-polish batch, display-name backfill, TF secret reconcile (#204/#205/#206)
+
+Three PRs merged after the 2026-07-13 round-2 entry, closing out the shipped editor surface and the
+one open infra-drift item. `main` green through all three (turbo typecheck 14/14 on the merged tree).
+
+- **#204 comment-polish batch** (`feat/comment-polish-batch`) — the deferred UX finishers from the
+  round-2 review:
+  - **Edited marker** — a comment edited after posting now renders an `(edited)` indicator (the
+    fast-follow explicitly deferred in #201, which shipped the edit path without the marker). Driven off
+    the existing PATCH-edit write path; no new domain field beyond the already-persisted edit timestamp.
+  - **Reply-edit UI** — the inline edit affordance, previously only on root comments, now also applies to
+    replies (same author-or-owner gate, ADR-0064 §3/§7).
+  - **Concurrency guard engaged** — an optimistic-concurrency check on the comment mutation path so two
+    in-flight edits/resolves against the same comment can't silently clobber each other (the guard was
+    scaffolded earlier but not wired; this "engages" it).
+  - **Hidden `note` default** — `note` intent stays chip-less (calm default), consistent with #197's
+    display polish; the composer no longer surfaces `note` as a loud choice.
+  - **DRY pass** — de-duplicated the comment-composer/edit lifecycle logic flagged in the #199/#200
+    review (task #58's pagination-DRY companion, now on the comment side).
+- **#205 display-name backfill** (`feat/display-name-backfill`) — resolves dogfood **finding F1**
+  (`docs/dogfood-reports/2026-07-13-unified-editor.md`): every pre-#200 user had `display_name = null`,
+  so authors rendered as email until their next sign-in. Shipped the **one-time backfill** (option (a)
+  from the dogfood recommendation) — a bounded use case that populates `users.display_name` for already-
+  mirrored users, so names appear immediately instead of waiting on a re-auth. Names now render
+  `name → email → "Unknown user"` with the backfilled value. Also folded in an identity hardening fix:
+  **an unparseable `maxUsers` is now rejected (400) instead of being silently capped** — surfaced while
+  touching the identity-mirror path.
+- **#206 Terraform secret reconcile** (`chore/tf-view-secret-reconcile`) — closed the
+  `VIEW_ACCESS_TOKEN_SECRET` state drift by bumping `keepers.rotation` on
+  `random_password.view_access_token_secret`, forcing a regeneration that the **CI apply-prod pipeline**
+  applied on merge (ADR-017/018 everything-as-code — **no manual `tf.sh apply`**; the plan diff was the
+  expected "1 to add, 2 to change, 1 to destroy" = secret replaced + the two consuming env vars updated).
+  The rotation runbook in `docs/infra.md` gained a caveat about the **redeploy mismatch window**:
+  redeploying only ONE of `arp-app-prod`/`arp-view-prod` after a rotation leaves the origins on mismatched
+  secrets (the 2026-06 P0 class) — redeploy both back-to-back; redeploying neither is safe, exactly one is
+  the danger.
+
+Also landed alongside the batch: **#202** logged the round-2 diary entry, **#203** published the
+live-prod dogfood report (`docs/dogfood-reports/2026-07-13-unified-editor.md`), and **#196** removed dead
+`versionsToDto` while repairing a 3-way-merge `arp-app` typecheck drift.
+
+**State after this close-out — what's shipped vs. what's left:**
+- **Shipped:** the entire unified in-viewer editing epic (ADR-0062–0067) — editor, comments + intent +
+  editing, version history + visual diff, author display-names + backfill, full-height/independent-scroll
+  shell — plus the Phase-5 dashboard-editor retirement and this infra reconcile.
+- **Missing / pending:** **#44** (wire `SCAN_DRAIN_SECRET` into CI to unblock the full authenticated
+  browser-render e2e on previews — the reason the editor's visual flows are still a manual checklist);
+  **#56 / PRD #198** the comment-`intent` agent-action pipeline (the enhancement/add/remove *consumer* —
+  intent is a stored label with nothing acting on it yet; needs an ADR, ADR-0069 surface); **#60**
+  deferred #204/#205 review follow-ups (atomic concurrency guard hardening, internal-route auth tests +
+  helper DRY); and the collaboration epics (real-time, notifications, @mentions/assignment) which still
+  need PRDs. Author-display carries a tracked doc-debt: a dedicated ADR to correct the inherited
+  "ADR-0063 author display" mis-citation (it's really an ADR-0048 identity-mirror extension).
+- **Next:** design-first on PRD #198 (the intent consumer) is the real remaining editor payoff.
+
+Worktree: `worktree/diary-round2-close` (branch `docs/diary-round2-close`) — housekeeping only, no code.
+The companion Centaur Spec roadmap report (slug `qqjM8VYe2-`) was refreshed the same day with the same
+Done / Missing / Next framing.
