@@ -68,6 +68,22 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 
 Reports are served on the separate viewer origin: `https://view.centaurspec.com/<slug>`.
 
+## Agent onboarding (ADR-0072)
+
+The server ships a short `instructions` string (set once, at connect, via the MCP `initialize`
+response) that teaches an agent the core workflow before it ever calls a tool: **upload** an HTML
+document with `reports_upload` to get a permanent `view_url` → **re-upload to the same slug**
+(`update_slug`) to publish a new version while that URL stays exactly the same → use **folders**
+to organize reports → use **comments** to read/resolve reviewer feedback. It also states plainly
+that the server acts only within the caller's own grants — never another user's or org's data.
+
+Not every client surfaces `instructions` to the model today (Claude Code/Gemini/Codex-style hosts
+do; Claude Desktop currently does not), so the same story is reinforced directly in the relevant
+tool descriptions (`reports_upload`, `folders_create`) as a fallback that reaches every client.
+See `docs/adr/0072-mcp-agent-onboarding.md` for the full rationale, the cross-client mechanism
+differences, and the planned follow-up layers (a portable `SKILL.md`, then a packaged Claude Code
+plugin / Gemini extension / MCP prompts).
+
 ## Notes
 
 - **Auth is downstream-honest:** whichever credential you present, the server resolves it to *your* org and the `/api/v1` use cases enforce ownership — an agent only ever sees your reports.

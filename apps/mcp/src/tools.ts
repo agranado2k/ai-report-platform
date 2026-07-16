@@ -264,17 +264,20 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Upload a report",
       description:
-        "Create a report from an HTML document, or re-upload a new version of an existing " +
-        "one (re-upload requires write access, ADR-0059/0060 — the report's owner or a " +
-        "write grantee). Returns the slug + permanent view URL. To set/change the title " +
-        "afterwards use reports_update. Title is not set here.",
+        "Create a report from an HTML document — returns the slug + a permanent `view_url` " +
+        "you can share immediately. To PUBLISH A NEW VERSION of that same report later " +
+        "(after edits/re-generation), call this again with `update_slug` set to its slug: " +
+        "the `view_url` stays exactly the same, only the content and version number change " +
+        "(re-upload requires write access, ADR-0059/0060 — the report's owner or a write " +
+        "grantee). To set/change the title afterwards use reports_update. Title is not set here.",
       inputSchema: {
         html: z.string().describe("The report's full HTML document."),
         update_slug: z
           .string()
           .optional()
           .describe(
-            "Re-upload a new version under this existing slug (keeps the URL). Omit to create new.",
+            "Publish a new version under this existing slug instead of creating a new report " +
+              "— the view_url is unchanged. Omit to create a brand-new report.",
           ),
         folder_path: z
           .string()
@@ -539,7 +542,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Create a folder",
       description:
-        "Create a folder under a parent. `parent_id` is required — new folders nest under an " +
+        "Create a folder to organize reports into — pair with reports_move (or reports_upload's " +
+        "folder_path) once it exists. `parent_id` is required — new folders nest under an " +
         "existing one; use folders_list to find the root (or another) folder id.",
       inputSchema: {
         name: z.string().describe("The folder name."),

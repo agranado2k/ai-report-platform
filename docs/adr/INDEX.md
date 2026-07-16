@@ -45,6 +45,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0069 | [Development-agent trust boundary — compartmentalizing untrusted content from private data and external actions](0069-agent-tool-trust-boundary.md) | Accepted (2026-07-08) — applies ADR-0045/0062's isolation principle to Claude Code dev-agent tooling |
 | 0070 | [Audit log write seam — the `AuditLogger` port, mirroring the transactional outbox](0070-audit-log-write-seam.md) | Accepted (2026-07-09) — mirrors ADR-0021's outbox shape; wires all 16 user-initiated, org-scoped mutating use cases (issue #153) |
 | 0071 | [Extract shared `packages/ui` + `packages/editor`](0071-extract-ui-editor-packages.md) | Accepted (2026-07-10) — pure refactor; single source of truth for `iframe-document.ts`'s CSP ahead of ADR-0063's `apps/view` editor; amended same day to move the Forge & Ember `theme.css` tokens into `arp-ui` too |
+| 0072 | [MCP agent onboarding — a layered rollout to teach host agents the workflow](0072-mcp-agent-onboarding.md) | Accepted (2026-07-16) — refines ADR-0051/ADR-003; Layer 0 (server `instructions` + sharpened tool descriptions) implemented this PR, Layer 1 (`SKILL.md`) / Layer 2 (plugin/extension/prompts) tracked follow-ups |
 
 ## Backlog (ADRs 1–30 from the spec)
 
