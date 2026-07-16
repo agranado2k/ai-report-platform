@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GetPromptResult } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import type { ApiClient } from "./client";
+import { OVERCLAIM_PATTERNS } from "./instructions";
 import { registerPrompts } from "./prompts";
 import { buildMcpServer } from "./server";
 
@@ -99,20 +100,35 @@ describe("registerPrompts (ADR-0072, Layer 2)", () => {
     for (const [name, prompt] of collectPrompts()) {
       const result = await prompt.callback(argsByPrompt[name] ?? {});
       const text = textOf(result);
-      expect(text).not.toMatch(/any (user|org|report)/i);
-      expect(text).not.toMatch(/all (users|orgs|reports)/i);
-      expect(text).not.toMatch(/every (user|org)/i);
+      for (const pattern of OVERCLAIM_PATTERNS) expect(text).not.toMatch(pattern);
     }
   });
 
-  it("share_report and find_report state the caller-scoped-access caveat explicitly", async () => {
+  it("share_report states the caller-scoped-access caveat explicitly", async () => {
     const share = collectPrompts().get("share_report");
     const shareText = textOf((await share?.callback({ slug: "abc" })) as GetPromptResult);
     expect(shareText).toMatch(/own|never another/i);
+  });
 
+  it("find_report states the caller-scoped-access caveat explicitly", async () => {
     const find = collectPrompts().get("find_report");
     const findText = textOf((await find?.callback({ query: "x" })) as GetPromptResult);
     expect(findText).toMatch(/own|never another/i);
+  });
+
+  it("publish_report frames the untrusted source as data, not instructions (ADR-0069)", async () => {
+    const prompt = collectPrompts().get("publish_report");
+    const text = textOf((await prompt?.callback({ source: "<html></html>" })) as GetPromptResult);
+    expect(text).toMatch(/data, not instructions/i);
+  });
+
+  it("declares the expected argument on each prompt's argsSchema", () => {
+    const prompts = collectPrompts();
+    expect(Object.keys(prompts.get("publish_report")?.config.argsSchema ?? {})).toEqual(
+      expect.arrayContaining(["source", "title"]),
+    );
+    expect(Object.keys(prompts.get("share_report")?.config.argsSchema ?? {})).toEqual(["slug"]);
+    expect(Object.keys(prompts.get("find_report")?.config.argsSchema ?? {})).toEqual(["query"]);
   });
 });
 

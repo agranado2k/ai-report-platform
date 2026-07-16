@@ -17,3 +17,13 @@ export const INSTRUCTIONS =
   "and reports_move to organize reports into folders; use reports_list_comments, " +
   "reports_add_comment, and reports_resolve_comment to read and resolve reviewer " +
   "feedback on a report.";
+
+// Patterns an onboarding string must NOT match — each reads as "this server can
+// reach any/all/every user's or org's data", the over-claim ADR-0069/0059/0060
+// forbid. Defined once here so the instructions and the prompt tests assert the
+// same guard (Layer 0 + Layer 2).
+export const OVERCLAIM_PATTERNS: readonly RegExp[] = [
+  /any (user|org|report)/i,
+  /all (users|orgs|reports)/i,
+  /every (user|org)/i,
+];

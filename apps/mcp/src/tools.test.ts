@@ -254,3 +254,23 @@ describe("comment tools", () => {
     expect(res?.isError).toBe(true);
   });
 });
+
+describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
+  const descriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  it("reports_upload explains the same-URL, new-version re-upload story", () => {
+    const d = descriptionOf("reports_upload");
+    expect(d).toMatch(/update_slug/);
+    expect(d).toMatch(/view_url/);
+    expect(d).toMatch(/same|unchanged/i);
+  });
+
+  it("folders_create points to reports_move for organizing reports", () => {
+    expect(descriptionOf("folders_create")).toMatch(/reports_move/);
+  });
+});
