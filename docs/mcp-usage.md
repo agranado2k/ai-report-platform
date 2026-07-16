@@ -84,6 +84,13 @@ See `docs/adr/0072-mcp-agent-onboarding.md` for the full rationale, the cross-cl
 differences, and the planned follow-up layers (a portable `SKILL.md`, then a packaged Claude Code
 plugin / Gemini extension / MCP prompts).
 
+### Portable Agent Skill (Layer 1)
+
+For a deeper, example-driven version of the same workflow — useful for hosts like Claude
+Desktop that don't surface `instructions`, and installable in Claude Code, Claude Desktop,
+Codex, and (reportedly) Gemini — see the standalone skill at
+`apps/mcp/skill/centaur-spec/SKILL.md` (install notes per host in the sibling `README.md`).
+
 ## Notes
 
 - **Auth is downstream-honest:** whichever credential you present, the server resolves it to *your* org and the `/api/v1` use cases enforce ownership — an agent only ever sees your reports.
