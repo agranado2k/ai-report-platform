@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "arp-mcp": {
+      "type": "http",
+      "url": "https://mcp.centaurspec.com/mcp"
+    }
+  }
+}
