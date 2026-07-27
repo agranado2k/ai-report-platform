@@ -4,7 +4,7 @@
 **Target**: live prod (`app.centaurspec.com` / `view.centaurspec.com`) at origin/main `a04f9fa`
 **Timestamp**: 2026-07-08 ~22:00 UTC
 **Mode**: test-against-live; no-fix-on-main (any fix goes through a worktree branch + PR)
-**Artifacts**: `.dogfood-state/2026-07-08-ownership-epic.json`, screenshots in `.dogfood-state/shots-2026-07-08/`
+**Artifacts**: `.dogfood-state/2026-07-08-ownership-epic.json`, screenshots in `.dogfood-state/shots-2026-07-08/` (local-only on the operator's machine — `.dogfood-state/` is gitignored)
 
 ## Summary
 
@@ -23,7 +23,7 @@
 | B4 | anon | security headers | ✓/note | viewer: CSP + COOP/CORP + no-referrer + HSTS ✓. App origin: HSTS only — see Observations |
 | B5 | anon | owner-open gate | ✓ | 302 → `/` — deliberate anti-existence-oracle (documented in `open-report.server.ts`), no token minted |
 | A1–A4 | unauth API | list/upload/acl/write-grants | ✓ | all 401 `application/problem+json` with correct `code` |
-| M1 | owner (MCP) | ownership on wire (G1) | ✓ | `reports_get 6HEjnrX9io` → `owner: user_033a6ux…` + owner-conditional `acl` block |
+| M1 | owner (MCP) | ownership on wire (G1) | ✓ | `reports_get <owner-slug>` → `owner: user_***` + owner-conditional `acl` block (identifiers redacted — public repo) |
 | M2 | owner (MCP) | creator-is-owner on upload | ✓ | fresh upload `bfTwXmvJuB` → owner = acting user |
 | M3 | owner (MCP) | owner write | ✓ | rename accepted |
 | M4 | owner (MCP) | write-grant roster read | ✓/question | 403 "missing required scope: acl:write" — see Observations (read op behind a write scope) |
@@ -41,6 +41,8 @@ Probe report `bfTwXmvJuB` was created and deleted by this run; no test data rema
 
 *Severity*: Medium-low. *Recommendation*: order the access decision before the scan interstitial for non-public modes (or return the same unlock redirect while scanning). Touches viewer permission logic → per /ce-dogfood policy this is a human decision, not an auto-fix. If approved I'll do it via `/tdd` in a worktree + PR.
 
+*Status (2026-07-27, added when this report was committed)*: **fixed** — PR #170 (`eee7cb2`, fix(viewer): enforce the Acl before the scanning holding page) merged to main with an ADR-0038 amendment; this section is historical record.
+
 ## Observations / paper cuts (no action taken)
 
 1. **`reports_list_write_grants` (a read) requires `acl:write`** — an owner with a read-scoped key can *see* their ACL (`reports_get_acl` worked) but not their write-grant roster. Possibly deliberate (roster = share management); if not, `acl:read` would be the natural scope. Design question for ADR-0060's wire contract.
@@ -56,4 +58,4 @@ Probe report `bfTwXmvJuB` was created and deleted by this run; no test data rema
 
 ## Reproducibility
 
-State: `.dogfood-state/2026-07-08-ownership-epic.json`. Replay: re-run the matrix against prod (scenarios are self-contained; M2/M7/M8 create + delete their own probe). Note: local `main` carries an unpushed operator commit `06a4353` (the /ce-dogfood skill docs) — it needs a PR to reach origin.
+State: `.dogfood-state/2026-07-08-ownership-epic.json` (operator-local). Replay: re-run the matrix against prod (scenarios are self-contained; M2/M7/M8 create + delete their own probe). Note: at run time, local `main` carried a then-unpushed operator commit `06a4353` (the /ce-dogfood skill docs); it later reached origin via the repo-hygiene PR.
