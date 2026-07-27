@@ -76,7 +76,7 @@ This repo IS NOT:
 | Write code                               | `/tdd <task>` — red-green-refactor              |
 | Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
 | Iterate on bot review + CI on an open PR | `/pr-iterate <PR#>` (one pass) · `/loop /pr-iterate <PR#>` (continuous) |
-| Local PR review + alignment check        | `/review-and-evaluate` (2-agent: review + ADR-aware verdicts) · auto-invoked by `/pr-iterate` |
+| Local PR review + alignment check        | `/review-and-evaluate` (2-agent: 6-sub-agent `/review-pr` incl. Reuse/DRY + ADR-aware verdicts) · auto-invoked by `/pr-iterate` |
 | Run end-to-end QA on a branch            | `/ce-dogfood` (browser test all changed flows, auto-fix safe issues, report with auditability) |
 | Force the agent to ask clarifying questions before coding | `/grill-me` (quick) · `/grill-with-docs` (also updates the glossary / ADR drafts) |
 | Diagnose a bug or perf issue methodically | `/diagnose` (reproduce → minimize → hypothesize → instrument → fix → test) |
