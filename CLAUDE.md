@@ -44,7 +44,7 @@ Full rationale, the classification of the three legs, and the considered/rejecte
 
 ## Style
 
-- **Functional, immutable** for `packages/domain/` and `packages/application/` (ADR-024). No new FP libraries — vanilla TS + 12-line `pipe()` + 15-line `Result<T, E>`.
+- **Functional, immutable** for `packages/domain/` and `packages/application/` (ADR-024). No new FP libraries — vanilla TS + the `Result<T, E>` type with `ok`/`err` (the unused `pipe()` and Result combinators were pruned by ADR-0073).
 - **`readonly` on every domain type.** ESLint will fail the build otherwise.
 - **No side effects in domain code** — push all I/O to `packages/adapters/`.
 - **Repository pattern** for data access (ADR-020). Drizzle implementations live in adapters, not in use cases.
