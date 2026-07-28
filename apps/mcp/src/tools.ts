@@ -6,6 +6,7 @@
 // react instead of the call throwing a protocol error.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { ACL_MODES, COMMENT_INTENTS } from "arp-domain";
 import { z } from "zod";
 import type { ApiClient, ApiResult, Problem } from "./client";
 
@@ -39,6 +40,30 @@ const DESTROY = {
   idempotentHint: true,
   openWorldHint: false,
 } as const;
+
+// Shared input-schema helpers (schema-side DRY only — the emitted JSON schema:
+// types, optionality, description strings, is identical to the previous
+// per-tool declarations; tools.test.ts pins them verbatim).
+
+/** The "slug or report_ id" input every slug-addressed tool shares.
+ *  (reports_get and reports_delete carry their own description variants.) */
+const SLUG_INPUT = z.string().describe("The report's slug or its report_ id.");
+
+/** The ADR-0053 cursor-pagination trio, parameterized by the entity whose
+ *  prefixed id is the cursor. */
+function cursorInputs(entity: "report" | "version" | "comment" | "folder") {
+  return {
+    limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+    starting_after: z
+      .string()
+      .optional()
+      .describe(`Cursor: a ${entity}_ id; returns items AFTER it (page forward).`),
+    ending_before: z
+      .string()
+      .optional()
+      .describe(`Cursor: a ${entity}_ id; returns items BEFORE it (page back).`),
+  };
+}
 
 export function okResult(data: unknown): CallToolResult {
   // 204/no-content writes resolve to `undefined` — render a friendly ack rather
@@ -79,15 +104,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       inputSchema: {
         q: z.string().optional().describe("Free-text match on title/slug. Omit to list all."),
         folder_id: z.string().optional().describe("Restrict to this folder_ id."),
-        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
-        starting_after: z
-          .string()
-          .optional()
-          .describe("Cursor: a report_ id; returns items AFTER it (page forward)."),
-        ending_before: z
-          .string()
-          .optional()
-          .describe("Cursor: a report_ id; returns items BEFORE it (page back)."),
+        ...cursorInputs("report"),
       },
       annotations: READ_ONLY,
     },
@@ -132,16 +149,8 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "(version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, " +
         "size_bytes, and origin ('upload' | 'editor'). Read-only. Page with starting_after.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
-        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
-        starting_after: z
-          .string()
-          .optional()
-          .describe("Cursor: a version_ id; returns items AFTER it (page forward)."),
-        ending_before: z
-          .string()
-          .optional()
-          .describe("Cursor: a version_ id; returns items BEFORE it (page back)."),
+        slug: SLUG_INPUT,
+        ...cursorInputs("version"),
       },
       annotations: READ_ONLY,
     },
@@ -166,7 +175,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "(owner-only, the default) | public | password | org | allowlist. Use it before " +
         "reports_set_acl to see the current sharing state.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
       },
       annotations: READ_ONLY,
     },
@@ -183,7 +192,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "Read-only and OWNER-ONLY: only the user who created the report can see its write-grant " +
         "roster. Distinct from reports_get_acl (that's VIEW access; this is WRITE access).",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
       },
       annotations: READ_ONLY,
     },
@@ -202,16 +211,8 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "resolved_at (null until resolved), and created_at. Read-only; comments never appear " +
         "on the public viewer. Page with starting_after.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
-        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
-        starting_after: z
-          .string()
-          .optional()
-          .describe("Cursor: a comment_ id; returns items AFTER it (page forward)."),
-        ending_before: z
-          .string()
-          .optional()
-          .describe("Cursor: a comment_ id; returns items BEFORE it (page back)."),
+        slug: SLUG_INPUT,
+        ...cursorInputs("comment"),
       },
       annotations: READ_ONLY,
     },
@@ -234,15 +235,7 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "each item has id (folder_…), name, slug, parent_id. Read-only. Use a folder_ id with " +
         "reports_search to scope a search, or when deciding where to organize a report.",
       inputSchema: {
-        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
-        starting_after: z
-          .string()
-          .optional()
-          .describe("Cursor: a folder_ id; returns items AFTER it (page forward)."),
-        ending_before: z
-          .string()
-          .optional()
-          .describe("Cursor: a folder_ id; returns items BEFORE it (page back)."),
+        ...cursorInputs("folder"),
       },
       annotations: READ_ONLY,
     },
@@ -306,7 +299,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "Change a report's title. Requires write access (ADR-0059/0060): the report's owner or " +
         "a write grantee. Find its slug with reports_search first.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         title: z.string().describe("The new title."),
       },
       annotations: MUTATE,
@@ -323,7 +316,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "report's owner or a write grantee. The destination folder must be in the REPORT's org. " +
         "Use folders_list to find the folder id.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         folder_id: z.string().describe("The destination folder_ id (from folders_list)."),
       },
       annotations: MUTATE,
@@ -343,10 +336,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "optional `access_ttl_seconds` sets how long their access lasts), or 'org'. REPLACES the " +
         "whole acl — send the COMPLETE allowed_emails list, not a delta. Use reports_get_acl first.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
-        mode: z
-          .enum(["private", "public", "password", "org", "allowlist"])
-          .describe("The sharing mode."),
+        slug: SLUG_INPUT,
+        mode: z.enum(ACL_MODES).describe("The sharing mode."),
         allowed_emails: z
           .array(z.string())
           .optional()
@@ -388,7 +379,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "do). Confers NO view access by itself — share viewing separately with reports_set_acl " +
         "if they also need to open it in the viewer.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         email: z.string().describe("The grantee's email address."),
       },
       annotations: MUTATE,
@@ -405,7 +396,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "`acl:write` scope. Idempotent — revoking an email with no grant still succeeds. Use " +
         "reports_list_write_grants first to see who currently has write access.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         email: z.string().describe("The grantee's email address to revoke."),
       },
       annotations: MUTATE,
@@ -439,7 +430,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "set for a reply else null, body, anchor, resolved_at:null, created_at). Comments are " +
         "private to the org — they never show on the public viewer.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         body: z.string().describe("The comment text."),
         version_id: z
           .string()
@@ -482,7 +473,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "One-way and idempotent: there is only one resolved transition (no un-resolve today), so " +
         "resolving an already-resolved comment is safe. Returns the updated comment resource.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         comment_id: z.string().describe("The comment_ id to resolve (from reports_list_comments)."),
       },
       annotations: MUTATE,
@@ -502,11 +493,11 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "enhancement | add | remove (an invalid value is rejected). The anchor is immutable and " +
         "cannot be edited. Returns the updated comment resource.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         comment_id: z.string().describe("The comment_ id to edit (from reports_list_comments)."),
         body: z.string().optional().describe("New comment text. Omit to leave the body unchanged."),
         intent: z
-          .enum(["note", "enhancement", "add", "remove"])
+          .enum(COMMENT_INTENTS)
           .optional()
           .describe("New intent. Omit to leave the intent unchanged."),
       },
@@ -529,7 +520,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. " +
         "Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.",
       inputSchema: {
-        slug: z.string().describe("The report's slug or its report_ id."),
+        slug: SLUG_INPUT,
         comment_id: z.string().describe("The comment_ id to delete (from reports_list_comments)."),
       },
       annotations: DESTROY,

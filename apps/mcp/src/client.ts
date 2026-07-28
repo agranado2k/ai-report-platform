@@ -7,6 +7,17 @@
 // them as a structured `Problem` so a tool can render an actionable message to the
 // model. Injectable `fetch` keeps this unit-testable without a live API.
 
+import type {
+  AclWire,
+  CommentWire,
+  FolderWire,
+  ListEnvelope,
+  ReportDetailWire,
+  ReportWire,
+  VersionWire,
+  WriteGrantWire,
+} from "arp-http/wire";
+
 /** RFC-9457 problem detail (the subset the API emits, ADR-0040). */
 export interface Problem {
   readonly title: string;
@@ -21,14 +32,9 @@ export type ApiResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly problem: Problem };
 
-/** The Stripe-style list envelope (ADR-0053): `{ object: "list", data, has_more }`. */
-export interface ListEnvelope {
-  readonly object: "list";
-  readonly data: readonly Record<string, unknown>[];
-  readonly has_more: boolean;
-}
-
-/** Cursor-pagination params (ADR-0053): the cursor is a prefixed id. */
+/** Cursor-pagination params (ADR-0053): the cursor is a prefixed id. Client-side
+ *  option bag (camelCase); `appendCursor` renders it to the wire's snake_case
+ *  query params (`arp-http/wire`'s `WireCursorParams`). */
 export interface CursorParams {
   readonly limit?: number;
   readonly startingAfter?: string;
@@ -59,25 +65,26 @@ function appendCursor(qs: URLSearchParams, p: CursorParams): void {
 export class ApiClient {
   constructor(private readonly cfg: ApiClientConfig) {}
 
-  searchReports(params: SearchReportsParams): Promise<ApiResult<ListEnvelope>> {
+  searchReports(params: SearchReportsParams): Promise<ApiResult<ListEnvelope<ReportWire>>> {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.folderId) qs.set("folder_id", params.folderId);
     appendCursor(qs, params);
     const query = qs.toString();
-    return this.get<ListEnvelope>(`/api/v1/reports${query ? `?${query}` : ""}`);
+    return this.get<ListEnvelope<ReportWire>>(`/api/v1/reports${query ? `?${query}` : ""}`);
   }
 
-  /** Fetch a single report by slug or report_ id (summary shape); 404 → problem. */
-  getReport(slug: string): Promise<ApiResult<Record<string, unknown>>> {
-    return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}`);
+  /** Fetch a single report by slug or report_ id — the single-report resource
+   *  (`owner` always present; `acl` only when the caller is the owner); 404 → problem. */
+  getReport(slug: string): Promise<ApiResult<ReportDetailWire>> {
+    return this.get<ReportDetailWire>(`/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
-  listFolders(params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+  listFolders(params: CursorParams = {}): Promise<ApiResult<ListEnvelope<FolderWire>>> {
     const qs = new URLSearchParams();
     appendCursor(qs, params);
     const query = qs.toString();
-    return this.get<ListEnvelope>(`/api/v1/folders${query ? `?${query}` : ""}`);
+    return this.get<ListEnvelope<FolderWire>>(`/api/v1/folders${query ? `?${query}` : ""}`);
   }
 
   /** Create a report, or re-upload a new version of `updateSlug` (multipart, ADR-0037). */
@@ -96,16 +103,20 @@ export class ApiClient {
     return this.request<unknown>("POST", "/api/v1/reports", { form });
   }
 
-  renameReport(slug: string, title: string): Promise<ApiResult<unknown>> {
-    return this.request<unknown>("PATCH", `/api/v1/reports/${encodeURIComponent(slug)}`, {
+  renameReport(slug: string, title: string): Promise<ApiResult<ReportDetailWire>> {
+    return this.request<ReportDetailWire>("PATCH", `/api/v1/reports/${encodeURIComponent(slug)}`, {
       json: { title },
     });
   }
 
-  moveReport(slug: string, folderId: string): Promise<ApiResult<unknown>> {
-    return this.request<unknown>("POST", `/api/v1/reports/${encodeURIComponent(slug)}/move`, {
-      json: { folder_id: folderId },
-    });
+  moveReport(slug: string, folderId: string): Promise<ApiResult<ReportDetailWire>> {
+    return this.request<ReportDetailWire>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/move`,
+      {
+        json: { folder_id: folderId },
+      },
+    );
   }
 
   deleteReport(slug: string): Promise<ApiResult<unknown>> {
@@ -115,18 +126,21 @@ export class ApiClient {
   /** List a report's version history (ADR-0065) — cursor-paginated, newest-created
    *  first; each item has id (version_…), version_no, uploaded_by (user_…),
    *  uploaded_at, scan_status, size_bytes, origin. */
-  listReportVersions(slug: string, params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+  listReportVersions(
+    slug: string,
+    params: CursorParams = {},
+  ): Promise<ApiResult<ListEnvelope<VersionWire>>> {
     const qs = new URLSearchParams();
     appendCursor(qs, params);
     const query = qs.toString();
-    return this.get<ListEnvelope>(
+    return this.get<ListEnvelope<VersionWire>>(
       `/api/v1/reports/${encodeURIComponent(slug)}/versions${query ? `?${query}` : ""}`,
     );
   }
 
   /** Read a report's sharing acl — `{ object: "acl", mode, allowed_emails?, access_ttl_seconds? }`. */
-  getReportAcl(slug: string): Promise<ApiResult<Record<string, unknown>>> {
-    return this.get<Record<string, unknown>>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
+  getReportAcl(slug: string): Promise<ApiResult<AclWire>> {
+    return this.get<AclWire>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
   }
 
   /** Set a report's sharing acl (ADR-0056). Sends only the fields relevant to `mode`. */
@@ -138,25 +152,29 @@ export class ApiClient {
       readonly password?: string;
       readonly accessTtlSeconds?: number;
     },
-  ): Promise<ApiResult<unknown>> {
-    return this.request<unknown>("POST", `/api/v1/reports/${encodeURIComponent(slug)}/acl`, {
-      json: {
-        mode: params.mode,
-        ...(params.allowedEmails ? { allowed_emails: params.allowedEmails } : {}),
-        // `!== undefined`, not truthiness — forward an explicit empty password so the server
-        // returns a clear "password required" rather than a generic error (claude-review #118).
-        ...(params.password !== undefined ? { password: params.password } : {}),
-        ...(params.accessTtlSeconds !== undefined
-          ? { access_ttl_seconds: params.accessTtlSeconds }
-          : {}),
+  ): Promise<ApiResult<ReportDetailWire>> {
+    return this.request<ReportDetailWire>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/acl`,
+      {
+        json: {
+          mode: params.mode,
+          ...(params.allowedEmails ? { allowed_emails: params.allowedEmails } : {}),
+          // `!== undefined`, not truthiness — forward an explicit empty password so the server
+          // returns a clear "password required" rather than a generic error (claude-review #118).
+          ...(params.password !== undefined ? { password: params.password } : {}),
+          ...(params.accessTtlSeconds !== undefined
+            ? { access_ttl_seconds: params.accessTtlSeconds }
+            : {}),
+        },
       },
-    });
+    );
   }
 
   /** Grant write access (rename/re-upload/move) on a report to someone by email
    *  (ADR-0060). Owner-only; requires the `acl:write` scope. */
-  grantWrite(slug: string, email: string): Promise<ApiResult<Record<string, unknown>>> {
-    return this.request<Record<string, unknown>>(
+  grantWrite(slug: string, email: string): Promise<ApiResult<WriteGrantWire>> {
+    return this.request<WriteGrantWire>(
       "POST",
       `/api/v1/reports/${encodeURIComponent(slug)}/write-grants`,
       { json: { email } },
@@ -172,8 +190,10 @@ export class ApiClient {
   }
 
   /** List everyone with write access on a report (owner-only). */
-  listWriteGrants(slug: string): Promise<ApiResult<ListEnvelope>> {
-    return this.get<ListEnvelope>(`/api/v1/reports/${encodeURIComponent(slug)}/write-grants`);
+  listWriteGrants(slug: string): Promise<ApiResult<ListEnvelope<WriteGrantWire>>> {
+    return this.get<ListEnvelope<WriteGrantWire>>(
+      `/api/v1/reports/${encodeURIComponent(slug)}/write-grants`,
+    );
   }
 
   /** List a report's comments (ADR-0064) — cursor-paginated (ADR-0053),
@@ -181,11 +201,14 @@ export class ApiClient {
    *  report_id, author_id (user_…), parent_id (comment_… for a reply, else null),
    *  body, anchor { version_pinned: { version_id, text_quote } }, resolved_at,
    *  created_at. Auth mirrors listReportVersions (org-scoped read). */
-  listComments(slug: string, params: CursorParams = {}): Promise<ApiResult<ListEnvelope>> {
+  listComments(
+    slug: string,
+    params: CursorParams = {},
+  ): Promise<ApiResult<ListEnvelope<CommentWire>>> {
     const qs = new URLSearchParams();
     appendCursor(qs, params);
     const query = qs.toString();
-    return this.get<ListEnvelope>(
+    return this.get<ListEnvelope<CommentWire>>(
       `/api/v1/reports/${encodeURIComponent(slug)}/comments${query ? `?${query}` : ""}`,
     );
   }
@@ -203,8 +226,8 @@ export class ApiClient {
       readonly relative?: unknown;
       readonly parentCommentId?: string;
     },
-  ): Promise<ApiResult<Record<string, unknown>>> {
-    return this.request<Record<string, unknown>>(
+  ): Promise<ApiResult<CommentWire>> {
+    return this.request<CommentWire>(
       "POST",
       `/api/v1/reports/${encodeURIComponent(slug)}/comments`,
       {
@@ -225,8 +248,8 @@ export class ApiClient {
   /** Resolve a comment (ADR-0064) — PATCH with no body; returns the resolved
    *  comment resource (resolved_at set). Author-or-report-owner gated. One-way
    *  and idempotent: there is only one resolved transition (no un-resolve). */
-  resolveComment(slug: string, commentId: string): Promise<ApiResult<Record<string, unknown>>> {
-    return this.request<Record<string, unknown>>(
+  resolveComment(slug: string, commentId: string): Promise<ApiResult<CommentWire>> {
+    return this.request<CommentWire>(
       "PATCH",
       `/api/v1/reports/${encodeURIComponent(slug)}/comments/${encodeURIComponent(commentId)}`,
     );
@@ -240,8 +263,8 @@ export class ApiClient {
     slug: string,
     commentId: string,
     params: { readonly body?: string; readonly intent?: string },
-  ): Promise<ApiResult<Record<string, unknown>>> {
-    return this.request<Record<string, unknown>>(
+  ): Promise<ApiResult<CommentWire>> {
+    return this.request<CommentWire>(
       "PATCH",
       `/api/v1/reports/${encodeURIComponent(slug)}/comments/${encodeURIComponent(commentId)}`,
       {
