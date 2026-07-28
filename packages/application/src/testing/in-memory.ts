@@ -21,6 +21,7 @@ import {
   versionId as makeVersionId,
   notAllowed,
   type OrgId,
+  type OrgKind,
   ok,
   type Report,
   type ReportId,
@@ -31,10 +32,13 @@ import {
   type VersionId,
   validationError,
 } from "arp-domain";
+import type { AuditEntry } from "../audit";
 import type {
   ApiKeyPrincipal,
   ApiKeyStore,
   ApiKeySummary,
+  AuditLogger,
+  AuthorIdentity,
   BlobFile,
   BlobStore,
   BundleProcessor,
@@ -382,6 +386,20 @@ export class InMemoryEventOutbox implements EventOutbox {
   }
 }
 
+export class InMemoryAuditLogger implements AuditLogger {
+  private readonly entries: AuditEntry[] = [];
+
+  async record(entries: readonly AuditEntry[]): Promise<Result<void, AppError>> {
+    this.entries.push(...entries);
+    return ok(undefined);
+  }
+
+  /** Test helper: the entries recorded so far (in order). */
+  recorded(): readonly AuditEntry[] {
+    return [...this.entries];
+  }
+}
+
 export class RecordingScanQueue implements ScanQueue {
   readonly enqueued: Array<{ readonly reportId: ReportId; readonly versionId: VersionId }> = [];
   readonly running: VersionId[] = [];
@@ -586,7 +604,13 @@ export class InMemoryIdentityStore implements IdentityStore {
   // don't go through the Clerk provisioning flow.
   private readonly emailByUserId = new Map<UserId, string>();
   private readonly userIdByEmail = new Map<string, UserId>(); // normalized email → userId
+  // Internal-UserId → display name (ADR-0063 author display); null when unknown.
+  private readonly displayNameByUserId = new Map<UserId, string | null>();
   private readonly orgByClerkOrgId = new Map<string, OrgId>();
+  private readonly rootFolderByOrgId = new Map<OrgId, FolderId>();
+  /** Test-only introspection: the `kind` each mirrored org was created with
+   *  (ADR-0068 §3), keyed by our internal OrgId. */
+  readonly kindByOrgId = new Map<OrgId, OrgKind>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -605,11 +629,13 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.orgByClerkOrgId.get(clerkOrgId) ?? null);
   }
 
-  async createPersonalIdentity(input: {
+  async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
+    readonly displayName: string | null;
     readonly orgName: string;
+    readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054).
     if (this.deleted.has(input.clerkUserId)) {
@@ -619,18 +645,35 @@ export class InMemoryIdentityStore implements IdentityStore {
     // email (review #150 M-2 — grant matching must follow a changed address).
     const existing = this.byClerk.get(this.key(input.clerkUserId, input.clerkOrgId));
     if (existing) {
-      this.seedUser(existing.userId, input.email);
+      this.seedUser(existing.userId, input.email, input.displayName);
       return ok(existing);
     }
+
+    // Org: find-or-create by clerkOrgId — a JIT team-org join (ADR-0068 §3)
+    // reuses the SAME org + root folder a previous colleague's sign-up already
+    // created; `kind` is recorded only on first creation, mirroring the real
+    // Drizzle adapter's onConflictDoNothing semantics.
+    let orgIdValue = this.orgByClerkOrgId.get(input.clerkOrgId);
+    let rootFolderIdValue: FolderId;
+    if (orgIdValue) {
+      rootFolderIdValue = this.rootFolderByOrgId.get(orgIdValue) as FolderId;
+    } else {
+      this.seq += 1;
+      orgIdValue = makeOrgId(`org-${this.seq}`);
+      rootFolderIdValue = makeFolderId(`folder-${this.seq}`);
+      this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
+      this.rootFolderByOrgId.set(orgIdValue, rootFolderIdValue);
+      this.kindByOrgId.set(orgIdValue, input.kind);
+    }
+
     this.seq += 1;
     const provisioned: ProvisionedIdentity = {
       userId: makeUserId(`user-${this.seq}`),
-      orgId: makeOrgId(`org-${this.seq}`),
-      rootFolderId: makeFolderId(`folder-${this.seq}`),
+      orgId: orgIdValue,
+      rootFolderId: rootFolderIdValue,
     };
     this.byClerk.set(this.key(input.clerkUserId, input.clerkOrgId), provisioned);
-    this.orgByClerkOrgId.set(input.clerkOrgId, provisioned.orgId);
-    this.seedUser(provisioned.userId, input.email);
+    this.seedUser(provisioned.userId, input.email, input.displayName);
     return ok(provisioned);
   }
 
@@ -648,18 +691,79 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.emailByUserId.get(userId) ?? null);
   }
 
+  async findAuthorIdentityByUserId(
+    userId: UserId,
+  ): Promise<Result<AuthorIdentity | null, AppError>> {
+    const email = this.emailByUserId.get(userId);
+    if (email === undefined) return ok(null); // unknown / never-seeded → miss
+    return ok({ email, displayName: this.displayNameByUserId.get(userId) ?? null });
+  }
+
   async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
     return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
   }
 
-  /** Test-only seam: register a user's email directly, for fixtures (e.g.
-   *  write-grant tests) that need a resolvable user without a full Clerk
-   *  provisioning round-trip. */
-  seedUser(userId: UserId, email: string): void {
+  /** The clerkUserId behind an internal UserId (reverse of `byClerk`), or null. */
+  private clerkIdFor(userId: UserId): string | null {
+    for (const [key, id] of this.byClerk) {
+      if (id.userId === userId) return key.split("|")[0] ?? null;
+    }
+    return null;
+  }
+
+  async listUsersMissingDisplayName(q: {
+    readonly limit: number;
+    readonly startingAfter?: UserId;
+    readonly endingBefore?: UserId;
+  }): Promise<
+    Result<
+      { items: readonly { userId: UserId; clerkUserId: string }[]; hasMore: boolean },
+      AppError
+    >
+  > {
+    // Dedup mirrored users by internal UserId, keep only those with no stored name
+    // and not soft-deleted, keyset DESC on UserId (mirrors the Drizzle adapter).
+    const seen = new Set<UserId>();
+    const eligible: { userId: UserId; clerkUserId: string }[] = [];
+    for (const [key, id] of this.byClerk) {
+      if (seen.has(id.userId)) continue;
+      seen.add(id.userId);
+      const clerkUserId = key.split("|")[0] ?? "";
+      const name = this.displayNameByUserId.get(id.userId) ?? null;
+      if (name === null && !this.deleted.has(clerkUserId)) {
+        eligible.push({ userId: id.userId, clerkUserId });
+      }
+    }
+    eligible.sort((a, b) => (a.userId < b.userId ? 1 : a.userId > b.userId ? -1 : 0));
+    // Range keyset (mirrors the adapter's `lt(users.id, cursor)`) so a cursor row
+    // that was just written (and dropped from the target set) still pages cleanly.
+    const after = q.startingAfter;
+    const pool = after ? eligible.filter((r) => r.userId < after) : eligible;
+    return ok({ items: pool.slice(0, q.limit), hasMore: pool.length > q.limit });
+  }
+
+  async setDisplayNameIfNull(
+    userId: UserId,
+    displayName: string,
+  ): Promise<Result<boolean, AppError>> {
+    const clerkUserId = this.clerkIdFor(userId);
+    if (clerkUserId === null || this.deleted.has(clerkUserId)) return ok(false);
+    const current = this.displayNameByUserId.get(userId) ?? null;
+    if (current !== null) return ok(false); // already set → no-op (idempotent)
+    this.displayNameByUserId.set(userId, displayName);
+    return ok(true);
+  }
+
+  /** Test-only seam: register a user's email (and optional display name) directly,
+   *  for fixtures (e.g. write-grant tests) that need a resolvable user without a
+   *  full Clerk provisioning round-trip. A null/omitted `displayName` PRESERVES any
+   *  previously-seeded name (mirrors the real store's COALESCE on re-provision). */
+  seedUser(userId: UserId, email: string, displayName: string | null = null): void {
     const prev = this.emailByUserId.get(userId);
     if (prev) this.userIdByEmail.delete(prev.trim().toLowerCase());
     this.emailByUserId.set(userId, email);
     this.userIdByEmail.set(email.trim().toLowerCase(), userId);
+    if (displayName !== null) this.displayNameByUserId.set(userId, displayName);
   }
 }
 
@@ -819,6 +923,14 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
   /** When set, findPersonalOrg resolves to this org id; null means "no org yet". */
   personalOrgId: string | null = null;
 
+  /** domain → existing team org's Clerk id (ADR-0068 §3). Set a domain here
+   *  BEFORE calling to simulate "a colleague already created this team org";
+   *  `createTeamOrg` also registers here, so a second call in the same test
+   *  (simulating a second colleague) finds what the first created. */
+  readonly teamOrgsByDomain = new Map<string, string>();
+  readonly teamOrgCalls: { readonly domain: string; readonly createdBy: string }[] = [];
+  readonly membershipCalls: { readonly clerkOrgId: string; readonly clerkUserId: string }[] = [];
+
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     this.calls.push({ clerkUserId, name });
     return ok(`clerk-org-${clerkUserId}`);
@@ -826,6 +938,22 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
 
   async findPersonalOrg(_clerkUserId: string): Promise<Result<string | null, AppError>> {
     return ok(this.personalOrgId);
+  }
+
+  async findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>> {
+    return ok(this.teamOrgsByDomain.get(domain) ?? null);
+  }
+
+  async createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>> {
+    this.teamOrgCalls.push({ domain, createdBy });
+    const id = `clerk-team-org-${domain}`;
+    this.teamOrgsByDomain.set(domain, id);
+    return ok(id);
+  }
+
+  async ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>> {
+    this.membershipCalls.push({ clerkOrgId, clerkUserId });
+    return ok(undefined);
   }
 }
 

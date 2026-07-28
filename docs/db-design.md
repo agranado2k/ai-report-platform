@@ -59,7 +59,7 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | Enum | Values |
 |---|---|
 | `plan` | `free`, `pro` |
-| `org_kind` | `personal`, `team` (ADR-0061; default `personal`; lands with the team-orgs build) |
+| `org_kind` | `personal`, `team` (ADR-0061, derived at provisioning by ADR-0068 §1's domain-keyed rule; default `personal`; migration `0014`) |
 | `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `version_origin` | `upload`, `editor` (ADR-0062 §6, ADR-0065; default `upload`) |
@@ -82,13 +82,13 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | `id` | uuid PK | UUIDv7 |
 | `clerk_org_id` | text | unique; mirror of Clerk org |
 | `name` | text | |
-| `kind` | `org_kind` | `personal` / `team` (ADR-0061); default `personal`; lands with the team-orgs build |
+| `kind` | `org_kind` | `personal` / `team` (ADR-0061/0068); default `personal`; set at JIT provisioning by the domain rule (migration `0014`) |
 | `plan` | `plan` | default `free` |
 | `plan_limits_json` | jsonb | quota ceilings (`PlanLimits`, ADR-006) |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | soft delete |
 
-Indexes: `clerk_org_id` unique, `plan`.
+Indexes: `clerk_org_id` unique, `plan`, `kind`.
 
 #### `users` — mirror of Clerk
 | Column | Type | Notes |
@@ -96,6 +96,7 @@ Indexes: `clerk_org_id` unique, `plan`.
 | `id` | uuid PK | UUIDv7 |
 | `clerk_user_id` | text | unique |
 | `email` | text | denormalized for pre-signup grant resolution |
+| `display_name` | text NULL | human name mirrored from Clerk at JIT provisioning (fullName / firstName lastName / username), for author display (ADR-0048 identity mirror); NULL when Clerk exposes none |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | Clerk `user.deleted` → soft delete (ADR-0054); terminal — never resurrected |
 
@@ -220,7 +221,7 @@ PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists unti
 
 ### Authoring & Collaboration
 
-#### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013)
+#### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013; `intent` added migration 0015)
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
@@ -228,11 +229,14 @@ PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists unti
 | `author_user_id` | uuid FK → users | who wrote it |
 | `parent_comment_id` | uuid FK → comments NULL, **ON DELETE CASCADE** | NULL = root (starts a Thread); set = a reply. Single-level threading enforced at the application layer (ADR-0064 Decision 2), not a self-join depth constraint. The self-FK is CASCADE — see the Conventions FK-policy note above |
 | `body` | text | bounded to 2000 chars at the domain layer (JUDGMENT CALL — ADR-0064 says "bounded... a short annotation," no number given) |
+| `intent` | `comment_intent` enum **NOT NULL DEFAULT 'note'** | what the author wants done with the comment (ADR-0064 Decision 8): `note` (default) / `enhancement` / `add` / `remove`. Migration 0015 backfills every existing row to `note`; a legacy value degrades to `note` on read |
 | `anchor_json` | jsonb | the `Anchor` value object (ADR-0064 §2a): `{ version_pinned: { version_id, text_quote }, relative? }` — `relative` is an opaque, optional Yjs-relative-position slot the editor slice will populate later |
 | `resolved_at` | timestamptz NULL | NULL = open; set = resolved (idempotent transition — resolving twice doesn't change it) |
 | `created_at` | timestamptz | |
 
-Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. No `updated_at` — `body`/`anchor_json` aren't editable in this slice (only `resolved_at` mutates, via `save()`'s upsert).
+| `edited_at` | timestamptz NULL | migration 0017 — set to the last edit time when `body`/`intent` is changed (surfaces an "· edited" indicator); also the optimistic-concurrency token (`expected_edited_at` → 409). NULL = never edited |
+
+Indexes: `report_id`, `(report_id, id DESC)` (keyset pagination for `listComments`, ADR-0053), `parent_comment_id`. `body`/`intent` ARE editable (edit-comment use case, migration 0017 added `edited_at`); the anchor stays immutable. `resolved_at` mutates via `save()`'s upsert.
 
 ### Abuse & Moderation
 
@@ -313,7 +317,22 @@ by the dispatcher (~1s poll). Carries the canonical events in `docs/events.md`.
 `id` PK, `org_id`, `actor_user_id` FK → users NULL, `action`, `target_type`,
 `target_id`, `meta_json` jsonb, `ip_hash` NULL, `geo` NULL, `at` timestamptz.
 Indexes: `(org_id, at)`, `actor_user_id`. Partitioned monthly; 1-year hot
-retention; cold-export at month-roll. Every mutating action writes a row.
+retention; cold-export at month-roll. Every **user-initiated org-scoped**
+mutation writes a row, synchronously in the same transaction as the mutation
+(ADR-0070); system/webhook state transitions (scan results, user-deletion
+webhook, identity provisioning) are captured as **domain events** (outbox),
+not audit rows.
+
+`action`/`target_type`/`target_id` are free `text` columns (no DB enum) — the
+app writes from the closed `AuditAction` union in
+`packages/application/src/audit.ts`. The vocabulary, grouped by resource:
+
+- **report**: `report.uploaded`, `report.renamed`, `report.moved`, `report.deleted`
+- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`
+- **acl**: `acl.set`
+- **grant**: `grant.write.granted`, `grant.write.revoked`
+- **comment**: `comment.added`, `comment.replied`, `comment.resolved`, `comment.deleted`
+- **api_key**: `api_key.created`, `api_key.revoked`
 
 ## R2 object layout (ADR-0037)
 

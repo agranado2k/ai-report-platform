@@ -13,7 +13,7 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { defineEnv } from "arp-env";
-import { buttonClass } from "./components/Button";
+import { buttonClass } from "arp-ui";
 import { EmptyState } from "./components/EmptyState";
 import { PageShell } from "./components/PageShell";
 import { TopBar } from "./components/TopBar";

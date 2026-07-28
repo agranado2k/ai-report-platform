@@ -5,28 +5,21 @@ import { parseBody, serializeBody } from "./body.js";
  * ADR-0062 §7 accepted cost, pinned as a contract: ProseMirror auto-wraps
  * bare inline content in a <p> inside block containers whose content model
  * is `block*` (the generic attr-retention catch-all, and every other
- * container built on it). This is "worked with, not fought" — the fixture
- * itself has many such containers (e.g. `.chips`, `.rtags` clusters of bare
- * chip spans, or a `.card` holding bare text), and normalizing
- * report-generator output to avoid this is out of scope for this package.
+ * container built on it that hasn't been given a dedicated `inline*` spec).
+ * This is "worked with, not fought" for containers that legitimately mix
+ * inline and block content (e.g. a `.card` holding bare text next to other
+ * blocks) — normalizing report-generator output to avoid it is out of scope
+ * for this package.
+ *
+ * `.chips`/`.rtags` (and `rt`/`rd`/`block-label`) are NO LONGER on this
+ * catch-all path (editor styling/structure fix, Fix 3) — they now have
+ * dedicated `content: 'inline*'` specs (schema/inline-content.ts) precisely
+ * because they never held anything but bare inline content, so the <p>
+ * auto-wrap was pure noise there. See schema/inline-content.test.ts for
+ * their no-<p> contract; kept here is only the remaining case (`.card`) that
+ * genuinely still goes through the generic `block*` catch-all.
  */
 describe("auto-<p>-wrap invariant (ADR-0062 §7)", () => {
-  it("wraps bare inline chip spans directly inside a generic block in a <p>", () => {
-    const html =
-      '<div class="chips">' +
-      '<span class="chip chip-cto">CTO</span>' +
-      '<span class="chip chip-staff">Staff Engineer</span>' +
-      "</div>";
-    const roundtripped = serializeBody(parseBody(html));
-
-    expect(roundtripped).toBe(
-      '<div class="chips"><p>' +
-        '<span class="chip chip-cto">CTO</span>' +
-        '<span class="chip chip-staff">Staff Engineer</span>' +
-        "</p></div>",
-    );
-  });
-
   it("wraps bare inline text + strong directly inside a .card in a <p>, without losing the text", () => {
     const html =
       '<div class="card"><strong>Don\'t pretrain a foundation model.</strong> Read about it.</div>';

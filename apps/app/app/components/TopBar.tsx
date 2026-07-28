@@ -1,7 +1,6 @@
 import { UserButton } from "@clerk/remix";
 import { Link } from "@remix-run/react";
-import { buttonClass } from "./Button";
-import { KeyIcon, UploadIcon } from "./icons";
+import { buttonClass, KeyIcon, UploadIcon } from "arp-ui";
 import { Logo } from "./Logo";
 
 /**

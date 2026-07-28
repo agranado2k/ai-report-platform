@@ -38,7 +38,9 @@ Creating, editing, or resolving a comment requires authentication **and** report
 
 **Decision: no, not in v1.** Commenting requires `canWrite`. Rationale: comments in this epic exist to steer content changes on a report someone can already edit — the collaboration surface is the edit route (ADR-0063), and read-only sharing (ADR-0056's `password`/`org`/`allowlist` view modes) is a content-consumption grant, not a collaboration grant. Read-only commenting (a lighter-weight "suggest via comment without write access" mode) is a **considered, deferred** option — noted here so it isn't rediscovered as a surprise later, but it is out of scope for this ADR.
 
-Resolving/deleting a comment: the comment's **author** or the report's **owner** may resolve or delete it. The owner can additionally moderate (resolve/delete) any comment on their report, matching the existing owner-is-final-authority pattern from ADR-0059 (owner-only delete/set_acl/grant-management).
+Resolving/deleting/**editing** a comment: the comment's **author** or the report's **owner** may resolve, delete, or edit it. The owner can additionally moderate (resolve/delete/edit) any comment on their report, matching the existing owner-is-final-authority pattern from ADR-0059 (owner-only delete/set_acl/grant-management).
+
+> **Amendment (2026-07-12): comment editing is now supported.** The §3 fork above listed "editing" under `canWrite`, but editing a comment's own text is a moderation-shaped act on your own content, so it is gated by the **author-or-owner** rule (the same gate as resolve/delete, via `loadReadableReport` + an author-or-owner check — ADR-0060 §4), NOT `canWrite`. This is the defensible mirror and keeps all three post-creation comment mutations under one rule. **v1 scope: `body` and/or `intent` only.** The anchor is **immutable** (re-anchoring is a separate, unbuilt concern), and there is **no `edited_at` column / "edited" indicator** yet — that is a migration-free fast-follow. A present `body` must be a non-empty bounded string; a present `intent` is validated by `makeIntent` (invalid → 422), exactly as on create. Emits a new `CommentEdited` domain event and writes a `comment.edited` audit row (ADR-0070).
 
 ### 4. No anonymous read of comments, either
 
@@ -56,12 +58,28 @@ Two new domain events, added to `docs/events.md` in the same PR (the integration
 
 Comment CRUD lives under `/api/v1/reports/{slug}/comments` (list/create) and `/api/v1/reports/{slug}/comments/{comment_id}` (get/update/resolve/delete), auth-required on every route, following the existing wire conventions (ADR-0053: flat snake_case resources, list envelope, cursor pagination for the list endpoint, RFC-9457 errors per ADR-0040). The full `openapi.yaml` addition and Bruno regen happen in the implementation PR, per the doc-trigger matrix (ADR-026) — noted here as a requirement, not performed by this ADR.
 
+**PATCH is overloaded on the request-body shape** (2026-07-12, mirroring how POST /comments serves both create and reply): a body carrying `body` and/or `intent` is an **edit**; an empty/absent body is the idempotent **resolve** (the resolve callers send no JSON body, so the dispatch defaults them to resolve — the resolve contract is byte-for-byte unchanged). A dedicated `reports_edit_comment` MCP tool wraps the edit path.
+
+### 8. Comment intent (added post-implementation)
+
+Every `Comment` carries an **intent** — a closed value object signalling what the author wants *done* with the comment:
+
+- `note` *(default)* — a human note, no agent action.
+- `enhancement` — an agent should enhance the anchored context using the comment.
+- `add` — add content per the comment.
+- `remove` — remove content per the comment.
+
+The intent is a first-class field on the `Comment` aggregate (`packages/domain/src/intent.ts` — `Intent` union + `makeIntent` smart constructor). It defaults to `note`: an omitted intent on create/reply resolves to `note`, and a pre-existing comment persisted before this field reads as `note` (backward compat, `intentOrDefault` on the persistence read). An **explicitly invalid** intent on the wire is rejected with a `ValidationError` → **422** by the create/reply route, consistent with the route's anchor/cursor validation. Persisted as a Postgres enum column `comments.intent NOT NULL DEFAULT 'note'` (migration `0015`, which backfills every existing row to `note`); surfaced on the `comment` wire resource as `intent`, and selectable in the editor's comment composer (default `note`).
+
+**Explicitly out of scope of this decision** (deferred to later design): the agent-action *semantics* that consume a non-`note` intent — nothing today reads the field to act on it; it only carries the signal. A separate "show the author as a bubble chip" surfacing idea is likewise deferred.
+
 ## Considered options
 
 - **New bounded context (Authoring & Collaboration)** *(chosen)* vs. modeling `Comment` as a member of the `Report` aggregate (rejected — comments have their own lifecycle, authorship, and moderation concerns distinct from report content/versioning, and bolting them onto `Report` would force every report read to consider loading comment threads).
 - **Anchoring**: relative-position primary + version-pinned fallback *(chosen)* vs. version-pinned only (rejected — every edit would orphan every comment, useless for a live editing surface) vs. relative-position only with no fallback (rejected — a heavily-edited document can make a position genuinely unresolvable; silently dropping the comment loses user data).
 - **Read-only commenting**: excluded from v1, `canWrite`-gated only *(chosen)* vs. allow read-only viewers to comment (deferred — a real product option, but conflates the view-access grant with a collaboration grant; revisit if a concrete need surfaces).
 - **Threading depth**: single level (root + replies) *(chosen)* vs. arbitrary nesting (rejected — unneeded complexity for a v1 discuss-and-resolve workflow).
+- **Comment intent** (Decision 8): a closed enum field defaulting to `note` *(chosen)* vs. a free-text/label system (rejected — an open vocabulary defeats the point of a machine-actionable signal a future agent step keys off) vs. no intent field at all, inferring action from the body text (rejected — brittle, and forces every consumer to re-parse natural language). Persisted as a Postgres enum vs. free `text` — enum chosen to match the closed-vocabulary columns already in the schema (`scan_status`, `version_origin`, `org_kind`), giving DB-level validation.
 
 ## Consequences
 

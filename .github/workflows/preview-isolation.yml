@@ -11,6 +11,18 @@ name: Preview data isolation
 # by triggering a redeploy so the isolated env takes effect. The DB is the hard
 # boundary; R2 stays namespaced within the prod bucket.
 #
+# TRIGGER INVERSION (issue #149, 2026-07-09): this workflow is now also the
+# entry point for the e2e smoke. It waits for the app's isolated redeploy to
+# reach Vercel `readyState: READY`, then calls `e2e.yml` as a REUSABLE workflow
+# (`smoke` job below) with that deployment's own URL. This replaces the old
+# `deployment_status`-triggered e2e.yml, which could not self-validate on its
+# own PR (deployment_status only fires from the default branch) and which fired
+# twice per commit (pre-isolation build + isolated redeploy), racing to
+# distinguish them via a `/health` poll. Now there is exactly one smoke
+# invocation, against a URL this workflow itself confirmed is READY, running on
+# the PR that made the change — see `docs/adr/0047-preview-data-isolation.md`
+# for the full history.
+#
 # Needs secrets: NEON_API_KEY, VERCEL_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_APP_ACCESS_KEY_ID,
 # R2_APP_SECRET_ACCESS_KEY. Vars: NEON_PROJECT_ID.
 
@@ -46,6 +58,15 @@ jobs:
     if: github.event.action != 'closed'
     name: Isolate preview data plane
     runs-on: ubuntu-latest
+    outputs:
+      # https:// URL of the isolated app-preview deployment, once it's READY —
+      # consumed by the `smoke` job below to invoke e2e.yml with a live target.
+      app_url: ${{ steps.redeploy.outputs.app_url }}
+      # https:// URL of the isolated view-preview deployment, once it's READY
+      # (redeployed AFTER the view project's APP_ORIGIN was set to app_url,
+      # above) — consumed by the `smoke` job to drive the cross-origin
+      # editor-render e2e (tests/e2e/smoke/editor-auth.feature).
+      view_url: ${{ steps.redeploy.outputs.view_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,26 +161,147 @@ jobs:
             set_env "$proj" DATABASE_URL "$DATABASE_URL"
             set_env "$proj" SCAN_QUEUE_DATABASE_URL "$DATABASE_URL"
             set_env "$proj" R2_KEY_PREFIX "pr-$PR/"
+            # Explicit isolation marker (issue #149): the app's /health route
+            # echoes this, and the `smoke` job's e2e.yml call polls /health as a
+            # defensive confirmation that the URL it was handed (the redeploy
+            # below, already waited to readyState:READY) is genuinely the
+            # isolated deployment — belt-and-braces, since trigger inversion
+            # (2026-07-09) means e2e.yml is only ever invoked with THIS
+            # deployment's URL, not raced against the pre-isolation build.
+            # Same branch name already computed above for the Neon branch itself
+            # ($NEON_BRANCH, workflow-level env).
+            set_env "$proj" NEON_BRANCH "$NEON_BRANCH"
           done
 
       - name: Redeploy previews so the isolated env takes effect
+        id: redeploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        # Cross-origin editor e2e (issue #187 follow-up — the P0 owner-lockout
+        # coverage gap): the app's /open redirect always points at
+        # `${viewOrigin}/${slug}/edit?et=…`, but on previews VIEW_ORIGIN is
+        # unset (Terraform wires it prod-only) so `viewOrigin` falls back to
+        # the APP's OWN request origin (container.server.ts) — a circular,
+        # same-origin URL Remix has no route for. Rather than wire VIEW_ORIGIN
+        # here (which would need the VIEW's URL before the APP deploys — still
+        # circular the other way), the e2e test extracts the `et=` token from
+        # that (broken) Location and navigates directly to the VIEW preview's
+        # own URL instead. That URL only needs to exist and be captured, in
+        # this order: (a) redeploy+wait the APP (unchanged), (b) now that
+        # app_url is known, set it as the VIEW project's APP_ORIGIN — the ONE
+        # preview env the view side actually needs, since $slug.edit.tsx bails
+        # to the public viewer without it (arp-env schema.ts) and its editor
+        # bundle needs it as the cross-origin API base — (c) redeploy+wait the
+        # VIEW so it picks up that env, symmetric to the app. VIEW_ACCESS_TOKEN_SECRET
+        # is already shared across both projects on previews (one
+        # random_password resource, target=[production,preview]), so the
+        # edit-token HMAC verifies once (b)+(c) land — and if the deployed
+        # secrets ever drift apart, the view render fails and THIS e2e catches
+        # it (see tests/e2e/smoke/editor-auth.feature).
         run: |
           set -euo pipefail
+          # On success, prints the response BODY to stdout. On failure, logs
+          # ::error:: + the body to stderr and returns non-zero. Shared by the
+          # app and view redeploy calls below (both are now captured+polled).
           redeploy() {
-            local proj="$1" name="$2" resp code
+            local proj="$1" name="$2" resp code body
             resp=$(curl -s -w $'\n%{http_code}' -X POST \
               "$VERCEL_API/v13/deployments?teamId=$VERCEL_TEAM&forceNew=1&skipAutoDetectionConfirmation=1" \
               -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
               -d "$(jq -nc --arg n "$name" --arg ref "$BRANCH_REF" --argjson rid "$GH_REPO_ID" \
                   '{name:$n,project:$n,gitSource:{type:"github",repoId:$rid,ref:$ref}}')")
             code=$(printf '%s' "$resp" | tail -n1)
-            case "$code" in 200|201) echo "  redeployed $name";; *) echo "::error::redeploy $name → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
+            body=$(printf '%s' "$resp" | sed '$d')
+            case "$code" in
+              200|201) printf '%s' "$body";;
+              *) echo "::error::redeploy $name → HTTP $code" >&2; printf '%s' "$body" >&2; return 1;;
+            esac
           }
-          redeploy "$APP_PROJECT" arp-app-prod
-          redeploy "$VIEW_PROJECT" arp-view-prod
+
+          # Poll Vercel's own deployment record until it's actually serving
+          # (readyState: READY), not just accepted for build. Bounded to ~5
+          # minutes (60 tries * 5s) each; a build error fails fast instead of
+          # exhausting the window. Shared by the app and view waits below.
+          wait_ready() {
+            local id="$1" name="$2" tries=60 interval=5 state="UNKNOWN" resp
+            for i in $(seq 1 "$tries"); do
+              # Tolerate a transient API blip (429/5xx): fall back to UNKNOWN
+              # and retry rather than letting a single failed GET kill the
+              # whole job under `set -euo pipefail`. Only a definitive
+              # ERROR/CANCELED, or exhausting the window, fails loud.
+              resp=$(curl -sf -m 10 "$VERCEL_API/v13/deployments/$id?teamId=$VERCEL_TEAM" \
+                -H "Authorization: Bearer $VERCEL_TOKEN" 2>/dev/null || true)
+              state=$(printf '%s' "$resp" | jq -r '.readyState // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
+              case "$state" in
+                READY) return 0 ;;
+                ERROR|CANCELED) echo "::error::$name deployment $id reached readyState=$state"; return 1 ;;
+                *) sleep "$interval" ;;
+              esac
+            done
+            echo "::error::$name deployment $id did not reach READY within $((tries * interval))s (last readyState: $state)"
+            return 1
+          }
+
+          # Same git-branch-scoped upsert as the "Inject branch-scoped Vercel
+          # env" step above — bash functions don't cross step boundaries, so
+          # it's redefined verbatim here rather than shared, to set exactly
+          # one var (APP_ORIGIN, below) on one project (the view).
+          set_env() {
+            local proj="$1" key="$2" val="$3"
+            local resp code
+            resp=$(curl -s -w $'\n%{http_code}' -X POST \
+              "$VERCEL_API/v10/projects/$proj/env?upsert=true&teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg k "$key" --arg v "$val" --arg b "$BRANCH_REF" \
+                  '{key:$k,value:$v,type:"encrypted",target:["preview"],gitBranch:$b}')")
+            code=$(printf '%s' "$resp" | tail -n1)
+            case "$code" in 200|201) echo "  set $key on $proj";; *) echo "::error::set $key on $proj → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
+          }
+
+          # (a) App project: capture id + url, redeploy, wait for READY —
+          # unchanged from before, just factored through wait_ready().
+          app_body=$(redeploy "$APP_PROJECT" arp-app-prod)
+          app_id=$(printf '%s' "$app_body" | jq -r '.id // empty')
+          app_url=$(printf '%s' "$app_body" | jq -r '.url // empty')
+          [ -n "$app_id" ] && [ -n "$app_url" ] || { echo "::error::redeploy arp-app-prod succeeded but the response had no id/url"; exit 1; }
+          echo "  redeployed arp-app-prod ($app_id → $app_url)"
+          wait_ready "$app_id" arp-app-prod
+          echo "  arp-app-prod deployment $app_id is READY"
+
+          # (b) Now that app_url is known, point the VIEW project's
+          # cross-origin editor bundle at it. Must happen AFTER the app is
+          # READY (so app_url is real) and BEFORE the view's own redeploy
+          # below (so that redeploy's build picks it up).
+          set_env "$VIEW_PROJECT" APP_ORIGIN "https://$app_url"
+
+          # (c) View project: now captured + polled too (previously
+          # fire-and-forget), symmetric to the app — the `smoke` job needs a
+          # live view URL to hand Playwright for the cross-origin editor
+          # render (tests/e2e/smoke/editor-auth.feature).
+          view_body=$(redeploy "$VIEW_PROJECT" arp-view-prod)
+          view_id=$(printf '%s' "$view_body" | jq -r '.id // empty')
+          view_url=$(printf '%s' "$view_body" | jq -r '.url // empty')
+          [ -n "$view_id" ] && [ -n "$view_url" ] || { echo "::error::redeploy arp-view-prod succeeded but the response had no id/url"; exit 1; }
+          echo "  redeployed arp-view-prod ($view_id → $view_url)"
+          wait_ready "$view_id" arp-view-prod
+          echo "  arp-view-prod deployment $view_id is READY"
+
           echo "Preview PR #$PR isolated on Neon branch $NEON_BRANCH + R2 prefix pr-$PR/"
+
+          echo "app_url=https://$app_url" >> "$GITHUB_OUTPUT"
+          echo "view_url=https://$view_url" >> "$GITHUB_OUTPUT"
+
+  # ── Smoke: run the e2e reusable workflow against the now-READY isolated URL ───
+  smoke:
+    needs: isolate
+    if: github.event.action != 'closed'
+    name: Smoke the isolated preview
+    uses: ./.github/workflows/e2e.yml
+    with:
+      base_url: ${{ needs.isolate.outputs.app_url }}
+      view_base_url: ${{ needs.isolate.outputs.view_url }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
 
   # ── Teardown: delete the branch, env vars, and R2 objects on PR close ─────────
   teardown:

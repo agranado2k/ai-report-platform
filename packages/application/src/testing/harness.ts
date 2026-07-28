@@ -10,6 +10,7 @@ import {
   FakeBundleProcessor,
   FakeHasher,
   FakePlanLimiter,
+  InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
   InMemoryIdempotencyStore,
@@ -29,6 +30,8 @@ export interface AppTestHarness {
   readonly bundles: FakeBundleProcessor;
   readonly idempotency: InMemoryIdempotencyStore;
   readonly outbox: InMemoryEventOutbox;
+  /** Audit log (ADR-0070) — every mutating action's audit_log row. */
+  readonly audit: InMemoryAuditLogger;
   readonly scans: RecordingScanQueue;
   readonly planLimiter: FakePlanLimiter;
   /** Write grants (ADR-0060) — the canWrite seam's reUpload call site. */
@@ -46,6 +49,7 @@ export type AppTestHarnessOverrides = Partial<
     | "bundles"
     | "idempotency"
     | "outbox"
+    | "audit"
     | "scans"
     | "planLimiter"
     | "grants"
@@ -67,6 +71,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const bundles = overrides.bundles ?? new FakeBundleProcessor();
   const idempotency = overrides.idempotency ?? new InMemoryIdempotencyStore();
   const outbox = overrides.outbox ?? new InMemoryEventOutbox();
+  const audit = overrides.audit ?? new InMemoryAuditLogger();
   const scans = overrides.scans ?? new RecordingScanQueue();
   const planLimiter = overrides.planLimiter ?? new FakePlanLimiter();
   const grants = overrides.grants ?? new InMemoryWriteGrantStore();
@@ -78,6 +83,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     bundles,
     idempotency,
     outbox,
+    audit,
     scans,
     planLimiter,
     grants,
@@ -95,6 +101,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     bundles,
     idempotency,
     outbox,
+    audit,
     scans,
     planLimiter,
     grants,

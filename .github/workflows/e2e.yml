@@ -1,24 +1,55 @@
 name: E2E (BDD)
 
-# Runs the BDD smoke scenario against the live Vercel preview, infrastructure-first
-# (ADR-019, ADR-023). Triggered by the Vercel↔GitHub integration's
-# deployment_status event so we get the preview URL with no token/polling.
+# Runs the BDD smoke scenario against a live Vercel preview, infrastructure-first
+# (ADR-019, ADR-023).
 #
-# NOTE: deployment_status workflows run from the DEFAULT branch, so this file
-# only takes effect once merged to main — it does not self-test on its own PR.
+# TRIGGER INVERSION (issue #149, 2026-07-09): this is now a REUSABLE workflow
+# (`on: workflow_call`), invoked ONCE by `preview-isolation.yml`'s `smoke` job
+# AFTER that workflow has waited for the isolated redeploy's `readyState` to
+# reach `READY`. That inverts the old model, where this workflow listened for
+# Vercel's `deployment_status` event directly:
 #
-# Two Vercel projects (arp-app-prod, arp-view-prod) each emit a deployment_status
-# event, so this workflow is invoked twice per commit. Only the app preview
-# serves the /health route the smoke hits. Rather than gate the JOB on the app
-# preview (which left a confusing "skipped" check from the view-project event),
-# a first "Gate" step decides whether to smoke and the remaining steps are
-# guarded on its output — so every invocation reports a single, green check, and
-# the non-app events simply no-op with a clear log line.
+#   - `deployment_status` workflows only run from the DEFAULT branch, so the
+#     old file could never self-validate on its own PR — a CI change here
+#     shipped to main unverified until the next PR exercised it for real.
+#   - The app preview fires `deployment_status: success` TWICE per commit: the
+#     initial push-triggered build (prod-DB fallback, ADR-0047's soft-isolation
+#     window) and preview-isolation.yml's force-redeploy (the isolated Neon
+#     branch). Both report `state: success` for the same commit, indistinguishable
+#     from the event payload alone — the root cause of #149 (the smoke could run
+#     against the pre-isolation deployment and 500 on the DB-writing upload step,
+#     writing to prod in the process).
+#
+# Now the CALLER (preview-isolation.yml) already knows which deployment is the
+# isolated one — it made the redeploy call and polled Vercel's own API for
+# READY — so it hands this workflow that exact URL directly. There is only one
+# invocation, it always targets the isolated deployment, and it runs on the PR
+# itself (a `workflow_call` job runs in the context of the calling workflow's
+# event), so THIS workflow's own changes are exercised by the PR that makes them.
+#
 # The 29 product .feature files are not executed yet (no step defs); step
 # definitions + a widened features glob land with 1d (upload API) and 1e (viewer).
 
 on:
-  deployment_status:
+  workflow_call:
+    inputs:
+      base_url:
+        description: The isolated preview URL to smoke (https://…)
+        required: true
+        type: string
+      view_base_url:
+        description: >-
+          The isolated VIEW-preview URL (https://…), once redeployed with
+          APP_ORIGIN pointed at `base_url` (preview-isolation.yml's `redeploy`
+          job). Optional — absent on a plain local `pnpm e2e` run; when unset,
+          the @browser scenario's cross-origin editor-render step skips
+          cleanly (tests/e2e/smoke/editor-auth.steps.ts).
+        required: false
+        type: string
+      head_sha:
+        description: PR head commit to checkout (the test definitions to run)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -28,54 +59,127 @@ jobs:
     name: E2E smoke against preview
     runs-on: ubuntu-latest
     steps:
-      # Decide whether this deployment_status is the successful APP preview.
-      # The event fields are read via env (never interpolated into the script)
-      # to avoid command injection from untrusted webhook data.
-      - name: Gate — only smoke the app preview
-        id: gate
-        env:
-          DS_STATE: ${{ github.event.deployment_status.state }}
-          DS_ENV: ${{ github.event.deployment_status.environment }}
-          DS_URL: ${{ github.event.deployment_status.target_url }}
-        run: |
-          if [ "$DS_STATE" = "success" ] && [ "$DS_ENV" != "Production" ] && [[ "$DS_URL" == *arp-app-prod* ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "App preview deploy succeeded — running the smoke."
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not the app preview (state=$DS_STATE env=$DS_ENV) — no smoke to run."
-          fi
-
       - name: Checkout the deployed commit
-        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.deployment.sha }}
+          ref: ${{ inputs.head_sha }}
 
       - name: Setup Node 24
-        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Enable Corepack + pnpm 10
-        if: steps.gate.outputs.run == 'true'
         run: |
           corepack enable
           corepack prepare pnpm@10.5.0 --activate
 
       - name: Install (frozen lockfile)
-        if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
-        if: steps.gate.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run BDD smoke against the preview
-        if: steps.gate.outputs.run == 'true'
+      # Defensive, not the primary race guard anymore (the caller already
+      # waited for `readyState: READY` on the exact isolated deployment before
+      # invoking this workflow — see preview-isolation.yml's `smoke` job). This
+      # poll now serves two remaining purposes: (1) confirm the app's own
+      # `/health` route agrees the deployment is up and isolated (belt-and-
+      # braces against a READY-but-not-yet-serving edge case), and (2) give a
+      # cold/suspended Neon preview branch a bounded grace window to warm up
+      # before the scenarios hit it.
+      #
+      # `checks.neon` stays ADVISORY ONLY, never a gate/fail condition: /health's
+      # DB ping opens a fresh neon-serverless WebSocket OUTSIDE the app's normal
+      # request/transaction path, and a Neon preview branch AUTO-SUSPENDS when
+      # idle — so the ping can read "error" on a genuinely-healthy deployment
+      # whose DB the real scenarios reach fine (Playwright's request timeout
+      # tolerates the cold-start wake). We wait a bounded window for neon:"ok"
+      # as a courtesy, but proceed once `isolated:true` regardless — a
+      # genuinely-unreachable DB then surfaces as a real scenario failure
+      # (auth-upload's upload step), not a synthetic gate fail.
+      #
+      # Event/input fields go through env: (never inlined into the script
+      # body) to avoid command injection from untrusted values.
+      - name: Readiness — confirm /health, warm the Neon branch
+        id: readiness
         env:
-          PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
+          BASE_URL: ${{ inputs.base_url }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # Only to detect a creds OUTAGE below — not used for auth here.
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
+          TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
+        run: |
+          set -euo pipefail
+          ever_isolated=false
+          neon_ok=false
+          isolated_at=0
+          tries=40
+          interval=3
+          # Once isolated is first seen, wait at most this many more polls for a
+          # `neon:"ok"` courtesy confirmation before proceeding anyway — so a
+          # cold/suspended Neon branch (which may NEVER report ok, since the ping
+          # is advisory) doesn't make every isolated run pay the full window as
+          # latency (claude-review #175).
+          neon_grace=10
+          for i in $(seq 1 "$tries"); do
+            body=$(curl -fsS -m 5 -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$BASE_URL/health" 2>/dev/null || echo '{}')
+            isolated=$(printf '%s' "$body" | jq -r '.isolated // false' 2>/dev/null || echo false)
+            neon=$(printf '%s' "$body" | jq -r '.checks.neon // "error"' 2>/dev/null || echo error)
+
+            if [ "$isolated" = "true" ]; then
+              ever_isolated=true
+              [ "$isolated_at" -eq 0 ] && isolated_at="$i"
+              # Ideal fast path: isolated AND the DB ping confirms warm — run now.
+              if [ "$neon" = "ok" ]; then
+                neon_ok=true
+                break
+              fi
+              # Bounded courtesy wait: stop once we've given neon its grace.
+              if [ $((i - isolated_at)) -ge "$neon_grace" ]; then
+                break
+              fi
+            fi
+            sleep "$interval"
+          done
+
+          if [ "$ever_isolated" = "false" ]; then
+            # The caller only invokes this workflow with the isolated
+            # deployment's own URL (waited on readyState:READY beforehand), so
+            # this should not happen in practice. Fail loud rather than skip
+            # silently — a silent skip here would hide a real regression in
+            # either workflow's contract.
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Expected the isolated preview at $BASE_URL but /health never reported isolated:true after ~$((tries * interval))s."
+            exit 1
+          fi
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          if [ "$neon_ok" = "true" ]; then
+            echo "::notice::Isolated deployment, DB ping ok — running the smoke."
+          else
+            echo "::warning::Isolated deployment reached, but /health DB ping not confirmed ok (advisory — the Neon branch may be cold). Running the smoke anyway; a genuinely-unreachable DB will fail the scenarios."
+          fi
+
+          # Creds-outage guard (claude-review #175): the ONLY DB-writing scenario
+          # is @auth (auth-upload), grep-excluded by playwright.config.ts when the
+          # Clerk staging creds are unset. With neon now advisory, a creds outage
+          # would leave ZERO DB coverage and a dead isolated DB would pass green —
+          # the exact silent-failure class this gate exists to prevent. Make it
+          # loud instead of letting it degrade silently.
+          if [ -z "${CLERK_SECRET_KEY:-}" ] || [ -z "${TEST_USER_EMAIL:-}" ]; then
+            echo "::warning::Clerk staging creds absent — @auth/@browser scenarios (the only DB-writing + editor coverage) are grep-excluded, so this run does NOT exercise DB reachability. A dead isolated DB would pass green. Restore E2E_CLERK_SECRET_KEY / E2E_TEST_USER_EMAIL."
+          fi
+          exit 0
+
+      - name: Run BDD smoke against the preview
+        if: steps.readiness.outputs.ready == 'true'
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ inputs.base_url }}
+          # Cross-origin editor e2e (editor-auth.feature): the isolated VIEW
+          # preview's own URL, once known — see `view_base_url`'s input doc
+          # above. Absent locally, so the step self-skips.
+          PLAYWRIGHT_VIEW_BASE_URL: ${{ inputs.view_base_url }}
           # Bypasses Vercel Deployment Protection on the preview (else 401).
           # Enable "Protection Bypass for Automation" on both Vercel projects and
           # store the generated secret as this repo secret.
@@ -85,10 +189,20 @@ jobs:
           # → the @auth scenario is grep-excluded (playwright.config.ts).
           E2E_CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
           E2E_TEST_USER_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
+          # @browser scenario (authenticated editor smoke, tests/e2e/support/
+          # clerk-auth.setup.ts): the staging pk_test publishable key — needed
+          # client-side so @clerk/clerk-js can initialize window.Clerk for the
+          # ticket sign-in. Reuses the EXISTING repo variable
+          # CLERK_PUBLISHABLE_KEY_STAGING (the staging pk_test), mirroring how
+          # E2E_CLERK_SECRET_KEY maps from the CLERK_SECRET_KEY_STAGING secret —
+          # so no new repo variable is needed. A variable, not a secret
+          # (publishable keys are meant to reach the browser). Absent → @browser
+          # is grep-excluded the same way @auth is (playwright.config.ts).
+          E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
         run: pnpm e2e
 
       - name: Upload Playwright report
-        if: steps.gate.outputs.run == 'true' && !cancelled()
+        if: steps.readiness.outputs.ready == 'true' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report

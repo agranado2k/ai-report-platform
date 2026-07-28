@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { parseBody } from "./body.js";
 import { diffDocs, diffRendered } from "./diff.js";
 import { DIFF_DEL_CLASS, DIFF_INS_CLASS } from "./diff-schema.js";
+import { splitShell } from "./shell.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(__dirname, "./fixtures/ai-readiness-report.html");
@@ -65,9 +66,11 @@ describe("diffDocs", () => {
   });
 
   it("finds a change against the real fixture (one edited .desc paragraph)", () => {
-    const original = loadFixtureHtml();
-    const oldDoc = parseBody(original);
-    const edited = original.replace(
+    // parseBody takes BODY html, not a whole document — split the shell first,
+    // exactly as the app does (reports.$slug.diff.tsx / .edit.tsx).
+    const { bodyHtml } = splitShell(loadFixtureHtml());
+    const oldDoc = parseBody(bodyHtml);
+    const edited = bodyHtml.replace(
       "Tokenization, attention, KV cache, sampling, context-window economics, why fine-tunes drift.",
       "Tokenization and context-window economics now ship with hosted debugging tools.",
     );
@@ -121,9 +124,9 @@ describe("diffRendered", () => {
   });
 
   it("renders cleanly against the real fixture end to end", () => {
-    const original = loadFixtureHtml();
-    const oldDoc = parseBody(original);
-    const edited = original.replace(
+    const { bodyHtml } = splitShell(loadFixtureHtml());
+    const oldDoc = parseBody(bodyHtml);
+    const edited = bodyHtml.replace(
       "Tokenization, attention, KV cache, sampling, context-window economics, why fine-tunes drift.",
       "Tokenization and context-window economics now ship with hosted debugging tools.",
     );

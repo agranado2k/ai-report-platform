@@ -11,15 +11,19 @@ import {
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  InMemoryAuditLogger,
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { renameReport } from "./rename-report";
 
 const writeDeps = () => ({
   grants: new InMemoryWriteGrantStore(),
   identities: new InMemoryIdentityStore(),
+  audit: new InMemoryAuditLogger(),
+  uow: new PassThroughUnitOfWork(),
 });
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -91,5 +95,25 @@ describe("renameReport use case", () => {
       title: "  ",
     });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
+  });
+
+  it("records a report.renamed audit entry alongside the rename (ADR-0070)", async () => {
+    const reports = new InMemoryReportRepository();
+    const toRename = report(orgA, "eeeeeeeeee");
+    await reports.save(toRename);
+    const deps = { reports, ...writeDeps() };
+    const r = await renameReport(deps, ownerActor, {
+      slug: slug("eeeeeeeeee"),
+      title: "New Title",
+    });
+    expect(r.ok).toBe(true);
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "report.renamed",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "report",
+      targetId: toRename.id,
+      meta: { from: "Old Title", to: "New Title" },
+    });
   });
 });

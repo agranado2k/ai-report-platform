@@ -59,6 +59,8 @@ describeCommentRepositoryContract("drizzle+pglite", async () => {
           },
         },
         parentCommentId: overrides.parentCommentId ?? null,
+        intent: overrides.intent ?? "note",
+        editedAt: null,
         resolvedAt: null,
         createdAt: seq,
       };

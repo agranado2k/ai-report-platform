@@ -7,8 +7,9 @@
 // able to delete their own comment outside the report's org. Deleting a root
 // also deletes its replies (the DB's self-FK CASCADE, schema.ts's FK-policy
 // note; the repository contract covers this). No domain event fires on delete
-// (docs/events.md's catalog only has CommentAdded/CommentResolved) — a plain
-// repository operation once authorized, no outbox/uow needed.
+// (docs/events.md's catalog only has CommentAdded/CommentResolved), but the
+// delete + a `comment.deleted` audit_log row (ADR-0070) now commit together
+// in one UnitOfWork (ADR-0037 section 5).
 import {
   type AppError,
   type CommentId,
@@ -19,11 +20,14 @@ import {
   type Slug,
 } from "arp-domain";
 import { loadReadableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
-import type { CommentRepository, ReportRepository } from "../ports";
+import type { AuditLogger, CommentRepository, ReportRepository, UnitOfWork } from "../ports";
 
 export interface DeleteCommentDeps extends WriteGrantCheckDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
+  /** Audit log (ADR-0070) -- one `comment.deleted` row per delete. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
 export type DeleteCommentActor = TenancyActor;
 export interface DeleteCommentInput {
@@ -51,5 +55,20 @@ export async function deleteComment(
     return err(notAllowed("only the comment's author or the report's owner may delete it"));
   }
 
-  return deps.comments.delete(input.commentId);
+  const reportId = report.value.id;
+  const targetCommentId = input.commentId;
+  return deps.uow.run(async () => {
+    const deleted = await deps.comments.delete(targetCommentId);
+    if (!deleted.ok) return deleted;
+    return deps.audit.record([
+      {
+        action: "comment.deleted",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "comment",
+        targetId: targetCommentId,
+        meta: { reportId },
+      },
+    ]);
+  });
 }

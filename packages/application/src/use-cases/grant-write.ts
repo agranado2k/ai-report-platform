@@ -6,7 +6,9 @@
 // (ADR-0024): scope → ownership → normalize+validate the grantee email →
 // resolve `granteeUserId` opportunistically (IdentityStore, ADR-0060 §2 — set
 // now if the grantee already has an account, else left null and matched by
-// email at check time) → upsert via WriteGrantStore → return the grant.
+// email at check time) → upsert via WriteGrantStore + a `grant.write.granted`
+// audit_log row (ADR-0070), committed together in one UnitOfWork (ADR-0037 §5)
+// → return the grant.
 import {
   type AppError,
   err,
@@ -17,7 +19,14 @@ import {
   type Slug,
 } from "arp-domain";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
-import type { IdentityStore, ReportRepository, WriteGrant, WriteGrantStore } from "../ports";
+import type {
+  AuditLogger,
+  IdentityStore,
+  ReportRepository,
+  UnitOfWork,
+  WriteGrant,
+  WriteGrantStore,
+} from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
 
@@ -25,6 +34,9 @@ export interface GrantWriteDeps {
   readonly reports: ReportRepository;
   readonly grants: WriteGrantStore;
   readonly identities: Pick<IdentityStore, "findUserIdByEmail">;
+  /** Audit log (ADR-0070) — one `grant.write.granted` row per grant. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
 
 export interface GrantWriteActor extends TenancyActor {
@@ -55,12 +67,29 @@ export async function grantWrite(
   const granteeUserId = await deps.identities.findUserIdByEmail(email.value);
   if (!granteeUserId.ok) return granteeUserId;
 
-  const granted = await deps.grants.grant(
-    found.value.id,
-    email.value,
-    actor.userId,
-    granteeUserId.value,
-  );
+  const granted = await deps.uow.run(async () => {
+    const g = await deps.grants.grant(
+      found.value.id,
+      email.value,
+      actor.userId,
+      granteeUserId.value,
+    );
+    if (!g.ok) return g;
+    return deps.audit.record([
+      {
+        action: "grant.write.granted",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "report",
+        targetId: found.value.id,
+        // Always record the grantee EMAIL (the grant key) — `granteeUserId` is
+        // opportunistic (null until the invitee signs up, ADR-0060 §2), so the
+        // email is the only attribution present for a grant to a not-yet-
+        // registered user. Consistent with revoke-write's audit meta.
+        meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
+      },
+    ]);
+  });
   if (!granted.ok) return granted;
 
   // Re-read via listByReport for the canonical persisted row (grantedAt is

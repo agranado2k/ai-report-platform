@@ -1,4 +1,20 @@
+import type { LinksFunction } from "@remix-run/node";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
+import stylesheet from "./tailwind.css?url";
+
+// The compiled Tailwind stylesheet (static, served from 'self' — CSP-safe) +
+// preloaded self-hosted fonts (font-src 'self'; no remote CDN). Mirrors
+// apps/app/app/root.tsx's links wiring (ADR-0058 "Forge & Ember").
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: stylesheet },
+  {
+    rel: "preload",
+    href: "/fonts/inter-variable.woff2",
+    as: "font",
+    type: "font/woff2",
+    crossOrigin: "anonymous",
+  },
+];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (

@@ -18,6 +18,7 @@ import type {
   Folder,
   FolderId,
   OrgId,
+  OrgKind,
   Report,
   ReportId,
   Result,
@@ -28,6 +29,7 @@ import type {
   VersionId,
   VersionOrigin,
 } from "arp-domain";
+import type { AuditEntry } from "./audit";
 
 /**
  * A lightweight read projection of a Report for list views (the dashboard).
@@ -338,6 +340,12 @@ export interface EventOutbox {
   enqueue(events: readonly DomainEvent[]): Promise<Result<void, AppError>>;
 }
 
+// ── Audit log (ADR-0070, issue #153) ──────────────────────────────────────
+export interface AuditLogger {
+  /** Append audit rows in the same transaction as the state change (ADR-0070). */
+  record(entries: readonly AuditEntry[]): Promise<Result<void, AppError>>;
+}
+
 // ── Scan port (Abuse & Moderation). Phase 1 stub always yields clean. ──────
 export interface ScanQueue {
   /** Record a queued scan for a freshly-uploaded version (status `queued`). */
@@ -449,6 +457,22 @@ export interface ClerkIdentity {
   /** The session's active Clerk org, or null when the user has none yet. */
   readonly clerkOrgId: ClerkOrgId | null;
   readonly email: string;
+  /** The user's human display name as Clerk reports it (ADR-0063 author display) —
+   *  `fullName` / `firstName lastName` / `username`, whichever the adapter could
+   *  resolve, else null. Captured at JIT provisioning alongside the email; a
+   *  best-effort attribute (the wire falls back to email, then a generic label). */
+  readonly displayName: string | null;
+}
+
+/**
+ * A mirrored user's display identity — email + optional human name — resolved by
+ * internal `UserId` for author display (ADR-0063). Distinct from the write-grant
+ * `findEmailByUserId` seam: this one also carries the `displayName` column so the
+ * comments/versions list routes can surface a human name (falling back to email).
+ */
+export interface AuthorIdentity {
+  readonly email: string;
+  readonly displayName: string | null;
 }
 
 /** Our mirrored Identity & Access trio: a User, their Org, and that Org's Root folder. */
@@ -456,6 +480,18 @@ export interface ProvisionedIdentity {
   readonly userId: UserId;
   readonly orgId: OrgId;
   readonly rootFolderId: FolderId;
+}
+
+/**
+ * A minimal reference to a mirrored user for the one-time display_name backfill
+ * (roadmap #59): our internal `UserId` plus the `clerkUserId` needed to fetch the
+ * source name from Clerk. Deliberately NOT `AuthorIdentity` — the backfill never
+ * reads the (null) name it's about to populate, and must NOT pull email into the
+ * job's memory/logs (PII minimization). Keyset-paginated on `userId` (UUIDv7).
+ */
+export interface MirroredUserRef {
+  readonly userId: UserId;
+  readonly clerkUserId: string;
 }
 
 /**
@@ -476,13 +512,28 @@ export interface IdentityStore {
    * (the users row is created on the write path, review #150 H-1).
    */
   findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>>;
-  /** Create the User + personal Org (Plan `free`) + Root folder for a fresh identity.
-   *  MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal). */
-  createPersonalIdentity(input: {
+  /**
+   * Create the User + Org (Plan `free`) + Root folder for a fresh identity, OR —
+   * when `clerkOrgId` already names an existing mirrored Org (a domain's team org
+   * a new colleague is JIT-joining, ADR-0068 §3) — join it: the Org insert is a
+   * find-or-create keyed on `clerkOrgId` (existing Org row wins; `kind` is set
+   * only on first creation), while the User row is always find-or-created for
+   * THIS call's `clerkUserId`. `kind` records which the CALLER already resolved
+   * via `resolveOrgKey` (ADR-0068 §1) — this port does not re-derive it. Renamed
+   * from `createPersonalIdentity` (ADR-0068): it now covers BOTH the original
+   * personal-org creation and a team-org join, same mirroring mechanics.
+   * MUST refuse to resurrect a soft-deleted user (ADR-0054 — deletion is terminal).
+   */
+  createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
     readonly email: string;
+    /** The user's human display name at first sight (ADR-0063), or null when Clerk
+     *  exposes none. Stored on the mirrored `users` row; refreshed (never nulled)
+     *  on a re-provision so a name captured later still lands. */
+    readonly displayName: string | null;
     readonly orgName: string;
+    readonly kind: OrgKind;
   }): Promise<Result<ProvisionedIdentity, AppError>>;
   /**
    * Soft-delete our mirrored user (stamp `deleted_at`) for a Clerk `user.deleted`
@@ -500,12 +551,42 @@ export interface IdentityStore {
    */
   findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>>;
   /**
+   * The mirrored user's display identity — email + optional `displayName` — by
+   * internal `UserId`, for author display (ADR-0063). One query resolves both
+   * columns (batch-friendly, mirroring `findEmailByUserId`'s single round-trip).
+   * Null when the user is unknown OR soft-deleted (same PII posture as
+   * `findEmailByUserId`: a since-deleted author must not leak name/email into the
+   * comments/versions author surfaces). `displayName` is null when none is stored.
+   */
+  findAuthorIdentityByUserId(userId: UserId): Promise<Result<AuthorIdentity | null, AppError>>;
+  /**
    * Our internal `UserId` for an already-mirrored user with this email, or
    * null if none exists yet (ADR-0060 §2 — `grantWrite`'s opportunistic
    * `grantee_user_id` resolution: set it now if the grantee already has an
    * account, else leave it null and match by email at check time).
    */
   findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>>;
+  /**
+   * The mirrored users still missing a display name — `display_name IS NULL AND
+   * deleted_at IS NULL` — as `(userId, clerkUserId)` refs, keyset-paginated on
+   * `userId` DESC (ADR-0053). The one-time backfill (roadmap #59) pages through
+   * these to re-fetch each name from Clerk; bounded so a single page can never
+   * load the whole table into memory. Excludes soft-deleted users (ADR-0054/0070
+   * PII posture — a deleted account is never re-populated).
+   */
+  listUsersMissingDisplayName(
+    q: CursorParams<UserId>,
+  ): Promise<Result<CursorPage<MirroredUserRef>, AppError>>;
+  /**
+   * Set `display_name` for a user ONLY when it is currently null (and the user is
+   * live). Returns `true` iff a row transitioned null → value, `false` when the
+   * name was already set / the user is unknown or soft-deleted. The `IS NULL`
+   * guard lives in the SQL predicate, so the backfill is idempotent by
+   * construction (a re-run, or a race with live JIT provisioning, never
+   * overwrites a name captured elsewhere). The caller has already derived +
+   * capped `displayName` via the shared `clerkDisplayName`/`capDisplayName`.
+   */
+  setDisplayNameIfNull(userId: UserId, displayName: string): Promise<Result<boolean, AppError>>;
 }
 
 /**
@@ -520,9 +601,35 @@ export interface ClerkOrgProvisioner {
    * Resolve the user's existing personal org WITHOUT creating one (read path,
    * ADR-0048): the org the write path would reuse, or null if the user has none.
    * Lets reads see the same org writes attribute to even when the session carries
-   * no active org (e.g. a browser sign-in that never selected one).
+   * no active org (e.g. a browser sign-in that never selected one). Under the
+   * one-user-one-org invariant (ADR-0068 §1) this ALSO resolves a team-org
+   * member's sole org — the name predates team orgs but the mechanics (oldest
+   * membership, read-only) are kind-agnostic.
    */
   findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>>;
+  /**
+   * Resolve an EXISTING team org for a corporate email domain (ADR-0068 §3), or
+   * null when nobody at that domain has signed up yet. The adapter derives
+   * whatever Clerk-specific identifier it needs (e.g. a slug) FROM `domain`
+   * internally — this port speaks in plain email domains, not Clerk slugs.
+   * Read-only — never creates (mirrors `findPersonalOrg`'s read/write split).
+   */
+  findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>>;
+  /**
+   * Create a brand-new team org for a corporate domain (ADR-0068 §3) — the
+   * FIRST sign-up at that domain. `domain` is both the org's display name and
+   * the input to the adapter's deterministic Clerk-identifier derivation (so a
+   * later joiner's `findTeamOrgByDomain` finds this same org). Resolves to the
+   * new Clerk org id.
+   */
+  createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>>;
+  /**
+   * Add `clerkUserId` as a member of an EXISTING Clerk org (ADR-0068 §3 — every
+   * sign-up after a team org's first joins this way). Idempotent: an
+   * already-a-member user is a no-op success, not an error (concurrency-safe
+   * like `createPersonalOrg`'s check-then-act dedupe).
+   */
+  ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>>;
 }
 
 // ── API keys (ADR-0008 / ADR-0016) — programmatic auth alongside Clerk sessions ─

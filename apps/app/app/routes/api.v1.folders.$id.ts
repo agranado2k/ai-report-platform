@@ -8,7 +8,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { deleteFolder, renameFolder } from "arp-application";
 import { makeFolderId, methodNotAllowed } from "arp-domain";
 import { deleteFolderToHttp, errorToHttp, renameFolderToHttp } from "arp-http";
-import { deps, folderRepo } from "../server/container.server";
+import { auditLogger, deps, folderRepo } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { toResponse, wireContext } from "../server/http.server";
 
@@ -26,8 +26,8 @@ const deleteHandler = handle({
     const id = makeFolderId(String(args.params.id ?? ""));
     if (!id.ok) return id;
     return deleteFolder(
-      { folders: folderRepo(), reports: deps().reports },
-      { orgId: actor.orgId },
+      { folders: folderRepo(), reports: deps().reports, audit: auditLogger(), uow: deps().uow },
+      { orgId: actor.orgId, userId: actor.userId },
       { folderId: id.value },
     );
   },
@@ -42,8 +42,8 @@ const patchHandler = handle({
     if (!id.ok) return id;
     const name = typeof body.name === "string" ? body.name : "";
     return renameFolder(
-      { folders: folderRepo() },
-      { orgId: actor.orgId },
+      { folders: folderRepo(), audit: auditLogger(), uow: deps().uow },
+      { orgId: actor.orgId, userId: actor.userId },
       { folderId: id.value, name },
     );
   },

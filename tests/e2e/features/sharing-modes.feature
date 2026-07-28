@@ -10,6 +10,15 @@ Feature: Sharing modes gate access
   # report resource omits its acl block for non-owners. Not exercisable e2e
   # until the ADR-0061 two-member-org fixture exists; pinned at unit level
   # (get-acl.test.ts, write-response.test.ts).
+  #
+  # ADR-0068 §6 update: the second identity now EXISTS (silver+clerk_test@
+  # agranado.com, a team-org member — see tests/e2e/README.md) and
+  # tests/e2e/support/clerk-session.ts can mint it a session
+  # (mintSecondTestSession). Still @wip because of a DIFFERENT, pre-existing
+  # blocker: this feature file has no step definitions at all, and
+  # playwright.config.ts's testDir doesn't even collect tests/e2e/features/**
+  # yet (only tests/e2e/smoke/**) — see tests/e2e/README.md "Current status".
+  # The fixture is a prerequisite, not the whole gap.
   Scenario Outline: Each ACL mode gates access correctly
     Given a report with ACL mode "<mode>"
     When a requester who "<eligibility>" the rule requests it
@@ -43,3 +52,19 @@ Feature: Sharing modes gate access
     Given a report with ACL mode "org"
     When an anonymous visitor visits the report's unlock page
     Then they are redirected to sign-in with the return URL preserved
+
+  # ADR-0038 amendment (2026-07-08 dogfood): the scanning holding page sits
+  # BEHIND the ADR-0056 access gate. A private report mid-scan must show a
+  # visitor exactly what it will show them once clean — the unlock redirect —
+  # never a 200 that reveals the slug exists and is being scanned.
+  Scenario: A private report that is still scanning is not revealed to anonymous visitors
+    Given a freshly uploaded report with ACL mode "private" whose scan is still pending
+    When an anonymous visitor opens the report's view URL
+    Then they are redirected to the unlock page
+    And the response does not contain the scanning holding page
+
+  Scenario: The owner still sees the scanning holding page mid-scan
+    Given a freshly uploaded report with ACL mode "private" whose scan is still pending
+    And the owner has opened it through the owner hand-off
+    When the owner opens the report's view URL
+    Then they see the scanning holding page

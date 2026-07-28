@@ -8,21 +8,34 @@
 // (ADR-0064 §3) via addComment/replyToComment. A reply IS a comment resource on
 // the wire (201), just with `parent_id` set.
 // Thin transport adapter (ADR-0038) built from the `handle()` combinator.
+//
+// CORS (ADR-0063): wrapped in `corsRoute` — the view-origin editor calls
+// this cross-origin, carrying its edit token as a Bearer header (never a
+// cookie), so the response needs `Access-Control-Allow-Origin` echoed for
+// the configured VIEW_ORIGIN, and an `OPTIONS` preflight answered before any
+// auth runs. Auth itself is unchanged — the edit-token branch is already
+// wired into `resolveActorForRead`/`resolveUploadActor` (ADR-0063).
 import { addComment, listComments, replyToComment } from "arp-application";
 import {
   type Anchor,
   type AppError,
   err,
   makeCommentId,
+  makeIntent,
   makeVersionId,
   ok,
   type Result,
   validationError,
 } from "arp-domain";
 import { addCommentToHttp, listCommentsToHttp, parseCursorParams } from "arp-http";
-import { clock, commentRepo, deps } from "../server/container.server";
+import { resolveAuthorIdentities } from "../server/author-email.server";
+import { uniqueCommentAuthorIds } from "../server/comment-dto.server";
+import { clock, commentRepo, deps, identityStore } from "../server/container.server";
+import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
+
+const ALLOWED_METHODS = "GET, POST, OPTIONS";
 
 /** Decode the wire anchor shape (resource.ts's commentBody, mirrored on input):
  *  `{ version_pinned: { version_id, text_quote }, relative? }`. `relative` is
@@ -48,54 +61,84 @@ function parseAnchor(raw: unknown): Result<Anchor, AppError> {
   });
 }
 
-export const loader = handle({
-  mode: "read",
-  slug: true,
-  run: ({ args, actor, slug }) => {
-    const url = new URL(args.request.url);
-    const cursor = parseCursorParams(url.searchParams, makeCommentId);
-    if (!cursor.ok) return cursor; // malformed cursor → 422
+export const loader = corsRoute(
+  ALLOWED_METHODS,
+  handle({
+    mode: "read",
+    slug: true,
+    run: async ({ args, actor, slug }) => {
+      const url = new URL(args.request.url);
+      const cursor = parseCursorParams(url.searchParams, makeCommentId);
+      if (!cursor.ok) return cursor; // malformed cursor → 422
 
-    return listComments(
-      { reports: deps().reports, comments: commentRepo() },
-      { orgId: actor.orgId },
-      { slug, ...cursor.value },
-    );
-  },
-  toHttp: (result) => listCommentsToHttp(result, wireContext()),
-});
+      const page = await listComments(
+        { reports: deps().reports, comments: commentRepo() },
+        { orgId: actor.orgId },
+        { slug, ...cursor.value },
+      );
+      if (!page.ok) return page;
 
-export const action = handle({
-  mode: "write",
-  slug: true,
-  parseBody: true,
-  run: ({ actor, slug, body }) => {
-    const anchor = parseAnchor(body.anchor);
-    if (!anchor.ok) return anchor;
-    const commentBody = typeof body.body === "string" ? body.body : "";
+      // ADR-0063 author display: resolve each unique author id → { name, email }
+      // (ONE IdentityStore round-trip per distinct author), fold onto the wire below.
+      const authorByUserId = await resolveAuthorIdentities(
+        uniqueCommentAuthorIds(page.value.items),
+        identityStore(),
+      );
+      return ok({ ...page.value, authorByUserId });
+    },
+    toHttp: (result) =>
+      listCommentsToHttp(
+        result,
+        wireContext(),
+        result.ok ? result.value.authorByUserId : undefined,
+      ),
+  }),
+);
 
-    // Spreads deps() (already carries `grants`/`identities` for the canWrite
-    // seam, ADR-0060 §4) + the comment-specific repo/clock.
-    const commentDeps = {
-      ...deps(),
-      comments: commentRepo(),
-      clock: clock(),
-    };
-    const commentActor = { orgId: actor.orgId, userId: actor.userId };
+export const action = corsRoute(
+  ALLOWED_METHODS,
+  handle({
+    mode: "write",
+    slug: true,
+    parseBody: true,
+    run: ({ actor, slug, body }) => {
+      const anchor = parseAnchor(body.anchor);
+      if (!anchor.ok) return anchor;
+      // Optional; absent → `note`, an explicitly invalid value → 422 (ADR-0064
+      // Decision 8), consistent with the anchor/cursor validation on this route.
+      const intent = makeIntent(body.intent);
+      if (!intent.ok) return intent;
+      const commentBody = typeof body.body === "string" ? body.body : "";
 
-    const parentRaw = body.parent_comment_id;
-    if (typeof parentRaw === "string") {
-      const parentCommentId = makeCommentId(parentRaw);
-      if (!parentCommentId.ok) return parentCommentId;
-      return replyToComment(commentDeps, commentActor, {
+      // Spreads deps() (already carries `grants`/`identities` for the canWrite
+      // seam, ADR-0060 §4) + the comment-specific repo/clock.
+      const commentDeps = {
+        ...deps(),
+        comments: commentRepo(),
+        clock: clock(),
+      };
+      const commentActor = { orgId: actor.orgId, userId: actor.userId };
+
+      const parentRaw = body.parent_comment_id;
+      if (typeof parentRaw === "string") {
+        const parentCommentId = makeCommentId(parentRaw);
+        if (!parentCommentId.ok) return parentCommentId;
+        return replyToComment(commentDeps, commentActor, {
+          slug,
+          parentCommentId: parentCommentId.value,
+          body: commentBody,
+          anchor: anchor.value,
+          intent: intent.value,
+        });
+      }
+
+      return addComment(commentDeps, commentActor, {
         slug,
-        parentCommentId: parentCommentId.value,
         body: commentBody,
         anchor: anchor.value,
+        intent: intent.value,
       });
-    }
-
-    return addComment(commentDeps, commentActor, { slug, body: commentBody, anchor: anchor.value });
-  },
-  toHttp: (result) => addCommentToHttp(result, wireContext()),
-});
+    },
+    toHttp: (result) => addCommentToHttp(result, wireContext()),
+  }),
+);

@@ -13,16 +13,20 @@ import {
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  InMemoryAuditLogger,
   InMemoryFolderRepository,
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { moveReport } from "./move-report";
 
 const writeDeps = () => ({
   grants: new InMemoryWriteGrantStore(),
   identities: new InMemoryIdentityStore(),
+  audit: new InMemoryAuditLogger(),
+  uow: new PassThroughUnitOfWork(),
 });
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -166,5 +170,26 @@ describe("moveReport use case", () => {
     const after = await reports.findBySlug(slug("ffffffffff"));
     expect(after.ok && after.value?.folderId).toBe(targetA.id);
     expect(after.ok && after.value?.versions.length).toBe(beforeCount);
+  });
+
+  it("records a report.moved audit entry alongside the move (ADR-0070)", async () => {
+    const { reports, folders, targetA } = await setup();
+    const toMove = report(orgA, "gggggggggg");
+    await reports.save(toMove);
+    const deps = { reports, folders, ...writeDeps() };
+
+    const r = await moveReport(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      toFolderId: targetA.id,
+    });
+    expect(r.ok).toBe(true);
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "report.moved",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "report",
+      targetId: toMove.id,
+      meta: { fromFolderId: rootA, toFolderId: targetA.id },
+    });
   });
 });

@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   FixedClock,
+  InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
@@ -61,6 +62,7 @@ function makeDeps() {
     ids: new SequentialIdGenerator(),
     clock: new FixedClock(1000),
     outbox: new InMemoryEventOutbox(),
+    audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
@@ -95,6 +97,35 @@ describe("addComment use case", () => {
 
     const persisted = await deps.comments.findById(r.value.id);
     expect(persisted.ok && persisted.value?.body).toBe("What does this mean?");
+
+    expect(deps.audit.recorded()).toContainEqual({
+      action: "comment.added",
+      orgId: orgA,
+      actorUserId: owner,
+      targetType: "comment",
+      targetId: r.value.id,
+      meta: { reportId: r.value.reportId },
+    });
+  });
+
+  it("defaults intent to note when omitted, and threads a supplied intent to the domain", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "gggggggggg"));
+
+    const noted = await addComment(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      body: "a plain note",
+      anchor,
+    });
+    expect(noted.ok && noted.value.intent).toBe("note");
+
+    const enhanced = await addComment(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      body: "please enhance this",
+      anchor,
+      intent: "enhancement",
+    });
+    expect(enhanced.ok && enhanced.value.intent).toBe("enhancement");
   });
 
   it("rejects a non-owner with no write grant with NotAllowed (canWrite = isOwner OR hasWriteGrant, ADR-0064 §3 / ADR-0060 §4)", async () => {

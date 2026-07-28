@@ -2,14 +2,18 @@
 // deliberately NOT on the canWrite seam: a future write grant must never allow
 // delete). Pure orchestration over the ReportRepository (ADR-0024): load+authz
 // (the shared loadOwnedReport owner guard) → softDelete (sets deleted_at; the
-// viewer then returns 410). The slug + blobs are retained for the appeal/purge
-// window (db-design.md).
+// viewer then returns 410) + an audit_log row (ADR-0070), committed together
+// (ADR-0037 §5 commit-last atomicity). The slug + blobs are retained for the
+// appeal/purge window (db-design.md).
 import type { AppError, Result, Slug } from "arp-domain";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
-import type { ReportRepository } from "../ports";
+import type { AuditLogger, ReportRepository, UnitOfWork } from "../ports";
 
 export interface DeleteReportDeps {
   readonly reports: ReportRepository;
+  /** Audit log (ADR-0070) — one `report.deleted` row per soft-delete. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
 export type DeleteReportActor = TenancyActor;
 export interface DeleteReportInput {
@@ -24,5 +28,17 @@ export async function deleteReport(
   const found = await loadOwnedReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
 
-  return deps.reports.softDelete(found.value.id);
+  return deps.uow.run(async () => {
+    const deleted = await deps.reports.softDelete(found.value.id);
+    if (!deleted.ok) return deleted;
+    return deps.audit.record([
+      {
+        action: "report.deleted",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "report",
+        targetId: found.value.id,
+      },
+    ]);
+  });
 }

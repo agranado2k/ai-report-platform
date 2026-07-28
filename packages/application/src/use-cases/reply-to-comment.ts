@@ -5,7 +5,9 @@
 // be a root (the domain `replyToComment` transition enforces the "no reply to
 // a reply" rule) — an unrelated or missing parent reads as NotFound, mirroring
 // how listReportVersions/getReport treat a cross-report reference as absent
-// rather than leaking its existence.
+// rather than leaking its existence. Persist + outbox the CommentAdded event
+// + a `comment.replied` audit_log row (ADR-0070) commit together, same shape
+// as addComment.
 import {
   type Anchor,
   type AppError,
@@ -13,6 +15,7 @@ import {
   type Comment,
   type CommentId,
   err,
+  type Intent,
   notFound,
   ok,
   type Result,
@@ -20,6 +23,7 @@ import {
 } from "arp-domain";
 import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type {
+  AuditLogger,
   Clock,
   CommentRepository,
   EventOutbox,
@@ -34,6 +38,8 @@ export interface ReplyToCommentDeps extends WriteGrantCheckDeps {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly outbox: EventOutbox;
+  /** Audit log (ADR-0070) — one `comment.replied` row per reply. */
+  readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
 }
 export type ReplyToCommentActor = TenancyActor;
@@ -42,6 +48,9 @@ export interface ReplyToCommentInput {
   readonly parentCommentId: CommentId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** What the author wants done with the reply (ADR-0064 Decision 8).
+   *  Optional — the domain defaults an absent intent to `note`. */
+  readonly intent?: Intent;
 }
 
 export async function replyToComment(
@@ -63,6 +72,7 @@ export async function replyToComment(
     authorUserId: actor.userId,
     body: input.body,
     anchor: input.anchor,
+    intent: input.intent,
     createdAt: deps.clock.now(),
   });
   if (!emission.ok) return emission;
@@ -70,7 +80,18 @@ export async function replyToComment(
   const committed = await deps.uow.run(async () => {
     const saved = await deps.comments.save(emission.value.comment);
     if (!saved.ok) return saved;
-    return deps.outbox.enqueue(emission.value.events);
+    const enqueued = await deps.outbox.enqueue(emission.value.events);
+    if (!enqueued.ok) return enqueued;
+    return deps.audit.record([
+      {
+        action: "comment.replied",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "comment",
+        targetId: emission.value.comment.id,
+        meta: { reportId: report.value.id, parentId: input.parentCommentId },
+      },
+    ]);
   });
   if (!committed.ok) return committed;
 

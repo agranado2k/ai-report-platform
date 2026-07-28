@@ -1,8 +1,5 @@
 import { Form, Link } from "@remix-run/react";
-import { Button } from "./Button";
-import { cx } from "./cx";
-import { Input } from "./Input";
-import { FolderIcon } from "./icons";
+import { Button, cx, FolderIcon, Input } from "arp-ui";
 
 /** Client-safe folder shape for the sidebar tree (no org id / timestamps). */
 export interface FolderNode {

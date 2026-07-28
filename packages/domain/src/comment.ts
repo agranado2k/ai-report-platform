@@ -7,7 +7,8 @@ import { validateAnchor } from "./anchor";
 import type { CommentId, ReportId, UserId } from "./brand";
 import type { AppError } from "./errors";
 import { validationError } from "./errors";
-import type { CommentAdded, CommentResolved, DomainEvent } from "./events";
+import type { CommentAdded, CommentEdited, CommentResolved, DomainEvent } from "./events";
+import { type Intent, makeIntent } from "./intent";
 import { err, ok, type Result } from "./result";
 
 export interface Comment {
@@ -21,6 +22,15 @@ export interface Comment {
    *  reply's parent is always itself a root — enforced by replyToComment, never
    *  a self-referential chain (ADR-0064 Decision 2/4: single-level threading). */
   readonly parentCommentId: CommentId | null;
+  /** What the author wants DONE with this comment (ADR-0064 Decision 8).
+   *  Defaults to `note` (a plain human annotation) — a pre-existing comment
+   *  persisted before this field reads as `note` (backward compat, intent.ts). */
+  readonly intent: Intent;
+  /** When this comment was last edited (epoch ms), or null if it has never been
+   *  edited (ADR-0064 §3). Set by the `editComment` transition; also doubles as
+   *  the optimistic-concurrency token the edit use case checks (a client presents
+   *  the `editedAt` it last saw; a mismatch is a 409 Conflict). */
+  readonly editedAt: number | null;
   readonly resolvedAt: number | null;
   readonly createdAt: number;
 }
@@ -54,6 +64,8 @@ export interface CreateCommentParams {
   readonly authorUserId: UserId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** Optional — defaults to `note` (intent.ts). */
+  readonly intent?: Intent;
   readonly createdAt: number;
 }
 
@@ -64,6 +76,8 @@ export function createComment(p: CreateCommentParams): Result<CommentEmission, A
   if (!body.ok) return body;
   const anchor = validateAnchor(p.anchor);
   if (!anchor.ok) return anchor;
+  const intent = makeIntent(p.intent);
+  if (!intent.ok) return intent;
 
   const comment: Comment = {
     id: p.id,
@@ -72,6 +86,8 @@ export function createComment(p: CreateCommentParams): Result<CommentEmission, A
     body: body.value,
     anchor: anchor.value,
     parentCommentId: null,
+    intent: intent.value,
+    editedAt: null,
     resolvedAt: null,
     createdAt: p.createdAt,
   };
@@ -90,6 +106,8 @@ export interface ReplyToCommentParams {
   readonly authorUserId: UserId;
   readonly body: string;
   readonly anchor: Anchor;
+  /** Optional — defaults to `note` (intent.ts). */
+  readonly intent?: Intent;
   readonly createdAt: number;
 }
 
@@ -110,6 +128,8 @@ export function replyToComment(
   if (!body.ok) return body;
   const anchor = validateAnchor(p.anchor);
   if (!anchor.ok) return anchor;
+  const intent = makeIntent(p.intent);
+  if (!intent.ok) return intent;
 
   const comment: Comment = {
     id: p.id,
@@ -118,6 +138,8 @@ export function replyToComment(
     body: body.value,
     anchor: anchor.value,
     parentCommentId: parent.id,
+    intent: intent.value,
+    editedAt: null,
     resolvedAt: null,
     createdAt: p.createdAt,
   };
@@ -150,4 +172,56 @@ export function resolveComment(comment: Comment, resolvedAt: number): CommentEmi
     resolvedAt,
   };
   return { comment: updated, events: [event] };
+}
+
+export interface EditCommentParams {
+  /** New body — DEFINED means "replace" (validated by validateBody); absent
+   *  (undefined) means "leave the current body unchanged". */
+  readonly body?: string;
+  /** New intent — DEFINED means "replace" (must already be a valid `Intent`,
+   *  validated at the trust boundary by `makeIntent`); absent means "leave the
+   *  current intent unchanged". */
+  readonly intent?: Intent;
+  readonly editedAt: number;
+}
+
+/**
+ * Edit a Comment's `body` and/or `intent` (ADR-0064 §3). v1 scope: only these
+ * two fields are mutable — the anchor is immutable. At least one of
+ * `body`/`intent` must be provided; neither is a ValidationError (the caller has
+ * nothing to edit). The body is revalidated (non-empty, bounded — same VO as
+ * create); the intent is applied as-is (already a valid `Intent` at this point).
+ * Stamps `editedAt` (which the "· edited" indicator reads, and the edit use case
+ * reads back as the optimistic-concurrency token). Emits CommentEdited. The use
+ * case enforces WHO may call this and the concurrency check (author-or-owner,
+ * ADR-0064 §3, mirroring resolve/delete); this transition doesn't check identity.
+ */
+export function editComment(
+  comment: Comment,
+  p: EditCommentParams,
+): Result<CommentEmission, AppError> {
+  if (p.body === undefined && p.intent === undefined) {
+    return err(validationError("nothing to edit: provide body and/or intent", "body"));
+  }
+  let next = comment;
+  if (p.body !== undefined) {
+    const body = validateBody(p.body);
+    if (!body.ok) return body;
+    next = { ...next, body: body.value };
+  }
+  if (p.intent !== undefined) {
+    // Belt-and-braces re-validation (mirrors createComment's makeIntent on an
+    // already-typed Intent): a value cast past the type boundary is still caught.
+    const intent = makeIntent(p.intent);
+    if (!intent.ok) return intent;
+    next = { ...next, intent: intent.value };
+  }
+  next = { ...next, editedAt: p.editedAt };
+  const event: CommentEdited = {
+    type: "CommentEdited",
+    commentId: comment.id,
+    reportId: comment.reportId,
+    editedAt: p.editedAt,
+  };
+  return ok({ comment: next, events: [event] });
 }

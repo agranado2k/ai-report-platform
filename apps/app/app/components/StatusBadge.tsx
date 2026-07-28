@@ -1,5 +1,4 @@
-import { Badge } from "./Badge";
-import { cx } from "./cx";
+import { Badge, cx } from "arp-ui";
 
 /**
  * Published = a clean version is live; otherwise it's still being processed.

@@ -446,15 +446,21 @@ paths:
         envelope (`{ object: "list", data, has_more }`, ADR-0053, ADR-0065),
         newest-created first. Auth is IDENTICAL to `GET /api/v1/reports/{slug}` —
         org-scoped; a report outside your org reads as not-found. A read-only
-        discovery surface — it grants no new write capability.
+        discovery surface — it grants no new write capability. CORS-enabled
+        for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). When
+            authenticating with an `editToken`, this MUST be the CANONICAL
+            slug the token was minted for (ADR-0063) — a `report_…` External
+            Id is rejected on that auth path.
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/StartingAfter' }
         - { $ref: '#/components/parameters/EndingBefore' }
@@ -468,6 +474,164 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: saveEditedVersion
+      tags: [Reports]
+      summary: Save an edit as a new version
+      description: >
+        Re-assembles the report's current presentation shell around the
+        submitted ProseMirror document, saves it as a NEW `ReportVersion`
+        through the standard ADR-0037 upload pipeline (`origin: "editor"`,
+        with the lossless `_source.json` sidecar, ADR-0062 §4/§5), and
+        re-enters the ADR-012 scan gate identically to any other upload —
+        there is no unscanned fast path for an edit. This is always a SAVE
+        to an EXISTING report (via the same re-upload mechanism `update_slug`
+        drives) — there is no create path here. Auth: `apiKey`, a Clerk
+        session, OR (ADR-0063) a slug-bound `editToken` carrying ONLY
+        `reports:write` — every path re-checks `canWrite` LIVE
+        (`isOwner OR hasWriteGrant`, ADR-0059 §2 / ADR-0060 §4).
+        CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
+      security:
+        - apiKey: []
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveEditedVersionRequest' }
+      responses:
+        '201':
+          description: The saved version, as the created `report` resource (mirrors POST /api/v1/reports).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/diff:
+    get:
+      operationId: getReportDiff
+      tags: [Reports]
+      summary: Diff two of a report's versions (JSON)
+      description: >
+        The visual diff between two versions, as JSON (ADR-0063 API slice,
+        ADR-0065 §3/§4) — the cross-origin, machine-readable counterpart to
+        the dashboard's HTML diff page. Structural (word-level) when BOTH
+        versions carry a parseable `_source.json` sidecar; a labeled,
+        lower-fidelity HTML fallback otherwise (`diff_mode` on the response
+        distinguishes the two — deliberately NOT named `mode`, which is
+        reserved for the deployment context on every resource, ADR-0053).
+        Addresses versions by their `version_…` External Id, not a display
+        ordinal. Auth: `apiKey`, a Clerk session, OR (ADR-0063) a slug-bound
+        `editToken` — read access is the SAME org-visible-or-write-grantee
+        seam as `GET /api/v1/reports/{slug}`. CORS-enabled for `VIEW_ORIGIN`
+        (ADR-0063).
+      security:
+        - apiKey: []
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, pattern: '^version_[0-9A-Za-z]{22}$' }
+          description: The OLDER version's External Id.
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, pattern: '^version_[0-9A-Za-z]{22}$' }
+          description: The NEWER version's External Id.
+      responses:
+        '200':
+          description: The computed diff.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDiff' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/edit-token:
+    post:
+      operationId: refreshEditToken
+      tags: [Reports]
+      summary: Silently refresh an in-flight editing session's edit token
+      description: >
+        Issues a FRESH, slug-bound `scope:"edit"` token to a caller
+        presenting a CURRENTLY-VALID one (ADR-0063 Phase 5), so an editing
+        session can keep itself alive past the 15-minute edit-token TTL
+        without a full round-trip back through `GET /reports/{slug}/open`.
+        Auth is the SAME `editToken` seam as every other edit-token
+        endpoint on this API — `canWrite` (`isOwner OR hasWriteGrant`,
+        ADR-0060 §4) is re-checked LIVE a SECOND time here (belt-and-braces,
+        mirroring `POST /api/v1/reports/{slug}/versions`'s own re-check),
+        so a revoked write grant or a lost ownership denies the refresh
+        (403), not just future saves. The new token's `sub` is always the
+        freshly re-checked actor — never echoed from the presented token's
+        own claims. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
+
+
+        **Security trade-off, now bounded by an absolute session cap
+        (ADR-0063 Phase 5-D):** making an edit token refreshable for as long
+        as `canWrite` holds means a LEAKED token is also refreshable — but
+        the refresh CHAIN as a whole is capped at `SESSION_CAP_SECONDS` (8h)
+        from its FIRST mint, independent of write-grant revocation: the
+        presented token's `sessionStart` claim is carried forward unchanged
+        on every refresh, and once `now - sessionStart >= SESSION_CAP_SECONDS`
+        the refresh is denied (403) — the caller must re-open the report
+        (`GET /reports/{slug}/open`) to start a genuinely fresh session. A
+        presented token with no `sessionStart` (minted before this cap
+        existed) is also denied (403), fail-closed on unknown age. Also
+        mitigated, as before, by the token's narrow `reports:write`-only,
+        single-report scope, the LIVE `canWrite` re-check on every refresh
+        (a revoked grant cuts a refresh off within one remaining TTL, often
+        sooner than the 8h cap), and the view origin's CSP + sandboxed
+        report iframe that's supposed to keep the token out of reach in the
+        first place. See ADR-0063's Phase 5 / Phase 5-D entries for the full
+        writeup.
+      security:
+        - editToken: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). MUST be
+            the CANONICAL slug the presented `editToken` was minted for
+            (ADR-0063) — a `report_…` External Id is rejected on this path.
+      responses:
+        '200':
+          description: The freshly-minted edit token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EditToken' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/reports/{slug}:
@@ -566,15 +730,21 @@ paths:
         (ADR-0053, ADR-0064 §7), newest-created first. Auth is IDENTICAL to
         `GET /api/v1/reports/{slug}` — org-scoped (ADR-0059 §3). Comments are
         workspace collaboration data — NEVER reachable from the public viewer
-        origin (ADR-0064 §4).
+        origin (ADR-0064 §4). CORS-enabled for `VIEW_ORIGIN` (ADR-0063) — the
+        edit-token-authenticated caller IS reachable, only the anonymous
+        public viewer route is excluded.
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/StartingAfter' }
         - { $ref: '#/components/parameters/EndingBefore' }
@@ -599,15 +769,19 @@ paths:
         (ADR-0064 Decision 2/4): replying to a reply is a 422. Gated by
         `canWrite` (ADR-0064 §3 — the SAME seam as rename/re-upload/move:
         `isOwner OR hasWriteGrant`, ADR-0060 §4), not the stricter owner-only
-        delete/setAcl seam.
+        delete/setAcl seam. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
       requestBody:
         required: true
         content:
@@ -628,36 +802,85 @@ paths:
 
   /api/v1/reports/{slug}/comments/{comment_id}:
     patch:
-      operationId: resolveComment
+      operationId: patchComment
       tags: [Comments]
-      summary: Resolve a comment
+      summary: Resolve or edit a comment
       description: >
-        Marks a comment resolved (ADR-0064 §3). Idempotent — resolving an
-        already-resolved comment is a no-op. Authorized by a DIFFERENT rule
-        than create/reply: the comment's AUTHOR or the report's OWNER (not
-        `canWrite`) — the owner moderates every comment on their report.
+        PATCH is OVERLOADED on the request-body shape (ADR-0064 §7): a body
+        carrying `body` and/or `intent` EDITS those fields; an empty/absent
+        body RESOLVES the comment (idempotent — resolving an already-resolved
+        comment is a no-op). Both paths are authorized by a DIFFERENT rule than
+        create/reply: the comment's AUTHOR or the report's OWNER (not
+        `canWrite`) — the owner moderates every comment on their report. An
+        `editToken` actor acts under their real, mirrored `userId`, so this
+        rule applies to them identically. Editing is v1-scoped to `body` +
+        `intent`; the anchor is immutable. An edit stamps `edited_at` (surfaced
+        as an "· edited" indicator). For optimistic concurrency an edit MAY send
+        `expected_edited_at` (the `edited_at` it last saw); if the stored value
+        has since moved, the edit is rejected **409** (reload and retry). A
+        present `body` must be a non-empty string, and a present `intent` must be
+        a valid value (both → 422 otherwise). CORS-enabled for `VIEW_ORIGIN`
+        (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - name: comment_id
           in: path
           required: true
           schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
           description: The comment's External Id (ADR-0052).
+      requestBody:
+        required: false
+        description: >
+          Omit entirely (or send an empty object) to RESOLVE. Send `body` and/or
+          `intent` to EDIT those fields.
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  description: New comment text (non-empty).
+                intent:
+                  type: string
+                  enum: [note, enhancement, add, remove]
+                  description: New comment intent.
+                expected_edited_at:
+                  type: [string, 'null']
+                  format: date-time
+                  description: >
+                    Optimistic-concurrency token — the `edited_at` the client
+                    last saw for this comment. When present, the edit is rejected
+                    409 if the stored `edited_at` has since changed. Omit to skip
+                    the check (first edit sends null).
+              additionalProperties: false
       responses:
         '200':
-          description: The resolved comment resource.
+          description: The resolved or edited comment resource.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comment' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            Optimistic-concurrency conflict — the comment was edited since
+            `expected_edited_at` was read. Reload the latest and retry.
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
     delete:
       operationId: deleteComment
@@ -666,15 +889,19 @@ paths:
       description: >
         Hard-deletes a comment (ADR-0064 §3). Deleting a root also deletes its
         replies (the DB's self-FK `ON DELETE CASCADE`). Same author-or-owner
-        authorization as resolve.
+        authorization as resolve. CORS-enabled for `VIEW_ORIGIN` (ADR-0063).
       security:
         - apiKey: []
+        - editToken: []
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
-          description: The report's permanent capability-URL slug (nanoid(10)).
+          description: >
+            The report's permanent capability-URL slug (nanoid(10)). With an
+            `editToken`, this MUST be the CANONICAL slug the token was
+            minted for (ADR-0063).
         - name: comment_id
           in: path
           required: true
@@ -728,37 +955,54 @@ paths:
 
   /{slug}/edit:
     get:
-      operationId: viewerEditDeepLink
+      operationId: unifiedEditingExperience
       tags: [Viewer]
-      summary: Deep-link from the viewer to the dashboard editor (ADR-0063 Decision 3)
+      summary: The unified in-viewer editing experience (ADR-0063 Decisions 1-3, Phase 5)
       description: >
-        A PURE, unauthenticated 302 redirect to the dashboard's own edit route
-        (`{app_origin}/reports/{slug}/edit`, ADR-0062) — the documented
-        fallback while the full in-viewer editing route (ADR-0063 Decisions
-        1-2, a second CSP profile on this origin) stays gated on its required
-        `/security-review` pass. No JS, no HTML body, no session/token concept
-        added to view.<domain>; auth happens entirely on the dashboard after
-        the hop. Never reachable from, and never modifies the behavior of,
-        `GET /{slug}`.
+        The authenticated, first-party-JS editing surface on the viewer
+        origin — Edit/View/Comments/Compare behind one edit-token capability
+        (`apps/view/app/routes/$slug_.edit.tsx`). Supersedes the interim,
+        unauthenticated 302-to-dashboard redirect this operation used to
+        document (ADR-0063 Decision 3's original fallback) — the dashboard's
+        own `/reports/{slug}/edit` page no longer exists (ADR-0063
+        "Phase 5-C"). Reached via `GET /reports/{slug}/open` on the app
+        origin, which mints a short-lived, slug-bound `scope:"edit"` token
+        and redirects here with `?et=<token>`. A `?et=` hand-off sets a
+        scoped `arp_edit` cookie and 303s to the clean URL (keeping the token
+        out of history/referer); a redeemed cookie renders the editor;
+        anything else (missing/invalid/expired token, no configured
+        secret/app origin, or no editable document) degrades to a 302 to the
+        public, read-only `GET /{slug}` — this route never renders the
+        editor without a live, valid capability, and never modifies the
+        public route's own behavior.
       parameters:
         - name: slug
           in: path
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
-      responses:
-        '302':
-          description: Redirect to the dashboard's edit route.
-          headers:
-            Location:
-              schema: { type: string, format: uri }
-              description: '`{app_origin}/reports/{slug}/edit`'
-        '404':
-          description: The slug does not have a valid shape (rejected before any redirect is built).
-        '503':
+        - name: et
+          in: query
+          required: false
+          schema: { type: string }
           description: >
-            The dashboard origin isn't configured (APP_ORIGIN unset) — fails
-            closed rather than guessing at a same-origin fallback.
+            A freshly-minted edit token from `GET /reports/{slug}/open`
+            (app origin). Present only on the initial hand-off; redeemed
+            into the `arp_edit` cookie and dropped from the URL immediately.
+      responses:
+        '200':
+          description: The unified editing experience is rendered (a valid, redeemed edit capability).
+          content:
+            text/html:
+              schema: { type: string }
+        '302':
+          description: >
+            No valid edit capability (or the report has nothing editable) —
+            degrades to the public viewer at `GET /{slug}`.
+        '303':
+          description: A valid `?et=` hand-off was redeemed into a cookie; redirects to the clean `/{slug}/edit` URL.
+        '404':
+          description: The slug does not have a valid shape.
 
 components:
   securitySchemes:
@@ -768,6 +1012,26 @@ components:
       description: >
         API key (ADR-0008) carrying the `reports:write` scope (ADR-0016).
         Hashed, prefixed, user-scoped so cross-org collaboration works.
+    editToken:
+      type: http
+      scheme: bearer
+      description: >
+        Slug-bound, single-purpose edit token (ADR-0063), minted by the app
+        for a user with `canWrite` on ONE specific report. Grants ONLY the
+        `reports:write` scope on that report — never `acl:write` (grant/
+        revoke/setAcl/listWriteGrants stay apiKey/Clerk-session-only).
+        `canWrite` is re-checked LIVE on every accept (a grant revoked after
+        mint rejects on the next call, not just the next mint), and the
+        request path's `slug` MUST be the CANONICAL slug the token was
+        minted for. Accepted as an alternative to `apiKey` on the
+        report-editing surface only (save a version, read a diff, list/add/
+        resolve/delete comments, list versions) — every other endpoint stays
+        apiKey/Clerk-session-only. These endpoints are additionally
+        CORS-enabled for the configured `VIEW_ORIGIN` (echoed
+        `Access-Control-Allow-Origin`, never `*`, no
+        `Access-Control-Allow-Credentials` — auth rides this Bearer header,
+        never a cookie) so a cross-origin view.<domain> caller can use them
+        directly.
 
   parameters:
     IdempotencyKey:
@@ -890,6 +1154,36 @@ components:
           type: boolean
           description: True if more items follow; page on with `starting_after` = the last id.
 
+    AuthorIdentity:
+      description: >
+        The responsible user's display identity (ADR-0063 author display),
+        carried alongside the raw `user_…` id (`author_id` / `uploaded_by`) on
+        comment and version resources. `name` is the human display name mirrored
+        from Clerk (fullName / firstName lastName / username) when one is stored,
+        else `null`; `email` is the fallback identity and is `null` for a deleted
+        or never-mirrored user. Clients prefer `name`, then `email`, then a
+        generic label — never the raw id. Only ever returned on the
+        authenticated, org-scoped API — never the public viewer.
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          pattern: '^user_[0-9A-Za-z]{22}$'
+          example: user_5mK9pQ2vR4nXtB6cD8eF1g
+          description: The author's `user_…` External Id (mirrors `author_id`/`uploaded_by`).
+        email:
+          type: [string, 'null']
+          format: email
+          description: The author's email, or `null` when it can't be resolved.
+        name:
+          type: [string, 'null']
+          description: >
+            The author's human display name, or `null` when none is stored.
+            Optional + additive (a server predating display names may omit it) —
+            not in `required`.
+          example: Jane Doe
+
     VersionSummary:
       description: A `version` resource — the ReportVersionSummary projection (ADR-0065).
       type: object
@@ -910,6 +1204,8 @@ components:
           pattern: '^user_[0-9A-Za-z]{22}$'
           example: user_5mK9pQ2vR4nXtB6cD8eF1g
           description: The user who created this version, as a `user_…` External Id (ADR-0052).
+        author:
+          $ref: '#/components/schemas/AuthorIdentity'
         uploaded_at:
           type: string
           format: date-time
@@ -925,9 +1221,94 @@ components:
           type: string
           enum: [upload, editor]
           description: >
-            How this version was produced (ADR-0062 §6, ADR-0065). `editor` is
-            reserved for the in-app editor — not buildable yet, so every version
-            is `upload` today.
+            How this version was produced (ADR-0062 §6, ADR-0065). `editor` —
+            produced by `POST /api/v1/reports/{slug}/versions`, which the
+            unified in-viewer editing experience's save action calls
+            (ADR-0063); `upload` — every other create/re-upload path.
+        mode:
+          type: string
+          enum: [prod, dev]
+          description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
+
+    SaveEditedVersionRequest:
+      description: >
+        Body for `POST /api/v1/reports/{slug}/versions` (ADR-0062 §5,
+        ADR-0063). The `doc` is opaque here — a `Report HTML schema`-conforming
+        ProseMirror document JSON (see `docs/domain-glossary.md`), re-assembled
+        server-side around the report's current presentation shell.
+      type: object
+      required: [doc]
+      properties:
+        doc:
+          type: object
+          description: The edited ProseMirror document JSON.
+
+    EditToken:
+      description: >
+        The `edit_token` resource (ADR-0063 Phase 5) —
+        `POST /api/v1/reports/{slug}/edit-token`'s response. Carries no
+        prefixed External Id and no deployment `mode` — it's a bearer
+        capability, not an addressable object.
+      type: object
+      required: [object, edit_token, expires_at]
+      properties:
+        object: { type: string, enum: [edit_token] }
+        edit_token:
+          type: string
+          description: >
+            The freshly-minted, slug-bound, `scope:"edit"` bearer token
+            (packages/domain/src/edit-token.ts). Use it exactly like the
+            token `GET /reports/{slug}/open` mints — as
+            `Authorization: Bearer <edit_token>` on subsequent
+            `editToken`-authenticated calls.
+        expires_at:
+          type: integer
+          description: Epoch seconds this token expires at (mint time + the standard edit-token TTL).
+
+    ReportDiff:
+      description: >
+        The `report_diff` resource (ADR-0063 API slice, ADR-0065 §3/§4) —
+        `GET /api/v1/reports/{slug}/diff`'s response.
+      type: object
+      required: [object, diff_mode, html, label, from, to, mode]
+      properties:
+        object: { type: string, enum: [report_diff] }
+        diff_mode:
+          type: string
+          enum: [structural, fallback]
+          description: >
+            `structural` — a word-level ProseMirror diff (both versions carried
+            a parseable `_source.json` sidecar). `fallback` — a labeled,
+            lower-fidelity block-level HTML diff (at least one version lacked a
+            sidecar, e.g. an externally-uploaded version, or its sidecar was
+            corrupt). Deliberately NOT named `mode` — that field means the
+            deployment context on every resource (ADR-0053); this is a
+            different axis (diff fidelity).
+        html:
+          type: string
+          description: The rendered diff markup (structural or fallback).
+        label:
+          type: string
+          nullable: true
+          description: A human-readable caption, present only when `diff_mode` is `fallback`.
+        from:
+          type: object
+          required: [id, version_no]
+          properties:
+            id:
+              type: string
+              pattern: '^version_[0-9A-Za-z]{22}$'
+              description: The OLDER version's External Id.
+            version_no: { type: integer, description: Its display ordinal. }
+        to:
+          type: object
+          required: [id, version_no]
+          properties:
+            id:
+              type: string
+              pattern: '^version_[0-9A-Za-z]{22}$'
+              description: The NEWER version's External Id.
+            version_no: { type: integer, description: Its display ordinal. }
         mode:
           type: string
           enum: [prod, dev]
@@ -1022,7 +1403,7 @@ components:
     Comment:
       description: A `comment` resource — the `Comment` aggregate on the wire (ADR-0064).
       type: object
-      required: [object, id, report_id, author_id, parent_id, body, anchor, resolved_at, created_at, mode]
+      required: [object, id, report_id, author_id, parent_id, body, intent, anchor, resolved_at, created_at, mode]
       properties:
         object: { type: string, enum: [comment] }
         id:
@@ -1037,6 +1418,8 @@ components:
           type: string
           pattern: '^user_[0-9A-Za-z]{22}$'
           description: The comment's author, as a `user_…` External Id (ADR-0052).
+        author:
+          $ref: '#/components/schemas/AuthorIdentity'
         parent_id:
           type: [string, 'null']
           pattern: '^comment_[0-9A-Za-z]{22}$'
@@ -1044,11 +1427,19 @@ components:
         body:
           type: string
           description: Bounded to 2000 characters (JUDGMENT CALL — ADR-0064 gives no exact number).
+        intent:
+          type: string
+          enum: [note, enhancement, add, remove]
+          description: What the author wants done with the comment (ADR-0064 Decision 8). `note` (default) is a plain human note; `enhancement`/`add`/`remove` signal an agent action (semantics deferred). A pre-existing comment reads as `note`.
         anchor: { $ref: '#/components/schemas/Anchor' }
         resolved_at:
           type: [string, 'null']
           format: date-time
           description: Null = open; set = resolved.
+        edited_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null = never edited; set = the last edit time (surfaces an "· edited" indicator). Additive (a pre-edit server may omit it).
         created_at:
           type: string
           format: date-time
@@ -1068,6 +1459,10 @@ components:
         body:
           type: string
           description: The comment text (max 2000 chars).
+        intent:
+          type: string
+          enum: [note, enhancement, add, remove]
+          description: What the author wants done with the comment (ADR-0064 Decision 8). Optional — omit (or send `note`) for a plain human note. An explicitly invalid value is rejected with 422.
         anchor: { $ref: '#/components/schemas/Anchor' }
         parent_comment_id:
           type: string

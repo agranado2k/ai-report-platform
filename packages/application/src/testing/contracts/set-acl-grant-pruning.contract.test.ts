@@ -3,7 +3,13 @@
 // DrizzleGrantStore/DrizzleReportRepository on pglite from
 // packages/adapters/src/set-acl-grant-pruning.contract.test.ts.
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
-import { FakePasswordHasher, InMemoryGrantStore, InMemoryReportRepository } from "../in-memory";
+import {
+  FakePasswordHasher,
+  InMemoryAuditLogger,
+  InMemoryGrantStore,
+  InMemoryReportRepository,
+  PassThroughUnitOfWork,
+} from "../in-memory";
 import { describeSetAclGrantPruningContract } from "./set-acl-grant-pruning.contract";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -33,6 +39,8 @@ describeSetAclGrantPruningContract("in-memory", async () => {
     // Real wall-clock time — mirrors the real adapter (grant-store.contract.test.ts).
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
     hasher: new FakePasswordHasher(),
+    audit: new InMemoryAuditLogger(),
+    uow: new PassThroughUnitOfWork(),
     orgId: ORG,
     userId: OWNER,
     reportId: REPORT,

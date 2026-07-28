@@ -163,12 +163,12 @@ async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Resp
   return redirectToView(report.slug, token, args.request);
 }
 
+// ADR-0068 §1: a user belongs to exactly ONE org (keyed by their email domain),
+// so there is no "switch your active organization and retry" under this model —
+// the session's org IS the user's only org. A 403 here means the visitor's
+// (single) org genuinely isn't this report's org.
 const orgMembershipNotice = () =>
-  notice(
-    "You need to be a member of this report's organization to view it. " +
-      "If you belong to more than one organization, switch your active organization and retry.",
-    403,
-  );
+  notice("You need to be a member of this report's organization to view it.", 403);
 
 // Preserve the intended destination via `redirect_url`, which Clerk's <SignIn>
 // honours post-auth (same convention as root.tsx's app-wide gate).

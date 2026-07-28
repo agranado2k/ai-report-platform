@@ -23,6 +23,7 @@ export interface CommentRepositoryContractHarness {
     readonly parentCommentId?: CommentId | null;
     readonly authorUserId?: UserId;
     readonly body?: string;
+    readonly intent?: Comment["intent"];
   }): Comment;
   teardown(): Promise<void>;
 }
@@ -63,6 +64,25 @@ export function describeCommentRepositoryContract(
 
       const found = await h.repo.findById(comment.id);
       expect(found.ok && found.value?.resolvedAt).toBe(1234);
+    });
+
+    it("round-trips a non-default intent through save → findById", async () => {
+      const comment = h.makeComment({ intent: "enhancement" });
+      await h.repo.save(comment);
+
+      const found = await h.repo.findById(comment.id);
+      expect(found.ok && found.value?.intent).toBe("enhancement");
+    });
+
+    it("save() upserts an edit — updated body + intent land in place (edit-comment)", async () => {
+      const comment = h.makeComment({ body: "before", intent: "note" });
+      await h.repo.save(comment);
+      const edited: Comment = { ...comment, body: "after", intent: "add" };
+      await h.repo.save(edited);
+
+      const found = await h.repo.findById(comment.id);
+      expect(found.ok && found.value?.body).toBe("after");
+      expect(found.ok && found.value?.intent).toBe("add");
     });
 
     it("listByReport returns a report's comments newest-created first", async () => {

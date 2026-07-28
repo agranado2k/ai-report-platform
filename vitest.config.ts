@@ -8,30 +8,30 @@ import { defineConfig } from "vitest/config";
 // `apps/app/app/server` also gets unit coverage for its transport-seam helpers
 // (the `handle()` combinator, etc.) — these are pure enough to test with
 // injected fakes, unlike the rest of the Remix app which stays e2e-only.
-// `apps/app/app/editor` is the same carve-out for the ProseMirror editor's
-// STATE/TRANSFORM wiring (ADR-0062): `prosemirror-state`/`-model`/`-commands`
-// need no DOM at all, so `createEditorState`/keymap-bound commands are cheap
-// to unit-test here; the mounted `EditorView` (real DOM, real keyboard
-// events) stays e2e-only like the rest of the Remix UI.
+// The ProseMirror editor's STATE/TRANSFORM wiring (ADR-0062) —
+// `prosemirror-state`/`-model`/`-commands` need no DOM at all, so
+// `createEditorState`/keymap-bound commands, plus the SSR-safety test for
+// `ReportEditor` itself, are cheap to unit-test — now live in
+// `packages/editor/src/**/*.test.ts` (ADR-0071), covered by the
+// `packages/*/src/**/*.test.ts` glob below; the mounted `EditorView` (real
+// DOM, real keyboard events) stays e2e-only like the rest of the Remix UI.
 // `apps/view/app/server` is the SAME carve-out on the viewer app, added for
 // the GET /<slug>/edit deep-link's pure URL-building helper (ADR-0063
 // Decision 3) — apps/view otherwise has no unit-test tier at all (its Remix
 // routes stay e2e-only), same as apps/app's routes.
-// `apps/app/app/components/comment-composer-lifecycle.test.ts` is a single,
-// narrow carve-out in `components/` (PR #157 review, Fix 2): the mounted
-// CommentSidebar/NewCommentComposer stay e2e-only like the rest of this
-// app's components, but the pure success/failure gate that decides whether
-// a fetcher's settled state should clear the composer is dependency-free
-// (no DOM, no React import) and cheap to unit-test directly.
+// `apps/view/app/edit` is the in-viewer editor's CLIENT save-fetch helper
+// (ADR-0063 Phase 4): a plain `fetch` wrapper with no DOM/React dependency
+// (the browser's `fetch` and Node's are interface-compatible, and a fake
+// `fetchImpl` is injected in tests either way), so it's cheap to unit-test
+// directly rather than deferring it to e2e like the mounted editor route.
 export default defineConfig({
   test: {
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
       "apps/app/app/server/**/*.test.ts",
-      "apps/app/app/editor/**/*.test.ts",
-      "apps/app/app/components/comment-composer-lifecycle.test.ts",
       "apps/view/app/server/**/*.test.ts",
+      "apps/view/app/edit/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test

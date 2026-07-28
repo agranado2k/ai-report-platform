@@ -17,6 +17,12 @@ export const serverSchema = {
   // boot without it) — the drain route itself is fail-closed: it returns 503
   // when this is unset and 401 on a mismatch.
   SCAN_DRAIN_SECRET: trimmedString.optional(),
+  // One-time display_name backfill (roadmap #59). Shared secret the OPERATOR
+  // presents to POST /internal/backfill-display-names. OPTIONAL at the env layer
+  // and normally UNSET — the route is fail-closed (503 when unset, 401 on
+  // mismatch), so the endpoint is inert until an operator transiently provisions
+  // the secret to run the job, then removes it. Never set as part of a deploy.
+  DISPLAY_NAME_BACKFILL_SECRET: trimmedString.optional(),
   // pg-boss connection string (node-postgres TCP). Defaults to DATABASE_URL when
   // unset; set it to Neon's POOLED endpoint so the drain doesn't exhaust
   // connections under serverless cold starts. Optional.
@@ -31,6 +37,15 @@ export const serverSchema = {
   // deployment's blobs within the shared bucket (preview-data-isolation). Unset
   // in production, so prod keys stay at `reports/…`.
   R2_KEY_PREFIX: trimmedString.optional(),
+
+  // Explicit preview-isolation marker (issue #149, amends ADR-0047): the Neon
+  // branch name (e.g. "preview-pr-42") that preview-isolation.yml forks and
+  // points this deployment's DATABASE_URL at. Injected on the isolated
+  // redeploy ONLY — unset on prod and on the pre-isolation preview build that
+  // races it. /health echoes it (and derives `isolated` from it, alongside
+  // R2_KEY_PREFIX) so the e2e smoke's readiness gate can tell the two
+  // deployments apart instead of racing them.
+  NEON_BRANCH: trimmedString.optional(),
 
   // Clerk server key (ADR-0005). The publishable key is client-safe — see below.
   CLERK_SECRET_KEY: trimmedString,

@@ -2,8 +2,10 @@ import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } 
 import { describe, expect, it } from "vitest";
 import {
   FakePasswordHasher,
+  InMemoryAuditLogger,
   InMemoryGrantStore,
   InMemoryReportRepository,
+  PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { setAcl } from "./set-acl";
 
@@ -34,14 +36,16 @@ async function seed(reportOrg = ORG) {
     reports,
     hasher: new FakePasswordHasher(),
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
+    audit: new InMemoryAuditLogger(),
+    uow: new PassThroughUnitOfWork(),
   };
 }
 
 describe("setAcl use case (ADR-0056)", () => {
   it("requires the acl:write scope", async () => {
-    const { reports, hasher, grants } = await seed();
+    const { reports, hasher, grants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants },
+      { reports, hasher, grants, audit, uow },
       { orgId: ORG, userId: OWNER, scopes: [] },
       {
         slug: SLUG as never,
@@ -53,8 +57,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode hashes the plaintext and persists it (never stores plaintext)", async () => {
-    const { reports, hasher, grants } = await seed();
-    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const r = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "password",
       password: "hunter2",
@@ -69,8 +73,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode without a password is a ValidationError", async () => {
-    const { reports, hasher, grants } = await seed();
-    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const r = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "password",
     });
@@ -79,8 +83,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("allowlist normalizes emails + carries the owner access TTL; empty list is a ValidationError", async () => {
-    const { reports, hasher, grants } = await seed();
-    const ok = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const ok = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["A@B.com", " a@b.com "],
@@ -91,7 +95,7 @@ describe("setAcl use case (ADR-0056)", () => {
       allowedEmails: ["a@b.com"],
       accessTtlSeconds: 86_400,
     });
-    const bad = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const bad = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: [],
@@ -100,8 +104,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("sets public / org with no extra data", async () => {
-    const { reports, hasher, grants } = await seed();
-    const r = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const r = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "public",
     });
@@ -109,8 +113,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("a revokeAll failure surfaces AND leaves the Acl unchanged (prune-before-persist)", async () => {
-    const { reports, hasher, grants } = await seed();
-    const allow = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const allow = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["a@b.com"],
@@ -118,7 +122,7 @@ describe("setAcl use case (ADR-0056)", () => {
     expect(allow.ok).toBe(true);
 
     grants.failRevokeAll = true;
-    const switched = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const switched = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "public",
     });
@@ -131,8 +135,8 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("a per-email revoke failure surfaces AND leaves the Acl roster unchanged", async () => {
-    const { reports, hasher, grants } = await seed();
-    const allow = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const allow = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["a@b.com", "c@d.io"],
@@ -140,7 +144,7 @@ describe("setAcl use case (ADR-0056)", () => {
     expect(allow.ok).toBe(true);
 
     grants.failRevoke = true;
-    const narrowed = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const narrowed = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       mode: "allowlist",
       allowedEmails: ["c@d.io"],
@@ -155,9 +159,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("rejects a non-owner (NotAllowed, ADR-0059: setAcl is owner-only) and an unknown slug (NotFound)", async () => {
-    const { reports, hasher, grants } = await seed();
+    const { reports, hasher, grants, audit, uow } = await seed();
     const notMine = await setAcl(
-      { reports, hasher, grants },
+      { reports, hasher, grants, audit, uow },
       { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
       {
         slug: SLUG as never,
@@ -169,11 +173,28 @@ describe("setAcl use case (ADR-0056)", () => {
       expect(notMine.error).toEqual({ kind: "NotAllowed", message: "you do not own this report" });
     }
 
-    const missing = await setAcl({ reports, hasher, grants }, ACTOR, {
+    const missing = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
       mode: "org",
     });
     expect(missing.ok).toBe(false);
     if (!missing.ok) expect(missing.error.kind).toBe("NotFound");
+  });
+
+  it("records an acl.set audit row (ADR-0070)", async () => {
+    const { reports, hasher, grants, audit, uow } = await seed();
+    const r = await setAcl({ reports, hasher, grants, audit, uow }, ACTOR, {
+      slug: SLUG as never,
+      mode: "public",
+    });
+    expect(r.ok).toBe(true);
+    expect(audit.recorded()).toContainEqual({
+      action: "acl.set",
+      orgId: ORG,
+      actorUserId: OWNER,
+      targetType: "report",
+      targetId: reportId("00000000-0000-7000-8000-0000000000c1"),
+      meta: { mode: "public" },
+    });
   });
 });

@@ -7,6 +7,7 @@ export type AppError =
   | { readonly kind: "NotAllowed"; readonly message: string }
   | { readonly kind: "InsufficientScope"; readonly message: string; readonly scope: string }
   | { readonly kind: "NotFound"; readonly message: string }
+  | { readonly kind: "Conflict"; readonly message: string }
   | { readonly kind: "UnsupportedMediaType"; readonly message: string }
   | { readonly kind: "PayloadTooLarge"; readonly message: string }
   | { readonly kind: "ValidationError"; readonly message: string; readonly field?: string }
@@ -23,6 +24,10 @@ export const validationError = (message: string, field?: string): AppError =>
     : { kind: "ValidationError", message, field };
 
 export const notFound = (message = "not found"): AppError => ({ kind: "NotFound", message });
+/** A concurrent-modification conflict (maps to HTTP 409, ADR-0040). Raised when a
+ *  client edits a resource against a stale version — e.g. the comment's
+ *  optimistic-concurrency token no longer matches the stored value. */
+export const conflict = (message = "conflict"): AppError => ({ kind: "Conflict", message });
 export const notAllowed = (message = "not allowed"): AppError => ({ kind: "NotAllowed", message });
 export const insufficientScope = (scope: string): AppError => ({
   kind: "InsufficientScope",

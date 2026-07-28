@@ -191,6 +191,41 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_list_comments",
+    {
+      title: "List a report's comments",
+      description:
+        "List a report's Comments (ADR-0064) as a cursor-paginated list " +
+        "({object:'list', data, has_more}), newest-created first; each item has id " +
+        "(comment_…), report_id, author_id (user_…), parent_id (a comment_ id when it's a " +
+        "reply, else null), body, anchor ({ version_pinned: { version_id, text_quote } }), " +
+        "resolved_at (null until resolved), and created_at. Read-only; comments never appear " +
+        "on the public viewer. Page with starting_after.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        limit: z.number().int().positive().optional().describe("Max items (1–100, default 20)."),
+        starting_after: z
+          .string()
+          .optional()
+          .describe("Cursor: a comment_ id; returns items AFTER it (page forward)."),
+        ending_before: z
+          .string()
+          .optional()
+          .describe("Cursor: a comment_ id; returns items BEFORE it (page back)."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) =>
+      toToolResult(
+        await client.listComments(args.slug, {
+          limit: args.limit,
+          startingAfter: args.starting_after,
+          endingBefore: args.ending_before,
+        }),
+      ),
+  );
+
+  server.registerTool(
     "folders_list",
     {
       title: "List folders",
@@ -229,17 +264,20 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
     {
       title: "Upload a report",
       description:
-        "Create a report from an HTML document, or re-upload a new version of an existing " +
-        "one (re-upload requires write access, ADR-0059/0060 — the report's owner or a " +
-        "write grantee). Returns the slug + permanent view URL. To set/change the title " +
-        "afterwards use reports_update. Title is not set here.",
+        "Create a report from an HTML document — returns the slug + a permanent `view_url` " +
+        "you can share immediately. To PUBLISH A NEW VERSION of that same report later " +
+        "(after edits/re-generation), call this again with `update_slug` set to its slug: " +
+        "the `view_url` stays exactly the same, only the content and version number change " +
+        "(re-upload requires write access, ADR-0059/0060 — the report's owner or a write " +
+        "grantee). To set/change the title afterwards use reports_update. Title is not set here.",
       inputSchema: {
         html: z.string().describe("The report's full HTML document."),
         update_slug: z
           .string()
           .optional()
           .describe(
-            "Re-upload a new version under this existing slug (keeps the URL). Omit to create new.",
+            "Publish a new version under this existing slug instead of creating a new report " +
+              "— the view_url is unchanged. Omit to create a brand-new report.",
           ),
         folder_path: z
           .string()
@@ -389,11 +427,123 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_add_comment",
+    {
+      title: "Add a comment (or reply) to a report",
+      description:
+        "Create a comment on a report (ADR-0064), or a REPLY to an existing comment when you " +
+        "pass parent_comment_id. Requires write access (canWrite, ADR-0064 §3): the report's " +
+        "owner or a write grantee. The comment is anchored to a specific ReportVersion and the " +
+        "exact quoted text it refers to (version_id + text_quote — get a version_ id from " +
+        "reports_list_versions). Returns the created comment resource (id comment_…, parent_id " +
+        "set for a reply else null, body, anchor, resolved_at:null, created_at). Comments are " +
+        "private to the org — they never show on the public viewer.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        body: z.string().describe("The comment text."),
+        version_id: z
+          .string()
+          .describe("The version_ id this comment is pinned to (from reports_list_versions)."),
+        text_quote: z
+          .string()
+          .describe("The exact quoted text in that version the comment refers to."),
+        relative: z
+          .unknown()
+          .optional()
+          .describe(
+            "Optional editor anchor hint, forwarded opaquely (position within the quoted text).",
+          ),
+        parent_comment_id: z
+          .string()
+          .optional()
+          .describe("Reply to this comment_ id. Omit to create a top-level (root) comment."),
+      },
+      annotations: CREATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.addComment(args.slug, {
+          body: args.body,
+          versionId: args.version_id,
+          textQuote: args.text_quote,
+          relative: args.relative,
+          parentCommentId: args.parent_comment_id,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "reports_resolve_comment",
+    {
+      title: "Resolve a comment",
+      description:
+        "Mark a comment as resolved (ADR-0064) — sets its resolved_at. Allowed for the comment's " +
+        "AUTHOR or the report's OWNER (a different rule from the write-access gate on add). " +
+        "One-way and idempotent: there is only one resolved transition (no un-resolve today), so " +
+        "resolving an already-resolved comment is safe. Returns the updated comment resource.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to resolve (from reports_list_comments)."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.resolveComment(args.slug, args.comment_id)),
+  );
+
+  server.registerTool(
+    "reports_edit_comment",
+    {
+      title: "Edit a comment",
+      description:
+        "Edit a comment's text (`body`) and/or its `intent` (ADR-0064) — fix a typo or change " +
+        "what the comment asks an agent to do. Allowed for the comment's AUTHOR or the report's " +
+        "OWNER (the same rule as resolve/delete, NOT the write-access gate on add). Supply at " +
+        "least one of body/intent; an omitted field is left unchanged. intent is one of note | " +
+        "enhancement | add | remove (an invalid value is rejected). The anchor is immutable and " +
+        "cannot be edited. Returns the updated comment resource.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to edit (from reports_list_comments)."),
+        body: z.string().optional().describe("New comment text. Omit to leave the body unchanged."),
+        intent: z
+          .enum(["note", "enhancement", "add", "remove"])
+          .optional()
+          .describe("New intent. Omit to leave the intent unchanged."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.editComment(args.slug, args.comment_id, {
+          body: args.body,
+          intent: args.intent,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "reports_delete_comment",
+    {
+      title: "Delete a comment",
+      description:
+        "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. " +
+        "Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.",
+      inputSchema: {
+        slug: z.string().describe("The report's slug or its report_ id."),
+        comment_id: z.string().describe("The comment_ id to delete (from reports_list_comments)."),
+      },
+      annotations: DESTROY,
+    },
+    async (args) => toToolResult(await client.deleteComment(args.slug, args.comment_id)),
+  );
+
+  server.registerTool(
     "folders_create",
     {
       title: "Create a folder",
       description:
-        "Create a folder under a parent. `parent_id` is required — new folders nest under an " +
+        "Create a folder to organize reports into — pair with reports_move (or reports_upload's " +
+        "folder_path) once it exists. `parent_id` is required — new folders nest under an " +
         "existing one; use folders_list to find the root (or another) folder id.",
       inputSchema: {
         name: z.string().describe("The folder name."),

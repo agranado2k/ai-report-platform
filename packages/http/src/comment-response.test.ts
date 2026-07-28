@@ -33,6 +33,8 @@ function comment(overrides: Partial<Comment> = {}): Comment {
     body: "What does this mean?",
     anchor: { versionPinned: { versionId: versionId(V1), textQuote: "the Q3 number" } },
     parentCommentId: null,
+    intent: "note",
+    editedAt: null,
     resolvedAt: null,
     createdAt: 1_700_000_000_000,
     ...overrides,
@@ -46,14 +48,17 @@ const commentResource = (overrides: Partial<Comment> = {}) => {
     id: commentIdToWire(c.id),
     report_id: reportIdToWire(c.reportId),
     author_id: userIdToWire(c.authorUserId),
+    author: { id: userIdToWire(c.authorUserId), email: null, name: null },
     parent_id: c.parentCommentId ? commentIdToWire(c.parentCommentId) : null,
     body: c.body,
+    intent: c.intent,
     anchor: {
       version_pinned: {
         version_id: versionIdToWire(c.anchor.versionPinned.versionId),
         text_quote: c.anchor.versionPinned.textQuote,
       },
     },
+    edited_at: c.editedAt === null ? null : new Date(c.editedAt).toISOString(),
     resolved_at: c.resolvedAt === null ? null : new Date(c.resolvedAt).toISOString(),
     created_at: new Date(c.createdAt).toISOString(),
     mode: "prod",
@@ -74,6 +79,11 @@ describe("addCommentToHttp", () => {
     expect(res.body).toEqual(
       commentResource({ id: commentId(C2), parentCommentId: commentId(C1) }),
     );
+  });
+
+  it("carries the comment's intent in the response body", () => {
+    const res = addCommentToHttp(ok(comment({ intent: "enhancement" })), CTX);
+    expect(res.body).toMatchObject({ intent: "enhancement" });
   });
 
   it("propagates an error as a problem+json response", () => {
@@ -124,6 +134,40 @@ describe("listCommentsToHttp", () => {
       data: [commentResource({ id: commentId(C2) }), commentResource({ id: commentId(C1) })],
       has_more: true,
     });
+  });
+
+  it("folds each comment's resolved author { name, email } in from the map", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const authorByUserId = new Map([
+      [userId(U1), { email: "alice@example.com", name: "Alice Ackerman" }],
+    ]);
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, authorByUserId);
+    const data = (
+      res.body as { data: { author: { id: string; email: string | null; name: string | null } }[] }
+    ).data;
+    expect(data[0]?.author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: "alice@example.com",
+      name: "Alice Ackerman",
+    });
+  });
+
+  it("emits author.name null when the author has no display name (email only)", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const authorByUserId = new Map([[userId(U1), { email: "alice@example.com", name: null }]]);
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, authorByUserId);
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
+    expect(data[0]?.author).toMatchObject({ email: "alice@example.com", name: null });
+  });
+
+  it("falls back to author null name+email when the map has no entry for the author", () => {
+    const items = [comment({ id: commentId(C1) })];
+    const res = listCommentsToHttp(ok({ items, hasMore: false }), CTX, new Map());
+    const data = (res.body as { data: { author: { email: string | null; name: string | null } }[] })
+      .data;
+    expect(data[0]?.author.email).toBeNull();
+    expect(data[0]?.author.name).toBeNull();
   });
 
   it("propagates a NotAllowed (cross-org) error as a problem", () => {

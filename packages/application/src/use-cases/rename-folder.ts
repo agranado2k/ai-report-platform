@@ -1,25 +1,29 @@
 // renameFolder — change a Folder's display name in the acting org (ADR-0036,
 // Reports & Folders). Pure orchestration over FolderRepository (ADR-0024):
-// load+authz (the shared loadOwnedFolder guard) → apply the domain rename
-// transition (name only; slug stays stable) → persist via save.
+// load+authz (the shared loadOwnedFolder guard, OUTSIDE the tx) → apply the
+// domain rename transition (name only; slug stays stable) → persist via save
+// + a `folder.renamed` audit_log row (ADR-0070), committed together
+// (ADR-0037 §5).
 import {
   type AppError,
   renameFolder as applyRename,
   type Folder,
   type FolderId,
-  type OrgId,
   ok,
   type Result,
 } from "arp-domain";
-import { loadOwnedFolder } from "../load-owned";
-import type { FolderRepository } from "../ports";
+import { loadOwnedFolder, type TenancyActor } from "../load-owned";
+import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 export interface RenameFolderDeps {
   readonly folders: FolderRepository;
+  /** Audit log (ADR-0070) — one `folder.renamed` row per rename. */
+  readonly audit: AuditLogger;
+  readonly uow: UnitOfWork;
 }
-export interface RenameFolderActor {
-  readonly orgId: OrgId;
-}
+/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
+ *  solely to attribute the audit row; it must never gate authorization. */
+export type RenameFolderActor = TenancyActor;
 export interface RenameFolderInput {
   readonly folderId: FolderId;
   readonly name: string;
@@ -32,11 +36,25 @@ export async function renameFolder(
 ): Promise<Result<Folder, AppError>> {
   const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
   if (!found.ok) return found;
+  const fromName = found.value.name;
 
   const renamed = applyRename(found.value, input.name);
   if (!renamed.ok) return renamed;
 
-  const saved = await deps.folders.save(renamed.value);
-  if (!saved.ok) return saved;
-  return ok(renamed.value);
+  return deps.uow.run(async () => {
+    const saved = await deps.folders.save(renamed.value);
+    if (!saved.ok) return saved;
+    const audited = await deps.audit.record([
+      {
+        action: "folder.renamed",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "folder",
+        targetId: found.value.id,
+        meta: { from: fromName, to: renamed.value.name },
+      },
+    ]);
+    if (!audited.ok) return audited;
+    return ok(renamed.value);
+  });
 }

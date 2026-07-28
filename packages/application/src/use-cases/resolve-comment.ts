@@ -24,13 +24,22 @@ import {
   type Slug,
 } from "arp-domain";
 import { loadReadableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
-import type { Clock, CommentRepository, EventOutbox, ReportRepository, UnitOfWork } from "../ports";
+import type {
+  AuditLogger,
+  Clock,
+  CommentRepository,
+  EventOutbox,
+  ReportRepository,
+  UnitOfWork,
+} from "../ports";
 
 export interface ResolveCommentDeps extends WriteGrantCheckDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
   readonly clock: Clock;
   readonly outbox: EventOutbox;
+  /** Audit log (ADR-0070) — one `comment.resolved` row per resolve. */
+  readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
 }
 export type ResolveCommentActor = TenancyActor;
@@ -64,7 +73,18 @@ export async function resolveComment(
   const committed = await deps.uow.run(async () => {
     const saved = await deps.comments.save(emission.comment);
     if (!saved.ok) return saved;
-    return deps.outbox.enqueue(emission.events);
+    const enqueued = await deps.outbox.enqueue(emission.events);
+    if (!enqueued.ok) return enqueued;
+    return deps.audit.record([
+      {
+        action: "comment.resolved",
+        orgId: actor.orgId,
+        actorUserId: actor.userId,
+        targetType: "comment",
+        targetId: comment.id,
+        meta: { reportId: report.value.id },
+      },
+    ]);
   });
   if (!committed.ok) return committed;
 

@@ -20,7 +20,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0044 | [Signed merge commits instead of rebase-merge + bot-merge](0044-merge-commit-strategy.md) | Accepted (2026-06-09) |
 | 0045 | [Async content-scan pipeline (pg-boss on Neon, Cloudflare cron)](0045-async-content-scan-pipeline.md) | Accepted (2026-06-11) |
 | 0046 | [Two-tier adapter testing — in-process pglite below the Neon e2e tier](0046-adapter-sql-test-tier.md) | Accepted (2026-06-15) |
-| 0047 | [Per-PR preview data isolation (soft) — ephemeral Neon branch + R2 key prefix](0047-preview-data-isolation.md) | Accepted (2026-06-15) |
+| 0047 | [Per-PR preview data isolation (soft) — ephemeral Neon branch + R2 key prefix](0047-preview-data-isolation.md) | Accepted (2026-06-15) — the soft-fallback residual gated by a `/health` readiness check, amended 2026-07-09 (issue #149) |
 | 0048 | [Auth provisioning & integration model (Clerk JIT personal-org)](0048-auth-provisioning-model.md) | Accepted (2026-06-16) |
 | 0049 | [Clerk dev/prod instance separation & the data-orphaning incident](0049-clerk-instance-hygiene.md) | Accepted (2026-06-18) |
 | 0050 | [App design system — Tailwind v4 + CSS-first design tokens](0050-app-design-system-tailwind-v4-tokens.md) | Accepted (2026-06-19) |
@@ -42,6 +42,10 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0066 | [AI suggestion mode](0066-ai-suggestions.md) | Proposed — deferred (AI suggestion mode) |
 | 0067 | [Live co-editing](0067-live-collaboration.md) | Proposed — deferred (live co-editing) |
 | 0068 | [Domain-keyed single-org membership — the G4 scope decisions](0068-domain-keyed-single-org-membership.md) | Accepted (2026-07-08) — resolves + amends ADR-0061; defers ownership transfer |
+| 0069 | [Development-agent trust boundary — compartmentalizing untrusted content from private data and external actions](0069-agent-tool-trust-boundary.md) | Accepted (2026-07-08) — applies ADR-0045/0062's isolation principle to Claude Code dev-agent tooling |
+| 0070 | [Audit log write seam — the `AuditLogger` port, mirroring the transactional outbox](0070-audit-log-write-seam.md) | Accepted (2026-07-09) — mirrors ADR-0021's outbox shape; wires all 16 user-initiated, org-scoped mutating use cases (issue #153) |
+| 0071 | [Extract shared `packages/ui` + `packages/editor`](0071-extract-ui-editor-packages.md) | Accepted (2026-07-10) — pure refactor; single source of truth for `iframe-document.ts`'s CSP ahead of ADR-0063's `apps/view` editor; amended same day to move the Forge & Ember `theme.css` tokens into `arp-ui` too |
+| 0072 | [MCP agent onboarding — a layered rollout to teach host agents the workflow](0072-mcp-agent-onboarding.md) | Accepted (2026-07-16) — refines ADR-0051/ADR-003; Layer 0 (server `instructions` + sharpened tool descriptions) implemented this PR, Layer 1 (`SKILL.md`) / Layer 2 (plugin/extension/prompts) tracked follow-ups |
 
 ## Backlog (ADRs 1–30 from the spec)
 

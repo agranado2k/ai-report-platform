@@ -1,0 +1,9 @@
+{
+  "name": "centaur-spec",
+  "version": "0.1.0",
+  "description": "Connect to the Centaur Spec reports MCP server and teach Claude Code the publish/version/organize/share/comment workflow in one step.",
+  "author": {
+    "name": "agranado2k",
+    "url": "https://centaurspec.com"
+  }
+}

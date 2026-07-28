@@ -25,7 +25,7 @@ import {
   PageShell,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { apiKeyStore, appOrigin } from "../server/container.server";
+import { apiKeyStore, appOrigin, auditLogger, deps } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 
 export const meta: MetaFunction = () => [{ title: "API keys & MCP — Centaur" }];
@@ -67,8 +67,8 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "revoke") {
     const id = String(form.get("id") ?? "");
     const revoked = await revokeApiKey(
-      { apiKeys: apiKeyStore() },
-      { userId: actor.value.userId },
+      { apiKeys: apiKeyStore(), audit: auditLogger(), uow: deps().uow },
+      { userId: actor.value.userId, orgId: actor.value.orgId },
       { id },
     );
     if (!revoked.ok) return errorToJson(revoked.error);
@@ -78,7 +78,7 @@ export async function action(args: ActionFunctionArgs) {
   // Default intent: create.
   const name = String(form.get("name") ?? "");
   const created = await createApiKey(
-    { apiKeys: apiKeyStore() },
+    { apiKeys: apiKeyStore(), audit: auditLogger(), uow: deps().uow },
     { userId: actor.value.userId, orgId: actor.value.orgId },
     { name },
   );

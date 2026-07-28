@@ -6,6 +6,23 @@
 // no secret → 503 (inert until configured); bad signature → 400. Every other event
 // type is acked 200 (no-op) so Clerk doesn't retry. A processing error returns 500 so
 // Clerk retries (handleUserDeleted is idempotent, so a retry is safe).
+//
+// ADR-0068 §3/§4 evaluation — deliberately NOT wiring `organizationMembership.*`
+// or `organization.*` here: this store has no local membership join table to
+// keep in sync (`users` and `orgs` are independent mirror rows; membership
+// itself lives ONLY in Clerk and is checked LIVE at every gate — the org-mode
+// unlock reads the Clerk-verified session org, `orgUnlock` in
+// `unlock.$slug.tsx`; JIT provisioning re-resolves the org from Clerk on every
+// sign-in with no active org). So there is no stale cache for a webhook to
+// invalidate today. More importantly, handling `organizationMembership.deleted`
+// would NOT achieve "a removed member stops resolving": under domain-keyed
+// JIT join-or-create (ADR-0068 §1/§3), a removed member who signs in again
+// re-derives the SAME team org from their email domain and silently REJOINS
+// via `ensureMembership` — persistent removal needs a "don't auto-rejoin"
+// tracking mechanism this epic doesn't build (no removal/ban UI exists yet).
+// Wiring the event without that machinery would give a false sense of having
+// closed the gap. Revisit alongside the deferred ownership-transfer /
+// membership-management admin surface (ADR-0068 §4/§5).
 import { verifyWebhook } from "@clerk/backend/webhooks";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { handleUserDeleted } from "arp-application";

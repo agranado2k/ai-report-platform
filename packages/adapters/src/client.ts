@@ -7,6 +7,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "@neondatabase/serverless";
 import * as schema from "arp-db/schema";
+import { sql } from "drizzle-orm";
 import { drizzle, type NeonDatabase } from "drizzle-orm/neon-serverless";
 
 export type Db = NeonDatabase<typeof schema>;
@@ -54,6 +55,18 @@ export class DbContext {
   async close(): Promise<void> {
     await this.pool?.end();
   }
+}
+
+/**
+ * A trivial DB round-trip (`SELECT 1`) against this DbContext's ACTIVE
+ * executor (`current()` — the open tx if inside `run()`, else the base pool).
+ * Rejects on any failure; callers decide how to degrade (issue #149's /health
+ * ping treats a rejection as `checks.neon:"error"`, never a thrown 500). Kept
+ * here rather than duplicated in a consumer so every caller genuinely proves
+ * reachability over the SAME connection path the real repositories use.
+ */
+export async function pingDb(ctx: DbContext): Promise<void> {
+  await ctx.current().execute(sql`select 1`);
 }
 
 export { schema };

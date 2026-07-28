@@ -1,13 +1,21 @@
 // Actor-resolution seam (server-only). Upload entrypoints depend on this, NOT on
-// a concrete auth scheme — so the three front doors (Clerk session, `arp_` API key,
-// and a forwarded Clerk OAuth token) are interchangeable behind one port.
+// a concrete auth scheme — so the four front doors (Clerk session, `arp_` API key,
+// a forwarded Clerk OAuth token, and a slug-bound edit token) are interchangeable
+// behind one port.
 //
 // Contract: request args → Result<UploadActor, AppError>. A write requires one of:
 //   - an `arp_` API key (ADR-0008, headless),
-//   - a signed-in Clerk session (ADR-0048, browser), or
+//   - a signed-in Clerk session (ADR-0048, browser),
 //   - a Clerk OAuth access token forwarded by the MCP server (ADR-0051 amendment —
 //     the MCP can't mint a session token on a production Clerk instance, so it
-//     forwards the OAuth token and we verify it here with `acceptsToken:'oauth_token'`).
+//     forwards the OAuth token and we verify it here with `acceptsToken:'oauth_token'`), or
+//   - a slug-bound edit token (ADR-0063) — the app-minted, canWrite-gated capability
+//     from open-report.server.ts. Fully verified by resolveEditTokenActor (the
+//     standalone, unit-tested trust boundary in edit-token-actor.server.ts,
+//     INCLUDING a LIVE canWrite re-check); this module only wires it in, gated
+//     on the route actually having a `:slug` param — a route with no slug (e.g.
+//     /api/v1/keys) never reaches this branch, so it can't become a general
+//     Clerk bypass.
 // Anything else is `Unauthenticated` (→ 401).
 import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
@@ -27,7 +35,35 @@ import {
   clerkUserId as toClerkUserId,
 } from "arp-domain";
 import { defineEnv } from "arp-env";
-import { apiKeyStore, provisionDeps } from "./container.server";
+import { capDisplayName, clerkDisplayName } from "./clerk-display-name";
+import {
+  accessTokenSecret,
+  apiKeyStore,
+  deps as containerDeps,
+  identityStore,
+  provisionDeps,
+  writeGrantStore,
+} from "./container.server";
+import { type EditTokenActorDeps, resolveEditTokenActor } from "./edit-token-actor.server";
+
+/** Scopes granted to an actor resolved off an edit token (ADR-0063) —
+ *  deliberately just `reports:write`, NOT the full `SELF_SCOPES`: an edit
+ *  token authorizes editing THIS report's content, not managing its sharing
+ *  (`acl:write` — grant/revoke/setAcl/listWriteGrants all gate on that scope
+ *  and must stay owner/Clerk-session-only). */
+const EDIT_TOKEN_SCOPES = ["reports:write"];
+
+/** Deps for resolveEditTokenActor, built from the composition root — memoized
+ *  stores, freshly-read env for the secret (previews/dev may leave it unset,
+ *  which fails the edit-token branch closed, see edit-token-actor.server.ts). */
+function editTokenDeps(): EditTokenActorDeps {
+  return {
+    reports: containerDeps().reports,
+    writeGrant: { grants: writeGrantStore(), identities: identityStore() },
+    secret: accessTokenSecret(),
+    nowSeconds: () => Math.floor(Date.now() / 1000),
+  };
+}
 
 /**
  * Extract an `arp_` API-key secret from `Authorization: Bearer …` (ADR-0008), or
@@ -104,14 +140,24 @@ async function resolveOAuthUserId(args: LoaderFunctionArgs): Promise<string | nu
  * deliberately distinct from the verification's fail-closed 401. No email on the
  * account → `Unauthenticated` (we can't provision without one).
  */
-async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>> {
+async function fetchOAuthIdentity(
+  userId: string,
+): Promise<Result<{ email: string; displayName: string | null }, AppError>> {
   let email: string | undefined;
+  let displayName: string | null = null;
   try {
     const user = await clerkBackend().users.getUser(userId);
-    const primary =
-      user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ??
-      user.emailAddresses[0];
+    // VERIFIED addresses only (review #158 H-3): under ADR-0068 the email
+    // domain IS the tenancy boundary — an unverified address would let anyone
+    // claim x@victim-corp.com and JIT-join that company's org. The session
+    // path relies on the Clerk instance blocking unverified sign-ins (a
+    // documented ADR-0068 dependency); here we can and do check explicitly.
+    const verified = user.emailAddresses.filter((e) => e.verification?.status === "verified");
+    const primary = verified.find((e) => e.id === user.primaryEmailAddressId) ?? verified[0];
     email = primary?.emailAddress;
+    // Best-effort display name (ADR-0063 author display): the OAuth path already
+    // has the full Clerk user, so we capture it here for free — no extra round-trip.
+    displayName = clerkDisplayName(user);
   } catch {
     // Clerk unreachable — infra, not a client auth failure (distinct from the 401).
     return err({ kind: "Unexpected", message: `failed to fetch Clerk user ${userId}` });
@@ -119,16 +165,17 @@ async function fetchOAuthEmail(userId: string): Promise<Result<string, AppError>
   if (!email) {
     return err({
       kind: "Unauthenticated",
-      message: "OAuth identity has no primary email; cannot provision",
+      message: "OAuth identity has no verified email; cannot provision",
     });
   }
-  return ok(email);
+  return ok({ email, displayName });
 }
 
 /**
  * Resolve the acting principal for a write request. Tries each front door in turn:
- * `arp_` API key → Clerk session → forwarded Clerk OAuth token. The session and
- * OAuth paths both `provisionIdentity` (create the mirror on first write, ADR-0048),
+ * `arp_` API key → Clerk session → forwarded Clerk OAuth token → slug-bound edit
+ * token (ADR-0063, only on a route with a `:slug` param). The session and OAuth
+ * paths both `provisionIdentity` (create the mirror on first write, ADR-0048),
  * attributing the upload to the user's personal org. No credential → `Unauthenticated`.
  */
 export async function resolveUploadActor(
@@ -162,6 +209,11 @@ export async function resolveUploadActor(
       clerkUserId: toClerkUserId(userId),
       clerkOrgId: orgId ? toClerkOrgId(orgId) : null,
       email,
+      // Best-effort display name (ADR-0063): read from the session token's `name`
+      // custom claim if the Clerk instance sets one (like the `email` claim, an
+      // ADR-0048 dependency). Absent → null; author surfaces fall back to email.
+      // No Clerk backend round-trip here — the session path deliberately avoids one.
+      displayName: readNameClaim(sessionClaims),
     });
   }
 
@@ -170,16 +222,38 @@ export async function resolveUploadActor(
   // Email is fetched only here (the write path) — reads don't pay that round-trip.
   const oauthUserId = await resolveOAuthUserId(args);
   if (oauthUserId) {
-    const email = await fetchOAuthEmail(oauthUserId);
-    if (!email.ok) return email; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
+    const identity = await fetchOAuthIdentity(oauthUserId);
+    if (!identity.ok) return identity; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
     const deps = provisionDeps();
     const personal = await deps.clerkOrgs.findPersonalOrg(oauthUserId);
     if (!personal.ok) return personal; // Clerk outage → propagate (→ 500)
     return provisionIdentity(deps, {
       clerkUserId: toClerkUserId(oauthUserId),
       clerkOrgId: personal.value ? toClerkOrgId(personal.value) : null,
-      email: email.value,
+      email: identity.value.email,
+      displayName: identity.value.displayName,
     });
+  }
+
+  // Slug-bound edit-token path (ADR-0063), LAST — only reached when nothing
+  // else matched, and only ever attempted on a route with a `:slug` param
+  // (a route with no slug segment, e.g. /api/v1/keys, has `args.params.slug
+  // === undefined` and never reaches resolveEditTokenActor at all). No
+  // identity provisioning here — an edit token only ever resolves to an
+  // ALREADY-mirrored user (its `sub` was minted from a real actor.userId,
+  // and the live canWrite re-check inside resolveEditTokenActor requires a
+  // real Report row to match against).
+  const routeSlug = args.params.slug;
+  if (routeSlug) {
+    const editActor = await resolveEditTokenActor(args.request, routeSlug, editTokenDeps());
+    if (editActor) {
+      return ok({
+        userId: editActor.userId,
+        orgId: editActor.orgId,
+        folderId: editActor.folderId,
+        scopes: EDIT_TOKEN_SCOPES,
+      });
+    }
   }
 
   return err({
@@ -234,6 +308,20 @@ export async function resolveActorForRead(
   const oauthUserId = await resolveOAuthUserId(args);
   if (oauthUserId) return lookupMirroredActor(oauthUserId, null);
 
+  // Slug-bound edit-token path (ADR-0063), LAST — same gating as
+  // resolveUploadActor's mirror branch above: only ever attempted on a route
+  // with a `:slug` param, so a non-slug read (e.g. the API-keys list) never
+  // reaches it. `scopes` is deliberately narrower than a Clerk session's
+  // `SELF_SCOPES` (see EDIT_TOKEN_SCOPES) — an edit-token actor must not
+  // read/write ACL config through this seam.
+  const routeSlug = args.params.slug;
+  if (routeSlug) {
+    const editActor = await resolveEditTokenActor(args.request, routeSlug, editTokenDeps());
+    if (editActor) {
+      return ok({ userId: editActor.userId, orgId: editActor.orgId, scopes: EDIT_TOKEN_SCOPES });
+    }
+  }
+
   return ok(null); // no credential → genuinely unauthenticated
 }
 
@@ -273,6 +361,22 @@ function readEmailClaim(claims: unknown): string | null {
   if (claims && typeof claims === "object" && "email" in claims) {
     const value = (claims as { email?: unknown }).email;
     if (typeof value === "string" && /^[^@\s]+@[^@\s]+$/.test(value)) return value;
+  }
+  return null;
+}
+
+/** Read the `name` custom claim off a Clerk session token (ADR-0063 author
+ *  display), if the instance sets one. Best-effort: a non-string / blank / absent
+ *  claim → null (author surfaces fall back to email). Trimmed to drop stray
+ *  whitespace-only values. Capped via the shared `capDisplayName` (claude-review
+ *  #200) so this capture point matches every other one. */
+function readNameClaim(claims: unknown): string | null {
+  if (claims && typeof claims === "object" && "name" in claims) {
+    const value = (claims as { name?: unknown }).name;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return capDisplayName(trimmed);
+    }
   }
   return null;
 }

@@ -1,6 +1,11 @@
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { InMemoryReportRepository, InMemoryWriteGrantStore } from "../testing/in-memory";
+import {
+  InMemoryAuditLogger,
+  InMemoryReportRepository,
+  InMemoryWriteGrantStore,
+  PassThroughUnitOfWork,
+} from "../testing/in-memory";
 import { revokeWrite } from "./revoke-write";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -29,14 +34,14 @@ async function seed() {
   await reports.save(report);
   const grants = new InMemoryWriteGrantStore();
   await grants.grant(REPORT_ID, "grantee@x.com", OWNER, null);
-  return { reports, grants };
+  return { reports, grants, audit: new InMemoryAuditLogger(), uow: new PassThroughUnitOfWork() };
 }
 
 describe("revokeWrite use case (ADR-0060)", () => {
   it("requires the acl:write scope", async () => {
-    const { reports, grants } = await seed();
+    const { reports, grants, audit, uow } = await seed();
     const r = await revokeWrite(
-      { reports, grants },
+      { reports, grants, audit, uow },
       { orgId: ORG, userId: OWNER, scopes: [] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -45,9 +50,9 @@ describe("revokeWrite use case (ADR-0060)", () => {
   });
 
   it("is owner-only — a same-org non-owner is rejected (NotAllowed)", async () => {
-    const { reports, grants } = await seed();
+    const { reports, grants, audit, uow } = await seed();
     const r = await revokeWrite(
-      { reports, grants },
+      { reports, grants, audit, uow },
       { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -55,8 +60,8 @@ describe("revokeWrite use case (ADR-0060)", () => {
   });
 
   it("revokes the grant — a subsequent findFor no longer matches", async () => {
-    const { reports, grants } = await seed();
-    const r = await revokeWrite({ reports, grants }, ACTOR, {
+    const { reports, grants, audit, uow } = await seed();
+    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
@@ -66,8 +71,8 @@ describe("revokeWrite use case (ADR-0060)", () => {
   });
 
   it("is idempotent — revoking an email with no grant still succeeds", async () => {
-    const { reports, grants } = await seed();
-    const r = await revokeWrite({ reports, grants }, ACTOR, {
+    const { reports, grants, audit, uow } = await seed();
+    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
       slug: SLUG as never,
       email: "never-granted@x.com",
     });
@@ -75,11 +80,28 @@ describe("revokeWrite use case (ADR-0060)", () => {
   });
 
   it("rejects an unknown slug with NotFound", async () => {
-    const { reports, grants } = await seed();
-    const r = await revokeWrite({ reports, grants }, ACTOR, {
+    const { reports, grants, audit, uow } = await seed();
+    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
       email: "grantee@x.com",
     });
     expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("records a grant.write.revoked audit row (ADR-0070)", async () => {
+    const { reports, grants, audit, uow } = await seed();
+    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
+      slug: SLUG as never,
+      email: "grantee@x.com",
+    });
+    expect(r.ok).toBe(true);
+    expect(audit.recorded()).toContainEqual({
+      action: "grant.write.revoked",
+      orgId: ORG,
+      actorUserId: OWNER,
+      targetType: "report",
+      targetId: REPORT_ID,
+      meta: { granteeEmail: "grantee@x.com" },
+    });
   });
 });

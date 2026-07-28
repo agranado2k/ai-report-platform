@@ -149,6 +149,18 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 > into Protection Bypass for Automation on **both** `arp-app-prod` and
 > `arp-view-prod`, store it as this repo secret, and **redeploy** (Vercel binds
 > it at build time).
+>
+> **`NEON_BRANCH`** (issue #149, amends ADR-0047) — an explicit isolation marker,
+> not a secret: `preview-isolation.yml`'s `set_env` loop injects it (value
+> `preview-pr-<N>`, the same name already used for the Neon branch itself)
+> alongside `DATABASE_URL`/`R2_KEY_PREFIX` on the isolated redeploy only; unset on
+> `production` and on the pre-isolation build. `packages/env/src/schema.ts`
+> declares it optional (`NEON_BRANCH`). `/health` echoes it (`neonBranch`) and
+> derives `isolated` from it (or `R2_KEY_PREFIX`) so `e2e.yml`'s readiness gate
+> can tell the pre-isolation deployment apart from the isolated one instead of
+> racing both — see `tests/e2e/README.md`'s "CI readiness gate" section. Cleaned
+> up automatically on PR close: the teardown job deletes every Vercel env var
+> matching the PR's `gitBranch`, key-agnostic.
 
 > **`R2_APP_ACCESS_KEY_ID` / `R2_APP_SECRET_ACCESS_KEY`** are a **separate** R2
 > token from the tf-state one — created in the dashboard (R2 → Manage R2 API
@@ -226,7 +238,7 @@ The async content-scan pipeline runs on infrastructure you already have, plus on
 ### Report sharing / private-report gating (ADR-0056)
 
 - **Secret: `VIEW_ACCESS_TOKEN_SECRET`** — a self-generated `random_password` (no operator input) in `shared_env`, so the **same value** lands on **both** the app (mints the access token after authorizing a private report) and the view (verifies it). Set for **production + preview** (previews can exercise the password-mode unlock flow). The credential-free view origin only ever verifies this HMAC — it never holds Clerk creds (ADR-002/0038 isolation). Unset ⇒ private-report enforcement is inert (the app can't mint, the viewer redirects fail closed); `public` reports + the `set_acl` API are unaffected.
-- **Env: `APP_ORIGIN`** (already in `shared_env`, `https://app.<apex>`) — the viewer redirects an un-authorized private report to `${APP_ORIGIN}/unlock/{slug}`. **Rotation:** tainting `random_password.view_access_token_secret` + `apply-prod` invalidates any outstanding access tokens / unlock cookies (they re-verify on next request → users re-enter the password); harmless beyond a one-time re-unlock.
+- **Env: `APP_ORIGIN`** (already in `shared_env`, `https://app.<apex>`) — the viewer redirects an un-authorized private report to `${APP_ORIGIN}/unlock/{slug}`. **Rotation (pipeline-native, ADR-017/018 — never a manual `tf.sh apply`):** bump the `keepers.rotation` value on `random_password.view_access_token_secret` (`envs/prod/main.tf`); on merge, `apply-prod` regenerates the secret and pushes the new value to `VIEW_ACCESS_TOKEN_SECRET` on **both** `arp-app-prod` + `arp-view-prod` (same `.result`, so the stored env vars can't land mismatched), then **redeploy both projects back-to-back** so the running functions read it. ⚠️ **Redeploy both, close together:** the already-running deployments keep the OLD secret until redeployed, so redeploying only one leaves the app minting with the new secret while the view still verifies the old (or vice-versa) — a mismatch window where **all private-report unlock + edit-token verification fails** until the second redeploy lands (the same failure class as the 2026-06 P0). Redeploying neither is fine (both hold the matched old value); redeploying exactly one is the dangerous state. Invalidates any outstanding access/edit tokens + unlock cookies (they re-verify on next request → users re-enter the password / re-open the editor; the 8h session cap bounds it). The **initial** `keepers` value also reconciles the 2026-06 P0 drift, where the secret was set out-of-band via the Vercel API — a pipeline-owned value restores IaC as the source of truth.
 - **Email send: `RESEND_API_KEY` + `EMAIL_FROM` on the app project** (ADR-0057) — for the `allowlist` magic link. `RESEND_API_KEY` is the existing shared Resend secret, now also merged onto **arp-app-prod** (production + preview); `EMAIL_FROM` = `noreply@<apex>` (the apex domain already verified with Resend via `modules/resend-domain`, DKIM/SPF in the zone). App project only (the unlock route sends). **Fail-open:** unset key ⇒ no `EmailSender` wired ⇒ the send-link path stays inert (still returns the generic "if your email is on the list…"). No new DNS — the Resend domain is already provisioned.
 
 **Operator prerequisite (one-time):** the Cloudflare API token (`TF_VAR_cloudflare_api_token`) must include **Workers Scripts: Edit** (in addition to the DNS/zone/R2 permissions it already has) — it's used both by the provider to upload the Worker and by the subdomain `null_resource`. Add it in the dashboard (My Profile → API Tokens → edit the existing token → add `Account · Workers Scripts · Edit`; the token value is unchanged, so no secret update). Everything else (subdomain registration included) is then handled by `apply-prod`.

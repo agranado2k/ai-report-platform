@@ -11,6 +11,7 @@ import {
   type Comment,
   type CommentId,
   commentId,
+  intentOrDefault,
   ok,
   type ReportId,
   type Result,
@@ -28,8 +29,13 @@ export function rowToComment(row: CommentRow): Comment {
     reportId: reportId(row.reportId),
     authorUserId: userId(row.authorUserId),
     body: row.body,
+    // A legacy row (pre-`intent` column, or a null slipped in) degrades to
+    // `note` (intentOrDefault) — the read never fails on it.
+    intent: intentOrDefault(row.intent),
     anchor: row.anchorJson as Anchor,
     parentCommentId: row.parentCommentId === null ? null : commentId(row.parentCommentId),
+    // A legacy row (pre-`edited_at` column) reads back NULL → never edited.
+    editedAt: row.editedAt === null ? null : row.editedAt.getTime(),
     resolvedAt: row.resolvedAt === null ? null : row.resolvedAt.getTime(),
     createdAt: row.createdAt.getTime(),
   };
@@ -42,7 +48,9 @@ function commentToRow(c: Comment): typeof comments.$inferInsert {
     authorUserId: c.authorUserId,
     parentCommentId: c.parentCommentId,
     body: c.body,
+    intent: c.intent,
     anchorJson: c.anchor,
+    editedAt: c.editedAt === null ? null : new Date(c.editedAt),
     resolvedAt: c.resolvedAt === null ? null : new Date(c.resolvedAt),
   };
 }
@@ -64,7 +72,7 @@ export class DrizzleCommentRepository implements CommentRepository {
     try {
       const db = this.ctx.current();
       // Insert, or update the mutable fields on conflict by id (resolve →
-      // resolvedAt; body/anchor stay editable for a future edit-comment use case).
+      // resolvedAt; edit → body/intent/editedAt).
       await db
         .insert(comments)
         .values(commentToRow(comment))
@@ -72,7 +80,9 @@ export class DrizzleCommentRepository implements CommentRepository {
           target: comments.id,
           set: {
             body: comment.body,
+            intent: comment.intent,
             anchorJson: comment.anchor,
+            editedAt: comment.editedAt === null ? null : new Date(comment.editedAt),
             resolvedAt: comment.resolvedAt === null ? null : new Date(comment.resolvedAt),
           },
         });
