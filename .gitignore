@@ -38,6 +38,12 @@ node_modules/
 .env.*.local
 *.env.local
 
+# ─── Claude Code local state ────────────────────────────────────────────
+# Per-machine permission grants (never shared) and /ce-dogfood resume
+# state + screenshots (the durable output goes to docs/dogfood-reports/).
+.claude/settings.local.json
+.dogfood-state/
+
 # ─── Build outputs ──────────────────────────────────────────────────────
 .next/
 .vercel/

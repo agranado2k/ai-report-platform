@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Senior security-first reviewer that runs 5 specialized parallel sub-agents (Security, API/CRUD, Pattern enforcement, Simplicity, Test hygiene) and produces a severity-based summary report scoped to the current branch's diff against `main`. Copied from zora-pantheon `.claude/commands/review-pr.md`.
+description: Senior security-first reviewer that runs 6 specialized parallel sub-agents (Security, API/CRUD, Pattern enforcement, Simplicity, Reuse/DRY, Test hygiene) and produces a severity-based summary report scoped to the current branch's diff against `main`. Copied from zora-pantheon `.claude/commands/review-pr.md`.
 ---
 
 # Skill: Senior Security-First Reviewer
@@ -15,13 +15,14 @@ Performs a rigorous code review focused on Security, API consistency, pattern co
 
 Steps:
 
-1. Run `git branch --show-current` to identify the current branch.
-2. Run `git merge-base main HEAD` to find the common ancestor.
-3. Run `git log --oneline <merge-base>..HEAD` to list ONLY the commits unique to this branch.
-4. Run `git diff <merge-base>..HEAD --name-only` to get the list of changed files.
-5. ALL review analysis MUST be scoped exclusively to these changed files and these commits.
-6. NEVER review, comment on, or flag issues in code that was NOT changed in this branch's commits.
-7. If a file was only partially modified, only review the changed lines and their immediate context.
+1. Run `git fetch origin` first to refresh remote refs, so the scope is computed against the real target tip and not a stale local `main`. Do NOT rebase or modify the current branch.
+2. Run `git branch --show-current` to identify the current branch.
+3. Run `git merge-base origin/main HEAD` to find the common ancestor (fall back to `git merge-base main HEAD` if there is no `origin` remote).
+4. Run `git log --oneline <merge-base>..HEAD` to list ONLY the commits unique to this branch.
+5. Run `git diff <merge-base>..HEAD --name-only` to get the list of changed files.
+6. ALL review analysis MUST be scoped exclusively to these changed files and these commits.
+7. NEVER review, comment on, or flag issues in code that was NOT changed in this branch's commits.
+8. If a file was only partially modified, only review the changed lines and their immediate context.
 
 This ensures the review is focused, actionable, and doesn't generate noise from pre-existing code.
 
@@ -31,11 +32,13 @@ This ensures the review is focused, actionable, and doesn't generate noise from 
 
 **Goal**: Determine established conventions (export styles, error handling, the in-repo `pipe()` / `Result<T,E>` helpers per ADR-024, security-header stack per ADR-013).
 
+**Also build a reuse catalog** the Reuse & DRY auditor (Agent 6) will match new code against: the shared helpers, utilities, VOs, and repository methods that already exist near the diff. Note the barrels/index files that export them (e.g. `packages/domain/src/index.ts`, `packages/http/src/`, `packages/application/src/`) and any workspace-level shared packages, so "this could have called an existing helper" findings cite the exact export that should have been reused.
+
 ### 2. Change Summarization (Sonnet agent)
 
 **Action**: Summarize the branch's changes (scoped to commits from step 0), focusing on new endpoints, DB queries, security-critical code paths, and any cross-cutting concerns.
 
-### 3. Parallel Specialized Reviews (5 sub-agents)
+### 3. Parallel Specialized Reviews (6 sub-agents)
 
 All agents MUST only analyze code within the branch scope defined in step 0.
 
@@ -63,7 +66,21 @@ Actively look for ways to reduce code complexity and volume. For every piece of 
 
 The goal is: less code to read, less code to maintain. Simpler code is easier to review, test, and debug.
 
-#### Agent 5 — Test Hygiene Inspector (Sonnet)
+#### Agent 5 — Reuse & DRY Auditor (Sonnet)
+
+The single most important lens for this repo: **new code must reuse what already exists before it reinvents it.** Using the reuse catalog from step 1, for every new function, type, constant, query, or block of logic in the diff, ask: *does an equivalent already exist in the codebase, and should this have called it instead?*
+
+Flag, with the exact existing export/file:line that should have been reused:
+
+- **Reimplemented helpers** — a new local function that duplicates a shared utility, VO, or `pipe()`/`Result<T,E>` helper that's already exported (ADR-024). Cite the existing one.
+- **Copy-paste blocks** — the same logic (validation, mapping, error shaping, auth/`canWrite` checks, pagination/`has_more` handling) pasted across two or more changed files, or pasted from an existing file the diff clearly mirrors. Recommend extracting once and calling it from both sites.
+- **Parallel constant/enum definitions** — a value, label map, or option list redefined locally when a canonical source already exists (e.g. deriving UI options from a domain enum rather than hand-listing them). Cite the canonical source.
+- **Duplicated wire/DTO shapes or mappers** — a row↔domain or domain↔wire mapping rewritten instead of routed through the existing repository/`resource` mapper.
+- **Divergent-behavior duplication** (highest severity) — two copies that are *supposed* to behave identically but have already drifted (one validates, the other doesn't; one degrades a legacy row, the other throws). This is a latent bug, not just a style issue — bump it up a severity band.
+
+Distinguish **genuine duplication worth removing** from **incidental similarity** (two short blocks that look alike but are coupled to different concerns and would be wrongly fused by a shared abstraction). Do NOT recommend a premature shared abstraction for a single occurrence — that contradicts Agent 4. The bar is: an existing reusable thing is right there, OR the same non-trivial logic appears in ≥2 places in this diff. When in doubt about whether extraction is worth it, state the trade-off rather than asserting.
+
+#### Agent 6 — Test Hygiene Inspector (Sonnet)
 
 When the PR includes test files, this agent MUST:
 
@@ -88,7 +105,9 @@ Common examples of duplication to flag:
 
 ### 4. High-Signal Filtering
 
-**Constraint**: Ignore nitpicks. Focus on vulnerabilities, broken contracts, major pattern deviations, duplicated test setup, missing tests, redundant tests, and simplification opportunities that meaningfully reduce code volume or complexity.
+**Constraint**: Ignore nitpicks. Focus on vulnerabilities, broken contracts, major pattern deviations, code duplication / missed reuse of existing helpers, duplicated test setup, missing tests, redundant tests, and simplification opportunities that meaningfully reduce code volume or complexity.
+
+**Justified vs. unjustified deviations** (borrowed from `/review-and-evaluate`): before reporting any deviation from an existing pattern, decide whether it is *intentional and better* or *accidental*. A deviation that is an improvement over the pattern it mirrors — stronger typing, better error handling, an ADR that explicitly sanctions it — is **not a finding**; drop it or, at most, note it as a deliberate improvement. Only surface deviations that are accidental, that break consistency without benefit, or that contradict an ADR. When you cite an ADR (from `CLAUDE.md`, `docs/adr/`, or `docs/diary.md`), include its number so the reasoning is auditable. This keeps the report free of noise where the author already made a considered call.
 
 ### 5. Severity-Based Summary Report (MANDATORY)
 
@@ -99,9 +118,9 @@ After all agents complete, you MUST present findings organized into exactly 4 se
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| CRITICAL | X | Security vulnerabilities, data leaks, broken functionality |
-| HIGH     | X | Missing tests, broken contracts, major pattern violations |
-| MEDIUM   | X | Redundant tests, unnecessary complexity, code duplication |
+| CRITICAL | X | Security vulnerabilities, data leaks, broken functionality, divergent duplicate logic that has already drifted into a latent bug |
+| HIGH     | X | Missing tests, broken contracts, major pattern violations, a reimplemented helper that duplicates an existing shared export |
+| MEDIUM   | X | Redundant tests, unnecessary complexity, code duplication / copy-paste blocks that should be extracted once |
 | LOW      | X | Minor simplifications, style improvements |
 ```
 
