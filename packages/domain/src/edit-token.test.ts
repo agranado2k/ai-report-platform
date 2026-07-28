@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { mintAccessToken, readAccessToken } from "./access-token";
-import { mintEditToken, readEditToken, verifyEditToken } from "./edit-token";
+import { mintEditToken, readEditToken } from "./edit-token";
 
 const SECRET = "test-secret-key-of-some-length";
 const SLUG = "abcdefghij";
@@ -19,7 +19,6 @@ describe("edit token (ADR-0063)", () => {
       scope: "edit",
       sessionStart: NOW,
     });
-    expect(verifyEditToken(t, SLUG, SECRET, NOW + 60)).toBe(true);
   });
 
   it("mintEditToken defaults sessionStart to nowSeconds — a fresh mint starts a fresh session", () => {
@@ -39,7 +38,6 @@ describe("edit token (ADR-0063)", () => {
   it("rejects a token signed with a different secret", () => {
     const t = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
     expect(readEditToken(t, SLUG, "other-secret", NOW + 60)).toBeNull();
-    expect(verifyEditToken(t, SLUG, "other-secret", NOW + 60)).toBe(false);
   });
 
   it("rejects a forged payload kept against an old signature", () => {
@@ -52,7 +50,6 @@ describe("edit token (ADR-0063)", () => {
   it("rejects an expired token", () => {
     const t = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
     expect(readEditToken(t, SLUG, SECRET, NOW + 901)).toBeNull();
-    expect(verifyEditToken(t, SLUG, SECRET, NOW + 901)).toBe(false);
   });
 
   it("rejects a token exactly at its expiry boundary (exp <= now)", () => {
@@ -63,7 +60,6 @@ describe("edit token (ADR-0063)", () => {
   it("rejects a token minted for a different slug (single-report binding)", () => {
     const t = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
     expect(readEditToken(t, "zzzzzzzzzz", SECRET, NOW + 60)).toBeNull();
-    expect(verifyEditToken(t, "zzzzzzzzzz", SECRET, NOW + 60)).toBe(false);
   });
 
   it("STAR: rejects an access token (even an owner:true one) as an edit token — no token-confusion escalation", () => {
@@ -72,7 +68,6 @@ describe("edit token (ADR-0063)", () => {
     // secret + shared codec family lets a read/share capability pass as an edit one.
     const ownerAccessToken = mintAccessToken(SLUG, 900, SECRET, NOW, { owner: true });
     expect(readEditToken(ownerAccessToken, SLUG, SECRET, NOW + 60)).toBeNull();
-    expect(verifyEditToken(ownerAccessToken, SLUG, SECRET, NOW + 60)).toBe(false);
 
     // A plain (non-owner) access token must be rejected too.
     const plainAccessToken = mintAccessToken(SLUG, 900, SECRET, NOW);
@@ -147,7 +142,6 @@ describe("edit token (ADR-0063)", () => {
     expect(readEditToken("garbage", SLUG, SECRET, NOW)).toBeNull();
     expect(readEditToken("", SLUG, SECRET, NOW)).toBeNull();
     expect(readEditToken(".sig", SLUG, SECRET, NOW)).toBeNull();
-    expect(verifyEditToken("garbage", SLUG, SECRET, NOW)).toBe(false);
   });
 
   it("rejects a non-JSON payload", () => {
@@ -188,7 +182,6 @@ describe("edit token (ADR-0063)", () => {
       expect(claims).toEqual({ slug: SLUG, exp: NOW + 900, sub: SUB, scope: "edit" });
       expect(claims?.sessionStart).toBeUndefined();
       expect("sessionStart" in (claims ?? {})).toBe(false);
-      expect(verifyEditToken(legacyToken, SLUG, SECRET, NOW + 60)).toBe(true);
     });
 
     it("rejects a non-number sessionStart (type confusion)", () => {

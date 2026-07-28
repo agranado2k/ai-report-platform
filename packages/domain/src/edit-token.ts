@@ -109,15 +109,3 @@ export function readEditToken(
 ): EditClaims | null {
   return codec.read(token, expectedSlug, secret, nowSeconds);
 }
-
-/** True iff the token's signature is valid, it hasn't expired, it was minted for
- *  `expectedSlug`, and it narrows to a genuine edit-scoped capability. Thin boolean
- *  wrapper over `readEditToken`. */
-export function verifyEditToken(
-  token: string,
-  expectedSlug: string,
-  secret: string,
-  nowSeconds: number,
-): boolean {
-  return readEditToken(token, expectedSlug, secret, nowSeconds) !== null;
-}
