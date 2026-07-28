@@ -1159,3 +1159,12 @@ export class InMemoryGrantStore implements GrantStore {
     return ok(undefined);
   }
 }
+
+/** Fresh ADR-0039 idempotency deps (`IdempotentWriteDeps`) for use-case tests —
+ *  every mutating use case now requires them (idempotent-write.ts). */
+export function idempotencyTestDeps(): {
+  idempotency: InMemoryIdempotencyStore;
+  keyHasher: FakeHasher;
+} {
+  return { idempotency: new InMemoryIdempotencyStore(), keyHasher: new FakeHasher() };
+}

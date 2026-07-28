@@ -19,8 +19,15 @@ import {
   type Result,
   validationError,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reviveFolderReplay,
+} from "../idempotent-write";
 import { loadOwnedFolder, type OwnedGuardMessages, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, IdGenerator, UnitOfWork } from "../ports";
+
+const ROUTE = "POST /api/v1/folders";
 
 const PARENT_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "parent folder not found",
@@ -30,7 +37,7 @@ const PARENT_FOLDER_MESSAGES: OwnedGuardMessages = {
 /** Max folder nesting (Root = 0); the deepest folder is depth MAX_FOLDER_DEPTH. */
 export const MAX_FOLDER_DEPTH = 8;
 
-export interface CreateFolderDeps {
+export interface CreateFolderDeps extends IdempotentWriteDeps {
   readonly folders: FolderRepository;
   readonly ids: IdGenerator;
   /** Audit log (ADR-0070) — one `folder.created` row per create. */
@@ -46,6 +53,8 @@ export interface CreateFolderInput {
   /** Parent folder — required; the org Root is provisioned, not created here. */
   readonly parentId: FolderId;
   readonly name: string;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function createFolder(
@@ -72,6 +81,19 @@ export async function createFolder(
   });
   if (!built.ok) return built;
 
+  // Idempotency (ADR-0039), claimed after validation so a rejected request
+  // never poisons a key: a retried create replays the ORIGINAL folder
+  // resource instead of minting a duplicate / sibling-slug clash.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.parentId, input.name],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
+  const idemRef = idem.value.ref;
+
   return deps.uow.run(async () => {
     const saved = await deps.folders.save(built.value);
     if (!saved.ok) return saved;
@@ -86,6 +108,11 @@ export async function createFolder(
       },
     ]);
     if (!audited.ok) return audited;
+    const done = await deps.idempotency.complete(idemRef, {
+      responseStatus: 201,
+      responseBody: built.value,
+    });
+    if (!done.ok) return done;
     return ok(built.value);
   });
 }

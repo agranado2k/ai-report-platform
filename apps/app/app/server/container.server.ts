@@ -46,6 +46,33 @@ import type {
   UploadReportDeps,
   WriteGrantStore,
 } from "arp-application";
+import {
+  addComment,
+  createApiKey,
+  createFolder,
+  deleteComment,
+  deleteFolder,
+  deleteReport,
+  editComment,
+  getAcl,
+  getReport,
+  grantWrite,
+  listApiKeys,
+  listComments,
+  listFolders,
+  listReportVersions,
+  listWriteGrants,
+  moveReport,
+  renameFolder,
+  renameReport,
+  replyToComment,
+  resolveComment,
+  revokeApiKey,
+  revokeWrite,
+  searchReports,
+  setAcl,
+  uploadReport,
+} from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { clerkDisplayName } from "./clerk-display-name";
@@ -302,4 +329,140 @@ export async function scanDrainDeps(): Promise<DrainScansDeps> {
     scanWork: new PgBossScanWorkQueue(boss),
     scanner: new CleanStubScanner(),
   };
+}
+
+/**
+ * The container-wired OPERATIONS surface — one fully-wired invocation per use
+ * case (the "one write front door" companion to `handle()`). This absorbs the
+ * per-route deps bags that used to live in every /api/v1 route and dashboard
+ * action (both the named-accessor style and the spread-with-comments style):
+ * routes now declare WHAT runs, the composition root owns HOW it's wired.
+ *
+ * Wiring notes carried over from the old call sites:
+ * - The canWrite/loadReadable seams need `grants` (WriteGrantStore) +
+ *   `identities` — both already ride `deps()` (ADR-0060 §4).
+ * - Comment use cases add the comment repo + clock on top of `deps()`
+ *   (ADR-0064 §6).
+ * - `setAcl`'s `hasher` is the argon2id PasswordHasher and its `grants` is the
+ *   viewer-access GrantStore (ADR-0056) — deliberately DIFFERENT from the
+ *   write-grant store the other use cases take; named wiring keeps them apart.
+ * - Every mutating op now also carries the ADR-0039 idempotency pair
+ *   (`idempotency` + `keyHasher`, the same Sha256 hasher the upload pipeline
+ *   uses) — threading an `Idempotency-Key` is just an input field.
+ */
+export function ops() {
+  const d = deps();
+  const commentDeps = { ...d, comments: commentRepo(), clock: clock(), keyHasher: d.hasher };
+  const writeCommon = { idempotency: d.idempotency, keyHasher: d.hasher };
+  return {
+    // ── Reports & Folders ──────────────────────────────────────────────────
+    searchReports: bind2(searchReports, { reports: d.reports }),
+    uploadReport: (cmd: Parameters<typeof uploadReport>[1]) => uploadReport(d, cmd),
+    getReport: bind2(getReport, {
+      reports: d.reports,
+      grants: writeGrantStore(),
+      identities: identityStore(),
+    }),
+    renameReport: bind2(renameReport, {
+      reports: d.reports,
+      grants: writeGrantStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    deleteReport: bind2(deleteReport, {
+      reports: d.reports,
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    moveReport: bind2(moveReport, {
+      reports: d.reports,
+      folders: folderRepo(),
+      grants: writeGrantStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    listFolders: bind2(listFolders, { folders: folderRepo() }),
+    createFolder: bind2(createFolder, {
+      folders: folderRepo(),
+      ids: d.ids,
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    renameFolder: bind2(renameFolder, {
+      folders: folderRepo(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    deleteFolder: bind2(deleteFolder, {
+      folders: folderRepo(),
+      reports: d.reports,
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    listReportVersions: bind2(listReportVersions, { reports: d.reports }),
+    // ── Sharing (ACL + write grants) ───────────────────────────────────────
+    getAcl: bind2(getAcl, { reports: d.reports }),
+    setAcl: bind2(setAcl, {
+      reports: d.reports,
+      hasher: passwordHasher(),
+      grants: grantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    listWriteGrants: bind2(listWriteGrants, { reports: d.reports, grants: writeGrantStore() }),
+    grantWrite: bind2(grantWrite, {
+      reports: d.reports,
+      grants: writeGrantStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    revokeWrite: bind2(revokeWrite, {
+      reports: d.reports,
+      grants: writeGrantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    // ── Authoring & Collaboration (ADR-0064) ───────────────────────────────
+    listComments: bind2(listComments, commentDeps),
+    addComment: bind2(addComment, commentDeps),
+    replyToComment: bind2(replyToComment, commentDeps),
+    editComment: bind2(editComment, commentDeps),
+    resolveComment: bind2(resolveComment, commentDeps),
+    deleteComment: bind2(deleteComment, commentDeps),
+    // ── Identity & Access (API keys) ───────────────────────────────────────
+    listApiKeys: (actor: Parameters<typeof listApiKeys>[1]) =>
+      listApiKeys({ apiKeys: apiKeyStore() }, actor),
+    createApiKey: bind2(createApiKey, {
+      apiKeys: apiKeyStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    revokeApiKey: bind2(revokeApiKey, {
+      apiKeys: apiKeyStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+  };
+}
+
+export type Ops = ReturnType<typeof ops>;
+
+/** Partially apply a `(deps, actor, input)` use case with its wired deps →
+ *  `(actor, input)`. Keeps `ops()` declarative: one line per use case. */
+function bind2<D, A, I, R>(useCase: (deps: D, actor: A, input: I) => R, wired: D) {
+  return (actor: A, input: I): R => useCase(wired, actor, input);
 }

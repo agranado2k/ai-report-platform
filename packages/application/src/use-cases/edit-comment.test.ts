@@ -19,6 +19,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -65,6 +66,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
@@ -222,5 +224,25 @@ describe("editComment use case", () => {
     });
     expect(edited.ok).toBe(true);
     expect(edited.ok && edited.value.body).toBe("grantee edits their own");
+  });
+});
+
+describe("editComment idempotency (ADR-0039)", () => {
+  it("replays the recorded edited comment on an identical retry — one comment.edited audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("iiiiiiiiii"));
+    const created = await addComment(deps, ownerActor, {
+      slug: slug("iiiiiiiiii"),
+      body: "before",
+      anchor,
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const auditRowsAfterSeed = deps.audit.recorded().length;
+    const input = { slug: slug("iiiiiiiiii"), commentId: created.value.id, body: "after" };
+    const first = await editComment(deps, ownerActor, input);
+    const second = await editComment(deps, ownerActor, input);
+    expect(first.ok && first.value.body).toBe("after");
+    expect(second.ok && second.value.body).toBe("after");
+    expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 1);
   });
 });

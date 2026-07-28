@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryApiKeyStore,
   InMemoryAuditLogger,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { createApiKey } from "./create-api-key";
@@ -15,6 +16,7 @@ function makeDeps() {
     apiKeys: new InMemoryApiKeyStore(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
@@ -68,5 +70,31 @@ describe("createApiKey use case", () => {
     });
     // No plaintext token / secret anywhere in the recorded entries.
     expect(JSON.stringify(recorded)).not.toContain(r.value.token);
+  });
+});
+
+describe("createApiKey idempotency (ADR-0039 — explicit key only)", () => {
+  it("with NO explicit key, two same-named mints both execute (the derived fallback is deliberately not applied)", async () => {
+    const deps = makeDeps();
+    const first = await createApiKey(deps, { userId: alice, orgId: orgA }, { name: "ci" });
+    const second = await createApiKey(deps, { userId: alice, orgId: orgA }, { name: "ci" });
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(first.value.token).not.toBeNull();
+    expect(second.value.token).not.toBeNull();
+    expect(second.value.summary.id).not.toBe(first.value.summary.id);
+  });
+
+  it("with an explicit key, a retry replays the summary with token: null — the secret is never persisted", async () => {
+    const deps = makeDeps();
+    const input = { name: "mcp", idempotencyKey: "mint-1" };
+    const first = await createApiKey(deps, { userId: alice, orgId: orgA }, input);
+    const second = await createApiKey(deps, { userId: alice, orgId: orgA }, input);
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(first.value.token).not.toBeNull(); // fresh mint shows the secret once
+    expect(second.value.token).toBeNull(); // replay can never re-display it
+    expect(second.value.summary.id).toBe(first.value.summary.id);
+    // No second key was minted.
+    const list = await deps.apiKeys.listForUser(alice);
+    expect(list.ok && list.value.length).toBe(1);
   });
 });

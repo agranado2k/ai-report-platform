@@ -10,7 +10,9 @@ import { type AppError, err, type Result } from "arp-domain";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleAuditLogger } from "./audit-logger";
+import { DrizzleIdempotencyStore } from "./idempotency-store";
 import { DrizzleReportRepository } from "./report-repository";
+import { Sha256Hasher } from "./services/hasher";
 import {
   makeSampleReport,
   makeTestDb,
@@ -46,6 +48,8 @@ describe("deleteReport (pglite integration) — commit-last atomicity with a rea
       reports,
       audit: new FailingAuditLogger(),
       uow: new DrizzleUnitOfWork(tdb.ctx),
+      idempotency: new DrizzleIdempotencyStore(tdb.ctx),
+      keyHasher: new Sha256Hasher(),
     };
 
     const r = await deleteReport(
@@ -80,6 +84,8 @@ describe("deleteReport (pglite integration) — commit-last atomicity with a rea
       reports,
       audit: new DrizzleAuditLogger(tdb.ctx),
       uow: new DrizzleUnitOfWork(tdb.ctx),
+      idempotency: new DrizzleIdempotencyStore(tdb.ctx),
+      keyHasher: new Sha256Hasher(),
     };
 
     const r = await deleteReport(

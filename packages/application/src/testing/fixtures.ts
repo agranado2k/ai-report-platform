@@ -39,6 +39,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "./in-memory";
@@ -109,26 +110,31 @@ export function makeGrantCheckDeps() {
 }
 
 /** The write-seam quartet shared by rename/move/re-upload-shaped use cases:
- *  grant check + audit + uow (each test supplies its own repositories). */
+ *  grant check + audit + uow + idempotency (ADR-0039) — each test supplies its
+ *  own repositories. */
 export function makeWriteSeamDeps() {
   return {
     ...makeGrantCheckDeps(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
-/** The owner-only mutation trio (delete-report shape): reports + audit + uow. */
+/** The owner-only mutation trio (delete-report shape): reports + audit + uow,
+ *  plus the idempotency pair every mutating use case takes (ADR-0039). */
 export function makeOwnerMutationDeps() {
   return {
     reports: new InMemoryReportRepository(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
 /** The comment-authoring deps (add/reply/resolve/edit-comment shape, ADR-0064):
- *  clock fixed at 1000 so `createdAt`/`resolvedAt` assertions stay literal. */
+ *  clock fixed at 1000 so `createdAt`/`resolvedAt` assertions stay literal;
+ *  includes the idempotency pair every mutating use case takes (ADR-0039). */
 export function makeCommentDeps() {
   return {
     reports: new InMemoryReportRepository(),
@@ -140,5 +146,6 @@ export function makeCommentDeps() {
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
+    ...idempotencyTestDeps(),
   };
 }

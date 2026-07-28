@@ -3204,3 +3204,27 @@ catalog, zero new runtime dependencies** (no zod-at-the-boundary, no codegen).
   request decoders. `apps/app` untouched (a parallel work package owns its routes).
 
 Worktree: `worktree/wire-catalog` (branch `refactor/wire-catalog`), PR #216.
+
+## 2026-07-28 — Architecture-review candidates 3 + 1: actor resolution as a module, one write front door
+
+The top recommendation from the architecture review lands in one worktree/PR (`worktree/write-front-door`,
+branch `refactor/write-front-door`):
+
+- **Candidate 3 — actor resolution as a module.** The four front doors (`arp_` API key → Clerk session
+  with JIT provisioning on write → forwarded OAuth token → slug-bound edit token) now live in ONE
+  unit-tested cascade, `apps/app/app/server/resolve-actor.server.ts` (`resolveActor(args, {mode, slug},
+  deps)`), with every door's I/O injected. Door order, terminal-vs-fall-through per door, the read/write
+  provisioning difference, null-vs-401, and the STRUCTURAL slug gate on the edit-token door are all
+  proven by tests instead of prose. `auth.server.ts` keeps the live Clerk wiring and delegates;
+  `api-key-principal.ts` dissolved.
+- **Candidate 1 — one write front door.** `handle()` deepened (Idempotency-Key + audit context parsed
+  once, `methods()` verb dispatch, `ctx.url`), `container.server.ts` gained `ops()` (one fully-wired
+  invocation per use case, absorbing every per-route deps bag), and all 13 `/api/v1` routes + the
+  dashboard actions migrated onto it. **ADR-0039 is now real on every mutating endpoint:** all 16
+  remaining mutating use cases adopt upload-report's begin/complete-inside-uow idempotency shape via the
+  new `beginIdempotentWrite` helper (`packages/application/src/idempotent-write.ts`) — replay/409/422
+  semantics proven at use-case level and through `handle()` at the wire. Deliberate carve-outs documented
+  in code + the PR: password-mode `setAcl` and `createApiKey` skip the DERIVED key (never derive a key
+  from a plaintext password; never replay a secret — a replayed mint returns `token: null`).
+- ADR-0070's magic-link exclusion stands (no org-shaped actor at those call sites) — audit for
+  sendMagicLink/redeemMagicLink stays a flagged follow-up, per ADR-0070 §4.

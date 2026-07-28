@@ -10,15 +10,18 @@ import {
   err,
   insufficientScope,
   makeEmailAddress,
+  ok,
   type Result,
   type Slug,
 } from "arp-domain";
+import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork, WriteGrantStore } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
+const ROUTE = "DELETE /api/v1/reports/{slug}/write-grants/{email}";
 
-export interface RevokeWriteDeps {
+export interface RevokeWriteDeps extends IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly grants: WriteGrantStore;
   /** Audit log (ADR-0070) — one `grant.write.revoked` row per revoke. */
@@ -33,6 +36,8 @@ export interface RevokeWriteActor extends TenancyActor {
 export interface RevokeWriteInput {
   readonly slug: Slug;
   readonly email: string;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function revokeWrite(
@@ -48,10 +53,21 @@ export async function revokeWrite(
   const email = makeEmailAddress(input.email);
   if (!email.ok) return email;
 
+  // Idempotency (ADR-0039): a replayed revoke returns the recorded 204.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, email.value],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return ok(undefined);
+  const idemRef = idem.value.ref;
+
   return deps.uow.run(async () => {
     const revoked = await deps.grants.revoke(found.value.id, email.value);
     if (!revoked.ok) return revoked;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "grant.write.revoked",
         orgId: actor.orgId,
@@ -65,5 +81,7 @@ export async function revokeWrite(
         meta: { granteeEmail: email.value },
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
   });
 }

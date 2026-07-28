@@ -29,6 +29,11 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reviveCommentReplay,
+} from "../idempotent-write";
 import { loadReadableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type {
   AuditLogger,
@@ -39,7 +44,11 @@ import type {
   UnitOfWork,
 } from "../ports";
 
-export interface EditCommentDeps extends WriteGrantCheckDeps {
+// Same wire route as resolveComment (PATCH is overloaded on body shape) — the
+// "edit" discriminator segment in the fingerprint keeps the two apart.
+const ROUTE = "PATCH /api/v1/reports/{slug}/comments/{comment_id}";
+
+export interface EditCommentDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
   readonly clock: Clock;
@@ -64,6 +73,8 @@ export interface EditCommentInput {
    *  `undefined` (the field omitted) SKIPS the check (backward-compatible: an API
    *  caller not opting into optimistic concurrency behaves as before). */
   readonly expectedEditedAt?: number | null;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function editComment(
@@ -111,12 +122,31 @@ export async function editComment(
   });
   if (!emission.ok) return emission;
 
+  // Idempotency (ADR-0039): a retried edit replays the ORIGINAL edited comment
+  // instead of re-stamping `editedAt`.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [
+      input.slug,
+      input.commentId,
+      "edit",
+      input.body ?? "",
+      input.intent ?? "",
+      input.expectedEditedAt === undefined ? "" : String(input.expectedEditedAt),
+    ],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveCommentReplay(idem.value.record);
+  const idemRef = idem.value.ref;
+
   const committed = await deps.uow.run(async () => {
     const saved = await deps.comments.save(emission.value.comment);
     if (!saved.ok) return saved;
     const enqueued = await deps.outbox.enqueue(emission.value.events);
     if (!enqueued.ok) return enqueued;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "comment.edited",
         orgId: actor.orgId,
@@ -126,6 +156,11 @@ export async function editComment(
         meta: { reportId: report.value.id },
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, {
+      responseStatus: 200,
+      responseBody: emission.value.comment,
+    });
   });
   if (!committed.ok) return committed;
 

@@ -50,9 +50,8 @@
 // answer the OPTIONS preflight (React-Router routes any OPTIONS to
 // `loader`, never `action`) and otherwise 405s, mirroring
 // api.v1.reports.$slug.comments.$comment_id.ts's PATCH/DELETE-only route.
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { err, methodNotAllowed } from "arp-domain";
-import { errorToHttp, refreshEditTokenToHttp } from "arp-http";
+import { err } from "arp-domain";
+import { refreshEditTokenToHttp } from "arp-http";
 import {
   accessTokenSecret,
   deps,
@@ -61,50 +60,46 @@ import {
 } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { refreshEditToken, resolvePresentedSession } from "../server/edit-token-refresh.server";
-import { handle } from "../server/handle.server";
-import { toResponse } from "../server/http.server";
+import { handle, methodNotAllowedLoader, methods } from "../server/handle.server";
 import { EDIT_TTL_SECONDS } from "../server/open-report.server";
 
 const ALLOWED_METHODS = "POST, OPTIONS";
 
-export const loader = corsRoute(ALLOWED_METHODS, async (_args: LoaderFunctionArgs) =>
-  toResponse(errorToHttp(methodNotAllowed("POST"))),
-);
+export const loader = corsRoute(ALLOWED_METHODS, methodNotAllowedLoader("POST"));
 
-export const action = corsRoute(
-  ALLOWED_METHODS,
-  handle({
-    mode: "write",
-    slug: true,
-    run: ({ actor, slug, args }) => {
-      const secret = accessTokenSecret();
-      if (!secret) {
-        // No secret configured (previews/dev): no token is ever trusted OR
-        // minted, the same fail-closed posture resolveEditTokenActor itself
-        // takes. In practice unreachable — an edit-token actor can only
-        // have been resolved AT ALL when a secret exists — but kept
-        // explicit rather than assumed, since `actor` here isn't
-        // structurally guaranteed to have come through that front door.
-        return err({ kind: "Unauthenticated", message: "private viewing is not configured" });
-      }
-      // One `now` for both the presented-session read and the mint below —
-      // avoids a (harmless, but needless) skew between the two.
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      const presented = resolvePresentedSession(args.request, slug, secret, nowSeconds);
-      return refreshEditToken(
-        {
-          reports: deps().reports,
-          grants: writeGrantStore(),
-          identities: identityStore(),
-          secret,
-          ttlSeconds: EDIT_TTL_SECONDS,
-          nowSeconds: () => nowSeconds,
-        },
-        actor,
-        slug,
-        presented,
-      );
-    },
-    toHttp: (result) => refreshEditTokenToHttp(result),
-  }),
-);
+const postHandler = handle({
+  mode: "write",
+  slug: true,
+  run: ({ actor, slug, args }) => {
+    const secret = accessTokenSecret();
+    if (!secret) {
+      // No secret configured (previews/dev): no token is ever trusted OR
+      // minted, the same fail-closed posture resolveEditTokenActor itself
+      // takes. In practice unreachable — an edit-token actor can only
+      // have been resolved AT ALL when a secret exists — but kept
+      // explicit rather than assumed, since `actor` here isn't
+      // structurally guaranteed to have come through that front door.
+      return err({ kind: "Unauthenticated", message: "private viewing is not configured" });
+    }
+    // One `now` for both the presented-session read and the mint below —
+    // avoids a (harmless, but needless) skew between the two.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const presented = resolvePresentedSession(args.request, slug, secret, nowSeconds);
+    return refreshEditToken(
+      {
+        reports: deps().reports,
+        grants: writeGrantStore(),
+        identities: identityStore(),
+        secret,
+        ttlSeconds: EDIT_TTL_SECONDS,
+        nowSeconds: () => nowSeconds,
+      },
+      actor,
+      slug,
+      presented,
+    );
+  },
+  toHttp: (result) => refreshEditTokenToHttp(result),
+});
+
+export const action = corsRoute(ALLOWED_METHODS, methods({ POST: postHandler }));

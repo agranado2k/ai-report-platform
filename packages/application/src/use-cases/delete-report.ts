@@ -5,11 +5,14 @@
 // viewer then returns 410) + an audit_log row (ADR-0070), committed together
 // (ADR-0037 §5 commit-last atomicity). The slug + blobs are retained for the
 // appeal/purge window (db-design.md).
-import type { AppError, Result, Slug } from "arp-domain";
+import { type AppError, ok, type Result, type Slug } from "arp-domain";
+import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork } from "../ports";
 
-export interface DeleteReportDeps {
+const ROUTE = "DELETE /api/v1/reports/{slug}";
+
+export interface DeleteReportDeps extends IdempotentWriteDeps {
   readonly reports: ReportRepository;
   /** Audit log (ADR-0070) — one `report.deleted` row per soft-delete. */
   readonly audit: AuditLogger;
@@ -18,6 +21,8 @@ export interface DeleteReportDeps {
 export type DeleteReportActor = TenancyActor;
 export interface DeleteReportInput {
   readonly slug: Slug;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function deleteReport(
@@ -25,13 +30,28 @@ export async function deleteReport(
   actor: DeleteReportActor,
   input: DeleteReportInput,
 ): Promise<Result<void, AppError>> {
+  // Idempotency (ADR-0039), claimed BEFORE the load (unlike the non-delete
+  // mutations): a successful delete makes the retry's own load 404 (the report
+  // is now soft-deleted), so the replay check must run first for the retried
+  // request to see its recorded 204 instead of NotFound. Replay is keyed per
+  // acting user — it only ever returns a response that same user already got.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return ok(undefined);
+  const idemRef = idem.value.ref;
+
   const found = await loadOwnedReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
 
   return deps.uow.run(async () => {
     const deleted = await deps.reports.softDelete(found.value.id);
     if (!deleted.ok) return deleted;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "report.deleted",
         orgId: actor.orgId,
@@ -40,5 +60,7 @@ export async function deleteReport(
         targetId: found.value.id,
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
   });
 }

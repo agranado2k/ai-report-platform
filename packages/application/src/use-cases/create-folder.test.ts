@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -30,6 +31,7 @@ async function setup() {
     ids: new SequentialIdGenerator(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
@@ -171,5 +173,40 @@ describe("createFolder use case", () => {
       targetId: r.value.id,
       meta: { parentId: rootA },
     });
+  });
+});
+
+describe("createFolder idempotency (ADR-0039)", () => {
+  it("replays the ORIGINAL folder resource on an identical retry — no duplicate", async () => {
+    const d = await setup();
+    const actor = { orgId: orgA, userId: actorA };
+    const input = { parentId: rootA, name: "Quarterly" };
+    const first = await createFolder(d, actor, input);
+    const second = await createFolder(d, actor, input);
+    expect(first.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).toBe(first.value.id); // same folder, not a sibling clash
+    const list = await d.folders.listByOrg(orgA);
+    expect(list.ok && list.value.filter((f) => f.name === "Quarterly").length).toBe(1);
+  });
+
+  it("a fresh explicit Idempotency-Key deliberately creates a second same-named folder attempt", async () => {
+    const d = await setup();
+    const actor = { orgId: orgA, userId: actorA };
+    const first = await createFolder(d, actor, {
+      parentId: rootA,
+      name: "Twice",
+      idempotencyKey: "k1",
+    });
+    const second = await createFolder(d, actor, {
+      parentId: rootA,
+      name: "Twice",
+      idempotencyKey: "k2",
+    });
+    expect(first.ok).toBe(true);
+    // A fresh key means NO replay: the second call really executed — and hit
+    // the real sibling-slug uniqueness guard, exactly as a deliberate
+    // duplicate-create should. (A replay would have returned the 201 body.)
+    expect(!second.ok && second.error.kind).toBe("ValidationError");
   });
 });
