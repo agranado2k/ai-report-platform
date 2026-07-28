@@ -15,6 +15,13 @@ ADR-024 shipped a 12-line `pipe()` and a `Result<T, E>` with five combinators (`
 
 Unused exports are not free: they are surface an agent (or human) must read, a shelf that invites speculative use, and — per ADR-024's own comment in `result.ts` — a source of stale claims about how the code works.
 
+## Decision drivers
+
+- **The deletion test as policy** — a module with zero production callers hides nothing; deleting it loses nothing and shrinks the surface an agent or human must read.
+- **Honest architectural claims** — ADR-024 and `result.ts` claimed a `pipe()`-threading style that never materialized; stale claims mislead future readers and reviews.
+- **AI-navigability** — grep-for-callers must stay an honest signal in an agent-driven repo; speculative shelves poison it.
+- **Reversibility** — re-adding a combinator when a real caller appears is a 10-line reviewed PR; carrying it unused is a permanent tax.
+
 ## Decision outcome
 
 Delete `packages/domain/src/pipe.ts` (and its test and index re-export) and the five `Result` combinators (and their tests). Keep the `Result<T, E>` type and the `ok`/`err` constructors.
