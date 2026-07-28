@@ -1,7 +1,7 @@
 // Pure data-assembly for the `/<slug>/edit` route's loader (unified-experience
 // epic). Factored out so the "never crash the editor over a Comments/Versions
 // load hiccup" degrade-gracefully rule is unit-testable without a Request/
-// Response — mirrors ../server/edit-session.ts's role for the auth decision.
+// Response — mirrors ../server/gate.server.ts's role for the serve decision.
 // A `listComments`/`listVersions` failure (network blip, a transient 5xx)
 // degrades to an EMPTY list, exactly like the loader's other "can't load
 // this bit, don't break the page" fallbacks (resolveViewableReport's

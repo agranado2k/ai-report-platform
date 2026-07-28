@@ -43,8 +43,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { resolveViewableReport } from "arp-application";
-import { makeSlug, versionIdToWire } from "arp-domain";
+import { versionIdToWire } from "arp-domain";
 import { type EditorSelection, ReportEditor } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
@@ -70,12 +69,7 @@ import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import {
-  buildEditCookie,
-  degradeLocation,
-  readEditCookieValue,
-  resolveEditAccess,
-} from "../server/edit-session";
+import { decideServe } from "../server/gate.server";
 
 function notFoundResponse(): Response {
   const headers = viewHeaders();
@@ -93,85 +87,64 @@ function notFoundResponse(): Response {
 // content or the edit token, so it gets the stricter, unauthenticated-route
 // header set.
 //
-// `oa`, when present (hotfix — see `degradeLocation`'s doc), routes an OWNER
-// through the viewer's existing `?access=` flow instead of the bare gated
-// viewer, so a broken edit-token round-trip degrades to a read-only OWNER
-// view of their own report rather than cascading to `/unlock/{slug}`.
-function redirectToPublicViewer(slug: string, oa?: string): Response {
+// `to` is either the gate's degrade location — which routes an OWNER through
+// the viewer's `?access=` flow when the `oa=` fallback token is present
+// (Phase 5-E hotfix, see gate.server.ts's degradeLocation) — or the bare
+// `/${slug}` for the post-gate can't-render cases below (blob/shell load).
+function redirectToPublicViewer(to: string): Response {
   const headers = viewHeaders();
-  headers.set("location", degradeLocation(slug, oa));
+  headers.set("location", to);
   headers.set("cache-control", "no-store");
   headers.set("x-robots-tag", "noindex, nofollow");
   return new Response(null, { status: 302, headers });
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  // Validate the slug's SHAPE first — same rule as $slug.tsx and the interim
-  // edit-redirect route: never build a Location/cookie Path out of an
-  // unvalidated path segment.
-  const slugR = makeSlug(params.slug ?? "");
-  if (!slugR.ok) throw notFoundResponse();
-  const slug = slugR.value;
-
-  const url = new URL(request.url);
-  const queryToken = url.searchParams.get("et") ?? undefined;
-  // Hotfix fallback (see `degradeLocation`'s doc): the fallback owner access
-  // token `ownerOpenLocation` mints alongside `et=` for actual owners, ONLY
-  // consulted when the edit-token round-trip below is denied.
-  const oa = url.searchParams.get("oa") ?? undefined;
-  const cookieToken = readEditCookieValue(request.headers.get("cookie"));
   const { secret, appOrigin } = viewerAccessConfig();
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const { reports, blobs, grants } = viewerDeps();
 
-  const decision = resolveEditAccess({ queryToken, cookieToken, slug, secret, nowSeconds });
+  // The ONE viewer gate (../server/gate.server.ts, decision-matrix-tested):
+  // slug validation, the ?et= hand-off / arp_edit cookie seam (ADR-0063), the
+  // oa= owner degrade (Phase 5-E, incl. its observability warn), and the
+  // is-there-a-document-to-edit resolution all live there. This loader only
+  // APPLIES the Decision — and, on "serve", loads the editor data.
+  const decision = await decideServe(request, params.slug ?? "", "edit", {
+    reports,
+    grants,
+    secret,
+    appOrigin,
+    nowSeconds: Math.floor(Date.now() / 1000),
+  });
 
-  if (decision.kind === "denied") {
-    // Observability (claude-review #187): when an OWNER's edit-token round-trip
-    // is denied and we degrade them to a read-only owner view (`oa` present),
-    // emit a structured signal. This is the exact secret-misalignment class of
-    // incident that — before this log — could only be inferred from user
-    // reports. Vercel captures `console` output to the function logs; the view
-    // origin has no logger of its own (ADR-0038 keeps it minimal), so a bare
-    // `console.warn` is the dependency-free signal here. Never logs the token.
-    if (oa) {
-      console.warn(
-        JSON.stringify({ event: "owner-edit-degraded-to-view", slug, reason: "edit-token-denied" }),
-      );
-    }
-    return redirectToPublicViewer(slug, oa);
-  }
-
-  if (decision.kind === "set-cookie") {
+  if (decision.kind === "error") throw notFoundResponse();
+  if (decision.kind === "redirect") return redirectToPublicViewer(decision.to);
+  if (decision.kind === "setCookieAndRedirect") {
     // Valid `?et=` hand-off: mint the arp_edit cookie and 303 to the clean
     // URL — drops the token out of the address bar/history/referer, exactly
     // like $slug.tsx's `grant` → unlock-cookie flow.
     const headers = viewHeaders();
-    headers.set("location", `/${slug}/edit`);
-    headers.set("set-cookie", buildEditCookie(slug, decision.token, decision.maxAgeSeconds));
+    headers.set("location", decision.to);
+    headers.set("set-cookie", decision.cookie);
     headers.set("cache-control", "no-store");
     headers.set("x-robots-tag", "noindex, nofollow");
     return new Response(null, { status: 303, headers });
   }
+  if (decision.kind !== "serve" || !decision.edit || !appOrigin) {
+    // Defensive narrowing only: for purpose "edit" the gate never emits
+    // `interstitial`, never a "serve" without the edit capability, and never
+    // a "serve" with appOrigin unset (it degrades those itself) — but the
+    // types can't prove it, so degrade the same way the gate would.
+    return redirectToPublicViewer(`/${params.slug ?? ""}`);
+  }
 
-  // decision.kind === "render": a valid, already-redeemed arp_edit cookie.
-  // Never render the editor without a configured app origin — editViewHeaders
-  // REQUIRES it for connect-src, and there would be nowhere for Save to POST
-  // to anyway (mirrors the interim redirect route's fail-closed-on-unset-
-  // APP_ORIGIN posture).
-  if (!appOrigin) return redirectToPublicViewer(slug);
-
-  const { reports, blobs } = viewerDeps();
-  const outcome = await resolveViewableReport(slug, reports);
-  // Any non-"serve" outcome (not found / deleted / flagged / still scanning)
-  // or a lookup failure degrades to the public viewer, which already renders
-  // the correct status page for every one of those states (ADR-0038 §2) —
-  // this route doesn't duplicate that state machine, it only adds "render
-  // the editor" on top of the one state where there's a document to edit.
-  if (!outcome.ok || outcome.value.kind !== "serve") return redirectToPublicViewer(slug);
-  const { report, version } = outcome.value;
+  // A valid, already-redeemed arp_edit cookie, and a clean live version to
+  // edit. From here on this loader only ASSEMBLES the editor data.
+  const { report, version } = decision;
+  const { token: editToken, claims: editClaims } = decision.edit;
+  const slug = report.slug;
 
   const blob = await blobs.readObject(report.id, version.id, version.manifest.entryDocument);
-  if (!blob.ok || !blob.value) return redirectToPublicViewer(slug);
+  if (!blob.ok || !blob.value) return redirectToPublicViewer(`/${slug}`);
 
   let shell: Shell;
   let bodyHtml: string;
@@ -180,7 +153,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   } catch {
     // Malformed content (shouldn't happen for anything that passed the
     // upload pipeline) — never crash the edit route; fall back to read-only.
-    return redirectToPublicViewer(slug);
+    return redirectToPublicViewer(`/${slug}`);
   }
 
   // Lossless reopen when a prior editor save left a `_source.json` sidecar;
@@ -200,8 +173,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // just render empty until the user's own client-side actions succeed (see
   // buildEditLoaderExtras).
   const [commentsResult, versionsResult] = await Promise.all([
-    listComments({ appOrigin, slug, editToken: decision.token }),
-    listVersions({ appOrigin, slug, editToken: decision.token }),
+    listComments({ appOrigin, slug, editToken }),
+    listVersions({ appOrigin, slug, editToken }),
   ]);
   const { comments, versions, commentsHasMore, versionsHasMore } = buildEditLoaderExtras(
     commentsResult,
@@ -247,12 +220,12 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       shell,
       slug,
       appOrigin,
-      editToken: decision.token,
+      editToken,
       // The validated token's expiry (epoch seconds) — decoded from the
-      // `EditClaims` `resolveEditAccess` already parsed above, never
-      // re-parsed from the raw token client-side. Drives the silent-refresh
-      // timer (ADR-0063 Phase 5) in the component below.
-      editTokenExp: decision.claims.exp,
+      // `EditClaims` the gate already parsed above, never re-parsed from the
+      // raw token client-side. Drives the silent-refresh timer (ADR-0063
+      // Phase 5) in the component below.
+      editTokenExp: editClaims.exp,
       docTitle: report.title,
       versionId: versionIdToWire(version.id),
       comments,
