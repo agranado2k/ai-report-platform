@@ -16,6 +16,12 @@ import {
   type Slug,
 } from "arp-domain";
 import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reportReplayBody,
+  reviveReportReplay,
+} from "../idempotent-write";
+import {
   loadOwnedFolder,
   loadWritableReport,
   type OwnedGuardMessages,
@@ -24,12 +30,14 @@ import {
 } from "../load-owned";
 import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
+const ROUTE = "POST /api/v1/reports/{slug}/move";
+
 const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
   notFound: "target folder not found",
   notAllowed: "target folder is not in the report's org",
 };
 
-export interface MoveReportDeps extends WriteGrantCheckDeps {
+export interface MoveReportDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly folders: FolderRepository;
   /** Audit log (ADR-0070) — one `report.moved` row per move. */
@@ -42,6 +50,8 @@ export type MoveReportActor = TenancyActor;
 export interface MoveReportInput {
   readonly slug: Slug;
   readonly toFolderId: FolderId;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function moveReport(
@@ -64,6 +74,17 @@ export async function moveReport(
   );
   if (!target.ok) return target;
 
+  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, input.toFolderId],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveReportReplay(idem.value.record);
+  const idemRef = idem.value.ref;
+
   const moved = placeInFolder(found.value, input.toFolderId);
   return deps.uow.run(async () => {
     const saved = await deps.reports.save(moved);
@@ -79,6 +100,11 @@ export async function moveReport(
       },
     ]);
     if (!audited.ok) return audited;
+    const done = await deps.idempotency.complete(idemRef, {
+      responseStatus: 200,
+      responseBody: reportReplayBody(moved),
+    });
+    if (!done.ok) return done;
     return ok(moved); // the moved report → the resource the API returns (ADR-0053)
   });
 }

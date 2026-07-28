@@ -15,6 +15,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { renameReport } from "./rename-report";
@@ -24,6 +25,7 @@ const writeDeps = () => ({
   identities: new InMemoryIdentityStore(),
   audit: new InMemoryAuditLogger(),
   uow: new PassThroughUnitOfWork(),
+  ...idempotencyTestDeps(),
 });
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -115,5 +117,61 @@ describe("renameReport use case", () => {
       targetId: toRename.id,
       meta: { from: "Old Title", to: "New Title" },
     });
+  });
+});
+
+describe("renameReport idempotency (ADR-0039)", () => {
+  it("replays the recorded response on an identical retry — one mutation, one audit row", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "ffffffffff"));
+    const deps = { reports, ...writeDeps() };
+    const input = { slug: slug("ffffffffff"), title: "New Title" };
+
+    const first = await renameReport(deps, ownerActor, input);
+    const second = await renameReport(deps, ownerActor, input);
+    expect(first.ok && first.value.title).toBe("New Title");
+    expect(second.ok && second.value.title).toBe("New Title");
+    expect(second.ok && second.value.slug).toBe("ffffffffff");
+    expect(deps.audit.recorded().length).toBe(1); // the replay never re-audited
+  });
+
+  it("rejects an explicit Idempotency-Key reused with a different payload (422)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "gggggggggg"));
+    const deps = { reports, ...writeDeps() };
+
+    const first = await renameReport(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      title: "One",
+      idempotencyKey: "k1",
+    });
+    expect(first.ok).toBe(true);
+    const second = await renameReport(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      title: "Two",
+      idempotencyKey: "k1",
+    });
+    expect(!second.ok && second.error.kind).toBe("IdempotencyKeyReuseDifferentBody");
+  });
+
+  it("maps a concurrent in-flight duplicate to IdempotencyInFlight (409)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "hhhhhhhhhh"));
+    const deps = { reports, ...writeDeps() };
+    // Claim the key but never complete it (simulates an in-flight request).
+    await deps.idempotency.begin(
+      {
+        actingUserId: owner,
+        route: "PATCH /api/v1/reports/{slug}",
+        key: "inflight",
+      },
+      deps.keyHasher.hash("hhhhhhhhhh\nX"),
+    );
+    const r = await renameReport(deps, ownerActor, {
+      slug: slug("hhhhhhhhhh"),
+      title: "X",
+      idempotencyKey: "inflight",
+    });
+    expect(!r.ok && r.error.kind).toBe("IdempotencyInFlight");
   });
 });

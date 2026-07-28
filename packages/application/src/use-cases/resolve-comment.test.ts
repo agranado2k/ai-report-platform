@@ -19,6 +19,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -67,6 +68,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
@@ -246,5 +248,25 @@ describe("resolveComment use case", () => {
     });
     expect(resolved.ok).toBe(true);
     expect(resolved.ok && resolved.value.resolvedAt).not.toBeNull();
+  });
+});
+
+describe("resolveComment idempotency (ADR-0039)", () => {
+  it("replays the recorded resolved comment on an identical retry — one comment.resolved audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("kkkkkkkkkk"));
+    const created = await addComment(deps, ownerActor, {
+      slug: slug("kkkkkkkkkk"),
+      body: "note",
+      anchor,
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const auditRowsAfterSeed = deps.audit.recorded().length;
+    const input = { slug: slug("kkkkkkkkkk"), commentId: created.value.id };
+    const first = await resolveComment(deps, ownerActor, input);
+    const second = await resolveComment(deps, ownerActor, input);
+    expect(first.ok && first.value.resolvedAt).not.toBeNull();
+    expect(second.ok && second.value.resolvedAt).not.toBeNull();
+    expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 1);
   });
 });

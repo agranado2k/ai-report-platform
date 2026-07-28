@@ -20,6 +20,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -65,6 +66,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
@@ -162,5 +164,25 @@ describe("deleteComment use case", () => {
     expect(r.ok).toBe(true);
     const found = await deps.comments.findById(created.value.id);
     expect(found.ok && found.value).toBeNull();
+  });
+});
+
+describe("deleteComment idempotency (ADR-0039)", () => {
+  it("replays the recorded 204 on an identical retry — one comment.deleted audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("llllllllll"));
+    const created = await addComment(deps, ownerActor, {
+      slug: slug("llllllllll"),
+      body: "bye",
+      anchor,
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const auditRowsAfterSeed = deps.audit.recorded().length;
+    const input = { slug: slug("llllllllll"), commentId: created.value.id };
+    const first = await deleteComment(deps, ownerActor, input);
+    const second = await deleteComment(deps, ownerActor, input);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true); // replayed 204, NOT a NotFound
+    expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 1);
   });
 });

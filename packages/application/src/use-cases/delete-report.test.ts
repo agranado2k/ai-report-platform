@@ -15,6 +15,7 @@ import type { AuditLogger } from "../ports";
 import {
   InMemoryAuditLogger,
   InMemoryReportRepository,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { type DeleteReportDeps, deleteReport } from "./delete-report";
@@ -29,6 +30,7 @@ function makeDeps() {
     reports: new InMemoryReportRepository(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
@@ -81,11 +83,17 @@ describe("deleteReport use case", () => {
     expect(!r.ok && r.error.kind).toBe("NotFound");
   });
 
-  it("rejects an already-deleted report with NotFound", async () => {
+  it("rejects an already-deleted report with NotFound under a FRESH explicit key", async () => {
+    // An IDENTICAL retry replays the recorded 204 (ADR-0039 — see the
+    // idempotency describe below); a deliberate re-delete under a fresh
+    // explicit Idempotency-Key re-executes and surfaces the real NotFound.
     const deps = makeDeps();
     await deps.reports.save(report(orgA, "dddddddddd"));
     await deleteReport(deps, ownerActor, { slug: slug("dddddddddd") });
-    const again = await deleteReport(deps, ownerActor, { slug: slug("dddddddddd") });
+    const again = await deleteReport(deps, ownerActor, {
+      slug: slug("dddddddddd"),
+      idempotencyKey: "fresh-deliberate-retry",
+    });
     expect(!again.ok && again.error.kind).toBe("NotFound");
   });
 
@@ -112,6 +120,7 @@ describe("deleteReport use case", () => {
       reports: new InMemoryReportRepository(),
       audit: failingAudit,
       uow: new PassThroughUnitOfWork(),
+      ...idempotencyTestDeps(),
     };
     await deps.reports.save(report(orgA, "ffffffffff"));
 
@@ -126,5 +135,17 @@ describe("deleteReport use case", () => {
     // packages/adapters/src/delete-report.integration.test.ts, which wires
     // deleteReport with DrizzleUnitOfWork + DrizzleReportRepository + a
     // failing AuditLogger and asserts the row's `deleted_at` stayed null.
+  });
+});
+
+describe("deleteReport idempotency (ADR-0039)", () => {
+  it("replays the recorded 204 on an identical retry — one soft-delete, one audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "ffffffffff"));
+    const first = await deleteReport(deps, ownerActor, { slug: slug("ffffffffff") });
+    const second = await deleteReport(deps, ownerActor, { slug: slug("ffffffffff") });
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(deps.audit.recorded().length).toBe(1);
   });
 });

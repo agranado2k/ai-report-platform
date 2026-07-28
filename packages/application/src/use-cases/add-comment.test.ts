@@ -19,6 +19,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -64,6 +65,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
@@ -207,5 +209,29 @@ describe("addComment use case", () => {
     });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
     expect(deps.outbox.drained()).toEqual([]);
+  });
+});
+
+describe("addComment idempotency (ADR-0039)", () => {
+  it("replays the ORIGINAL comment on an identical retry — no duplicate comment, one audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "iiiiiiiiii"));
+    const input = { slug: slug("iiiiiiiiii"), body: "same note", anchor };
+    const first = await addComment(deps, ownerActor, input);
+    const second = await addComment(deps, ownerActor, input);
+    expect(first.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).toBe(first.value.id); // the SAME comment, not a twin
+    expect(deps.audit.recorded().length).toBe(1);
+  });
+
+  it("a fresh explicit Idempotency-Key deliberately posts a second identical comment", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "jjjjjjjjjj"));
+    const base = { slug: slug("jjjjjjjjjj"), body: "same note", anchor };
+    const first = await addComment(deps, ownerActor, { ...base, idempotencyKey: "k1" });
+    const second = await addComment(deps, ownerActor, { ...base, idempotencyKey: "k2" });
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).not.toBe(first.value.id);
   });
 });

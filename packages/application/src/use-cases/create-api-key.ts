@@ -11,16 +11,25 @@ import {
   type AppError,
   err,
   type OrgId,
+  ok,
   type Result,
   type UserId,
   validationError,
 } from "arp-domain";
-import type { ApiKeyStore, ApiKeySummary, AuditLogger, UnitOfWork } from "../ports";
+import { beginIdempotentWrite, type IdempotentWriteDeps, reviveReplay } from "../idempotent-write";
+import type {
+  ApiKeyStore,
+  ApiKeySummary,
+  AuditLogger,
+  IdempotencyKeyRef,
+  UnitOfWork,
+} from "../ports";
 
 /** The only Scope the settings UI offers today (ADR-0016). */
 const DEFAULT_SCOPES: readonly string[] = ["reports:write"];
+const ROUTE = "POST /settings/api-keys";
 
-export interface CreateApiKeyDeps {
+export interface CreateApiKeyDeps extends IdempotentWriteDeps {
   readonly apiKeys: ApiKeyStore;
   /** Audit log (ADR-0070) -- one `api_key.created` row per mint. */
   readonly audit: AuditLogger;
@@ -33,15 +42,58 @@ export interface CreateApiKeyActor {
 export interface CreateApiKeyInput {
   readonly name: string;
   readonly scopes?: readonly string[];
+  /** The client's explicit `Idempotency-Key` (ADR-0039). For THIS use case the
+   *  derived-fallback key is deliberately NOT applied (see below) — idempotency
+   *  engages only when the caller supplies a key. */
+  readonly idempotencyKey?: string;
+}
+
+/** The mint result. `token` is the one-time secret — present on a fresh mint,
+ *  `null` on an idempotent REPLAY: the plaintext token is never persisted (we
+ *  only store its HMAC, ADR-0008), so a replay can return the summary but can
+ *  never re-display the secret. */
+export interface CreatedApiKey {
+  readonly token: string | null;
+  readonly summary: ApiKeySummary;
 }
 
 export async function createApiKey(
   deps: CreateApiKeyDeps,
   actor: CreateApiKeyActor,
   input: CreateApiKeyInput,
-): Promise<Result<{ readonly token: string; readonly summary: ApiKeySummary }, AppError>> {
+): Promise<Result<CreatedApiKey, AppError>> {
   const name = input.name.trim();
   if (!name) return err(validationError("give your key a name", "name"));
+
+  // Idempotency (ADR-0039), EXPLICIT-KEY ONLY — a deliberate narrowing: the
+  // derived fallback would fingerprint on (name, scopes), silently replaying a
+  // user's intentional second same-named key within 24h AND returning it
+  // without a secret. Duplicate mints are cheap and harmless (keys are
+  // revocable); a swallowed mint with no secret is not. The stored replay body
+  // carries ONLY the summary — never the plaintext token.
+  let idemRef: IdempotencyKeyRef | undefined;
+  if (input.idempotencyKey !== undefined) {
+    const idem = await beginIdempotentWrite(deps, {
+      actingUserId: actor.userId,
+      route: ROUTE,
+      key: input.idempotencyKey,
+      fingerprint: [name, (input.scopes ?? DEFAULT_SCOPES).join(",")],
+    });
+    if (!idem.ok) return idem;
+    if (idem.value.outcome === "replay") {
+      const summary = reviveReplay(
+        idem.value.record,
+        (body): body is ApiKeySummary =>
+          typeof body === "object" &&
+          body !== null &&
+          typeof (body as Record<string, unknown>).id === "string" &&
+          typeof (body as Record<string, unknown>).keyPrefix === "string",
+      );
+      if (!summary.ok) return summary;
+      return ok({ token: null, summary: summary.value });
+    }
+    idemRef = idem.value.ref;
+  }
 
   return deps.uow.run(async () => {
     const created = await deps.apiKeys.create({
@@ -63,6 +115,13 @@ export async function createApiKey(
       },
     ]);
     if (!audited.ok) return audited;
-    return created;
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 201,
+        responseBody: created.value.summary, // summary ONLY — never the token
+      });
+      if (!done.ok) return done;
+    }
+    return ok(created.value);
   });
 }

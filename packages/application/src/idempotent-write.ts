@@ -23,9 +23,15 @@
 // that will never complete would otherwise 409 identical retries until the 24h
 // sweep. Replay is keyed per acting user, so re-running the (read-only) authz
 // before serving a replay only ever narrows access, never widens it.
-import type { AppError, Report, Result, UserId } from "arp-domain";
+import type { AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { err, ok } from "arp-domain";
-import type { Hasher, IdempotencyKeyRef, IdempotencyRecord, IdempotencyStore } from "./ports";
+import type {
+  Hasher,
+  IdempotencyKeyRef,
+  IdempotencyRecord,
+  IdempotencyStore,
+  WriteGrant,
+} from "./ports";
 
 /** The two deps every mutating use case adds for ADR-0039. `keyHasher` derives
  *  the fallback key + fingerprint digest (sha-256 hex in production) — named
@@ -135,5 +141,47 @@ function isReportReplay(body: unknown): body is Report {
     typeof b.acl === "object" &&
     b.acl !== null &&
     Array.isArray(b.versions)
+  );
+}
+
+// ── Aggregate replay revivers for the other JSON-safe result shapes ────────
+// Folder / Comment / WriteGrant are stored whole (every field is a string /
+// number / null — nothing bulky, nothing secret) and revived with the same
+// light structural guard style as `reviveReportReplay`.
+
+export function reviveFolderReplay(record: IdempotencyRecord): Result<Folder, AppError> {
+  return reviveReplay(
+    record,
+    (body): body is Folder =>
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).id === "string" &&
+      typeof (body as Record<string, unknown>).name === "string" &&
+      typeof (body as Record<string, unknown>).slug === "string",
+  );
+}
+
+export function reviveCommentReplay(record: IdempotencyRecord): Result<Comment, AppError> {
+  return reviveReplay(
+    record,
+    (body): body is Comment =>
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).id === "string" &&
+      typeof (body as Record<string, unknown>).reportId === "string" &&
+      typeof (body as Record<string, unknown>).body === "string" &&
+      typeof (body as Record<string, unknown>).createdAt === "number",
+  );
+}
+
+export function reviveWriteGrantReplay(record: IdempotencyRecord): Result<WriteGrant, AppError> {
+  return reviveReplay(
+    record,
+    (body): body is WriteGrant =>
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).reportId === "string" &&
+      typeof (body as Record<string, unknown>).granteeEmail === "string" &&
+      typeof (body as Record<string, unknown>).grantedAt === "number",
   );
 }

@@ -19,6 +19,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -64,6 +65,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };

@@ -12,10 +12,17 @@ import {
   ok,
   type Result,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reviveFolderReplay,
+} from "../idempotent-write";
 import { loadOwnedFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
-export interface RenameFolderDeps {
+const ROUTE = "PATCH /api/v1/folders/{id}";
+
+export interface RenameFolderDeps extends IdempotentWriteDeps {
   readonly folders: FolderRepository;
   /** Audit log (ADR-0070) — one `folder.renamed` row per rename. */
   readonly audit: AuditLogger;
@@ -27,6 +34,8 @@ export type RenameFolderActor = TenancyActor;
 export interface RenameFolderInput {
   readonly folderId: FolderId;
   readonly name: string;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function renameFolder(
@@ -40,6 +49,17 @@ export async function renameFolder(
 
   const renamed = applyRename(found.value, input.name);
   if (!renamed.ok) return renamed;
+
+  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.folderId, input.name],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const saved = await deps.folders.save(renamed.value);
@@ -55,6 +75,11 @@ export async function renameFolder(
       },
     ]);
     if (!audited.ok) return audited;
+    const done = await deps.idempotency.complete(idemRef, {
+      responseStatus: 200,
+      responseBody: renamed.value,
+    });
+    if (!done.ok) return done;
     return ok(renamed.value);
   });
 }

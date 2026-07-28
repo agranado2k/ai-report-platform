@@ -5,11 +5,14 @@
 // → softDelete + a `folder.deleted` audit_log row (ADR-0070), committed
 // together (ADR-0037 §5). "Block if non-empty" is the chosen policy: the
 // caller empties a folder (move its contents out) before deleting.
-import { type AppError, err, type FolderId, type Result, validationError } from "arp-domain";
+import { type AppError, err, type FolderId, ok, type Result, validationError } from "arp-domain";
+import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadOwnedFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
-export interface DeleteFolderDeps {
+const ROUTE = "DELETE /api/v1/folders/{id}";
+
+export interface DeleteFolderDeps extends IdempotentWriteDeps {
   readonly folders: FolderRepository;
   readonly reports: ReportRepository;
   /** Audit log (ADR-0070) — one `folder.deleted` row per soft-delete. */
@@ -21,6 +24,8 @@ export interface DeleteFolderDeps {
 export type DeleteFolderActor = TenancyActor;
 export interface DeleteFolderInput {
   readonly folderId: FolderId;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function deleteFolder(
@@ -28,6 +33,19 @@ export async function deleteFolder(
   actor: DeleteFolderActor,
   input: DeleteFolderInput,
 ): Promise<Result<void, AppError>> {
+  // Idempotency (ADR-0039), claimed BEFORE the load (same rationale as
+  // deleteReport): a successful delete makes the retry's own load 404, so the
+  // replay check must run first for the retry to see its recorded 204.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.folderId],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return ok(undefined);
+  const idemRef = idem.value.ref;
+
   const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
   if (!found.ok) return found;
   if (found.value.parentId === null) {
@@ -51,7 +69,7 @@ export async function deleteFolder(
   return deps.uow.run(async () => {
     const deleted = await deps.folders.softDelete(input.folderId);
     if (!deleted.ok) return deleted;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "folder.deleted",
         orgId: actor.orgId,
@@ -60,5 +78,7 @@ export async function deleteFolder(
         targetId: input.folderId,
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
   });
 }

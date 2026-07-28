@@ -21,18 +21,26 @@ import {
   type Slug,
   validationError,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reportReplayBody,
+  reviveReportReplay,
+} from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type {
   AuditLogger,
   GrantStore,
+  IdempotencyKeyRef,
   PasswordHasher,
   ReportRepository,
   UnitOfWork,
 } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
+const ROUTE = "POST /api/v1/reports/{slug}/acl";
 
-export interface SetAclDeps {
+export interface SetAclDeps extends IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly hasher: PasswordHasher;
   readonly grants: GrantStore;
@@ -54,6 +62,8 @@ export interface SetAclInput {
   readonly allowedEmails?: readonly string[];
   /** Owner access TTL (seconds) for `allowlist` mode; defaults when omitted. */
   readonly accessTtlSeconds?: number;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function setAcl(
@@ -84,6 +94,35 @@ export async function setAcl(
   });
   if (!acl.ok) return acl;
 
+  // Idempotency (ADR-0039), with one deliberate carve-out: a DERIVED key must
+  // never be a function of the plaintext password (a fast sha-256 fingerprint
+  // of a password would be a crackable artifact in `idempotency_keys`, far
+  // weaker than the argon2id hash `acls` stores). So a password-mode request
+  // WITHOUT an explicit `Idempotency-Key` skips the claim entirely — re-applying
+  // the same password is naturally idempotent in effect, and two DIFFERENT
+  // passwords back-to-back must both apply (a presence-marker fingerprint would
+  // silently swallow the second). With an explicit key, the client owns retry
+  // identity and the fingerprint carries only a `password:set` marker.
+  const useIdempotency = input.mode !== "password" || input.idempotencyKey !== undefined;
+  let idemRef: IdempotencyKeyRef | undefined;
+  if (useIdempotency) {
+    const idem = await beginIdempotentWrite(deps, {
+      actingUserId: actor.userId,
+      route: ROUTE,
+      key: input.idempotencyKey,
+      fingerprint: [
+        input.slug,
+        input.mode,
+        input.allowedEmails?.join(",") ?? "",
+        input.accessTtlSeconds ?? "",
+        input.password !== undefined ? "password:set" : "",
+      ],
+    });
+    if (!idem.ok) return idem;
+    if (idem.value.outcome === "replay") return reviveReportReplay(idem.value.record);
+    idemRef = idem.value.ref;
+  }
+
   return deps.uow.run(async () => {
     // Prune BEFORE persisting. Fail-closed both ways: if pruning fails
     // nothing changed and a retry re-prunes; if the persist then fails, the
@@ -110,7 +149,15 @@ export async function setAcl(
     ]);
     if (!audited.ok) return audited;
 
-    return ok({ ...found.value, acl: acl.value });
+    const updated = { ...found.value, acl: acl.value };
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 200,
+        responseBody: reportReplayBody(updated), // never carries a password hash
+      });
+      if (!done.ok) return done;
+    }
+    return ok(updated);
   });
 }
 

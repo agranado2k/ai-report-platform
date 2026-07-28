@@ -18,6 +18,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { moveReport } from "./move-report";
@@ -27,6 +28,7 @@ const writeDeps = () => ({
   identities: new InMemoryIdentityStore(),
   audit: new InMemoryAuditLogger(),
   uow: new PassThroughUnitOfWork(),
+  ...idempotencyTestDeps(),
 });
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -191,5 +193,25 @@ describe("moveReport use case", () => {
       targetId: toMove.id,
       meta: { fromFolderId: rootA, toFolderId: targetA.id },
     });
+  });
+});
+
+describe("moveReport idempotency (ADR-0039)", () => {
+  it("replays the recorded moved-report resource on an identical retry — one audit row", async () => {
+    const reports = new InMemoryReportRepository();
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder("00000000-0000-7000-8000-0000000000a0", orgA, "Root"));
+    await folders.save(folder("00000000-0000-7000-8000-0000000000a9", orgA, "Dest"));
+    await reports.save(report(orgA, "iiiiiiiiii"));
+    const deps = { reports, folders, ...writeDeps() };
+    const input = {
+      slug: slug("iiiiiiiiii"),
+      toFolderId: folderId("00000000-0000-7000-8000-0000000000a9"),
+    };
+    const first = await moveReport(deps, ownerActor, input);
+    const second = await moveReport(deps, ownerActor, input);
+    expect(first.ok && first.value.folderId).toBe(input.toFolderId);
+    expect(second.ok && second.value.folderId).toBe(input.toFolderId);
+    expect(deps.audit.recorded().length).toBe(1);
   });
 });

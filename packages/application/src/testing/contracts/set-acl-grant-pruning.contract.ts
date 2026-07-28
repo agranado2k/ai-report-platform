@@ -19,6 +19,7 @@ import type {
   UnitOfWork,
 } from "../../ports";
 import { setAcl } from "../../use-cases/set-acl";
+import { idempotencyTestDeps } from "../in-memory";
 
 export interface SetAclGrantPruningHarness {
   readonly reports: ReportRepository;
@@ -74,6 +75,7 @@ export function describeSetAclGrantPruningContract(
         grants: h.grants,
         audit: h.audit,
         uow: h.uow,
+        ...idempotencyTestDeps(),
       };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
@@ -105,6 +107,7 @@ export function describeSetAclGrantPruningContract(
         grants: h.grants,
         audit: h.audit,
         uow: h.uow,
+        ...idempotencyTestDeps(),
       };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
@@ -135,6 +138,7 @@ export function describeSetAclGrantPruningContract(
         grants: h.grants,
         audit: h.audit,
         uow: h.uow,
+        ...idempotencyTestDeps(),
       };
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
@@ -162,6 +166,7 @@ export function describeSetAclGrantPruningContract(
         grants: h.grants,
         audit: h.audit,
         uow: h.uow,
+        ...idempotencyTestDeps(),
       };
       const pub = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "public" });
       expect(pub.ok).toBe(true);

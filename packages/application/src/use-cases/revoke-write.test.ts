@@ -4,6 +4,7 @@ import {
   InMemoryAuditLogger,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { revokeWrite } from "./revoke-write";
@@ -41,7 +42,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
   it("requires the acl:write scope", async () => {
     const { reports, grants, audit, uow } = await seed();
     const r = await revokeWrite(
-      { reports, grants, audit, uow },
+      { reports, grants, audit, uow, ...idempotencyTestDeps() },
       { orgId: ORG, userId: OWNER, scopes: [] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -52,7 +53,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
   it("is owner-only — a same-org non-owner is rejected (NotAllowed)", async () => {
     const { reports, grants, audit, uow } = await seed();
     const r = await revokeWrite(
-      { reports, grants, audit, uow },
+      { reports, grants, audit, uow, ...idempotencyTestDeps() },
       { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
       { slug: SLUG as never, email: "grantee@x.com" },
     );
@@ -61,7 +62,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
 
   it("revokes the grant — a subsequent findFor no longer matches", async () => {
     const { reports, grants, audit, uow } = await seed();
-    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
+    const r = await revokeWrite({ reports, grants, audit, uow, ...idempotencyTestDeps() }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
@@ -72,7 +73,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
 
   it("is idempotent — revoking an email with no grant still succeeds", async () => {
     const { reports, grants, audit, uow } = await seed();
-    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
+    const r = await revokeWrite({ reports, grants, audit, uow, ...idempotencyTestDeps() }, ACTOR, {
       slug: SLUG as never,
       email: "never-granted@x.com",
     });
@@ -81,7 +82,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
 
   it("rejects an unknown slug with NotFound", async () => {
     const { reports, grants, audit, uow } = await seed();
-    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
+    const r = await revokeWrite({ reports, grants, audit, uow, ...idempotencyTestDeps() }, ACTOR, {
       slug: "zzzzzzzzzz" as never,
       email: "grantee@x.com",
     });
@@ -90,7 +91,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
 
   it("records a grant.write.revoked audit row (ADR-0070)", async () => {
     const { reports, grants, audit, uow } = await seed();
-    const r = await revokeWrite({ reports, grants, audit, uow }, ACTOR, {
+    const r = await revokeWrite({ reports, grants, audit, uow, ...idempotencyTestDeps() }, ACTOR, {
       slug: SLUG as never,
       email: "grantee@x.com",
     });
@@ -105,3 +106,22 @@ describe("revokeWrite use case (ADR-0060)", () => {
     });
   });
 });
+
+describe("revokeWrite idempotency (ADR-0039)", () => {
+  it("replays the recorded 204 on an identical retry — one audit row", async () => {
+    const { reports, grants, audit, uow } = await seed();
+    const deps = { reports, grants, audit, uow, ...idempotencyTestDeps() };
+    await grants.grant(REPORT_ID, "g@x.io", OWNER, null);
+    const first = await revokeWrite(deps, ACTOR, { slug: makeSlugOrThrow(), email: "g@x.io" });
+    const second = await revokeWrite(deps, ACTOR, { slug: makeSlugOrThrow(), email: "g@x.io" });
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(audit.recorded().length).toBe(1);
+  });
+});
+
+function makeSlugOrThrow() {
+  const r = makeSlug(SLUG);
+  if (!r.ok) throw new Error("bad slug");
+  return r.value;
+}
