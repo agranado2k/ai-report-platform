@@ -2,6 +2,7 @@
 
 export * from "./access-token";
 export * from "./acl";
+export * from "./claims-codec";
 export * from "./anchor";
 export * from "./brand";
 export * from "./comment";
