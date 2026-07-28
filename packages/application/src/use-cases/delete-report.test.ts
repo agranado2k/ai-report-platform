@@ -1,56 +1,17 @@
-import {
-  createReport,
-  err,
-  folderId,
-  makeSlug,
-  orgId,
-  type Report,
-  reportId,
-  type Slug,
-  userId,
-  versionId,
-} from "arp-domain";
+import { err } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { AuditLogger } from "../ports";
 import {
-  InMemoryAuditLogger,
-  InMemoryReportRepository,
-  PassThroughUnitOfWork,
-} from "../testing/in-memory";
+  ACTORS,
+  makeOwnerMutationDeps as makeDeps,
+  ownerActor,
+  report,
+  slug,
+} from "../testing/fixtures";
+import { InMemoryReportRepository, PassThroughUnitOfWork } from "../testing/in-memory";
 import { type DeleteReportDeps, deleteReport } from "./delete-report";
 
-const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
-const owner = userId("00000000-0000-7000-8000-0000000000d1");
-const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
-const ownerActor = { orgId: orgA, userId: owner };
-
-function makeDeps() {
-  return {
-    reports: new InMemoryReportRepository(),
-    audit: new InMemoryAuditLogger(),
-    uow: new PassThroughUnitOfWork(),
-  };
-}
-
-function slug(s: string): Slug {
-  const r = makeSlug(s);
-  if (!r.ok) throw new Error("bad slug");
-  return r.value;
-}
-function report(org: typeof orgA, slugStr: string): Report {
-  return createReport({
-    id: reportId(`00000000-0000-7000-8000-0000000000${slugStr.slice(0, 2)}`),
-    orgId: org,
-    folderId: folderId("00000000-0000-7000-8000-0000000000a0"),
-    slug: slug(slugStr),
-    title: "A report",
-    versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
-    contentHash: "h".repeat(64),
-    uploadedBy: userId("00000000-0000-7000-8000-0000000000d1"),
-    manifest: { entryDocument: "index.html", files: ["index.html"] },
-    sizeBytes: 1,
-  }).report;
-}
+const { orgA, owner, otherUser } = ACTORS;
 
 describe("deleteReport use case", () => {
   it("soft-deletes a report (excluded from listByOrg)", async () => {
