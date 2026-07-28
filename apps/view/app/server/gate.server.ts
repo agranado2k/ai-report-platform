@@ -41,9 +41,9 @@ import {
 import {
   type EditClaims,
   makeSlug,
-  readEditToken,
   type Report,
   type ReportVersion,
+  readEditToken,
   type Slug,
 } from "arp-domain";
 import { parseVersionQuery } from "./version-query";

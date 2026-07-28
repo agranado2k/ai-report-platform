@@ -13,11 +13,7 @@
 // minted tokens (mintAccessToken/mintEditToken), real Report aggregates, the
 // in-memory ports — never hand-rolled token strings or mocked domain logic.
 import type { ReportRepository } from "arp-application";
-import {
-  FixedClock,
-  InMemoryGrantStore,
-  InMemoryReportRepository,
-} from "arp-application/testing";
+import { FixedClock, InMemoryGrantStore, InMemoryReportRepository } from "arp-application/testing";
 import {
   type Acl,
   type AppError,
@@ -31,14 +27,14 @@ import {
   mintEditToken,
   orgId,
   type Report,
-  reportId,
   type Result,
+  reportId,
   type TerminalScanStatus,
   userId,
   versionId,
 } from "arp-domain";
 import { describe, expect, it, vi } from "vitest";
-import { decideServe, type Decision, type GateDeps } from "./gate.server";
+import { type Decision, decideServe, type GateDeps } from "./gate.server";
 
 const SECRET = "view-access-secret";
 const APP_ORIGIN = "https://app.example.test";
@@ -185,13 +181,15 @@ const editToken = (ttl = 900, now = NOW, slug = SLUG) =>
 // Slug validation — shared by both purposes (the routes' makeSlug guard).
 // ---------------------------------------------------------------------------
 describe("decideServe — slug validation", () => {
-  it.each(["", "short", "way-too-long-for-a-slug", "bad!chars!"])(
-    "view: invalid slug %j → error 404 (reason-opaque)",
-    async (bad) => {
-      const decision = await decideServe(request(`/${bad}`), bad, "view", makeDeps());
-      expect(decision).toEqual({ kind: "error", status: 404, message: "Not found" });
-    },
-  );
+  it.each([
+    "",
+    "short",
+    "way-too-long-for-a-slug",
+    "bad!chars!",
+  ])("view: invalid slug %j → error 404 (reason-opaque)", async (bad) => {
+    const decision = await decideServe(request(`/${bad}`), bad, "view", makeDeps());
+    expect(decision).toEqual({ kind: "error", status: 404, message: "Not found" });
+  });
 
   it("edit: invalid slug → error 404", async () => {
     const decision = await decideServe(request("/nope/edit"), "nope", "edit", makeDeps());
@@ -220,9 +218,9 @@ describe("decideServe view — resolveViewableReport outcome mapping", () => {
   });
 
   it("deleted report → error 410, even for a private report with no token (outcome precedes ACL)", async () => {
-    expect(await decideView(buildReport({ verdict: "clean", deleted: true, acl: PRIVATE }))).toEqual(
-      { kind: "error", status: 410, message: "No longer available" },
-    );
+    expect(
+      await decideView(buildReport({ verdict: "clean", deleted: true, acl: PRIVATE })),
+    ).toEqual({ kind: "error", status: 410, message: "No longer available" });
   });
 
   it("flagged (newest flagged, no live) → error 451", async () => {
@@ -298,14 +296,17 @@ describe("decideServe view — ?v=N ordinal", () => {
     });
   });
 
-  it.each(["abc", "1.5", "-1", "%20 1", "1e2"])(
-    "malformed ?v=%s is treated as absent → live default",
-    async (v) => {
-      const decision = await decideView(report(), { path: `/${SLUG}?v=${v}` });
-      expect(decision.kind).toBe("serve");
-      if (decision.kind === "serve") expect(decision.version.id).toBe(VID);
-    },
-  );
+  it.each([
+    "abc",
+    "1.5",
+    "-1",
+    "%20 1",
+    "1e2",
+  ])("malformed ?v=%s is treated as absent → live default", async (v) => {
+    const decision = await decideView(report(), { path: `/${SLUG}?v=${v}` });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") expect(decision.version.id).toBe(VID);
+  });
 
   it("?v=N on a PRIVATE report is behind the same ACL gate (no token → unlock redirect)", async () => {
     expect(await decideView(buildMultiVersionReport(PW), { path: `/${SLUG}?v=1` })).toEqual({
@@ -656,6 +657,19 @@ describe("decideServe edit — token/cookie decision", () => {
         claims: { slug: SLUG, exp: NOW + 900, sub: "user_1", scope: "edit", sessionStart: NOW },
       });
     }
+  });
+
+  it("a cookie header WITHOUT an arp_edit entry → redirect (no capability present)", async () => {
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), { cookie: "other=1; another=2" }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+  });
+
+  it("an empty arp_edit cookie value is treated as absent → redirect", async () => {
+    expect(await decideEdit(buildReport({ verdict: "clean" }), { cookie: "arp_edit=" })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}`,
+    });
   });
 
   it("expired arp_edit cookie → redirect to the public viewer", async () => {
