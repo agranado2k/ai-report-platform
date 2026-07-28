@@ -9,20 +9,22 @@ import {
 import type { CommentWire } from "./wire-types";
 
 function comment(overrides: Partial<CommentWire> = {}): CommentWire {
-  return {
+  const base: CommentWire = {
     object: "comment",
     id: "comment_1",
     report_id: "report_1",
     author_id: "user_1",
+    author: { id: "user_1", email: null, name: null },
     parent_id: null,
     body: "hi",
     intent: "note",
     anchor: { version_pinned: { version_id: "version_1", text_quote: "q" } },
+    edited_at: null,
     resolved_at: null,
     created_at: "2026-07-08T00:00:00.000Z",
     mode: "prod",
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }
 
 describe("unresolvedCount", () => {

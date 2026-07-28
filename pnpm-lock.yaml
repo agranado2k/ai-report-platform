@@ -250,6 +250,9 @@ importers:
       arp-headers:
         specifier: workspace:*
         version: link:../../packages/headers
+      arp-http:
+        specifier: workspace:*
+        version: link:../../packages/http
       arp-report-html:
         specifier: workspace:*
         version: link:../../packages/report-html
