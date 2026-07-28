@@ -1,0 +1,326 @@
+// decideServe — the ONE viewer gate (architecture-review candidate 2). Every
+// serve decision the viewer origin makes — for the public GET /<slug> route
+// (purpose: "view") AND the authenticated GET /<slug>/edit route (purpose:
+// "edit") — flows through this single function. It absorbs, verbatim in
+// behavior, the decision logic the two route loaders previously inlined:
+//
+//   • slug shape validation (never build a Location/cookie Path out of an
+//     unvalidated path segment — both routes' first guard)
+//   • the ?v=N ordinal parse (version-query.ts, ADR-0038 §3 — view only; the
+//     edit route has always ignored ?v= and that stays true here)
+//   • the resolveViewableReport outcome mapping (ADR-0038 §2: deleted→410 /
+//     flagged→451 / notfound→404 / scanning→interstitial)
+//   • the ADR-0056 ACL gate: resolveAccessDecision + the arp_unlock cookie
+//     read/build (view only — the edit route's capability is the edit token,
+//     checked INSTEAD of the share-mode ACL, exactly as before)
+//   • the ADR-0063 edit auth seam: the arp_edit cookie + resolveEditAccess,
+//     incl. the Phase 5-E `oa=` owner-access degrade hand-off
+//   • both query-token → Set-Cookie → 303-clean-URL dances (the token never
+//     stays in the address bar / history / referer)
+//
+// The routes consume the returned Decision and ONLY apply it (build headers,
+// stream the blob / render the editor data) — no access/serve rule lives in a
+// route anymore. Response header assembly stays route-side on purpose: the
+// two routes legitimately differ there (e.g. the edit route stamps
+// x-robots-tag on its redirects; the public route's redirects never have),
+// and the gate must not unify observable behavior the routes didn't share.
+//
+// The ordering here is load-bearing and pinned by the decision-matrix tests
+// (gate.server.test.ts): the ADR-0038 outcome mapping runs BEFORE the ACL
+// gate (a deleted private report 410s, it doesn't redirect to unlock), and
+// the scanning interstitial is emitted only AFTER access is granted — a
+// private report mid-scan must not reveal its existence to visitors who
+// couldn't view it once clean (the M7 / PR #170 ordering fix, dogfood
+// 2026-07-08 — do not regress).
+import {
+  type GrantStore,
+  type ReportRepository,
+  resolveAccessDecision,
+  resolveViewableReport,
+} from "arp-application";
+import {
+  type EditClaims,
+  makeSlug,
+  readEditToken,
+  type Report,
+  type ReportVersion,
+  type Slug,
+} from "arp-domain";
+import { parseVersionQuery } from "./version-query";
+
+// The unlock cookie (ADR-0056): a per-report capability the viewer issues to itself
+// after verifying the app's `?access` hand-off — NOT an app/Clerk credential, so the
+// ADR-002/0038 origin isolation holds. Path-scoped + the value is a slug-bound token,
+// so it only unlocks its own report.
+export const UNLOCK_COOKIE = "arp_unlock";
+
+// The `arp_edit` cookie (ADR-0063) is DELIBERATELY narrower-scoped than the
+// unlock cookie: Path=/${slug}/edit (not /${slug}) — an edit capability must
+// never ride along on the public GET /<slug> read request, even for the same
+// report. HttpOnly + Secure + SameSite=Lax, same posture as the unlock cookie
+// (never readable by report-embedded JS, never sent cross-site).
+export const EDIT_COOKIE = "arp_edit";
+
+/** Parse a named cookie's value out of a raw `Cookie` request header. */
+function readCookieValue(cookieHeader: string | null, cookieName: string): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === cookieName) return rest.join("=") || undefined;
+  }
+  return undefined;
+}
+
+// Max-Age = the token's remaining life (= the grant's TTL for allowlist, ~15 min for
+// password), so a long-lived allowlist grant isn't re-prompted every 15 min. Revocation
+// stays immediate via the per-request grant check, not via a short cookie (ADR-0056).
+function unlockCookie(slug: string, token: string, maxAgeSeconds: number): string {
+  // HttpOnly + Secure + SameSite=Lax; path-scoped to this report only.
+  return `${UNLOCK_COOKIE}=${token}; Path=/${slug}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/** Build the `Set-Cookie` value for the `arp_edit` cookie. `maxAgeSeconds` is the
+ *  token's remaining life (`claims.exp - nowSeconds`) so the cookie never outlives
+ *  the capability it carries — there is no independent expiry. */
+function editCookie(slug: string, token: string, maxAgeSeconds: number): string {
+  return `${EDIT_COOKIE}=${token}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/**
+ * HOTFIX carried over from edit-session.ts (Phase 5-E, PR #185): when an
+ * OWNER's edit-token round-trip is denied, degrade through the viewer's
+ * existing `?access=` owner flow (HttpOnly unlock cookie, URL cleaned by the
+ * public route's grant → 303) instead of the bare viewer — otherwise a
+ * private report's owner lands on their own report's unlock wall. Same
+ * exposure the pre-Phase-5 owner-view flow already had for this exact token
+ * shape (an owner token in `?access=`) — not a new surface. When `oa` is
+ * absent (a write-grantee's failed round-trip, or no fallback was minted),
+ * behavior is unchanged: the bare public viewer.
+ */
+function degradeLocation(slug: string, oa: string | undefined): string {
+  return oa ? `/${slug}?access=${encodeURIComponent(oa)}` : `/${slug}`;
+}
+
+export type Purpose = "view" | "edit";
+
+export interface GateDeps {
+  readonly reports: ReportRepository;
+  /** Allowlist revocation-C — the per-request live-grant check (ADR-0056). */
+  readonly grants: GrantStore;
+  /** `viewerAccessConfig().secret` — undefined in previews/dev without the env wired.
+   *  Both token paths fail closed on an unset secret (an HMAC accepts an empty key,
+   *  so an unset secret would otherwise admit a forged `payload.HMAC("",payload)`). */
+  readonly secret: string | undefined;
+  /** `viewerAccessConfig().appOrigin` — where an un-authorized private request is sent
+   *  (view), and the editor's Save/API target (edit). Fail-closed when unset. */
+  readonly appOrigin: string | undefined;
+  readonly nowSeconds: number;
+  /** Structured-log sink for the owner-degrade observability signal (claude-review
+   *  #187). Defaults to `console.warn` — Vercel captures it to the function logs;
+   *  the view origin has no logger of its own (ADR-0038 keeps it minimal). */
+  readonly warn?: (line: string) => void;
+}
+
+export type Decision =
+  /** Access granted and there is a clean version: stream it (view) / load the
+   *  editor data for it (edit — `edit` carries the validated capability). */
+  | {
+      readonly kind: "serve";
+      readonly report: Report;
+      readonly version: ReportVersion;
+      readonly edit?: { readonly token: string; readonly claims: EditClaims };
+    }
+  /** Access granted but the report is mid-scan → the ADR-0038 §2 holding page. */
+  | { readonly kind: "interstitial" }
+  /** A terminal HTTP error (404 / 410 / 451 / 500 / 503) with its body text. */
+  | { readonly kind: "error"; readonly status: number; readonly message: string }
+  /** 302: the app unlock hand-off (view) or the degrade-to-public-viewer (edit). */
+  | { readonly kind: "redirect"; readonly to: string }
+  /** 303: a valid query-token hand-off → set the capability cookie and bounce to
+   *  the clean URL, dropping the token out of the address bar/history/referer. */
+  | { readonly kind: "setCookieAndRedirect"; readonly cookie: string; readonly to: string };
+
+/** The one viewer gate: decide what the origin should do for `rawSlug` under
+ *  `purpose`, given the request's query/cookie capabilities. Pure over `deps`
+ *  (all I/O behind the injected ports); never throws. */
+export async function decideServe(
+  request: Request,
+  rawSlug: string,
+  purpose: Purpose,
+  deps: GateDeps,
+): Promise<Decision> {
+  // Unknown/invalid slug is indistinguishable from blocked content → 404.
+  const slug = makeSlug(rawSlug);
+  if (!slug.ok) return { kind: "error", status: 404, message: "Not found" };
+  const url = new URL(request.url);
+
+  return purpose === "edit"
+    ? decideEdit(request, url, slug.value, deps)
+    : decideView(request, url, slug.value, deps);
+}
+
+// --- purpose: "view" — the public route's decision chain (ADR-0038 + 0056) ---
+async function decideView(
+  request: Request,
+  url: URL,
+  slug: Slug,
+  deps: GateDeps,
+): Promise<Decision> {
+  // ?v=N (issue #155, ADR-0038 §3): resolve a specific ReportVersion by ordinal
+  // instead of the live version. Absent/malformed `v` parses to `undefined`
+  // (parseVersionQuery), which resolveViewableReport treats identically to no
+  // `v=` at all — the live-serving default is unchanged. The requested version
+  // passes through the EXACT SAME scan-status state machine as the live path.
+  const requestedVersionNo = parseVersionQuery(url.searchParams.get("v"));
+
+  const outcome = await resolveViewableReport(slug, deps.reports, requestedVersionNo);
+  if (!outcome.ok) return { kind: "error", status: 500, message: "Lookup failed" };
+  switch (outcome.value.kind) {
+    case "deleted":
+      return { kind: "error", status: 410, message: "No longer available" };
+    case "flagged":
+      return { kind: "error", status: 451, message: "Unavailable — flagged for review" };
+    case "notfound":
+      return { kind: "error", status: 404, message: "Not found" };
+  }
+
+  // Servable (clean live / clean ?v=N ordinal) OR still scanning → enforce the
+  // Acl (ADR-0056) BEFORE emitting anything about the report. The holding page
+  // sits behind the same gate as content (dogfood 2026-07-08): a private report
+  // mid-scan must show a visitor exactly what it will show them once clean —
+  // the unlock redirect — not a 200 that reveals the slug exists and is being
+  // scanned. Same `report.acl`, same resolveAccessDecision call regardless of
+  // which version was resolved above — ?v=N is not a separate gate, it's the
+  // identical gate applied to a different version (ADR-0038 §3).
+  const { report } = outcome.value;
+
+  // The app authorizes private reports; the viewer only verifies a slug-bound token
+  // (from the `?access` hand-off or a prior unlock cookie). Public reports serve
+  // directly. Async + grant-aware: for `allowlist`, a valid token is only honored
+  // while its `report_grants` row is live (revocation-C) — the per-request check.
+  const decided = await resolveAccessDecision(
+    report.acl,
+    report.id,
+    {
+      cookie: readCookieValue(request.headers.get("cookie"), UNLOCK_COOKIE),
+      query: url.searchParams.get("access") ?? undefined,
+    },
+    slug,
+    deps.secret ?? "",
+    deps.nowSeconds,
+    deps.grants,
+  );
+  if (!decided.ok) return { kind: "error", status: 500, message: "Access check failed" };
+  const decision = decided.value;
+  if (decision.kind === "unlock") {
+    // Send the viewer to the app to authorize. Fail closed if the app origin is unset.
+    if (!deps.appOrigin) {
+      return {
+        kind: "error",
+        status: 503,
+        message: "Private report — viewing is not available here",
+      };
+    }
+    return { kind: "redirect", to: `${deps.appOrigin}/unlock/${slug}` };
+  }
+  if (decision.kind === "grant") {
+    // Valid hand-off → set the unlock cookie (lasting as long as the token/grant)
+    // and redirect to the clean URL (drops the token from the address bar/history).
+    return {
+      kind: "setCookieAndRedirect",
+      cookie: unlockCookie(slug, decision.token, decision.maxAgeSeconds),
+      to: `/${slug}`,
+    };
+  }
+  // Access granted. Mid-scan there is still no clean version to serve — the
+  // authorized visitor (owner via /open, or anyone the mode admits, e.g. public)
+  // gets the ADR-0038 §2 holding page, exactly as before.
+  if (outcome.value.kind === "scanning") return { kind: "interstitial" };
+  return { kind: "serve", report, version: outcome.value.version };
+}
+
+// --- purpose: "edit" — the edit route's auth seam (ADR-0063 Decisions 3-4) ---
+//
+// The edit capability is checked INSTEAD of the report's share-mode ACL: a
+// valid edit token proves the app already ran its `canWrite` check at mint
+// time (and re-runs it live on every save/API call — ADR-0063 §3/§5), so the
+// gate here never consults `report.acl` — exactly the pre-extraction route's
+// behavior. Every "can't render" case degrades to the public viewer, which
+// owns the ADR-0038 §2 state machine — this purpose never emits `interstitial`
+// or (beyond the slug guard) `error`.
+async function decideEdit(
+  request: Request,
+  url: URL,
+  slug: Slug,
+  deps: GateDeps,
+): Promise<Decision> {
+  const queryToken = url.searchParams.get("et") ?? undefined;
+  // Hotfix fallback (see `degradeLocation`): the fallback owner access token
+  // `ownerOpenLocation` mints alongside `et=` for actual owners, ONLY
+  // consulted when the edit-token round-trip below is denied.
+  const oa = url.searchParams.get("oa") ?? undefined;
+  const cookieToken = readCookieValue(request.headers.get("cookie"), EDIT_COOKIE);
+
+  // Fail closed (denied) when `secret` is unset — same posture as the view
+  // path's resolveAccessDecision. The query token takes precedence when both
+  // are present — a fresh mint always wins over whatever cookie is already
+  // sitting there. NOTE (deliberate, preserved asymmetry vs "view"): an
+  // INVALID query token is denied outright — it does NOT fall back to a
+  // still-valid cookie the way the view path's resolveAccessDecision falls
+  // back to the unlock cookie. That is the pre-extraction behavior of both
+  // loaders, kept intact behind the purpose parameter.
+  if (deps.secret && queryToken) {
+    const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
+    if (!claims) return deniedEdit(slug, oa, deps);
+    return {
+      kind: "setCookieAndRedirect",
+      cookie: editCookie(slug, queryToken, Math.max(0, claims.exp - deps.nowSeconds)),
+      // Mint the arp_edit cookie and 303 to the clean URL — drops the token out
+      // of the address bar/history/referer, exactly like the view path's grant.
+      to: `/${slug}/edit`,
+    };
+  }
+  const claims =
+    deps.secret && cookieToken
+      ? readEditToken(cookieToken, slug, deps.secret, deps.nowSeconds)
+      : null;
+  if (!claims || !cookieToken) return deniedEdit(slug, oa, deps);
+
+  // A valid, already-redeemed arp_edit cookie. Never render the editor without
+  // a configured app origin — editViewHeaders REQUIRES it for connect-src, and
+  // there would be nowhere for Save to POST to anyway (fail closed).
+  if (!deps.appOrigin) return { kind: "redirect", to: degradeLocation(slug, undefined) };
+
+  // Any non-"serve" outcome (not found / deleted / flagged / still scanning)
+  // or a lookup failure degrades to the public viewer, which already renders
+  // the correct status page for every one of those states (ADR-0038 §2) —
+  // the edit purpose doesn't duplicate that state machine, it only adds
+  // "render the editor" on top of the one state with a document to edit.
+  // Deliberately NO ?v= here — the editor always opens the live version.
+  const outcome = await resolveViewableReport(slug, deps.reports);
+  if (!outcome.ok || outcome.value.kind !== "serve") {
+    return { kind: "redirect", to: degradeLocation(slug, undefined) };
+  }
+  return {
+    kind: "serve",
+    report: outcome.value.report,
+    version: outcome.value.version,
+    edit: { token: cookieToken, claims },
+  };
+}
+
+/** The edit purpose's denied branch: degrade to the public viewer — through the
+ *  `oa=` owner flow when present (with the observability signal), bare otherwise. */
+function deniedEdit(slug: string, oa: string | undefined, deps: GateDeps): Decision {
+  if (oa) {
+    // Observability (claude-review #187): when an OWNER's edit-token round-trip
+    // is denied and we degrade them to a read-only view (`oa` present), emit a
+    // structured signal — the secret-misalignment class of incident is then
+    // visible in logs rather than only inferable from user reports. Never logs
+    // the token.
+    (deps.warn ?? console.warn)(
+      JSON.stringify({ event: "owner-edit-degraded-to-view", slug, reason: "edit-token-denied" }),
+    );
+  }
+  return { kind: "redirect", to: degradeLocation(slug, oa) };
+}
