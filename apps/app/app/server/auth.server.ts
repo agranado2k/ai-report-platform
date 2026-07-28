@@ -1,41 +1,19 @@
-// Actor-resolution seam (server-only). Upload entrypoints depend on this, NOT on
-// a concrete auth scheme — so the four front doors (Clerk session, `arp_` API key,
-// a forwarded Clerk OAuth token, and a slug-bound edit token) are interchangeable
-// behind one port.
-//
-// Contract: request args → Result<UploadActor, AppError>. A write requires one of:
-//   - an `arp_` API key (ADR-0008, headless),
-//   - a signed-in Clerk session (ADR-0048, browser),
-//   - a Clerk OAuth access token forwarded by the MCP server (ADR-0051 amendment —
-//     the MCP can't mint a session token on a production Clerk instance, so it
-//     forwards the OAuth token and we verify it here with `acceptsToken:'oauth_token'`), or
-//   - a slug-bound edit token (ADR-0063) — the app-minted, canWrite-gated capability
-//     from open-report.server.ts. Fully verified by resolveEditTokenActor (the
-//     standalone, unit-tested trust boundary in edit-token-actor.server.ts,
-//     INCLUDING a LIVE canWrite re-check); this module only wires it in, gated
-//     on the route actually having a `:slug` param — a route with no slug (e.g.
-//     /api/v1/keys) never reaches this branch, so it can't become a general
-//     Clerk bypass.
-// Anything else is `Unauthenticated` (→ 401).
+// Live wiring for the actor-resolution seam (server-only). The CASCADE itself —
+// the four front doors (`arp_` API key → Clerk session → forwarded Clerk OAuth
+// token → slug-bound edit token), their order, terminal-vs-fall-through rules,
+// the read/write differences (JIT provisioning on write only; null-vs-401), and
+// the STRUCTURAL slug gate on the edit-token door — lives in resolve-actor.
+// server.ts, where it is unit-tested with every door injected. This module only
+// builds the REAL deps from the composition root (container.server.ts) and the
+// Clerk SDK, and keeps `resolveUploadActor` / `resolveActorForRead` as the two
+// mode-specific entrypoints the routes and `handle()` call.
 import { createClerkClient } from "@clerk/backend";
 import { getAuth as clerkGetAuth } from "@clerk/remix/ssr.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import {
-  principalToUploadActor,
-  provisionIdentity,
-  SELF_SCOPES,
-  type UploadActor,
-} from "arp-application";
-import {
-  type AppError,
-  err,
-  ok,
-  type Result,
-  clerkOrgId as toClerkOrgId,
-  clerkUserId as toClerkUserId,
-} from "arp-domain";
+import type { UploadActor } from "arp-application";
+import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
-import { capDisplayName, clerkDisplayName } from "./clerk-display-name";
+import { clerkDisplayName } from "./clerk-display-name";
 import {
   accessTokenSecret,
   apiKeyStore,
@@ -44,16 +22,10 @@ import {
   provisionDeps,
   writeGrantStore,
 } from "./container.server";
-import { type EditTokenActorDeps, resolveEditTokenActor } from "./edit-token-actor.server";
+import type { EditTokenActorDeps } from "./edit-token-actor.server";
+import { type Actor, type ResolveActorDeps, resolveActor } from "./resolve-actor.server";
 
-/** Scopes granted to an actor resolved off an edit token (ADR-0063) —
- *  deliberately just `reports:write`, NOT the full `SELF_SCOPES`: an edit
- *  token authorizes editing THIS report's content, not managing its sharing
- *  (`acl:write` — grant/revoke/setAcl/listWriteGrants all gate on that scope
- *  and must stay owner/Clerk-session-only). */
-const EDIT_TOKEN_SCOPES = ["reports:write"];
-
-/** Deps for resolveEditTokenActor, built from the composition root — memoized
+/** Deps for the edit-token door, built from the composition root — memoized
  *  stores, freshly-read env for the secret (previews/dev may leave it unset,
  *  which fails the edit-token branch closed, see edit-token-actor.server.ts). */
 function editTokenDeps(): EditTokenActorDeps {
@@ -63,19 +35,6 @@ function editTokenDeps(): EditTokenActorDeps {
     secret: accessTokenSecret(),
     nowSeconds: () => Math.floor(Date.now() / 1000),
   };
-}
-
-/**
- * Extract an `arp_` API-key secret from `Authorization: Bearer …` (ADR-0008), or
- * null when the header is absent or carries something else (a Clerk session JWT
- * also rides this header — those start `eyJ…`, ours start `arp_`, so the prefix
- * cleanly routes the request to the API-key path vs the Clerk-session path).
- */
-function apiKeyToken(args: LoaderFunctionArgs): string | null {
-  const header = args.request.headers.get("authorization");
-  if (!header) return null;
-  const match = /^Bearer\s+(arp_[A-Za-z0-9_-]+)$/.exec(header.trim());
-  return match?.[1] ?? null;
 }
 
 /**
@@ -120,10 +79,10 @@ function clerkBackend() {
  * RFC-8707 binding to the MCP resource isn't rejected here — verifying the same
  * token at our own API is Clerk's supported multi-backend pattern.
  */
-async function resolveOAuthUserId(args: LoaderFunctionArgs): Promise<string | null> {
-  if (!args.request.headers.get("authorization")) return null;
+async function resolveOAuthUserId(request: Request): Promise<string | null> {
+  if (!request.headers.get("authorization")) return null;
   try {
-    const state = await clerkBackend().authenticateRequest(args.request, {
+    const state = await clerkBackend().authenticateRequest(request, {
       acceptsToken: "oauth_token",
     });
     const auth = state.toAuth();
@@ -171,212 +130,40 @@ async function fetchOAuthIdentity(
   return ok({ email, displayName });
 }
 
+/** The REAL four-door deps, assembled from the composition root + Clerk SDK. */
+function liveResolveActorDeps(): ResolveActorDeps {
+  return {
+    apiKeys: apiKeyStore(),
+    session: getAuth,
+    provision: provisionDeps(),
+    oauth: { verify: resolveOAuthUserId, fetchIdentity: fetchOAuthIdentity },
+    editTokenDeps: editTokenDeps(),
+  };
+}
+
 /**
- * Resolve the acting principal for a write request. Tries each front door in turn:
- * `arp_` API key → Clerk session → forwarded Clerk OAuth token → slug-bound edit
- * token (ADR-0063, only on a route with a `:slug` param). The session and OAuth
- * paths both `provisionIdentity` (create the mirror on first write, ADR-0048),
- * attributing the upload to the user's personal org. No credential → `Unauthenticated`.
+ * Resolve the acting principal for a WRITE. The edit-token door is gated on the
+ * route actually having a `:slug` param (passed here as the structural gate —
+ * a slugless route never has that door). No credential → `Unauthenticated`.
  */
 export async function resolveUploadActor(
   args: LoaderFunctionArgs,
 ): Promise<Result<UploadActor, AppError>> {
-  // API-key path first (ADR-0008): a Bearer `arp_…` resolves to an org-scoped
-  // actor without a Clerk session. A present-but-unmatched key is `Unauthenticated`
-  // (→ 401), NOT a fall-through to the session path.
-  const token = apiKeyToken(args);
-  if (token) {
-    const resolved = await apiKeyStore().verify(token);
-    if (!resolved.ok) return resolved;
-    if (!resolved.value) {
-      return err({ kind: "Unauthenticated", message: "invalid or revoked API key" });
-    }
-    return ok(principalToUploadActor(resolved.value));
-  }
-
-  // Clerk session path (ADR-0048): a browser sign-in carries the email custom claim.
-  const { userId, orgId, sessionClaims } = await getAuth(args);
-  if (userId) {
-    const email = readEmailClaim(sessionClaims);
-    if (!email) {
-      console.warn(
-        `resolveUploadActor: signed-in user ${userId} has no 'email' session claim — ` +
-          "rejecting. Configure the email claim on the Clerk instance (ADR-0048).",
-      );
-      return err({ kind: "Unauthenticated", message: "session is missing the email claim" });
-    }
-    return provisionIdentity(provisionDeps(), {
-      clerkUserId: toClerkUserId(userId),
-      clerkOrgId: orgId ? toClerkOrgId(orgId) : null,
-      email,
-      // Best-effort display name (ADR-0063): read from the session token's `name`
-      // custom claim if the Clerk instance sets one (like the `email` claim, an
-      // ADR-0048 dependency). Absent → null; author surfaces fall back to email.
-      // No Clerk backend round-trip here — the session path deliberately avoids one.
-      displayName: readNameClaim(sessionClaims),
-    });
-  }
-
-  // Forwarded Clerk OAuth token path (ADR-0051 amendment). No active org rides an
-  // OAuth token, so attribute to the user's personal org (created on first write).
-  // Email is fetched only here (the write path) — reads don't pay that round-trip.
-  const oauthUserId = await resolveOAuthUserId(args);
-  if (oauthUserId) {
-    const identity = await fetchOAuthIdentity(oauthUserId);
-    if (!identity.ok) return identity; // no email → Unauthenticated (401); Clerk outage → Unexpected (500)
-    const deps = provisionDeps();
-    const personal = await deps.clerkOrgs.findPersonalOrg(oauthUserId);
-    if (!personal.ok) return personal; // Clerk outage → propagate (→ 500)
-    return provisionIdentity(deps, {
-      clerkUserId: toClerkUserId(oauthUserId),
-      clerkOrgId: personal.value ? toClerkOrgId(personal.value) : null,
-      email: identity.value.email,
-      displayName: identity.value.displayName,
-    });
-  }
-
-  // Slug-bound edit-token path (ADR-0063), LAST — only reached when nothing
-  // else matched, and only ever attempted on a route with a `:slug` param
-  // (a route with no slug segment, e.g. /api/v1/keys, has `args.params.slug
-  // === undefined` and never reaches resolveEditTokenActor at all). No
-  // identity provisioning here — an edit token only ever resolves to an
-  // ALREADY-mirrored user (its `sub` was minted from a real actor.userId,
-  // and the live canWrite re-check inside resolveEditTokenActor requires a
-  // real Report row to match against).
-  const routeSlug = args.params.slug;
-  if (routeSlug) {
-    const editActor = await resolveEditTokenActor(args.request, routeSlug, editTokenDeps());
-    if (editActor) {
-      return ok({
-        userId: editActor.userId,
-        orgId: editActor.orgId,
-        folderId: editActor.folderId,
-        scopes: EDIT_TOKEN_SCOPES,
-      });
-    }
-  }
-
-  return err({
-    kind: "Unauthenticated",
-    message: "a session, API key, or OAuth token is required",
-  });
+  return resolveActor(args, { mode: "write", slug: args.params.slug }, liveResolveActorDeps());
 }
 
 /** The read-path actor's shape (ADR-0060 §3): `userId`/`orgId` PLUS `scopes` —
  *  needed so a read-only, owner-gated use case (`listWriteGrants`) can still
  *  enforce the `acl:write` scope on a GET, same as its write siblings. */
-type ReadResolvedActor = Pick<UploadActor, "userId" | "orgId" | "scopes">;
+type ReadResolvedActor = Pick<Actor, "userId" | "orgId" | "scopes">;
 
 /**
- * Resolve the acting principal for a READ (the dashboard list, the API-keys
- * settings page) WITHOUT the write-path side effects. Unlike `resolveUploadActor`,
- * this never provisions: it looks up the already-mirrored identity (`findByClerk`)
- * and returns its `userId`/`orgId`/`scopes`, or `null` when there's no credential /
- * the user isn't mirrored yet (a brand-new user who hasn't uploaded — their list is
- * simply empty). Keeps GET loaders safe/idempotent: no Clerk org or DB rows are
- * created on a read. `userId` is exposed (not just `orgId`) so read loaders that key
- * off the acting user — e.g. listing that user's API keys — needn't take the write
- * path.
+ * Resolve the acting principal for a READ — same doors, but NEVER provisions
+ * (GET loaders stay safe/idempotent): an unmirrored / credential-less request
+ * resolves to ok(null) (the caller renders an empty list / 401s).
  */
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
 ): Promise<Result<ReadResolvedActor | null, AppError>> {
-  // API-key path first (ADR-0008): a Bearer `arp_…` resolves the principal
-  // (scopes pass through from the key row — an owner's key without `acl:write`
-  // stays unable to read write-grant config, ADR-0060 §3). An unmatched key
-  // reads as `null` (empty list), consistent with no-session reads.
-  const token = apiKeyToken(args);
-  if (token) {
-    const resolved = await apiKeyStore().verify(token);
-    if (!resolved.ok) return resolved;
-    return ok(
-      resolved.value
-        ? {
-            userId: resolved.value.userId,
-            orgId: resolved.value.orgId,
-            scopes: resolved.value.scopes,
-          }
-        : null,
-    );
-  }
-
-  const { userId, orgId } = await getAuth(args);
-  if (userId) return lookupMirroredActor(userId, orgId ?? null);
-
-  // Forwarded Clerk OAuth token (ADR-0051 amendment) — read-only lookup of the
-  // already-mirrored identity. Verify only (no email round-trip on a read).
-  const oauthUserId = await resolveOAuthUserId(args);
-  if (oauthUserId) return lookupMirroredActor(oauthUserId, null);
-
-  // Slug-bound edit-token path (ADR-0063), LAST — same gating as
-  // resolveUploadActor's mirror branch above: only ever attempted on a route
-  // with a `:slug` param, so a non-slug read (e.g. the API-keys list) never
-  // reaches it. `scopes` is deliberately narrower than a Clerk session's
-  // `SELF_SCOPES` (see EDIT_TOKEN_SCOPES) — an edit-token actor must not
-  // read/write ACL config through this seam.
-  const routeSlug = args.params.slug;
-  if (routeSlug) {
-    const editActor = await resolveEditTokenActor(args.request, routeSlug, editTokenDeps());
-    if (editActor) {
-      return ok({ userId: editActor.userId, orgId: editActor.orgId, scopes: EDIT_TOKEN_SCOPES });
-    }
-  }
-
-  return ok(null); // no credential → genuinely unauthenticated
-}
-
-/**
- * Read-only resolve of an already-mirrored actor from a Clerk user id. The session/
- * OAuth token may carry NO active org; the user still has a personal org (the one
- * the write path provisioned on first upload, ADR-0048). Resolve it so reads see the
- * same org writes attribute to, WITHOUT provisioning on a GET. Returns `null` when
- * the user has no org / mirror yet (never uploaded) → empty list. Session/OAuth
- * reads aren't API-key-scoped, so they carry the same `SELF_SCOPES` the write path
- * grants (ADR-0060 §3 — a browser/MCP-OAuth caller has full access on both paths).
- */
-async function lookupMirroredActor(
-  clerkUserId: string,
-  activeOrgId: string | null,
-): Promise<Result<ReadResolvedActor | null, AppError>> {
-  const deps = provisionDeps();
-  let clerkOrgId = activeOrgId;
-  if (!clerkOrgId) {
-    const personal = await deps.clerkOrgs.findPersonalOrg(clerkUserId);
-    if (!personal.ok) return personal; // infra failure (Clerk outage) → propagate (→ 500)
-    clerkOrgId = personal.value;
-  }
-  if (!clerkOrgId) return ok(null); // signed in but no org yet (never uploaded) → empty
-
-  const found = await deps.identities.findByClerk(clerkUserId, clerkOrgId);
-  if (!found.ok) return found; // infra failure (DB outage) → propagate (→ 500)
-  return ok(
-    found.value
-      ? { userId: found.value.userId, orgId: found.value.orgId, scopes: SELF_SCOPES }
-      : null,
-  );
-}
-
-/** Read the `email` custom claim off a Clerk session token, if present + plausible. */
-function readEmailClaim(claims: unknown): string | null {
-  if (claims && typeof claims === "object" && "email" in claims) {
-    const value = (claims as { email?: unknown }).email;
-    if (typeof value === "string" && /^[^@\s]+@[^@\s]+$/.test(value)) return value;
-  }
-  return null;
-}
-
-/** Read the `name` custom claim off a Clerk session token (ADR-0063 author
- *  display), if the instance sets one. Best-effort: a non-string / blank / absent
- *  claim → null (author surfaces fall back to email). Trimmed to drop stray
- *  whitespace-only values. Capped via the shared `capDisplayName` (claude-review
- *  #200) so this capture point matches every other one. */
-function readNameClaim(claims: unknown): string | null {
-  if (claims && typeof claims === "object" && "name" in claims) {
-    const value = (claims as { name?: unknown }).name;
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) return capDisplayName(trimmed);
-    }
-  }
-  return null;
+  return resolveActor(args, { mode: "read", slug: args.params.slug }, liveResolveActorDeps());
 }
