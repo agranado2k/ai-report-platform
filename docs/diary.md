@@ -3173,6 +3173,38 @@ cleanups; the accepted ones are now in flight as six parallel worktrees, one PR 
 
 Each worktree carries its own PR and review cycle; this entry just records the wave starting together.
 
+---
+
+## 2026-07-28 — One wire contract: the `arp-http/wire` catalog (architecture-review candidate 4, option c)
+
+Closed the "three hand-kept copies of the wire" gap the architecture review flagged: the viewer's
+`apps/view/app/edit/wire-types.ts` mirrored `resource.ts` by hand ("kept in sync by hand" was literal),
+and the MCP client typed everything as `Record<string, unknown>`. Chose **option (c) — a plain-TS
+catalog, zero new runtime dependencies** (no zod-at-the-boundary, no codegen).
+
+- **`arp-http/wire`** (new `packages/http/src/wire/`, exported as a package subpath): the client-safe,
+  browser-importable declaration of every `/api/v1` success shape — `ReportWire`/`ReportDetailWire`,
+  `FolderWire`, `VersionWire`, `CommentWire` + `CommentAnchorWire`, `DiffWire`, `AclShareWire`/`AclWire`,
+  `WriteGrantWire`, `ListEnvelope<T>`, `WireCursorParams`, `WireMode`. Types + type-only `arp-domain`
+  imports ONLY (a value import would drag `node:crypto` into browser bundles). Enum vocabularies
+  (`AclMode`, `Intent`, `ScanStatus`, `VersionOrigin`) are imported from `arp-domain`, never re-declared.
+- **Compile-time link:** the `resource.ts` / `diff-response.ts` / `write-response.ts` encoders are now
+  return-typed against the catalog, and `wire/index.test.ts` locks the emitted objects to it — the
+  catalog can't drift from what the server sends. Emit-shape truths reconciled along the way: `author`
+  and `edited_at` are ALWAYS present on comment/version resources (null-filled, never omitted) — the
+  viewer's defensive `author?`/`edited_at?` optionality encoded a pre-ADR-0063 server that no longer
+  exists.
+- **apps/view** re-exports the catalog through the existing `./wire-types` seam (the hand-mirror is
+  dead); **apps/mcp**'s `ApiClient` is fully typed with it, `tools.ts` derives `z.enum(...)` from
+  `ACL_MODES`/`COMMENT_INTENTS`, and the 4× cursor-param trio + 13× slug describe-string collapsed into
+  shared helpers (schema output pinned verbatim by tests). The MCP esbuild bundle gains
+  `--alias:arp-domain=…` so the TS-source workspace package is compiled in (aliases resolve before
+  `--packages=external`).
+- **Deliberately out of scope** (follow-ups): OpenAPI generation from the catalog, and route-side
+  request decoders. `apps/app` untouched (a parallel work package owns its routes).
+
+Worktree: `worktree/wire-catalog` (branch `refactor/wire-catalog`), PR #216.
+
 ## 2026-07-28 — Architecture-review candidates 3 + 1: actor resolution as a module, one write front door
 
 The top recommendation from the architecture review lands in one worktree/PR (`worktree/write-front-door`,

@@ -12,4 +12,5 @@ export * from "./request";
 export * from "./resource";
 export * from "./secret";
 export * from "./upload-response";
+export * from "./wire";
 export * from "./write-response";
