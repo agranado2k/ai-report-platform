@@ -2,9 +2,9 @@
 
 export * from "./access-token";
 export * from "./acl";
-export * from "./claims-codec";
 export * from "./anchor";
 export * from "./brand";
+export * from "./claims-codec";
 export * from "./comment";
 export * from "./comment-id";
 export * from "./edit-token";
@@ -17,7 +17,6 @@ export * from "./folder-id";
 export * from "./intent";
 export * from "./magic-link";
 export * from "./org-key";
-export * from "./pipe";
 export * from "./report";
 export * from "./report-id";
 export * from "./report-version";
