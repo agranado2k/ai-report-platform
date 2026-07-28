@@ -6,16 +6,6 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import {
-  createFolder,
-  deleteFolder,
-  deleteReport,
-  listFolders,
-  moveReport,
-  renameFolder,
-  renameReport,
-  searchReports,
-} from "arp-application";
 import { folderIdToWire, makeFolderId, makeReportId, makeSlug, reportIdToWire } from "arp-domain";
 import {
   AppHeader,
@@ -34,13 +24,7 @@ import {
   StatusBadge,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import {
-  auditLogger,
-  deps,
-  folderRepo,
-  identityStore,
-  writeGrantStore,
-} from "../server/container.server";
+import { ops } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 import { log } from "../server/log.server";
 
@@ -88,7 +72,7 @@ export async function loader(args: LoaderFunctionArgs) {
 
   // No pagination params → listFolders returns the WHOLE org folder tree in
   // one unpaginated page (the sidebar needs every folder to build it).
-  const foldersR = await listFolders({ folders: folderRepo() }, { orgId: actor.orgId });
+  const foldersR = await ops().listFolders({ orgId: actor.orgId }, {});
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
   const folders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
     id: folderIdToWire(f.id),
@@ -111,8 +95,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (before && !before.ok)
     log.warn(`dashboard: malformed ending_before cursor — ${before.error.message}`);
 
-  const searchR = await searchReports(
-    { reports: deps().reports },
+  const searchR = await ops().searchReports(
     { orgId: actor.orgId },
     {
       query: q || undefined,
@@ -171,15 +154,7 @@ export async function action(args: ActionFunctionArgs) {
     // (api.v1.reports.$slug.move.ts follows the same pattern).
     const toFolderId = makeFolderId(rawTo);
     if (!toFolderId.ok) return errorToJson(toFolderId.error);
-    const r = await moveReport(
-      {
-        reports: deps().reports,
-        folders: folderRepo(),
-        grants: writeGrantStore(),
-        identities: identityStore(),
-        audit: auditLogger(),
-        uow: deps().uow,
-      },
+    const r = await ops().moveReport(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, toFolderId: toFolderId.value },
     );
@@ -191,14 +166,7 @@ export async function action(args: ActionFunctionArgs) {
     const slug = makeSlug(String(form.get("slug") ?? ""));
     const title = String(form.get("title") ?? "");
     if (!slug.ok) return json({ error: "Invalid rename request." }, { status: 400 });
-    const r = await renameReport(
-      {
-        reports: deps().reports,
-        grants: writeGrantStore(),
-        identities: identityStore(),
-        audit: auditLogger(),
-        uow: deps().uow,
-      },
+    const r = await ops().renameReport(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value, title },
     );
@@ -212,8 +180,7 @@ export async function action(args: ActionFunctionArgs) {
     const slug = makeSlug(String(form.get("slug") ?? ""));
     const folder = String(form.get("folder") ?? "").trim();
     if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
-    const r = await deleteReport(
-      { reports: deps().reports, audit: auditLogger(), uow: deps().uow },
+    const r = await ops().deleteReport(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value },
     );
@@ -227,8 +194,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!rawId) return json({ error: "Invalid rename request." }, { status: 400 });
     const folderId = makeFolderId(rawId);
     if (!folderId.ok) return errorToJson(folderId.error);
-    const r = await renameFolder(
-      { folders: folderRepo(), audit: auditLogger(), uow: deps().uow },
+    const r = await ops().renameFolder(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value, name },
     );
@@ -241,8 +207,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!rawId) return json({ error: "Invalid delete request." }, { status: 400 });
     const folderId = makeFolderId(rawId);
     if (!folderId.ok) return errorToJson(folderId.error);
-    const r = await deleteFolder(
-      { folders: folderRepo(), reports: deps().reports, audit: auditLogger(), uow: deps().uow },
+    const r = await ops().deleteFolder(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value },
     );
@@ -259,8 +224,7 @@ export async function action(args: ActionFunctionArgs) {
   const parentId = makeFolderId(rawParent);
   if (!parentId.ok) return errorToJson(parentId.error);
 
-  const r = await createFolder(
-    { folders: folderRepo(), ids: deps().ids, audit: auditLogger(), uow: deps().uow },
+  const r = await ops().createFolder(
     { orgId: actor.value.orgId, userId: actor.value.userId },
     { parentId: parentId.value, name },
   );

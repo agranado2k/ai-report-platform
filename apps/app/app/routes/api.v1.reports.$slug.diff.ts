@@ -29,8 +29,7 @@ export const loader = corsRoute(
   handle({
     mode: "read",
     slug: true,
-    run: ({ args, actor, slug }) => {
-      const url = new URL(args.request.url);
+    run: ({ url, actor, slug }) => {
       const fromRaw = url.searchParams.get("from");
       const toRaw = url.searchParams.get("to");
       if (!fromRaw || !toRaw) {

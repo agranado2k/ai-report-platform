@@ -1,27 +1,20 @@
 // POST /api/v1/reports — the production upload API (ADR-0037, ADR-0039, ADR-0040).
-// Thin transport adapter: resolve the actor (auth seam) → parse the multipart
-// body + Idempotency-Key → run the UploadReportUseCase → serialize via the pure
-// arp-http mapper. All policy lives in the application/domain; this file only
-// translates HTTP ⇆ use-case Result and never throws a bare error to the client.
-// Both loader and action are built from the `handle()` combinator (route-seam
-// deepening): it owns the actor-resolution → run-use-case → map-Result →
-// toResponse choreography common to every /api/v1 route.
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { searchReports, type UploadActor, uploadReport } from "arp-application";
-import { err, type FolderId, makeFolderId, makeReportId, methodNotAllowed } from "arp-domain";
-import { errorToHttp, parseCursorParams, searchReportsToHttp, uploadResultToHttp } from "arp-http";
-import { deps, viewOrigin } from "../server/container.server";
-import { handle } from "../server/handle.server";
-import { toResponse, wireContext } from "../server/http.server";
+// GET  /api/v1/reports — the acting org's reports, newest-created-first, cursor
+// paginated + searchable (ADR-0036, ADR-0053).
+// Thin transport adapter over the deepened `handle()` seam + the container's
+// `ops()`: this file keeps ONLY its unique parsing (the multipart upload
+// command, the search/cursor query params); actor resolution, method dispatch,
+// the Idempotency-Key header (ADR-0039), and wiring live on the seam.
+import type { UploadActor, uploadReport } from "arp-application";
+import { err, type FolderId, makeFolderId, makeReportId } from "arp-domain";
+import { parseCursorParams, searchReportsToHttp, uploadResultToHttp } from "arp-http";
+import { ops, viewOrigin } from "../server/container.server";
+import { handle, methods } from "../server/handle.server";
+import { wireContext } from "../server/http.server";
 
-// GET /api/v1/reports — the acting org's reports, newest-created-first, **cursor
-// paginated + searchable** (ADR-0036, ADR-0053). Query params: `q` (title/slug),
-// `folder_id` (filter), `limit`, `starting_after`/`ending_before` (a report_ id).
-// resolveActorForRead resolves the org WITHOUT provisioning; no session/org → 401.
 export const loader = handle({
   mode: "read",
-  run: async ({ args, actor }) => {
-    const url = new URL(args.request.url);
+  run: ({ url, actor }) => {
     const query = url.searchParams.get("q")?.trim() || undefined;
     const cursor = parseCursorParams(url.searchParams, makeReportId);
     if (!cursor.ok) return cursor; // malformed cursor → 422
@@ -34,45 +27,36 @@ export const loader = handle({
       folderId = parsed.value;
     }
 
-    return searchReports(
-      { reports: deps().reports },
-      { orgId: actor.orgId },
-      { query, folderId, ...cursor.value },
-    );
+    return ops().searchReports({ orgId: actor.orgId }, { query, folderId, ...cursor.value });
   },
   toHttp: (result) => searchReportsToHttp(result, wireContext()),
 });
 
-export async function action(args: ActionFunctionArgs) {
-  if (args.request.method !== "POST") {
-    return toResponse(errorToHttp(methodNotAllowed("POST")));
-  }
-  return uploadHandler(args);
-}
-
 // The report is served on the PSL-isolated view origin (ADR-002 / ADR-0038):
-// view_url = `${viewBaseUrl}/${slug}`. The composition root owns env access
-// (ADR-0043) — canonical VIEW_ORIGIN on prod, request-origin fallback on previews.
-// resolveUploadActor (the write-mode resolver) provisions the user's identity
-// (User + personal Org + Root folder) on first sight.
-const uploadHandler = handle({
-  mode: "write",
-  run: async ({ args, actor }) => {
-    // Parse the multipart request into an UploadCommand, then run it against the
-    // real adapters. The version is committed as `pending`; promotion happens
-    // asynchronously when the scan drain processes it (ADR-0045) — the 201
-    // truthfully returns scan_status: pending, and the viewer shows the holding
-    // page until the drain promotes the clean version.
-    const commandResult = await parseUploadCommand(args.request, actor);
-    if (!commandResult.ok) return commandResult;
-    return uploadReport(deps(), commandResult.value);
-  },
-  toHttp: (result, { args }) =>
-    uploadResultToHttp(result, { viewBaseUrl: viewOrigin(args.request), mode: wireContext().mode }),
+// view_url = `${viewBaseUrl}/${slug}`. The version is committed as `pending`;
+// promotion happens asynchronously when the scan drain processes it (ADR-0045).
+export const action = methods({
+  POST: handle({
+    mode: "write",
+    run: async ({ args, actor, idempotencyKey }) => {
+      const commandResult = await parseUploadCommand(args.request, actor, idempotencyKey);
+      if (!commandResult.ok) return commandResult;
+      return ops().uploadReport(commandResult.value);
+    },
+    toHttp: (result, { args }) =>
+      uploadResultToHttp(result, {
+        viewBaseUrl: viewOrigin(args.request),
+        mode: wireContext().mode,
+      }),
+  }),
 });
 
 /** Map the multipart form into an UploadCommand, or a client error. */
-async function parseUploadCommand(request: Request, actor: UploadActor) {
+async function parseUploadCommand(
+  request: Request,
+  actor: UploadActor,
+  idempotencyKey: string | undefined,
+) {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return err({
@@ -107,17 +91,14 @@ async function parseUploadCommand(request: Request, actor: UploadActor) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const idempotencyKey = strOrUndefined(request.headers.get("Idempotency-Key"));
 
-  return {
-    ok: true as const,
-    value: {
-      actor,
-      upload: { filename: file.name || "index.html", bytes },
-      ...(updateSlug ? { updateSlug } : {}),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    },
+  const cmd: Parameters<typeof uploadReport>[1] = {
+    actor,
+    upload: { filename: file.name || "index.html", bytes },
+    ...(updateSlug ? { updateSlug } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   };
+  return { ok: true as const, value: cmd };
 }
 
 function strOrUndefined(v: FormDataEntryValue | string | null): string | undefined {

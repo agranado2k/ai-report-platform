@@ -26,14 +26,13 @@
 // (never a cookie), so the response needs `Access-Control-Allow-Origin`
 // echoed for the configured VIEW_ORIGIN, and an `OPTIONS` preflight answered
 // before any auth runs.
-import { listReportVersions } from "arp-application";
 import { err, makeVersionId, ok, validationError } from "arp-domain";
 import { listReportVersionsToHttp, parseCursorParams, uploadResultToHttp } from "arp-http";
 import type { PMDocJson } from "arp-report-html";
 import { resolveAuthorIdentities } from "../server/author-email.server";
-import { deps, identityStore, viewOrigin } from "../server/container.server";
+import { deps, identityStore, ops, viewOrigin } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
-import { handle } from "../server/handle.server";
+import { handle, methods } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
 import { reassembleAndSaveEditedVersion } from "../server/save-edited-version.server";
 import { uniqueVersionAuthorIds } from "../server/version-dto.server";
@@ -45,13 +44,11 @@ export const loader = corsRoute(
   handle({
     mode: "read",
     slug: true,
-    run: async ({ args, actor, slug }) => {
-      const url = new URL(args.request.url);
+    run: async ({ url, actor, slug }) => {
       const cursor = parseCursorParams(url.searchParams, makeVersionId);
       if (!cursor.ok) return cursor; // malformed cursor → 422
 
-      const page = await listReportVersions(
-        { reports: deps().reports },
+      const page = await ops().listReportVersions(
         { orgId: actor.orgId },
         { slug, ...cursor.value },
       );
@@ -76,21 +73,29 @@ export const loader = corsRoute(
 
 export const action = corsRoute(
   ALLOWED_METHODS,
-  handle({
-    mode: "write",
-    slug: true,
-    parseBody: true,
-    run: ({ actor, slug, body }) => {
-      const raw = body.doc;
-      if (!raw || typeof raw !== "object") {
-        return err(validationError("doc is required", "doc"));
-      }
-      return reassembleAndSaveEditedVersion(deps(), actor, slug, raw as PMDocJson);
-    },
-    toHttp: (result, { args }) =>
-      uploadResultToHttp(result, {
-        viewBaseUrl: viewOrigin(args.request),
-        mode: wireContext().mode,
-      }),
+  methods({
+    POST: handle({
+      mode: "write",
+      slug: true,
+      parseBody: true,
+      run: ({ actor, slug, body, idempotencyKey }) => {
+        const raw = body.doc;
+        if (!raw || typeof raw !== "object") {
+          return err(validationError("doc is required", "doc"));
+        }
+        return reassembleAndSaveEditedVersion(
+          deps(),
+          actor,
+          slug,
+          raw as PMDocJson,
+          idempotencyKey,
+        );
+      },
+      toHttp: (result, { args }) =>
+        uploadResultToHttp(result, {
+          viewBaseUrl: viewOrigin(args.request),
+          mode: wireContext().mode,
+        }),
+    }),
   }),
 );
