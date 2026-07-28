@@ -1,17 +1,4 @@
-import {
-  createFolder,
-  createReport,
-  err,
-  type Folder,
-  folderId,
-  makeSlug,
-  orgId,
-  type Report,
-  reportId,
-  type Slug,
-  userId,
-  versionId,
-} from "arp-domain";
+import { err, folderId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
   canWrite,
@@ -26,49 +13,22 @@ import {
 } from "./load-owned";
 import type { FolderRepository, ReportRepository } from "./ports";
 import {
+  ACTORS,
+  colleagueActor,
+  folder,
+  makeGrantCheckDeps,
+  ownerActor,
+  report,
+  slug,
+} from "./testing/fixtures";
+import {
   InMemoryFolderRepository,
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "./testing/in-memory";
 
-const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
-const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
-const owner = userId("00000000-0000-7000-8000-0000000000d1");
-const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
-
-/** The owner acting in their own org — the only combination that exists in prod
- *  today (single-member personal orgs, ADR-0059). */
-const ownerActor = { orgId: orgA, userId: owner };
-/** A same-org colleague who is NOT the owner (the future company-org case). */
-const colleagueActor = { orgId: orgA, userId: otherUser };
-
-function slug(s: string): Slug {
-  const r = makeSlug(s);
-  if (!r.ok) throw new Error(`bad slug ${s}`);
-  return r.value;
-}
-
-function report(org: typeof orgA, slugStr: string): Report {
-  return createReport({
-    id: reportId(`00000000-0000-7000-8000-0000000000${slugStr.slice(0, 2)}`),
-    orgId: org,
-    folderId: folderId("00000000-0000-7000-8000-0000000000a0"),
-    slug: slug(slugStr),
-    title: "A Title",
-    versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
-    contentHash: "h".repeat(64),
-    uploadedBy: owner,
-    manifest: { entryDocument: "index.html", files: ["index.html"] },
-    sizeBytes: 1,
-  }).report;
-}
-
-function folder(id: string, org: typeof orgA, name: string): Folder {
-  const r = createFolder({ id: folderId(id), orgId: org, parentId: null, name });
-  if (!r.ok) throw new Error("bad folder");
-  return r.value;
-}
+const { orgA, orgB, owner, otherUser } = ACTORS;
 
 const FAILING_REPORTS: ReportRepository = {
   async findBySlug() {
@@ -216,9 +176,7 @@ describe("loadOwnedReport (owner-gated writes, ADR-0059 §2)", () => {
   });
 });
 
-function writeDeps(): WriteGrantCheckDeps {
-  return { grants: new InMemoryWriteGrantStore(), identities: new InMemoryIdentityStore() };
-}
+const writeDeps = (): WriteGrantCheckDeps => makeGrantCheckDeps();
 
 describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", () => {
   it("the owner can write, with no grant needed", async () => {
