@@ -806,19 +806,32 @@ export class InMemoryIdentityStore implements IdentityStore {
   }
 
   async findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>> {
+    // Soft-deleted users must not resolve (ADR-0054 terminal deletion,
+    // ADR-0070 PII posture) — matches the real adapter's `deleted_at IS NULL`
+    // filter (IdentityStore contract suite, ADR-0046).
+    if (this.isDeletedUser(userId)) return ok(null);
     return ok(this.emailByUserId.get(userId) ?? null);
   }
 
   async findAuthorIdentityByUserId(
     userId: UserId,
   ): Promise<Result<AuthorIdentity | null, AppError>> {
+    if (this.isDeletedUser(userId)) return ok(null); // no PII leak (ADR-0054/0070)
     const email = this.emailByUserId.get(userId);
     if (email === undefined) return ok(null); // unknown / never-seeded → miss
     return ok({ email, displayName: this.displayNameByUserId.get(userId) ?? null });
   }
 
   async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
-    return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
+    const resolved = this.userIdByEmail.get(email.trim().toLowerCase()) ?? null;
+    if (resolved !== null && this.isDeletedUser(resolved)) return ok(null); // ADR-0054
+    return ok(resolved);
+  }
+
+  /** Whether this internal UserId belongs to a soft-deleted Clerk user. */
+  private isDeletedUser(userId: UserId): boolean {
+    const clerkUserId = this.clerkIdFor(userId);
+    return clerkUserId !== null && this.deleted.has(clerkUserId);
   }
 
   /** The clerkUserId behind an internal UserId (reverse of `byClerk`), or null. */
