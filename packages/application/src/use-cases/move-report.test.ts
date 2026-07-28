@@ -1,69 +1,18 @@
-import {
-  createFolder,
-  createReport,
-  type Folder,
-  folderId,
-  makeSlug,
-  orgId,
-  type Report,
-  reportId,
-  type Slug,
-  userId,
-  versionId,
-} from "arp-domain";
+import { folderId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
-  InMemoryAuditLogger,
-  InMemoryFolderRepository,
-  InMemoryIdentityStore,
-  InMemoryReportRepository,
-  InMemoryWriteGrantStore,
-  idempotencyTestDeps,
-  PassThroughUnitOfWork,
-} from "../testing/in-memory";
+  ACTORS,
+  folder,
+  ownerActor,
+  report,
+  ROOT_FOLDER_ID as rootA,
+  slug,
+  makeWriteSeamDeps as writeDeps,
+} from "../testing/fixtures";
+import { InMemoryFolderRepository, InMemoryReportRepository } from "../testing/in-memory";
 import { moveReport } from "./move-report";
 
-const writeDeps = () => ({
-  grants: new InMemoryWriteGrantStore(),
-  identities: new InMemoryIdentityStore(),
-  audit: new InMemoryAuditLogger(),
-  uow: new PassThroughUnitOfWork(),
-  ...idempotencyTestDeps(),
-});
-
-const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
-const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
-const owner = userId("00000000-0000-7000-8000-0000000000d1");
-const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
-const ownerActor = { orgId: orgA, userId: owner };
-const rootA = folderId("00000000-0000-7000-8000-0000000000a0");
-
-function slug(s: string): Slug {
-  const r = makeSlug(s);
-  if (!r.ok) throw new Error(`bad slug ${s}`);
-  return r.value;
-}
-
-function folder(id: string, org: typeof orgA, name: string): Folder {
-  const r = createFolder({ id: folderId(id), orgId: org, parentId: null, name });
-  if (!r.ok) throw new Error("bad folder");
-  return r.value;
-}
-
-function report(org: typeof orgA, slugStr: string): Report {
-  return createReport({
-    id: reportId(`00000000-0000-7000-8000-0000000000${slugStr.slice(0, 2)}`),
-    orgId: org,
-    folderId: rootA,
-    slug: slug(slugStr),
-    title: "A report",
-    versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
-    contentHash: "h".repeat(64),
-    uploadedBy: userId("00000000-0000-7000-8000-0000000000d1"),
-    manifest: { entryDocument: "index.html", files: ["index.html"] },
-    sizeBytes: 1,
-  }).report;
-}
+const { orgA, orgB, owner, otherUser } = ACTORS;
 
 async function setup() {
   const reports = new InMemoryReportRepository();
