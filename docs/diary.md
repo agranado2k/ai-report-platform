@@ -3156,3 +3156,19 @@ live-prod dogfood report (`docs/dogfood-reports/2026-07-13-unified-editor.md`), 
 Worktree: `worktree/diary-round2-close` (branch `docs/diary-round2-close`) — housekeeping only, no code.
 The companion Centaur Spec roadmap report (slug `qqjM8VYe2-`) was refreshed the same day with the same
 Done / Missing / Next framing.
+
+### 2026-07-28 — Architecture-review application wave (report `Mk-hb0efFm`)
+
+An architecture-review pass (Centaur Spec report, slug `Mk-hb0efFm`) surfaced a batch of candidate
+cleanups; the accepted ones are now in flight as six parallel worktrees, one PR each:
+
+- `chore/seam-contracts` (card 5) — application-layer seam/contract tightening.
+- `refactor/viewer-gate` (card 2) — viewer access-gate refactor.
+- `chore/event-catalog-truth` (card 7B, this PR) — reversible outbox retire option: `docs/events.md`
+  split into Emitted/Proposed sections truthed up against actual `packages/domain/src` emit sites, the
+  `event-names` docs-conformance validator extended to catch drift between the two, no behavioral change.
+- `refactor/wire-catalog` (card 4, plain-TS option) — wiring/catalog refactor without a new FP dependency.
+- `refactor/write-front-door` (cards 3+1) — write-path front-door consolidation.
+- `refactor/prune-shelf` (card 6) — dead-code/shelf pruning.
+
+Each worktree carries its own PR and review cycle; this entry just records the wave starting together.
