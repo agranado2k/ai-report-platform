@@ -1,4 +1,6 @@
+export * from "./audit-logger.contract";
 export * from "./comment-repository.contract";
+export * from "./event-outbox.contract";
 export * from "./folder-repository.contract";
 export * from "./grant-store.contract";
 export * from "./report-repository.contract";
