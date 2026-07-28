@@ -34,7 +34,7 @@ This ensures the review is focused, actionable, and doesn't generate noise from 
 
 **Also build a reuse catalog** the Reuse & DRY auditor (Agent 6) will match new code against: the shared helpers, utilities, VOs, and repository methods that already exist near the diff. Note the barrels/index files that export them (e.g. `packages/domain/src/index.ts`, `packages/http/src/`, `packages/application/src/`) and any workspace-level shared packages, so "this could have called an existing helper" findings cite the exact export that should have been reused.
 
-### 2. Change Summarization (Sonnet agent)
+### 2. Change Summarization (Opus agent)
 
 **Action**: Summarize the branch's changes (scoped to commits from step 0), focusing on new endpoints, DB queries, security-critical code paths, and any cross-cutting concerns.
 
@@ -42,19 +42,19 @@ This ensures the review is focused, actionable, and doesn't generate noise from 
 
 All agents MUST only analyze code within the branch scope defined in step 0.
 
-#### Agent 1 — Security Sentinel (Opus/Sonnet)
+#### Agent 1 — Security Sentinel (Opus)
 
 Audit for SQL/NoSQL/Prompt Injections. Ensure strict input validation/sanitization. For this repo, also check: ADR-013 security-header stack on every viewer response, ADR-014 service-worker block at the edge, ADR-015 SVG rejection, ADR-016 API-key scopes.
 
-#### Agent 2 — API & CRUD Contract Manager (Sonnet)
+#### Agent 2 — API & CRUD Contract Manager (Opus)
 
 Verify CRUD symmetry, HTTP status codes, and DTO data leaks. For this repo, also check OpenAPI contract changes (`docs/api/openapi.yaml`) when API routes change.
 
-#### Agent 3 — Pattern & Refactor Enforcer (Sonnet)
+#### Agent 3 — Pattern & Refactor Enforcer (Opus)
 
 Check adherence to existing patterns. Identify code that can be simplified or modularized. For this repo, specifically: ADR-024 (no fp-ts/Effect/Remeda — vanilla TS + in-repo `pipe()` and `Result<T,E>`), ADR-020 (hexagonal — domain has no I/O), readonly on domain types.
 
-#### Agent 4 — Simplicity Advocate (Sonnet)
+#### Agent 4 — Simplicity Advocate (Opus)
 
 Actively look for ways to reduce code complexity and volume. For every piece of new code, ask: "Is there a simpler way to achieve the same result with less code?" Prioritize:
 
@@ -66,7 +66,7 @@ Actively look for ways to reduce code complexity and volume. For every piece of 
 
 The goal is: less code to read, less code to maintain. Simpler code is easier to review, test, and debug.
 
-#### Agent 5 — Reuse & DRY Auditor (Sonnet)
+#### Agent 5 — Reuse & DRY Auditor (Opus)
 
 The single most important lens for this repo: **new code must reuse what already exists before it reinvents it.** Using the reuse catalog from step 1, for every new function, type, constant, query, or block of logic in the diff, ask: *does an equivalent already exist in the codebase, and should this have called it instead?*
 
@@ -80,7 +80,7 @@ Flag, with the exact existing export/file:line that should have been reused:
 
 Distinguish **genuine duplication worth removing** from **incidental similarity** (two short blocks that look alike but are coupled to different concerns and would be wrongly fused by a shared abstraction). Do NOT recommend a premature shared abstraction for a single occurrence — that contradicts Agent 4. The bar is: an existing reusable thing is right there, OR the same non-trivial logic appears in ≥2 places in this diff. When in doubt about whether extraction is worth it, state the trade-off rather than asserting.
 
-#### Agent 6 — Test Hygiene Inspector (Sonnet)
+#### Agent 6 — Test Hygiene Inspector (Opus)
 
 When the PR includes test files, this agent MUST:
 

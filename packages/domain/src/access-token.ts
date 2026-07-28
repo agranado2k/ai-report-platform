@@ -1,10 +1,12 @@
 // Access token — the app↔view sharing capability (ADR-0056). A compact,
 // HMAC-signed, slug-bound, exp-bounded token: the app mints it after authorizing
 // a private report (by Acl mode); the credential-free view origin verifies the
-// signature only (never holds Clerk creds). Built on the shared signed-token
-// codec (signed-token.ts) — this module owns only the `AccessClaims` shape,
-// its validation, and the slug-match check; sign/verify/expiry are the codec's.
-import { mintClaimsToken, readClaimsToken, type TokenClaims } from "./signed-token";
+// signature only (never holds Clerk creds). Built on the shared claims-codec
+// factory (claims-codec.ts, over signed-token.ts) — this module owns only the
+// `AccessClaims` shape and its validation; sign/verify/expiry/slug-match are
+// the factory's (ADR-0073).
+import { makeClaimsCodec } from "./claims-codec";
+import type { TokenClaims } from "./signed-token";
 
 export interface AccessClaims extends TokenClaims {
   readonly slug: string;
@@ -41,6 +43,8 @@ function parseAccessClaims(raw: unknown): AccessClaims | null {
   };
 }
 
+const codec = makeClaimsCodec({ parseClaims: parseAccessClaims });
+
 /** Mint a slug-bound token valid for `ttlSeconds` from `nowSeconds`. `mode` binds it to the
  *  Acl mode it authorizes; `email` is carried for `allowlist` so the viewer can check a grant. */
 export function mintAccessToken(
@@ -50,14 +54,16 @@ export function mintAccessToken(
   nowSeconds: number,
   extra: { readonly mode?: string; readonly email?: string; readonly owner?: boolean } = {},
 ): string {
-  const claims: AccessClaims = {
-    slug,
-    exp: nowSeconds + ttlSeconds,
-    ...(extra.mode ? { mode: extra.mode } : {}),
-    ...(extra.email ? { email: extra.email } : {}),
-    ...(extra.owner ? { owner: true } : {}),
-  };
-  return mintClaimsToken(claims, secret);
+  return codec.mint(
+    {
+      slug,
+      exp: nowSeconds + ttlSeconds,
+      ...(extra.mode ? { mode: extra.mode } : {}),
+      ...(extra.email ? { email: extra.email } : {}),
+      ...(extra.owner ? { owner: true } : {}),
+    },
+    secret,
+  );
 }
 
 /** Verify + return the claims (incl. `email`), or null if the signature is invalid, it
@@ -68,9 +74,7 @@ export function readAccessToken(
   secret: string,
   nowSeconds: number,
 ): AccessClaims | null {
-  const claims = readClaimsToken(token, secret, nowSeconds, parseAccessClaims);
-  if (!claims) return null;
-  return claims.slug === expectedSlug ? claims : null;
+  return codec.read(token, expectedSlug, secret, nowSeconds);
 }
 
 /** True iff the token's signature is valid, it hasn't expired, and it was minted

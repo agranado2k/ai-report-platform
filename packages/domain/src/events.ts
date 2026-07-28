@@ -17,6 +17,10 @@ export interface ReportVersionUploaded {
   readonly origin: VersionOrigin;
 }
 
+/** Declared but not yet constructed anywhere in packages/domain/src — no
+ *  emitter exists yet (processScanResult updates scan_status directly).
+ *  Tracked as "Proposed (not yet emitted)" in docs/events.md until an emit
+ *  site is added. */
 export interface ReportVersionScanned {
   readonly type: "ReportVersionScanned";
   readonly reportId: ReportId;

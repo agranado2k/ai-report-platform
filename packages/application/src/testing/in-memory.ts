@@ -106,7 +106,7 @@ function keysetPage<T extends { readonly id: string }>(
   return { items: sorted.slice(0, q.limit), hasMore: sorted.length > q.limit };
 }
 
-export class InMemoryFolderRepository implements FolderRepository {
+export class InMemoryFolderRepository implements FolderRepository, TxSnapshottable {
   private readonly byId = new Map<string, Folder>();
 
   async listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>> {
@@ -146,9 +146,17 @@ export class InMemoryFolderRepository implements FolderRepository {
     if (f) this.byId.set(id, { ...f, deletedAt: 1 });
     return ok(undefined);
   }
+
+  snapshot(): unknown {
+    return new Map(this.byId);
+  }
+
+  restore(snapshot: unknown): void {
+    restoreMap(this.byId, snapshot as Map<string, Folder>);
+  }
 }
 
-export class InMemoryReportRepository implements ReportRepository {
+export class InMemoryReportRepository implements ReportRepository, TxSnapshottable {
   private readonly byId = new Map<string, Report>();
   private readonly slugToId = new Map<string, string>();
   // Monotonic per-id write sequence, bumped on every save() (create AND
@@ -255,11 +263,45 @@ export class InMemoryReportRepository implements ReportRepository {
     }));
     return ok(keysetPage(summaries, q));
   }
+
+  snapshot(): unknown {
+    return {
+      byId: new Map(this.byId),
+      slugToId: new Map(this.slugToId),
+      lastWriteSeq: new Map(this.lastWriteSeq),
+      writeSeq: this.writeSeq,
+      versionUploadedAt: new Map(this.versionUploadedAt),
+      uploadSeq: this.uploadSeq,
+    };
+  }
+
+  restore(snapshot: unknown): void {
+    const s = snapshot as {
+      byId: Map<string, Report>;
+      slugToId: Map<string, string>;
+      lastWriteSeq: Map<string, number>;
+      writeSeq: number;
+      versionUploadedAt: Map<string, number>;
+      uploadSeq: number;
+    };
+    restoreMap(this.byId, s.byId);
+    restoreMap(this.slugToId, s.slugToId);
+    restoreMap(this.lastWriteSeq, s.lastWriteSeq);
+    this.writeSeq = s.writeSeq;
+    restoreMap(this.versionUploadedAt, s.versionUploadedAt);
+    this.uploadSeq = s.uploadSeq;
+  }
+}
+
+/** Overwrite `target`'s contents with `source`'s (rollback restore helper). */
+function restoreMap<K, V>(target: Map<K, V>, source: ReadonlyMap<K, V>): void {
+  target.clear();
+  for (const [k, v] of source) target.set(k, v);
 }
 
 /** In-memory CommentRepository (ADR-0064). `delete` mirrors the real adapter's
  *  self-FK CASCADE: deleting a root also deletes its replies. */
-export class InMemoryCommentRepository implements CommentRepository {
+export class InMemoryCommentRepository implements CommentRepository, TxSnapshottable {
   private readonly byId = new Map<string, Comment>();
 
   async findById(id: CommentId): Promise<Result<Comment | null, AppError>> {
@@ -287,6 +329,14 @@ export class InMemoryCommentRepository implements CommentRepository {
       if (c.parentCommentId === id) this.byId.delete(c.id);
     }
     return ok(undefined);
+  }
+
+  snapshot(): unknown {
+    return new Map(this.byId);
+  }
+
+  restore(snapshot: unknown): void {
+    restoreMap(this.byId, snapshot as Map<string, Comment>);
   }
 }
 
@@ -331,7 +381,7 @@ interface IdemEntry {
   readonly record?: IdempotencyRecord;
 }
 
-export class InMemoryIdempotencyStore implements IdempotencyStore {
+export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottable {
   private readonly entries = new Map<string, IdemEntry>();
 
   async begin(
@@ -370,9 +420,17 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     this.entries.set(k, { ...existing, state: "completed", record });
     return ok(undefined);
   }
+
+  snapshot(): unknown {
+    return new Map(this.entries);
+  }
+
+  restore(snapshot: unknown): void {
+    restoreMap(this.entries, snapshot as Map<string, IdemEntry>);
+  }
 }
 
-export class InMemoryEventOutbox implements EventOutbox {
+export class InMemoryEventOutbox implements EventOutbox, TxSnapshottable {
   private readonly events: DomainEvent[] = [];
 
   async enqueue(events: readonly DomainEvent[]): Promise<Result<void, AppError>> {
@@ -384,9 +442,18 @@ export class InMemoryEventOutbox implements EventOutbox {
   drained(): readonly DomainEvent[] {
     return [...this.events];
   }
+
+  snapshot(): unknown {
+    return [...this.events];
+  }
+
+  restore(snapshot: unknown): void {
+    this.events.length = 0;
+    this.events.push(...(snapshot as DomainEvent[]));
+  }
 }
 
-export class InMemoryAuditLogger implements AuditLogger {
+export class InMemoryAuditLogger implements AuditLogger, TxSnapshottable {
   private readonly entries: AuditEntry[] = [];
 
   async record(entries: readonly AuditEntry[]): Promise<Result<void, AppError>> {
@@ -397,6 +464,15 @@ export class InMemoryAuditLogger implements AuditLogger {
   /** Test helper: the entries recorded so far (in order). */
   recorded(): readonly AuditEntry[] {
     return [...this.entries];
+  }
+
+  snapshot(): unknown {
+    return [...this.entries];
+  }
+
+  restore(snapshot: unknown): void {
+    this.entries.length = 0;
+    this.entries.push(...(snapshot as AuditEntry[]));
   }
 }
 
@@ -528,10 +604,52 @@ export class FixedClock implements Clock {
   }
 }
 
-/** Pass-through UnitOfWork — the in-memory fakes share no real transaction. */
+/** Pass-through UnitOfWork — the in-memory fakes share no real transaction.
+ *  Fine for tests that don't assert rollback; a test that DOES assert "the
+ *  mutation was rolled back" needs {@link TransactionalInMemoryUnitOfWork}. */
 export class PassThroughUnitOfWork implements UnitOfWork {
   async run<T>(work: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
     return work();
+  }
+}
+
+/** A fake that can participate in {@link TransactionalInMemoryUnitOfWork}:
+ *  snapshot its whole state before the work runs, restore it on rollback.
+ *  Snapshots are shallow container copies — safe because domain values are
+ *  immutable (`readonly` everywhere, ADR-024). */
+export interface TxSnapshottable {
+  snapshot(): unknown;
+  restore(snapshot: unknown): void;
+}
+
+/**
+ * An in-memory UnitOfWork that actually rolls back (unlike
+ * {@link PassThroughUnitOfWork}): it snapshots every registered participant
+ * before running `work`, and restores them when the work returns err (the
+ * adapter's Rollback-sentinel path) or throws — mirroring DrizzleUnitOfWork's
+ * semantics, including the `unitOfWork: …` Unexpected mapping for throws.
+ * Register every fake the work mutates; an unregistered fake's writes survive
+ * a rollback silently.
+ */
+export class TransactionalInMemoryUnitOfWork implements UnitOfWork {
+  constructor(private readonly participants: readonly TxSnapshottable[]) {}
+
+  async run<T>(work: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
+    const snapshots = this.participants.map((p) => p.snapshot());
+    const rollback = () => {
+      for (const [i, p] of this.participants.entries()) p.restore(snapshots[i]);
+    };
+    try {
+      const r = await work();
+      if (!r.ok) rollback();
+      return r;
+    } catch (e) {
+      rollback();
+      return err({
+        kind: "Unexpected",
+        message: `unitOfWork: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
   }
 }
 
@@ -688,19 +806,32 @@ export class InMemoryIdentityStore implements IdentityStore {
   }
 
   async findEmailByUserId(userId: UserId): Promise<Result<string | null, AppError>> {
+    // Soft-deleted users must not resolve (ADR-0054 terminal deletion,
+    // ADR-0070 PII posture) — matches the real adapter's `deleted_at IS NULL`
+    // filter (IdentityStore contract suite, ADR-0046).
+    if (this.isDeletedUser(userId)) return ok(null);
     return ok(this.emailByUserId.get(userId) ?? null);
   }
 
   async findAuthorIdentityByUserId(
     userId: UserId,
   ): Promise<Result<AuthorIdentity | null, AppError>> {
+    if (this.isDeletedUser(userId)) return ok(null); // no PII leak (ADR-0054/0070)
     const email = this.emailByUserId.get(userId);
     if (email === undefined) return ok(null); // unknown / never-seeded → miss
     return ok({ email, displayName: this.displayNameByUserId.get(userId) ?? null });
   }
 
   async findUserIdByEmail(email: string): Promise<Result<UserId | null, AppError>> {
-    return ok(this.userIdByEmail.get(email.trim().toLowerCase()) ?? null);
+    const resolved = this.userIdByEmail.get(email.trim().toLowerCase()) ?? null;
+    if (resolved !== null && this.isDeletedUser(resolved)) return ok(null); // ADR-0054
+    return ok(resolved);
+  }
+
+  /** Whether this internal UserId belongs to a soft-deleted Clerk user. */
+  private isDeletedUser(userId: UserId): boolean {
+    const clerkUserId = this.clerkIdFor(userId);
+    return clerkUserId !== null && this.deleted.has(clerkUserId);
   }
 
   /** The clerkUserId behind an internal UserId (reverse of `byClerk`), or null. */
