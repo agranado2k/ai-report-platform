@@ -5,13 +5,15 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
-    "dev": "esbuild src/local.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/local.mjs && node dist/local.mjs",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --alias:arp-domain=../../packages/domain/src/index.ts --outfile=dist/server.mjs",
+    "dev": "esbuild src/local.ts --bundle --platform=node --format=esm --packages=external --alias:arp-domain=../../packages/domain/src/index.ts --outfile=dist/local.mjs && node dist/local.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {
     "@clerk/backend": "^2.33.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "arp-domain": "workspace:*",
+    "arp-http": "workspace:*",
     "express": "^5.1.0",
     "zod": "^4.4.3"
   },

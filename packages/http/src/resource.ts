@@ -2,6 +2,9 @@
 // carrying an `object` type discriminator + `mode` + its prefixed External Id
 // (ADR-0052); lists use the `{ object: "list", data: [...], has_more }` envelope.
 // Errors stay RFC 9457 (ADR-0040). Mapping lives ONLY here, at the http boundary.
+// Every builder is return-typed against the `./wire` catalog (the client-safe
+// declaration of these shapes) — the compile-time link that keeps the catalog
+// honest about what actually goes on the wire.
 import type { ReportVersionSummary } from "arp-application";
 import type { Comment, Folder, FolderId, ReportId, Slug } from "arp-domain";
 import {
@@ -11,9 +14,14 @@ import {
   userIdToWire,
   versionIdToWire,
 } from "arp-domain";
-
-/** Which deployment a resource belongs to (ADR-0053): the live product vs preview/dev. */
-export type WireMode = "prod" | "dev";
+import type {
+  CommentWire,
+  FolderWire,
+  ListEnvelope,
+  ReportWire,
+  VersionWire,
+  WireMode,
+} from "./wire";
 
 /** Per-request wire context: the deployment `mode` stamped onto every resource.
  *  (Request-Id is a response header, set by the app boundary — not a body field.) */
@@ -40,7 +48,7 @@ export function reportBody(
     readonly folderId: FolderId;
   },
   ctx: WireContext,
-) {
+): ReportWire {
   return {
     object: "report" as const,
     id: reportIdToWire(r.id),
@@ -53,7 +61,7 @@ export function reportBody(
 }
 
 /** A `folder` resource. */
-export function folderBody(f: Folder, ctx: WireContext) {
+export function folderBody(f: Folder, ctx: WireContext): FolderWire {
   return {
     object: "folder" as const,
     id: folderIdToWire(f.id),
@@ -73,7 +81,7 @@ export function versionBody(
   v: ReportVersionSummary,
   ctx: WireContext,
   author: WireAuthor | null = null,
-) {
+): VersionWire {
   return {
     object: "version" as const,
     id: versionIdToWire(v.id),
@@ -103,7 +111,11 @@ export function versionBody(
  *  is null for a root comment (starts a Thread), a `comment_…` External Id for a
  *  reply. `anchor.relative` is omitted when absent (v1: no editor slice yet, so
  *  every comment is version-pinned only). */
-export function commentBody(c: Comment, ctx: WireContext, author: WireAuthor | null = null) {
+export function commentBody(
+  c: Comment,
+  ctx: WireContext,
+  author: WireAuthor | null = null,
+): CommentWire {
   return {
     object: "comment" as const,
     id: commentIdToWire(c.id),
@@ -141,6 +153,6 @@ export function commentBody(c: Comment, ctx: WireContext, author: WireAuthor | n
 }
 
 /** The Stripe-style list envelope: `{ object: "list", data: [...], has_more }`. */
-export function listBody<T>(data: readonly T[], hasMore: boolean) {
+export function listBody<T>(data: readonly T[], hasMore: boolean): ListEnvelope<T> {
   return { object: "list" as const, data, has_more: hasMore };
 }

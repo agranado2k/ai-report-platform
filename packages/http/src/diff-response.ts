@@ -11,6 +11,7 @@ import type { AppError, Result, VersionId } from "arp-domain";
 import { versionIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import type { WireContext } from "./resource";
+import type { DiffWire } from "./wire";
 
 export interface ReportDiffOutcome {
   readonly mode: "structural" | "fallback";
@@ -29,17 +30,14 @@ export function reportDiffToHttp(
   if (!result.ok) return errorToHttp(result.error);
   const { mode, html, label, fromVersionId, toVersionId, fromVersionNo, toVersionNo } =
     result.value;
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: {
-      object: "report_diff" as const,
-      diff_mode: mode,
-      html,
-      label,
-      from: { id: versionIdToWire(fromVersionId), version_no: fromVersionNo },
-      to: { id: versionIdToWire(toVersionId), version_no: toVersionNo },
-      mode: ctx.mode,
-    },
+  const body: DiffWire = {
+    object: "report_diff" as const,
+    diff_mode: mode,
+    html,
+    label,
+    from: { id: versionIdToWire(fromVersionId), version_no: fromVersionNo },
+    to: { id: versionIdToWire(toVersionId), version_no: toVersionNo },
+    mode: ctx.mode,
   };
+  return { status: 200, contentType: "application/json", body };
 }

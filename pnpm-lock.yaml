@@ -183,6 +183,12 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.26.0
         version: 1.29.0(zod@4.4.3)
+      arp-domain:
+        specifier: workspace:*
+        version: link:../../packages/domain
+      arp-http:
+        specifier: workspace:*
+        version: link:../../packages/http
       express:
         specifier: ^5.1.0
         version: 5.2.1
@@ -250,6 +256,9 @@ importers:
       arp-headers:
         specifier: workspace:*
         version: link:../../packages/headers
+      arp-http:
+        specifier: workspace:*
+        version: link:../../packages/http
       arp-report-html:
         specifier: workspace:*
         version: link:../../packages/report-html
