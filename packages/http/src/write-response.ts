@@ -7,10 +7,11 @@ import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import { commentBody, folderBody, listBody, reportBody, type WireContext } from "./resource";
+import type { AclShareWire, AclWire, ReportDetailWire, WriteGrantWire } from "./wire";
 
 /** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
  *  allowed emails + owner access TTL; the argon2id password hash is NEVER serialized. */
-function aclToWire(acl: Acl) {
+function aclToWire(acl: Acl): AclShareWire {
   return acl.mode === "allowlist"
     ? {
         mode: "allowlist",
@@ -32,7 +33,7 @@ export interface ReportViewer {
  *  (ADR-0059 §3), so org members (and future ADR-0060 write-grantees) never
  *  receive it. No viewer ⇒ fail closed (no acl). List summaries carry neither
  *  (ADR-0056). */
-function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer) {
+function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer): ReportDetailWire {
   const base = {
     ...reportBody(
       {
@@ -110,7 +111,7 @@ export function setAclToHttp(
 
 /** The `Acl` as a standalone `object: "acl"` resource (ADR-0053/0056) — the focused
  *  read shape for GET /acl, distinct from the full report resource POST returns. */
-function aclResource(acl: Acl) {
+function aclResource(acl: Acl): AclWire {
   return { object: "acl", ...aclToWire(acl) };
 }
 
@@ -154,7 +155,7 @@ export function deleteFolderToHttp(result: Result<void, AppError>): HttpResponse
 /** A `WriteGrant` → the `write_grant` resource body (ADR-0060). No surrogate
  *  id — wire-addressed by `(slug, email)`, so only the fields on the wire; the
  *  granting owner is a `user_…` External Id like `Report.owner`. */
-function writeGrantBody(g: WriteGrant) {
+function writeGrantBody(g: WriteGrant): WriteGrantWire {
   return {
     object: "write_grant" as const,
     email: g.granteeEmail,
