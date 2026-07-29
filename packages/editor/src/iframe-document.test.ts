@@ -26,6 +26,7 @@ import type { Shell } from "arp-report-html";
 import { reinjectShell, splitShell } from "arp-report-html";
 import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
+import { COMMENT_INTENT_COLORS } from "./comment-colors";
 import {
   buildIframeDocument,
   buildReadOnlyIframeDocument,
@@ -110,6 +111,19 @@ describe("buildIframeDocument", () => {
     expect(injectedIndex).toBeGreaterThan(-1);
     expect(injectedIndex).toBeLessThan(headCloseIndex);
     expect(doc).toContain(IFRAME_INJECTED_CSS);
+  });
+
+  it("injects one highlight color rule per intent, generated from the overlay palette", () => {
+    // Comment-UX adoptions, item A: the CSS is generated from
+    // COMMENT_INTENT_COLORS so the painted rules can never drift from the
+    // exported constants.
+    for (const [intent, colors] of Object.entries(COMMENT_INTENT_COLORS)) {
+      expect(IFRAME_INJECTED_CSS).toContain(`.comment-highlight--${intent}`);
+      expect(IFRAME_INJECTED_CSS).toContain(colors.background);
+      expect(IFRAME_INJECTED_CSS).toContain(colors.underline);
+    }
+    // Item E's print half: the highlight pigments survive printing.
+    expect(IFRAME_INJECTED_CSS).toContain("print-color-adjust: exact");
   });
 
   it("preserves the shell's <body> attributes/classes verbatim", () => {
