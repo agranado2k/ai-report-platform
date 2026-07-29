@@ -3156,3 +3156,75 @@ live-prod dogfood report (`docs/dogfood-reports/2026-07-13-unified-editor.md`), 
 Worktree: `worktree/diary-round2-close` (branch `docs/diary-round2-close`) — housekeeping only, no code.
 The companion Centaur Spec roadmap report (slug `qqjM8VYe2-`) was refreshed the same day with the same
 Done / Missing / Next framing.
+
+### 2026-07-28 — Architecture-review application wave (report `Mk-hb0efFm`)
+
+An architecture-review pass (Centaur Spec report, slug `Mk-hb0efFm`) surfaced a batch of candidate
+cleanups; the accepted ones are now in flight as six parallel worktrees, one PR each:
+
+- `chore/seam-contracts` (card 5) — application-layer seam/contract tightening.
+- `refactor/viewer-gate` (card 2) — viewer access-gate refactor.
+- `chore/event-catalog-truth` (card 7B, this PR) — reversible outbox retire option: `docs/events.md`
+  split into Emitted/Proposed sections truthed up against actual `packages/domain/src` emit sites, the
+  `event-names` docs-conformance validator extended to catch drift between the two, no behavioral change.
+- `refactor/wire-catalog` (card 4, plain-TS option) — wiring/catalog refactor without a new FP dependency.
+- `refactor/write-front-door` (cards 3+1) — write-path front-door consolidation.
+- `refactor/prune-shelf` (card 6) — dead-code/shelf pruning.
+
+Each worktree carries its own PR and review cycle; this entry just records the wave starting together.
+
+---
+
+## 2026-07-28 — One wire contract: the `arp-http/wire` catalog (architecture-review candidate 4, option c)
+
+Closed the "three hand-kept copies of the wire" gap the architecture review flagged: the viewer's
+`apps/view/app/edit/wire-types.ts` mirrored `resource.ts` by hand ("kept in sync by hand" was literal),
+and the MCP client typed everything as `Record<string, unknown>`. Chose **option (c) — a plain-TS
+catalog, zero new runtime dependencies** (no zod-at-the-boundary, no codegen).
+
+- **`arp-http/wire`** (new `packages/http/src/wire/`, exported as a package subpath): the client-safe,
+  browser-importable declaration of every `/api/v1` success shape — `ReportWire`/`ReportDetailWire`,
+  `FolderWire`, `VersionWire`, `CommentWire` + `CommentAnchorWire`, `DiffWire`, `AclShareWire`/`AclWire`,
+  `WriteGrantWire`, `ListEnvelope<T>`, `WireCursorParams`, `WireMode`. Types + type-only `arp-domain`
+  imports ONLY (a value import would drag `node:crypto` into browser bundles). Enum vocabularies
+  (`AclMode`, `Intent`, `ScanStatus`, `VersionOrigin`) are imported from `arp-domain`, never re-declared.
+- **Compile-time link:** the `resource.ts` / `diff-response.ts` / `write-response.ts` encoders are now
+  return-typed against the catalog, and `wire/index.test.ts` locks the emitted objects to it — the
+  catalog can't drift from what the server sends. Emit-shape truths reconciled along the way: `author`
+  and `edited_at` are ALWAYS present on comment/version resources (null-filled, never omitted) — the
+  viewer's defensive `author?`/`edited_at?` optionality encoded a pre-ADR-0063 server that no longer
+  exists.
+- **apps/view** re-exports the catalog through the existing `./wire-types` seam (the hand-mirror is
+  dead); **apps/mcp**'s `ApiClient` is fully typed with it, `tools.ts` derives `z.enum(...)` from
+  `ACL_MODES`/`COMMENT_INTENTS`, and the 4× cursor-param trio + 13× slug describe-string collapsed into
+  shared helpers (schema output pinned verbatim by tests). The MCP esbuild bundle gains
+  `--alias:arp-domain=…` so the TS-source workspace package is compiled in (aliases resolve before
+  `--packages=external`).
+- **Deliberately out of scope** (follow-ups): OpenAPI generation from the catalog, and route-side
+  request decoders. `apps/app` untouched (a parallel work package owns its routes).
+
+Worktree: `worktree/wire-catalog` (branch `refactor/wire-catalog`), PR #216.
+
+## 2026-07-28 — Architecture-review candidates 3 + 1: actor resolution as a module, one write front door
+
+The top recommendation from the architecture review lands in one worktree/PR (`worktree/write-front-door`,
+branch `refactor/write-front-door`):
+
+- **Candidate 3 — actor resolution as a module.** The four front doors (`arp_` API key → Clerk session
+  with JIT provisioning on write → forwarded OAuth token → slug-bound edit token) now live in ONE
+  unit-tested cascade, `apps/app/app/server/resolve-actor.server.ts` (`resolveActor(args, {mode, slug},
+  deps)`), with every door's I/O injected. Door order, terminal-vs-fall-through per door, the read/write
+  provisioning difference, null-vs-401, and the STRUCTURAL slug gate on the edit-token door are all
+  proven by tests instead of prose. `auth.server.ts` keeps the live Clerk wiring and delegates;
+  `api-key-principal.ts` dissolved.
+- **Candidate 1 — one write front door.** `handle()` deepened (Idempotency-Key + audit context parsed
+  once, `methods()` verb dispatch, `ctx.url`), `container.server.ts` gained `ops()` (one fully-wired
+  invocation per use case, absorbing every per-route deps bag), and all 13 `/api/v1` routes + the
+  dashboard actions migrated onto it. **ADR-0039 is now real on every mutating endpoint:** all 16
+  remaining mutating use cases adopt upload-report's begin/complete-inside-uow idempotency shape via the
+  new `beginIdempotentWrite` helper (`packages/application/src/idempotent-write.ts`) — replay/409/422
+  semantics proven at use-case level and through `handle()` at the wire. Deliberate carve-outs documented
+  in code + the PR: password-mode `setAcl` and `createApiKey` skip the DERIVED key (never derive a key
+  from a plaintext password; never replay a secret — a replayed mint returns `token: null`).
+- ADR-0070's magic-link exclusion stands (no org-shaped actor at those call sites) — audit for
+  sendMagicLink/redeemMagicLink stays a flagged follow-up, per ADR-0070 §4.

@@ -1,54 +1,19 @@
-import {
-  createReport,
-  folderId,
-  makeSlug,
-  orgId,
-  type Report,
-  reportId,
-  type Slug,
-  userId,
-  versionId,
-} from "arp-domain";
+import type { OrgId, Report } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
-  InMemoryAuditLogger,
-  InMemoryIdentityStore,
-  InMemoryReportRepository,
-  InMemoryWriteGrantStore,
-  PassThroughUnitOfWork,
-} from "../testing/in-memory";
+  ACTORS,
+  ownerActor,
+  report as reportFixture,
+  slug,
+  makeWriteSeamDeps as writeDeps,
+} from "../testing/fixtures";
+import { InMemoryReportRepository } from "../testing/in-memory";
 import { renameReport } from "./rename-report";
 
-const writeDeps = () => ({
-  grants: new InMemoryWriteGrantStore(),
-  identities: new InMemoryIdentityStore(),
-  audit: new InMemoryAuditLogger(),
-  uow: new PassThroughUnitOfWork(),
-});
+const { orgA, owner, otherUser } = ACTORS;
 
-const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
-const owner = userId("00000000-0000-7000-8000-0000000000d1");
-const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
-const ownerActor = { orgId: orgA, userId: owner };
-
-function slug(s: string): Slug {
-  const r = makeSlug(s);
-  if (!r.ok) throw new Error("bad slug");
-  return r.value;
-}
-function report(org: typeof orgA, slugStr: string): Report {
-  return createReport({
-    id: reportId(`00000000-0000-7000-8000-0000000000${slugStr.slice(0, 2)}`),
-    orgId: org,
-    folderId: folderId("00000000-0000-7000-8000-0000000000a0"),
-    slug: slug(slugStr),
-    title: "Old Title",
-    versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
-    contentHash: "h".repeat(64),
-    uploadedBy: userId("00000000-0000-7000-8000-0000000000d1"),
-    manifest: { entryDocument: "index.html", files: ["index.html"] },
-    sizeBytes: 1,
-  }).report;
+function report(org: OrgId, slugStr: string): Report {
+  return reportFixture(org, slugStr, { title: "Old Title" });
 }
 
 describe("renameReport use case", () => {
@@ -115,5 +80,61 @@ describe("renameReport use case", () => {
       targetId: toRename.id,
       meta: { from: "Old Title", to: "New Title" },
     });
+  });
+});
+
+describe("renameReport idempotency (ADR-0039)", () => {
+  it("replays the recorded response on an identical retry — one mutation, one audit row", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "ffffffffff"));
+    const deps = { reports, ...writeDeps() };
+    const input = { slug: slug("ffffffffff"), title: "New Title" };
+
+    const first = await renameReport(deps, ownerActor, input);
+    const second = await renameReport(deps, ownerActor, input);
+    expect(first.ok && first.value.title).toBe("New Title");
+    expect(second.ok && second.value.title).toBe("New Title");
+    expect(second.ok && second.value.slug).toBe("ffffffffff");
+    expect(deps.audit.recorded().length).toBe(1); // the replay never re-audited
+  });
+
+  it("rejects an explicit Idempotency-Key reused with a different payload (422)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "gggggggggg"));
+    const deps = { reports, ...writeDeps() };
+
+    const first = await renameReport(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      title: "One",
+      idempotencyKey: "k1",
+    });
+    expect(first.ok).toBe(true);
+    const second = await renameReport(deps, ownerActor, {
+      slug: slug("gggggggggg"),
+      title: "Two",
+      idempotencyKey: "k1",
+    });
+    expect(!second.ok && second.error.kind).toBe("IdempotencyKeyReuseDifferentBody");
+  });
+
+  it("maps a concurrent in-flight duplicate to IdempotencyInFlight (409)", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "hhhhhhhhhh"));
+    const deps = { reports, ...writeDeps() };
+    // Claim the key but never complete it (simulates an in-flight request).
+    await deps.idempotency.begin(
+      {
+        actingUserId: owner,
+        route: "PATCH /api/v1/reports/{slug}",
+        key: "inflight",
+      },
+      deps.keyHasher.hash("hhhhhhhhhh\nX"),
+    );
+    const r = await renameReport(deps, ownerActor, {
+      slug: slug("hhhhhhhhhh"),
+      title: "X",
+      idempotencyKey: "inflight",
+    });
+    expect(!r.ok && r.error.kind).toBe("IdempotencyInFlight");
   });
 });

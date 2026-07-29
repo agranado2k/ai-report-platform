@@ -159,6 +159,8 @@ paths:
         `parent_id` (every folder lives under Root).
       security:
         - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -173,6 +175,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -193,6 +196,7 @@ paths:
           required: true
           schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: The folder id.
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -207,6 +211,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -226,12 +231,14 @@ paths:
           required: true
           schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: The folder id.
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '204':
           description: Deleted (no content).
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -254,6 +261,7 @@ paths:
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -268,6 +276,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -320,6 +329,7 @@ paths:
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -334,6 +344,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -387,6 +398,7 @@ paths:
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -401,6 +413,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -428,11 +441,13 @@ paths:
           required: true
           schema: { type: string, format: email }
           description: The grantee's email (URL-encoded).
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '204': { description: Revoked (or no grant existed — idempotent). }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -504,6 +519,7 @@ paths:
             The report's permanent capability-URL slug (nanoid(10)). With an
             `editToken`, this MUST be the CANONICAL slug the token was
             minted for (ADR-0063).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -518,6 +534,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -678,6 +695,7 @@ paths:
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -692,6 +710,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -711,12 +730,14 @@ paths:
           required: true
           schema: { type: string }
           description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '204':
           description: Deleted (no content).
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/reports/{slug}/comments:
@@ -782,6 +803,7 @@ paths:
             The report's permanent capability-URL slug (nanoid(10)). With an
             `editToken`, this MUST be the CANONICAL slug the token was
             minted for (ADR-0063).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -796,6 +818,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -838,6 +861,7 @@ paths:
           required: true
           schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
           description: The comment's External Id (ADR-0052).
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
         description: >
@@ -907,12 +931,14 @@ paths:
           required: true
           schema: { type: string, pattern: '^comment_[0-9A-Za-z]{22}$' }
           description: The comment's External Id (ADR-0052).
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '204':
           description: Deleted (no content).
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /{slug}:
@@ -1040,11 +1066,16 @@ components:
       required: false
       schema: { type: string }
       description: >
-        Optional idempotency key (ADR-0039, IETF/Stripe style). If absent, the
-        server derives one from acting_user_id + method + route + a canonical
-        payload fingerprint (for upload: content_hash + target). A match replays
-        the stored response without re-executing; an explicit key reused with a
-        different body → 422; a concurrent in-flight retry → 409. Keys live 24h.
+        Optional idempotency key (ADR-0039, IETF/Stripe style) — honored on
+        EVERY mutating endpoint. If absent, the server derives one from
+        acting_user_id + method + route + a canonical payload fingerprint (for
+        upload: content_hash + target). A match replays the stored response
+        without re-executing; an explicit key reused with a different body →
+        422; a concurrent in-flight retry → 409. Keys live 24h. To deliberately
+        re-apply an identical request within that window, send a fresh explicit
+        key. One carve-out: a password-mode acl set WITHOUT an explicit key
+        skips the derived fallback (the key must never be a function of the
+        plaintext password); send an explicit key to opt in.
     Limit:
       name: limit
       in: query

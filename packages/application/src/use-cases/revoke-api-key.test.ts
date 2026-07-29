@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryApiKeyStore,
   InMemoryAuditLogger,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { revokeApiKey } from "./revoke-api-key";
@@ -17,6 +18,7 @@ function makeDeps() {
     apiKeys: new InMemoryApiKeyStore(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
   };
 }
 
@@ -69,5 +71,24 @@ describe("revokeApiKey use case", () => {
 
     const list = await deps.apiKeys.listForUser(alice);
     expect(list.ok && list.value[0]?.revokedAt).toBeNull(); // untouched
+  });
+});
+
+describe("revokeApiKey idempotency (ADR-0039)", () => {
+  it("replays the recorded success on an identical retry — one api_key.revoked audit row", async () => {
+    const deps = makeDeps();
+    const created = await deps.apiKeys.create({
+      actingUserId: alice,
+      issuedInOrgId: orgA,
+      name: "k",
+      scopes: ["reports:write"],
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const input = { id: created.value.summary.id };
+    const first = await revokeApiKey(deps, { userId: alice, orgId: orgA }, input);
+    const second = await revokeApiKey(deps, { userId: alice, orgId: orgA }, input);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(deps.audit.recorded().length).toBe(1);
   });
 });

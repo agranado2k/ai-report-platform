@@ -346,7 +346,7 @@ function ReplyItem({
                 size="sm"
                 aria-labelledby={`edit-reply-intent-label-${reply.id}`}
                 value={editIntent}
-                onChange={(e) => setEditIntent(e.target.value)}
+                onChange={(e) => setEditIntent(e.target.value as Intent)}
                 disabled={editBusy}
               >
                 {INTENT_OPTIONS.map((o) => (
@@ -593,7 +593,7 @@ function CommentThread({
                   size="sm"
                   aria-labelledby={`edit-intent-label-${root.id}`}
                   value={editIntent}
-                  onChange={(e) => setEditIntent(e.target.value)}
+                  onChange={(e) => setEditIntent(e.target.value as Intent)}
                   disabled={editBusy}
                 >
                   {INTENT_OPTIONS.map((o) => (

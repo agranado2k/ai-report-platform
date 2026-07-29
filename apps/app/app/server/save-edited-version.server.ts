@@ -69,6 +69,9 @@ export async function reassembleAndSaveEditedVersion(
   actor: UploadActor,
   slug: Slug,
   doc: PMDocJson,
+  /** The client's explicit `Idempotency-Key` (ADR-0039), threaded through to
+   *  saveEditedVersion → uploadReport; absent → the derived-key fallback. */
+  idempotencyKey?: string,
 ): Promise<Result<UploadOutcome, AppError>> {
   const found = await loadWritableReport(deps.reports, actor, slug, {
     grants: deps.grants,
@@ -95,5 +98,6 @@ export async function reassembleAndSaveEditedVersion(
     slug,
     html: new TextEncoder().encode(wholeHtml),
     sourceDoc: doc as unknown as Record<string, unknown>,
+    idempotencyKey,
   });
 }

@@ -19,6 +19,7 @@ import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
   SequentialIdGenerator,
 } from "../testing/in-memory";
@@ -64,6 +65,7 @@ function makeDeps() {
     outbox: new InMemoryEventOutbox(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
@@ -203,5 +205,28 @@ describe("replyToComment use case", () => {
       anchor,
     });
     expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+});
+
+describe("replyToComment idempotency (ADR-0039)", () => {
+  it("replays the ORIGINAL reply on an identical retry — no duplicate reply", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("iiiiiiiiii"));
+    const root = await addComment(deps, ownerActor, {
+      slug: slug("iiiiiiiiii"),
+      body: "root",
+      anchor,
+    });
+    if (!root.ok) throw new Error("seed failed");
+    const input = {
+      slug: slug("iiiiiiiiii"),
+      parentCommentId: root.value.id,
+      body: "same reply",
+      anchor,
+    };
+    const first = await replyToComment(deps, ownerActor, input);
+    const second = await replyToComment(deps, ownerActor, input);
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).toBe(first.value.id);
   });
 });

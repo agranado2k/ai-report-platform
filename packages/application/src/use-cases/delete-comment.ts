@@ -16,13 +16,17 @@ import {
   err,
   notAllowed,
   notFound,
+  ok,
   type Result,
   type Slug,
 } from "arp-domain";
+import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadReadableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type { AuditLogger, CommentRepository, ReportRepository, UnitOfWork } from "../ports";
 
-export interface DeleteCommentDeps extends WriteGrantCheckDeps {
+const ROUTE = "DELETE /api/v1/reports/{slug}/comments/{comment_id}";
+
+export interface DeleteCommentDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
   /** Audit log (ADR-0070) -- one `comment.deleted` row per delete. */
@@ -33,6 +37,8 @@ export type DeleteCommentActor = TenancyActor;
 export interface DeleteCommentInput {
   readonly slug: Slug;
   readonly commentId: CommentId;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function deleteComment(
@@ -40,6 +46,20 @@ export async function deleteComment(
   actor: DeleteCommentActor,
   input: DeleteCommentInput,
 ): Promise<Result<void, AppError>> {
+  // Idempotency (ADR-0039), claimed BEFORE the load (same rationale as
+  // deleteReport): a successful hard-delete makes the retry's own comment
+  // lookup 404, so the replay check must run first for the retry to see its
+  // recorded 204. Replay is keyed per acting user.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, input.commentId],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return ok(undefined);
+  const idemRef = idem.value.ref;
+
   const report = await loadReadableReport(deps.reports, actor, input.slug, deps);
   if (!report.ok) return report;
 
@@ -60,7 +80,7 @@ export async function deleteComment(
   return deps.uow.run(async () => {
     const deleted = await deps.comments.delete(targetCommentId);
     if (!deleted.ok) return deleted;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "comment.deleted",
         orgId: actor.orgId,
@@ -70,5 +90,7 @@ export async function deleteComment(
         meta: { reportId },
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
   });
 }

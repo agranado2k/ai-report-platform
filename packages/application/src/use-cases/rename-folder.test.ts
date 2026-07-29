@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { renameFolder } from "./rename-folder";
@@ -22,7 +23,12 @@ const F1 = "00000000-0000-7000-8000-0000000000f1";
 async function setup() {
   const folders = new InMemoryFolderRepository();
   await folders.save(folder(F1, orgA, "Old Name"));
-  return { folders, audit: new InMemoryAuditLogger(), uow: new PassThroughUnitOfWork() };
+  return {
+    folders,
+    audit: new InMemoryAuditLogger(),
+    uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
+  };
 }
 
 describe("renameFolder use case", () => {
@@ -71,7 +77,7 @@ describe("renameFolder use case", () => {
   it("records a folder.renamed audit entry alongside the rename (ADR-0070)", async () => {
     const { folders, audit, uow } = await setup();
     const r = await renameFolder(
-      { folders, audit, uow },
+      { folders, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(F1), name: "New Name" },
     );
@@ -84,5 +90,19 @@ describe("renameFolder use case", () => {
       targetId: folderId(F1),
       meta: { from: "Old Name", to: "New Name" },
     });
+  });
+});
+
+describe("renameFolder idempotency (ADR-0039)", () => {
+  it("replays the recorded folder resource on an identical retry — one audit row", async () => {
+    const { folders, ...deps } = await setup();
+    const full = { folders, ...deps };
+    const actor = { orgId: orgA, userId: actorA };
+    const input = { folderId: folderId(F1), name: "New Name" };
+    const first = await renameFolder(full, actor, input);
+    const second = await renameFolder(full, actor, input);
+    expect(first.ok && first.value.name).toBe("New Name");
+    expect(second.ok && second.value.name).toBe("New Name");
+    expect(deps.audit.recorded().length).toBe(1);
   });
 });

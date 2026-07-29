@@ -1,74 +1,44 @@
 // GET    /api/v1/reports/{slug} — fetch one report (summary), org-scoped.
 // PATCH  /api/v1/reports/{slug} — rename a report (title).
 // DELETE /api/v1/reports/{slug} — soft-delete a report (viewer then 410).
-// Thin transport adapter (ADR-0038), built from the `handle()` combinator: it
-// resolves the actor (read path → no provision; write path → provisions) + the
-// slug, runs the use case, and serializes via the pure arp-http mappers. The use
-// cases own authz: GET is org-scoped; PATCH/DELETE are ownership-gated (ADR-0059).
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { deleteReport, getReport, renameReport } from "arp-application";
-import { methodNotAllowed } from "arp-domain";
-import { deleteReportToHttp, errorToHttp, getReportToHttp, renameReportToHttp } from "arp-http";
-import { auditLogger, deps, identityStore, writeGrantStore } from "../server/container.server";
-import { handle } from "../server/handle.server";
-import { toResponse, wireContext } from "../server/http.server";
+// Thin transport adapter over the deepened `handle()` seam + `ops()` (ADR-0038):
+// the seam resolves the actor + slug + Idempotency-Key (ADR-0039) and
+// dispatches the verb; the use cases own authz (GET org-scoped; PATCH/DELETE
+// ownership-gated, ADR-0059).
+import { deleteReportToHttp, getReportToHttp, renameReportToHttp } from "arp-http";
+import { ops } from "../server/container.server";
+import { handle, methods } from "../server/handle.server";
+import { wireContext } from "../server/http.server";
 
-// GET — read a single report by slug: org-visible, PLUS the cross-org
-// write-grantee metadata carve-out (ADR-0060 §4). resolveActorForRead resolves
-// the org WITHOUT provisioning (GETs stay safe); no session / no org → 401.
-// A report neither in the actor's org nor write-granted to them reads as
-// NotAllowed (the use case owns authz).
+// GET — org-visible, PLUS the cross-org write-grantee metadata carve-out
+// (ADR-0060 §4). A report neither in the actor's org nor write-granted to them
+// reads as NotAllowed (the use case owns authz).
 export const loader = handle({
   mode: "read",
   slug: true,
-  run: ({ actor, slug }) =>
-    getReport(
-      { reports: deps().reports, grants: writeGrantStore(), identities: identityStore() },
-      { orgId: actor.orgId, userId: actor.userId },
-      { slug },
-    ),
+  run: ({ actor, slug }) => ops().getReport({ orgId: actor.orgId, userId: actor.userId }, { slug }),
   // The acl block is owner-conditional (ADR-0059 §3) — thread the viewer through.
   toHttp: (result, { actor }) => getReportToHttp(result, wireContext(), { userId: actor.userId }),
 });
 
-export async function action(args: ActionFunctionArgs) {
-  const method = args.request.method.toUpperCase();
-  if (method === "DELETE") return deleteHandler(args);
-  if (method === "PATCH") return patchHandler(args);
-
-  return toResponse(errorToHttp(methodNotAllowed("PATCH, DELETE")));
-}
-
-const deleteHandler = handle({
-  mode: "write",
-  slug: true,
-  run: ({ actor, slug }) =>
-    deleteReport(
-      { reports: deps().reports, audit: auditLogger(), uow: deps().uow },
-      { orgId: actor.orgId, userId: actor.userId },
-      { slug },
-    ),
-  toHttp: (result) => deleteReportToHttp(result),
-});
-
-const patchHandler = handle({
-  mode: "write",
-  slug: true,
-  parseBody: true,
-  run: ({ actor, slug, body }) => {
-    const title = typeof body.title === "string" ? body.title : "";
-    return renameReport(
-      {
-        reports: deps().reports,
-        grants: writeGrantStore(),
-        identities: identityStore(),
-        audit: auditLogger(),
-        uow: deps().uow,
-      },
-      { orgId: actor.orgId, userId: actor.userId },
-      { slug, title },
-    );
-  },
-  toHttp: (result, { actor }) =>
-    renameReportToHttp(result, wireContext(), { userId: actor.userId }),
+export const action = methods({
+  PATCH: handle({
+    mode: "write",
+    slug: true,
+    parseBody: true,
+    run: ({ actor, slug, body, idempotencyKey }) =>
+      ops().renameReport(
+        { orgId: actor.orgId, userId: actor.userId },
+        { slug, title: typeof body.title === "string" ? body.title : "", idempotencyKey },
+      ),
+    toHttp: (result, { actor }) =>
+      renameReportToHttp(result, wireContext(), { userId: actor.userId }),
+  }),
+  DELETE: handle({
+    mode: "write",
+    slug: true,
+    run: ({ actor, slug, idempotencyKey }) =>
+      ops().deleteReport({ orgId: actor.orgId, userId: actor.userId }, { slug, idempotencyKey }),
+    toHttp: (result) => deleteReportToHttp(result),
+  }),
 });

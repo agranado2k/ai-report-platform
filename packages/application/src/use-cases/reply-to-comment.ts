@@ -21,6 +21,11 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reviveCommentReplay,
+} from "../idempotent-write";
 import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type {
   AuditLogger,
@@ -32,7 +37,11 @@ import type {
   UnitOfWork,
 } from "../ports";
 
-export interface ReplyToCommentDeps extends WriteGrantCheckDeps {
+// Same wire route as addComment (a reply IS a POST /comments with
+// `parent_comment_id` set) — the parent id in the fingerprint disambiguates.
+const ROUTE = "POST /api/v1/reports/{slug}/comments";
+
+export interface ReplyToCommentDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
   readonly ids: IdGenerator;
@@ -51,6 +60,8 @@ export interface ReplyToCommentInput {
   /** What the author wants done with the reply (ADR-0064 Decision 8).
    *  Optional — the domain defaults an absent intent to `note`. */
   readonly intent?: Intent;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function replyToComment(
@@ -77,12 +88,31 @@ export async function replyToComment(
   });
   if (!emission.ok) return emission;
 
+  // Idempotency (ADR-0039): a retried reply replays the ORIGINAL comment
+  // resource instead of posting a duplicate.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [
+      input.slug,
+      input.parentCommentId,
+      input.body,
+      input.intent ?? "",
+      input.anchor.versionPinned.versionId,
+      input.anchor.versionPinned.textQuote,
+    ],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveCommentReplay(idem.value.record);
+  const idemRef = idem.value.ref;
+
   const committed = await deps.uow.run(async () => {
     const saved = await deps.comments.save(emission.value.comment);
     if (!saved.ok) return saved;
     const enqueued = await deps.outbox.enqueue(emission.value.events);
     if (!enqueued.ok) return enqueued;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "comment.replied",
         orgId: actor.orgId,
@@ -92,6 +122,11 @@ export async function replyToComment(
         meta: { reportId: report.value.id, parentId: input.parentCommentId },
       },
     ]);
+    if (!audited.ok) return audited;
+    return deps.idempotency.complete(idemRef, {
+      responseStatus: 201,
+      responseBody: emission.value.comment,
+    });
   });
   if (!committed.ok) return committed;
 

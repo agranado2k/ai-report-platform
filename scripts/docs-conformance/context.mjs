@@ -23,6 +23,30 @@ export function makeContext({ repoRoot, config }) {
       .sort();
   };
 
+  /**
+   * List repo-relative file paths under a dir, recursing into subdirectories,
+   * optionally filtered by extension. Returns `[]` if the dir doesn't exist —
+   * validators that use this can stay silent on fixtures that don't model it.
+   */
+  const listRecursive = (relDir, ext) => {
+    const root = join(repoRoot, relDir);
+    if (!existsSync(root)) return [];
+    const out = [];
+    const walk = (dir, relBase) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, entry.name);
+        const rel = relBase ? join(relBase, entry.name) : entry.name;
+        if (entry.isDirectory()) {
+          walk(abs, rel);
+        } else if (!ext || entry.name.endsWith(ext)) {
+          out.push(join(relDir, rel));
+        }
+      }
+    };
+    walk(root, "");
+    return out.sort();
+  };
+
   const exists = (rel) => existsSync(join(repoRoot, rel));
 
   return {
@@ -30,6 +54,7 @@ export function makeContext({ repoRoot, config }) {
     config,
     read,
     list,
+    listRecursive,
     exists,
     paths: {
       docs: "docs",
@@ -40,6 +65,7 @@ export function makeContext({ repoRoot, config }) {
       contextMap: "docs/context-map.md",
       features: "tests/e2e/features",
       openapi: "docs/api/openapi.yaml",
+      domainSrc: "packages/domain/src",
     },
   };
 }

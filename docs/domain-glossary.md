@@ -110,9 +110,9 @@ Terms for infra that sits alongside the four bounded contexts rather than inside
 
 ## Domain events
 
-Event names are the contract; their full catalog (emitter, subscribers, payload) lives in `docs/events.md`. Events are facts in past tense.
+Event names are the contract; their full catalog (emitter, subscribers, payload, and the Emitted/Proposed split) lives in `docs/events.md`. Events are facts in past tense.
 
-- Reports & Folders emits: `ReportVersionUploaded`, `ReportPublished`, `AclChanged`, `CollaboratorGranted` (retired, ADR-0060 — write grants shipped deliberately without a replacement event).
-- Identity & Access emits: `UserCreated`, `ApiKeyUsed`, `ApiKeyAnomalyDetected`.
-- Abuse & Moderation emits: `ReportVersionScanned`, `AbuseReported`, `ReportTakenDown`, `CspViolationReported`.
-- Authoring & Collaboration emits: `CommentAdded`, `CommentResolved`.
+- Reports & Folders emits: `ReportVersionUploaded`, `ReportPublished`. `AclChanged` is proposed, not yet emitted. `CollaboratorGranted` is retired (ADR-0060 — write grants shipped deliberately without a replacement event).
+- Identity & Access: `UserCreated`, `ApiKeyUsed`, `ApiKeyAnomalyDetected` are all proposed, not yet emitted — no emitter exists in code today.
+- Abuse & Moderation: `ReportVersionScanned`, `AbuseReported`, `ReportTakenDown`, `CspViolationReported` are all proposed, not yet emitted — no emitter exists in code today.
+- Authoring & Collaboration emits: `CommentAdded`, `CommentResolved`, `CommentEdited`.

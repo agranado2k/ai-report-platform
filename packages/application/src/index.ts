@@ -2,8 +2,8 @@
 // that orchestrate them. The viewer loader + PromoteVersionUseCase land in
 // later slices (1e/1f). In-memory fakes for unit-testing the use cases are
 // exported from the `./testing` subpath.
-export * from "./api-key-principal";
 export * from "./audit";
+export * from "./idempotent-write";
 export * from "./load-owned";
 export * from "./ports";
 export * from "./use-cases/add-comment";

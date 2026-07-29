@@ -7,6 +7,7 @@ const VERSION: VersionWire = {
   id: "version_1",
   version_no: 3,
   uploaded_by: "user_1",
+  author: { id: "user_1", email: null, name: null },
   uploaded_at: "2026-07-08T00:00:00.000Z",
   scan_status: "clean",
   size_bytes: 4096,

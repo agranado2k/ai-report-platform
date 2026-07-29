@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { ACL_MODES, COMMENT_INTENTS } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -272,5 +273,69 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
 
   it("folders_create points to reports_move for organizing reports", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
+  });
+});
+
+describe("shared schema vocabulary + cursor/slug helpers (wire-catalog refactor)", () => {
+  const { client } = recordingClient();
+  const readTools = collectTools(registerReadTools, client);
+  const writeTools = collectTools(registerWriteTools, client);
+  const schemaOf = (tools: Map<string, RegisteredTool>, tool: string, param: string) =>
+    tools.get(tool)?.config.inputSchema[param] as {
+      description?: string;
+      options?: readonly string[];
+      unwrap?: () => { options?: readonly string[] };
+    };
+
+  it("reports_set_acl's mode enum is exactly the arp-domain ACL_MODES vocabulary", () => {
+    expect(schemaOf(writeTools, "reports_set_acl", "mode").options).toEqual([...ACL_MODES]);
+  });
+
+  it("reports_edit_comment's intent enum is exactly the arp-domain COMMENT_INTENTS vocabulary", () => {
+    expect(schemaOf(writeTools, "reports_edit_comment", "intent")?.unwrap?.().options).toEqual([
+      ...COMMENT_INTENTS,
+    ]);
+  });
+
+  it("keeps the per-entity cursor descriptions verbatim on every paginated tool", () => {
+    const cases: readonly (readonly [Map<string, RegisteredTool>, string, string])[] = [
+      [readTools, "reports_search", "report"],
+      [readTools, "reports_list_versions", "version"],
+      [readTools, "reports_list_comments", "comment"],
+      [readTools, "folders_list", "folder"],
+    ];
+    for (const [tools, tool, entity] of cases) {
+      expect(schemaOf(tools, tool, "limit").description).toBe("Max items (1–100, default 20).");
+      expect(schemaOf(tools, tool, "starting_after").description).toBe(
+        `Cursor: a ${entity}_ id; returns items AFTER it (page forward).`,
+      );
+      expect(schemaOf(tools, tool, "ending_before").description).toBe(
+        `Cursor: a ${entity}_ id; returns items BEFORE it (page back).`,
+      );
+    }
+  });
+
+  it("keeps the shared slug describe-string verbatim (slug-or-report_-id tools)", () => {
+    // reports_get keeps its own variant ("… (from reports_search).") — not listed.
+    const slugTools: readonly (readonly [Map<string, RegisteredTool>, string])[] = [
+      [readTools, "reports_list_versions"],
+      [readTools, "reports_get_acl"],
+      [readTools, "reports_list_write_grants"],
+      [readTools, "reports_list_comments"],
+      [writeTools, "reports_update"],
+      [writeTools, "reports_move"],
+      [writeTools, "reports_set_acl"],
+      [writeTools, "reports_grant_write"],
+      [writeTools, "reports_revoke_write"],
+      [writeTools, "reports_add_comment"],
+      [writeTools, "reports_resolve_comment"],
+      [writeTools, "reports_edit_comment"],
+      [writeTools, "reports_delete_comment"],
+    ];
+    for (const [tools, tool] of slugTools) {
+      expect(schemaOf(tools, tool, "slug").description).toBe(
+        "The report's slug or its report_ id.",
+      );
+    }
   });
 });

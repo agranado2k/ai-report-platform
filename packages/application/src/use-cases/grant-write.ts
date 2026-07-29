@@ -18,6 +18,11 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reviveWriteGrantReplay,
+} from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type {
   AuditLogger,
@@ -29,8 +34,9 @@ import type {
 } from "../ports";
 
 const ACL_WRITE_SCOPE = "acl:write";
+const ROUTE = "POST /api/v1/reports/{slug}/write-grants";
 
-export interface GrantWriteDeps {
+export interface GrantWriteDeps extends IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly grants: WriteGrantStore;
   readonly identities: Pick<IdentityStore, "findUserIdByEmail">;
@@ -46,6 +52,8 @@ export interface GrantWriteActor extends TenancyActor {
 export interface GrantWriteInput {
   readonly slug: Slug;
   readonly email: string;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function grantWrite(
@@ -67,7 +75,18 @@ export async function grantWrite(
   const granteeUserId = await deps.identities.findUserIdByEmail(email.value);
   if (!granteeUserId.ok) return granteeUserId;
 
-  const granted = await deps.uow.run(async () => {
+  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, email.value],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveWriteGrantReplay(idem.value.record);
+  const idemRef = idem.value.ref;
+
+  return deps.uow.run(async () => {
     const g = await deps.grants.grant(
       found.value.id,
       email.value,
@@ -75,7 +94,7 @@ export async function grantWrite(
       granteeUserId.value,
     );
     if (!g.ok) return g;
-    return deps.audit.record([
+    const audited = await deps.audit.record([
       {
         action: "grant.write.granted",
         orgId: actor.orgId,
@@ -89,19 +108,25 @@ export async function grantWrite(
         meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
       },
     ]);
-  });
-  if (!granted.ok) return granted;
+    if (!audited.ok) return audited;
 
-  // Re-read via listByReport for the canonical persisted row (grantedAt is
-  // server-assigned) rather than constructing one client-side.
-  const listed = await deps.grants.listByReport(found.value.id);
-  if (!listed.ok) return listed;
-  const grant = listed.value.find((g) => g.granteeEmail === email.value);
-  if (!grant) {
-    return err({
-      kind: "Unexpected",
-      message: "write grant not found immediately after granting",
+    // Re-read via listByReport for the canonical persisted row (grantedAt is
+    // server-assigned) rather than constructing one client-side. Inside the
+    // transaction so the recorded replay body IS the committed row (ADR-0039).
+    const listed = await deps.grants.listByReport(found.value.id);
+    if (!listed.ok) return listed;
+    const grant = listed.value.find((it) => it.granteeEmail === email.value);
+    if (!grant) {
+      return err({
+        kind: "Unexpected",
+        message: "write grant not found immediately after granting",
+      });
+    }
+    const done = await deps.idempotency.complete(idemRef, {
+      responseStatus: 201,
+      responseBody: grant,
     });
-  }
-  return ok(grant);
+    if (!done.ok) return done;
+    return ok(grant);
+  });
 }

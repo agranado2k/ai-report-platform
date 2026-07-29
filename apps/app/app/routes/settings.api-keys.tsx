@@ -11,7 +11,6 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-import { createApiKey, listApiKeys, revokeApiKey } from "arp-application";
 import {
   AppHeader,
   Badge,
@@ -25,7 +24,7 @@ import {
   PageShell,
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
-import { apiKeyStore, appOrigin, auditLogger, deps } from "../server/container.server";
+import { appOrigin, ops } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
 
 export const meta: MetaFunction = () => [{ title: "API keys & MCP — Centaur" }];
@@ -50,7 +49,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!actor.ok) throw errorToJson(actor.error);
   const endpoint = mcpEndpoint(args.request);
   if (!actor.value) return json({ keys: [], mcpEndpoint: endpoint });
-  const keys = await listApiKeys({ apiKeys: apiKeyStore() }, { userId: actor.value.userId });
+  const keys = await ops().listApiKeys({ userId: actor.value.userId });
   if (!keys.ok) throw errorToJson(keys.error);
   return json({ keys: keys.value, mcpEndpoint: endpoint });
 }
@@ -66,8 +65,7 @@ export async function action(args: ActionFunctionArgs) {
 
   if (intent === "revoke") {
     const id = String(form.get("id") ?? "");
-    const revoked = await revokeApiKey(
-      { apiKeys: apiKeyStore(), audit: auditLogger(), uow: deps().uow },
+    const revoked = await ops().revokeApiKey(
       { userId: actor.value.userId, orgId: actor.value.orgId },
       { id },
     );
@@ -77,8 +75,7 @@ export async function action(args: ActionFunctionArgs) {
 
   // Default intent: create.
   const name = String(form.get("name") ?? "");
-  const created = await createApiKey(
-    { apiKeys: apiKeyStore(), audit: auditLogger(), uow: deps().uow },
+  const created = await ops().createApiKey(
     { userId: actor.value.userId, orgId: actor.value.orgId },
     { name },
   );
@@ -98,9 +95,13 @@ export default function ApiKeys() {
   const nav = useNavigation();
   const busy = nav.state !== "idle";
   // `useActionData`'s serialized union narrows poorly across the create/revoke/error
-  // shapes; the create-success branch is the only one carrying `secret`.
+  // shapes; the create-success branch is the only one carrying `secret`. A null
+  // secret (an ADR-0039 replay of an explicit-keyed mint — never re-displayed)
+  // renders nothing rather than an empty secret box.
   const created =
-    data && "secret" in data ? (data as unknown as { secret: string; name: string }) : null;
+    data && "secret" in data && data.secret
+      ? (data as unknown as { secret: string; name: string })
+      : null;
 
   return (
     <PageShell className="max-w-4xl">

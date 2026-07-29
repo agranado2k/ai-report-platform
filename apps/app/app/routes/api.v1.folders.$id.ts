@@ -1,51 +1,40 @@
-// PATCH /api/v1/folders/{id} — rename a folder.
+// PATCH  /api/v1/folders/{id} — rename a folder.
 // DELETE /api/v1/folders/{id} — delete a folder (blocked if non-empty).
-// Thin transport adapter (ADR-0036), built from the `handle()` combinator:
-// resolve the actor (write path → provisions) → validate the id → dispatch on
-// method → run the use case → serialize via the pure arp-http mappers. The use
+// Thin transport adapter over the deepened `handle()` seam + `ops()`
+// (ADR-0036): the seam resolves the actor + Idempotency-Key (ADR-0039) and
+// dispatches the verb; this file keeps only the folder-id decode. The use
 // cases own all authz + the not-empty / not-Root invariants.
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { deleteFolder, renameFolder } from "arp-application";
-import { makeFolderId, methodNotAllowed } from "arp-domain";
-import { deleteFolderToHttp, errorToHttp, renameFolderToHttp } from "arp-http";
-import { auditLogger, deps, folderRepo } from "../server/container.server";
-import { handle } from "../server/handle.server";
-import { toResponse, wireContext } from "../server/http.server";
+import { makeFolderId } from "arp-domain";
+import { deleteFolderToHttp, renameFolderToHttp } from "arp-http";
+import { ops } from "../server/container.server";
+import { handle, methods } from "../server/handle.server";
+import { wireContext } from "../server/http.server";
 
-export async function action(args: ActionFunctionArgs) {
-  const method = args.request.method.toUpperCase();
-  if (method === "DELETE") return deleteHandler(args);
-  if (method === "PATCH") return patchHandler(args);
-
-  return toResponse(errorToHttp(methodNotAllowed("PATCH, DELETE")));
-}
-
-const deleteHandler = handle({
-  mode: "write",
-  run: ({ args, actor }) => {
-    const id = makeFolderId(String(args.params.id ?? ""));
-    if (!id.ok) return id;
-    return deleteFolder(
-      { folders: folderRepo(), reports: deps().reports, audit: auditLogger(), uow: deps().uow },
-      { orgId: actor.orgId, userId: actor.userId },
-      { folderId: id.value },
-    );
-  },
-  toHttp: (result) => deleteFolderToHttp(result),
-});
-
-const patchHandler = handle({
-  mode: "write",
-  parseBody: true,
-  run: ({ args, actor, body }) => {
-    const id = makeFolderId(String(args.params.id ?? ""));
-    if (!id.ok) return id;
-    const name = typeof body.name === "string" ? body.name : "";
-    return renameFolder(
-      { folders: folderRepo(), audit: auditLogger(), uow: deps().uow },
-      { orgId: actor.orgId, userId: actor.userId },
-      { folderId: id.value, name },
-    );
-  },
-  toHttp: (result) => renameFolderToHttp(result, wireContext()),
+export const action = methods({
+  PATCH: handle({
+    mode: "write",
+    parseBody: true,
+    run: ({ args, actor, body, idempotencyKey }) => {
+      const id = makeFolderId(String(args.params.id ?? ""));
+      if (!id.ok) return id;
+      const name = typeof body.name === "string" ? body.name : "";
+      return ops().renameFolder(
+        { orgId: actor.orgId, userId: actor.userId },
+        { folderId: id.value, name, idempotencyKey },
+      );
+    },
+    toHttp: (result) => renameFolderToHttp(result, wireContext()),
+  }),
+  DELETE: handle({
+    mode: "write",
+    run: ({ args, actor, idempotencyKey }) => {
+      const id = makeFolderId(String(args.params.id ?? ""));
+      if (!id.ok) return id;
+      return ops().deleteFolder(
+        { orgId: actor.orgId, userId: actor.userId },
+        { folderId: id.value, idempotencyKey },
+      );
+    },
+    toHttp: (result) => deleteFolderToHttp(result),
+  }),
 });

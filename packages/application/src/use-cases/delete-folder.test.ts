@@ -16,6 +16,7 @@ import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
   InMemoryReportRepository,
+  idempotencyTestDeps,
   PassThroughUnitOfWork,
 } from "../testing/in-memory";
 import { deleteFolder } from "./delete-folder";
@@ -61,14 +62,20 @@ async function setup() {
   const reports = new InMemoryReportRepository();
   await folders.save(folder(ROOT, orgA, null, "Root"));
   await folders.save(folder(SUB, orgA, ROOT, "Sub"));
-  return { folders, reports, audit: new InMemoryAuditLogger(), uow: new PassThroughUnitOfWork() };
+  return {
+    folders,
+    reports,
+    audit: new InMemoryAuditLogger(),
+    uow: new PassThroughUnitOfWork(),
+    ...idempotencyTestDeps(),
+  };
 }
 
 describe("deleteFolder use case", () => {
   it("soft-deletes an empty folder (excluded from listByOrg)", async () => {
     const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -80,7 +87,7 @@ describe("deleteFolder use case", () => {
   it("refuses to delete the Root folder", async () => {
     const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(ROOT) },
     );
@@ -91,7 +98,7 @@ describe("deleteFolder use case", () => {
     const { folders, reports, audit, uow } = await setup();
     await reports.save(reportIn(orgA, SUB, "aaaaaaaaaa"));
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -102,7 +109,7 @@ describe("deleteFolder use case", () => {
     const { folders, reports, audit, uow } = await setup();
     await folders.save(folder("00000000-0000-7000-8000-0000000000a3", orgA, SUB, "Nested"));
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -112,7 +119,7 @@ describe("deleteFolder use case", () => {
   it("rejects a cross-org folder with NotAllowed", async () => {
     const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgB, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -122,7 +129,7 @@ describe("deleteFolder use case", () => {
   it("rejects an unknown folder with NotFound", async () => {
     const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId("00000000-0000-7000-8000-00000000dead") },
     );
@@ -132,7 +139,7 @@ describe("deleteFolder use case", () => {
   it("records a folder.deleted audit entry alongside the soft-delete (ADR-0070)", async () => {
     const { folders, reports, audit, uow } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow },
+      { folders, reports, audit, uow, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -144,5 +151,17 @@ describe("deleteFolder use case", () => {
       targetType: "folder",
       targetId: folderId(SUB),
     });
+  });
+});
+
+describe("deleteFolder idempotency (ADR-0039)", () => {
+  it("replays the recorded 204 on an identical retry — one audit row", async () => {
+    const deps = await setup();
+    const actor = { orgId: orgA, userId: actorA };
+    const first = await deleteFolder(deps, actor, { folderId: folderId(SUB) });
+    const second = await deleteFolder(deps, actor, { folderId: folderId(SUB) });
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(deps.audit.recorded().length).toBe(1);
   });
 });

@@ -13,10 +13,18 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import {
+  beginIdempotentWrite,
+  type IdempotentWriteDeps,
+  reportReplayBody,
+  reviveReportReplay,
+} from "../idempotent-write";
 import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork } from "../ports";
 
-export interface RenameReportDeps extends WriteGrantCheckDeps {
+const ROUTE = "PATCH /api/v1/reports/{slug}";
+
+export interface RenameReportDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   /** Audit log (ADR-0070) — one `report.renamed` row per rename. */
   readonly audit: AuditLogger;
@@ -26,6 +34,8 @@ export type RenameReportActor = TenancyActor;
 export interface RenameReportInput {
   readonly slug: Slug;
   readonly title: string;
+  /** The client's explicit `Idempotency-Key` header (ADR-0039), when sent. */
+  readonly idempotencyKey?: string;
 }
 
 export async function renameReport(
@@ -39,6 +49,17 @@ export async function renameReport(
 
   const renamed = applyRename(found.value, input.title);
   if (!renamed.ok) return renamed;
+
+  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, input.title],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveReportReplay(idem.value.record);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const saved = await deps.reports.save(renamed.value);
@@ -54,6 +75,11 @@ export async function renameReport(
       },
     ]);
     if (!audited.ok) return audited;
+    const done = await deps.idempotency.complete(idemRef, {
+      responseStatus: 200,
+      responseBody: reportReplayBody(renamed.value),
+    });
+    if (!done.ok) return done;
     return ok(renamed.value);
   });
 }

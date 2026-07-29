@@ -1,73 +1,20 @@
-import {
-  type Anchor,
-  createReport,
-  folderId,
-  makeSlug,
-  orgId,
-  type Report,
-  reportId,
-  type Slug,
-  userId,
-  versionId,
-} from "arp-domain";
+import { type Anchor, reportId, userId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
-  FixedClock,
-  InMemoryAuditLogger,
-  InMemoryCommentRepository,
-  InMemoryEventOutbox,
-  InMemoryIdentityStore,
-  InMemoryReportRepository,
-  InMemoryWriteGrantStore,
-  PassThroughUnitOfWork,
-  SequentialIdGenerator,
-} from "../testing/in-memory";
+  ACTORS,
+  FIRST_VERSION_ID,
+  makeCommentDeps as makeDeps,
+  ownerActor,
+  report,
+  slug,
+} from "../testing/fixtures";
 import { addComment } from "./add-comment";
 
-const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
-const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
-const owner = userId("00000000-0000-7000-8000-0000000000d1");
-const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
-const ownerActor = { orgId: orgA, userId: owner };
-
-function slug(s: string): Slug {
-  const r = makeSlug(s);
-  if (!r.ok) throw new Error("bad slug");
-  return r.value;
-}
-
-function report(org: typeof orgA, slugStr: string, ownerId = owner): Report {
-  return createReport({
-    id: reportId(`00000000-0000-7000-8000-0000000000${slugStr.slice(0, 2)}`),
-    orgId: org,
-    folderId: folderId("00000000-0000-7000-8000-0000000000a0"),
-    slug: slug(slugStr),
-    title: "A Title",
-    versionId: versionId("00000000-0000-7000-8000-0000000000e1"),
-    contentHash: "h".repeat(64),
-    uploadedBy: ownerId,
-    manifest: { entryDocument: "index.html", files: ["index.html"] },
-    sizeBytes: 1,
-  }).report;
-}
+const { orgA, orgB, owner, otherUser } = ACTORS;
 
 const anchor: Anchor = {
-  versionPinned: { versionId: versionId("00000000-0000-7000-8000-0000000000e1"), textQuote: "hi" },
+  versionPinned: { versionId: FIRST_VERSION_ID, textQuote: "hi" },
 };
-
-function makeDeps() {
-  return {
-    reports: new InMemoryReportRepository(),
-    comments: new InMemoryCommentRepository(),
-    ids: new SequentialIdGenerator(),
-    clock: new FixedClock(1000),
-    outbox: new InMemoryEventOutbox(),
-    audit: new InMemoryAuditLogger(),
-    uow: new PassThroughUnitOfWork(),
-    grants: new InMemoryWriteGrantStore(),
-    identities: new InMemoryIdentityStore(),
-  };
-}
 
 describe("addComment use case", () => {
   it("creates a root comment for the report's owner and enqueues CommentAdded", async () => {
@@ -207,5 +154,29 @@ describe("addComment use case", () => {
     });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
     expect(deps.outbox.drained()).toEqual([]);
+  });
+});
+
+describe("addComment idempotency (ADR-0039)", () => {
+  it("replays the ORIGINAL comment on an identical retry — no duplicate comment, one audit row", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "iiiiiiiiii"));
+    const input = { slug: slug("iiiiiiiiii"), body: "same note", anchor };
+    const first = await addComment(deps, ownerActor, input);
+    const second = await addComment(deps, ownerActor, input);
+    expect(first.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).toBe(first.value.id); // the SAME comment, not a twin
+    expect(deps.audit.recorded().length).toBe(1);
+  });
+
+  it("a fresh explicit Idempotency-Key deliberately posts a second identical comment", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "jjjjjjjjjj"));
+    const base = { slug: slug("jjjjjjjjjj"), body: "same note", anchor };
+    const first = await addComment(deps, ownerActor, { ...base, idempotencyKey: "k1" });
+    const second = await addComment(deps, ownerActor, { ...base, idempotencyKey: "k2" });
+    if (!first.ok || !second.ok) throw new Error("expected ok");
+    expect(second.value.id).not.toBe(first.value.id);
   });
 });
