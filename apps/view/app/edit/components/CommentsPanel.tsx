@@ -24,6 +24,7 @@ import { useState } from "react";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
 import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
+import { handleComposerKeyDown } from "../composer-keys";
 import type { CommentWire, VersionWire } from "../wire-types";
 
 export interface CommentsPanelProps {
@@ -192,6 +193,18 @@ function NewCommentComposer({
       <Textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
+        // ⌘/Ctrl+Enter submits, Esc cancels; every other keystroke is
+        // isolated from document-level handlers (../composer-keys.ts, item C).
+        onKeyDown={(e) =>
+          handleComposerKeyDown(e, {
+            onSubmit: () => {
+              if (!busy) void submit();
+            },
+            onCancel: () => {
+              if (!busy) onSubmitted();
+            },
+          })
+        }
         placeholder="Add a comment…"
         rows={3}
         className="w-full"
@@ -302,6 +315,16 @@ function ReplyItem({
           <Textarea
             value={editBody}
             onChange={(e) => setEditBody(e.target.value)}
+            onKeyDown={(e) =>
+              handleComposerKeyDown(e, {
+                onSubmit: () => {
+                  if (!editBusy) void submitEdit();
+                },
+                onCancel: () => {
+                  if (!editBusy) setEditOpen(false);
+                },
+              })
+            }
             placeholder="Edit reply…"
             rows={2}
             className="w-full"
@@ -518,6 +541,16 @@ function CommentThread({
           <Textarea
             value={editBody}
             onChange={(e) => setEditBody(e.target.value)}
+            onKeyDown={(e) =>
+              handleComposerKeyDown(e, {
+                onSubmit: () => {
+                  if (!editBusy) void submitEdit();
+                },
+                onCancel: () => {
+                  if (!editBusy) setEditOpen(false);
+                },
+              })
+            }
             placeholder="Edit comment…"
             rows={3}
             className="w-full"
@@ -589,6 +622,16 @@ function CommentThread({
           <Textarea
             value={replyBody}
             onChange={(e) => setReplyBody(e.target.value)}
+            onKeyDown={(e) =>
+              handleComposerKeyDown(e, {
+                onSubmit: () => {
+                  if (!replyBusy) void submitReply();
+                },
+                onCancel: () => {
+                  if (!replyBusy) setReplyOpen(false);
+                },
+              })
+            }
             placeholder="Reply…"
             rows={2}
             className="w-full"
