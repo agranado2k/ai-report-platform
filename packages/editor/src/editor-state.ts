@@ -16,6 +16,7 @@ import {
   commentHighlightsPlugin,
   jumpTargetForComment,
 } from "./comment-decorations";
+import { trimSelectionBleed } from "./selection-trim";
 
 /** Look up a mark type reportSchema is known to define (schema.ts builds on
  *  prosemirror-schema-basic, which always defines `strong`/`em`) — throws
@@ -101,10 +102,18 @@ export function jumpToCommentTransaction(
  *  the PENDING (commentable) selection, or `null` — the pure gate behind
  *  ReportEditor's `onSelectionChange`. Null when the selection is collapsed
  *  (nothing to comment on) OR when the transaction was programmatic (a Jump
- *  must not trip the composer's pendingSelection gate). */
+ *  must not trip the composer's pendingSelection gate). The reported range is
+ *  bleed-trimmed (selection-trim.ts) and the quote is derived from the SAME
+ *  trimmed range, so the stored anchor and its text_quote always agree
+ *  (2026-07-29 dogfood paper cut #2). */
 export function reportableSelection(tr: Transaction, state: EditorState): EditorSelection | null {
   if (tr.getMeta(PROGRAMMATIC_SELECTION_META)) return null;
   const { from, to } = state.selection;
   if (from === to) return null;
-  return { from, to, text: state.doc.textBetween(from, to, " ") };
+  const trimmed = trimSelectionBleed(state.doc, from, to);
+  return {
+    from: trimmed.from,
+    to: trimmed.to,
+    text: state.doc.textBetween(trimmed.from, trimmed.to, " "),
+  };
 }
