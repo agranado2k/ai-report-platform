@@ -19,11 +19,13 @@
 // runtime, and `Record<Intent, …>` below still gives us drift-safety.
 import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
-import { Badge, Button, Card, Select, Textarea } from "arp-ui";
-import { useState } from "react";
+import { Badge, Button, Card, cx, Select, Textarea } from "arp-ui";
+import { useEffect, useRef, useState } from "react";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
+import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
-import type { CommentWire } from "../wire-types";
+import { handleComposerKeyDown } from "../composer-keys";
+import type { CommentWire, VersionWire } from "../wire-types";
 
 export interface CommentsPanelProps {
   readonly appOrigin: string;
@@ -38,6 +40,21 @@ export interface CommentsPanelProps {
    *  a "some older items are hidden" note at the foot of the list. */
   readonly hasMore?: boolean;
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
+  /** The editor's RESOLVED highlight ranges (ReportEditor's
+   *  onCommentRangesChange) — drives document-order sorting and the
+   *  degraded-anchor badge (../comment-order.ts, items C/D). */
+  readonly commentRanges: readonly ResolvedRange[];
+  /** The report's version list — resolves a degraded comment's pinned
+   *  version id to its human version NUMBER for the badge (item D). */
+  readonly versions: readonly VersionWire[];
+  /** The comment to open/focus in the panel — set when the user clicks that
+   *  comment's highlight in the editor (item B: click-highlight →
+   *  focus-panel). The matching thread scrolls into view and gets a ring. */
+  readonly focusedCommentId?: string | null;
+  /** Item B's "Jump": scroll the editor to this comment's anchor position.
+   *  The panel only offers the affordance for comments whose anchor RESOLVED
+   *  (a degraded, version-pinned comment has nowhere live to jump to). */
+  readonly onJump?: (commentId: string) => void;
   /** The editor's current non-empty selection, or `null` — gates whether the
    *  "new comment" composer renders at all (only present while `mode ===
    *  "edit"`, since selection tracking requires the mounted ReportEditor). */
@@ -184,6 +201,18 @@ function NewCommentComposer({
       <Textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
+        // ⌘/Ctrl+Enter submits, Esc cancels; every other keystroke is
+        // isolated from document-level handlers (../composer-keys.ts, item C).
+        onKeyDown={(e) =>
+          handleComposerKeyDown(e, {
+            onSubmit: () => {
+              if (!busy) void submit();
+            },
+            onCancel: () => {
+              if (!busy) onSubmitted();
+            },
+          })
+        }
         placeholder="Add a comment…"
         rows={3}
         className="w-full"
@@ -294,6 +323,16 @@ function ReplyItem({
           <Textarea
             value={editBody}
             onChange={(e) => setEditBody(e.target.value)}
+            onKeyDown={(e) =>
+              handleComposerKeyDown(e, {
+                onSubmit: () => {
+                  if (!editBusy) void submitEdit();
+                },
+                onCancel: () => {
+                  if (!editBusy) setEditOpen(false);
+                },
+              })
+            }
             placeholder="Edit reply…"
             rows={2}
             className="w-full"
@@ -351,12 +390,33 @@ function ReplyItem({
   );
 }
 
+/** Item D's "UI honesty" badge: a comment whose relative anchor no longer
+ *  resolves against the current document is version-pinned (ADR-0064 §2a) —
+ *  badge it visibly instead of rendering it like a live-anchored comment.
+ *  `warning` tone: distinct from the Open/Resolved state badges beside it. */
+function PinnedBadge({ versionNo }: { readonly versionNo: number | null }) {
+  return (
+    <Badge
+      tone="warning"
+      className="text-[10px]"
+      title="This comment's anchor no longer matches the current document — it stays pinned to the version it was written against."
+    >
+      {versionNo === null ? "Pinned to an earlier version" : `Pinned to v${versionNo}`}
+    </Badge>
+  );
+}
+
 function CommentThread({
   appOrigin,
   slug,
   editToken,
   root,
   replies,
+  degraded,
+  pinnedVersionNo,
+  focused,
+  canJump,
+  onJump,
   comments,
   onCommentsChange,
 }: {
@@ -365,9 +425,25 @@ function CommentThread({
   readonly editToken: string;
   readonly root: CommentWire;
   readonly replies: readonly CommentWire[];
+  /** True when the root's anchor failed to resolve (item D). */
+  readonly degraded: boolean;
+  /** The pinned version's number, when the versions list resolves it. */
+  readonly pinnedVersionNo: number | null;
+  /** True when this thread was focused by a highlight click (item B). */
+  readonly focused: boolean;
+  /** Whether Jump is offered — the anchor resolved to a live position. */
+  readonly canJump: boolean;
+  readonly onJump: () => void;
   readonly comments: readonly CommentWire[];
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
 }) {
+  // Item B (click-highlight → focus-panel): when this thread becomes the
+  // focused one, bring it into the panel's own scrollport. The ring below is
+  // the matching visual cue.
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focused) containerRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focused]);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyIntent, setReplyIntent] = useState("note");
@@ -464,155 +540,195 @@ function CommentThread({
   };
 
   return (
-    <Card className="mb-3 p-3">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Avatar name={root.author?.name ?? null} email={root.author?.email ?? null} />
-          <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
-          <IntentChip intent={root.intent} />
+    // Wrapper div carries the focus ref — arp-ui's Card is a plain function
+    // component (no forwardRef), so the scroll target lives one level up.
+    <div ref={containerRef}>
+      <Card
+        className={cx("mb-3 p-3", focused && "ring-2 ring-brand/40")}
+        aria-current={focused || undefined}
+      >
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Avatar name={root.author?.name ?? null} email={root.author?.email ?? null} />
+            <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
+            <IntentChip intent={root.intent} />
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {degraded ? <PinnedBadge versionNo={pinnedVersionNo} /> : null}
+            {root.resolved_at ? (
+              <Badge tone="success">Resolved</Badge>
+            ) : (
+              <Badge tone="neutral">Open</Badge>
+            )}
+          </div>
         </div>
-        {root.resolved_at ? (
-          <Badge tone="success">Resolved</Badge>
+        <p className="mb-1 text-xs italic text-subtle">
+          "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
+        </p>
+        {editOpen ? (
+          <div className="mt-1">
+            <Textarea
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              onKeyDown={(e) =>
+                handleComposerKeyDown(e, {
+                  onSubmit: () => {
+                    if (!editBusy) void submitEdit();
+                  },
+                  onCancel: () => {
+                    if (!editBusy) setEditOpen(false);
+                  },
+                })
+              }
+              placeholder="Edit comment…"
+              rows={3}
+              className="w-full"
+              aria-label="Edit comment body"
+            />
+            <ErrorText message={editError} />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 text-xs text-subtle">
+                <span id={`edit-intent-label-${root.id}`}>Intent</span>
+                <Select
+                  size="sm"
+                  aria-labelledby={`edit-intent-label-${root.id}`}
+                  value={editIntent}
+                  onChange={(e) => setEditIntent(e.target.value as Intent)}
+                  disabled={editBusy}
+                >
+                  {INTENT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setEditOpen(false)}
+                  disabled={editBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={submitEdit}
+                  disabled={editBusy || !editBody.trim()}
+                >
+                  {editBusy ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
-          <Badge tone="neutral">Open</Badge>
+          <p className="text-sm text-fg">{root.body}</p>
         )}
-      </div>
-      <p className="mb-1 text-xs italic text-subtle">
-        "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
-      </p>
-      {editOpen ? (
-        <div className="mt-1">
-          <Textarea
-            value={editBody}
-            onChange={(e) => setEditBody(e.target.value)}
-            placeholder="Edit comment…"
-            rows={3}
-            className="w-full"
-            aria-label="Edit comment body"
+        <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
+          {relativeTime(root.created_at)}
+          {isEdited(root.edited_at) ? " · edited" : ""}
+        </p>
+
+        {replies.map((reply) => (
+          <ReplyItem
+            key={reply.id}
+            reply={reply}
+            appOrigin={appOrigin}
+            slug={slug}
+            editToken={editToken}
+            comments={comments}
+            onCommentsChange={onCommentsChange}
           />
-          <ErrorText message={editError} />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 text-xs text-subtle">
-              <span id={`edit-intent-label-${root.id}`}>Intent</span>
-              <Select
-                size="sm"
-                aria-labelledby={`edit-intent-label-${root.id}`}
-                value={editIntent}
-                onChange={(e) => setEditIntent(e.target.value as Intent)}
-                disabled={editBusy}
-              >
-                {INTENT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setEditOpen(false)}
-                disabled={editBusy}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={submitEdit}
-                disabled={editBusy || !editBody.trim()}
-              >
-                {editBusy ? "Saving…" : "Save"}
-              </Button>
+        ))}
+
+        <ErrorText message={resolveError} />
+        <ErrorText message={replyError} />
+
+        {replyOpen ? (
+          <div className="mt-2">
+            <Textarea
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
+              onKeyDown={(e) =>
+                handleComposerKeyDown(e, {
+                  onSubmit: () => {
+                    if (!replyBusy) void submitReply();
+                  },
+                  onCancel: () => {
+                    if (!replyBusy) setReplyOpen(false);
+                  },
+                })
+              }
+              placeholder="Reply…"
+              rows={2}
+              className="w-full"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 text-xs text-subtle">
+                <span id={`reply-intent-label-${root.id}`}>Intent</span>
+                <Select
+                  size="sm"
+                  aria-labelledby={`reply-intent-label-${root.id}`}
+                  value={replyIntent}
+                  onChange={(e) => setReplyIntent(e.target.value)}
+                  disabled={replyBusy}
+                >
+                  {INTENT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setReplyOpen(false)}
+                  disabled={replyBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={submitReply}
+                  disabled={replyBusy || !replyBody.trim()}
+                >
+                  {replyBusy ? "Posting…" : "Reply"}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : (
-        <p className="text-sm text-fg">{root.body}</p>
-      )}
-      <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
-        {relativeTime(root.created_at)}
-        {isEdited(root.edited_at) ? " · edited" : ""}
-      </p>
-
-      {replies.map((reply) => (
-        <ReplyItem
-          key={reply.id}
-          reply={reply}
-          appOrigin={appOrigin}
-          slug={slug}
-          editToken={editToken}
-          comments={comments}
-          onCommentsChange={onCommentsChange}
-        />
-      ))}
-
-      <ErrorText message={resolveError} />
-      <ErrorText message={replyError} />
-
-      {replyOpen ? (
-        <div className="mt-2">
-          <Textarea
-            value={replyBody}
-            onChange={(e) => setReplyBody(e.target.value)}
-            placeholder="Reply…"
-            rows={2}
-            className="w-full"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 text-xs text-subtle">
-              <span id={`reply-intent-label-${root.id}`}>Intent</span>
-              <Select
-                size="sm"
-                aria-labelledby={`reply-intent-label-${root.id}`}
-                value={replyIntent}
-                onChange={(e) => setReplyIntent(e.target.value)}
-                disabled={replyBusy}
-              >
-                {INTENT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex gap-2">
+        ) : editOpen ? null : (
+          <div className="mt-2 flex gap-2">
+            {canJump ? (
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
-                onClick={() => setReplyOpen(false)}
-                disabled={replyBusy}
+                onClick={onJump}
+                title="Scroll the document to this comment's anchor"
               >
-                Cancel
+                Jump
               </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={submitReply}
-                disabled={replyBusy || !replyBody.trim()}
-              >
-                {replyBusy ? "Posting…" : "Reply"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : editOpen ? null : (
-        <div className="mt-2 flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setReplyOpen(true)}>
-            Reply
-          </Button>
-          <Button variant="ghost" size="sm" onClick={openEdit}>
-            Edit
-          </Button>
-          {root.resolved_at ? null : (
-            <Button variant="ghost" size="sm" onClick={resolve} disabled={resolveBusy}>
-              {resolveBusy ? "Resolving…" : "Resolve"}
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={() => setReplyOpen(true)}>
+              Reply
             </Button>
-          )}
-        </div>
-      )}
-    </Card>
+            <Button variant="ghost" size="sm" onClick={openEdit}>
+              Edit
+            </Button>
+            {root.resolved_at ? null : (
+              <Button variant="ghost" size="sm" onClick={resolve} disabled={resolveBusy}>
+                {resolveBusy ? "Resolving…" : "Resolve"}
+              </Button>
+            )}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -623,11 +739,14 @@ export function CommentsPanel({
   currentVersionId,
   comments,
   onCommentsChange,
+  commentRanges,
+  versions,
+  focusedCommentId,
+  onJump,
   pendingSelection,
   onSelectionConsumed,
   hasMore,
 }: CommentsPanelProps) {
-  const roots = comments.filter((c) => c.parent_id === null);
   const repliesByRoot = new Map<string, CommentWire[]>();
   for (const c of comments) {
     if (c.parent_id === null) continue;
@@ -635,13 +754,14 @@ export function CommentsPanel({
     list.push(c);
     repliesByRoot.set(c.parent_id, list);
   }
+  // Document order, not newest-first (item C): roots sort by where their
+  // anchor lives in the document — resolved position first, raw
+  // relative.from as the fallback, created_at last (../comment-order.ts).
+  const orderedRoots = orderRootComments(comments, commentRanges);
   // Note: shownCount is the ROOT-thread count; the fetch cap counts all comments
   // (incl. replies), so in a reply-heavy truncated set this number is an
   // approximation of how many were fetched — acceptable for a "some hidden" hint.
-  const truncNote = truncationNote(roots.length, hasMore ?? false);
-  const sortedRoots = [...roots].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  const truncNote = truncationNote(orderedRoots.length, hasMore ?? false);
 
   return (
     <section className="flex w-full flex-col gap-2" aria-label="Comments">
@@ -660,10 +780,10 @@ export function CommentsPanel({
         <p className="mb-2 text-xs text-subtle">Select text in the document to add a comment.</p>
       )}
 
-      {sortedRoots.length === 0 ? (
+      {orderedRoots.length === 0 ? (
         <p className="text-sm text-muted">No comments yet.</p>
       ) : (
-        sortedRoots.map((root) => (
+        orderedRoots.map(({ comment: root, degraded, position }) => (
           <CommentThread
             key={root.id}
             appOrigin={appOrigin}
@@ -671,6 +791,11 @@ export function CommentsPanel({
             editToken={editToken}
             root={root}
             replies={repliesByRoot.get(root.id) ?? []}
+            degraded={degraded}
+            pinnedVersionNo={versionNoForPin(versions, root.anchor.version_pinned.version_id)}
+            focused={focusedCommentId === root.id}
+            canJump={position !== null && onJump !== undefined}
+            onJump={() => onJump?.(root.id)}
             comments={comments}
             onCommentsChange={onCommentsChange}
           />

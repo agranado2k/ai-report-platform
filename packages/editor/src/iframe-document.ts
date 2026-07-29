@@ -7,6 +7,7 @@
 // the injected parser; the iframe mount itself (ReportEditor.tsx) is manual/e2e
 // territory.
 import type { Shell } from "arp-report-html";
+import { COMMENT_INTENT_COLORS } from "./comment-colors";
 
 /**
  * Comment-highlight decoration + auto-<p> safety-net CSS (Fix 2, and Fix 3's
@@ -20,12 +21,39 @@ import type { Shell } from "arp-report-html";
  * a dedicated `inline*` node (e.g. `rmeta`, `role-head` — see
  * packages/report-html/src/schema/inline-content.ts) — `display: contents`
  * makes that `<p>` invisible in layout while it still exists structurally.
+ *
+ * Intent coloring (comment-UX adoptions, item A): one `--<intent>` modifier
+ * rule per palette entry, GENERATED from `COMMENT_INTENT_COLORS`
+ * (comment-colors.ts) so the CSS can never drift from the exported palette.
+ * The bare `.comment-highlight` rule keeps the `note` colors as the fallback
+ * for any span without a modifier (defense-in-depth — the plugin always emits
+ * one). The `@media print` rule keeps the highlight pigments on paper
+ * (comment-UX adoptions, item E — browsers strip backgrounds when printing
+ * unless `print-color-adjust: exact`): a printed report with intact review
+ * marks is a useful artifact, per the gap-analysis report.
  */
+const INTENT_HIGHLIGHT_RULES = Object.entries(COMMENT_INTENT_COLORS)
+  .map(
+    ([intent, c]) => `.comment-highlight--${intent} {
+  background: ${c.background};
+  box-shadow: inset 0 -2px ${c.underline};
+}`,
+  )
+  .join("\n");
+
 export const IFRAME_INJECTED_CSS = `
 .comment-highlight {
-  background: rgba(244, 201, 93, 0.28);
-  box-shadow: inset 0 -2px rgba(244, 201, 93, 0.55);
+  background: ${COMMENT_INTENT_COLORS.note.background};
+  box-shadow: inset 0 -2px ${COMMENT_INTENT_COLORS.note.underline};
   border-radius: 2px;
+  cursor: pointer;
+}
+${INTENT_HIGHLIGHT_RULES}
+@media print {
+  .comment-highlight {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 .rt > p, .rd > p, .rtags > p, .chips > p, .block-label > p,
 .role-head > p, .rmeta > p {

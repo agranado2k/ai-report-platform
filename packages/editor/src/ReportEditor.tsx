@@ -35,15 +35,32 @@
 // transactions carry no such meta — the plugin re-maps existing decorations
 // through ProseMirror's own position mapping instead (best-effort: an edit
 // that invalidates a range just stops highlighting it, ADR-0064 §2a). The
-// `.comment-highlight` CSS rule itself (Fix 2 — previously nonexistent, so
-// the decoration spans rendered with no visible highlight at all) lives in
-// the iframe's injected style (iframe-document.ts's `IFRAME_INJECTED_CSS`),
-// since it has to be in the SAME document as the decorated spans.
+// `.comment-highlight` CSS rules (base + per-intent modifiers, item A) live
+// in the iframe's injected style (iframe-document.ts's
+// `IFRAME_INJECTED_CSS`), since they have to be in the SAME document as the
+// decorated spans.
+//
+// Bidirectional linking (comment-UX adoptions, item B): `onCommentClick`
+// fires with the clicked highlight's comment id (via `EditorView`'s
+// `handleClick` prop + the pure `commentIdAtPos`), and the forwarded ref
+// exposes `jumpToComment` — resolve the comment's anchor against the CURRENT
+// doc (`jumpTargetForComment`) and scroll the selection there. Both are
+// best-effort: a degraded anchor makes `jumpToComment` return `false` and a
+// click outside any highlight fires nothing. `onCommentRangesChange` reports
+// each seeding's RESOLVED ranges back to the caller — the panel uses it for
+// document-order sorting and the degraded-anchor badge (items C/D) without
+// re-implementing position resolution outside this package.
 import type { PMDocJson, Shell } from "arp-report-html";
+import { TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { useEffect, useRef, useState } from "react";
-import type { CommentForHighlight } from "./comment-decorations";
-import { commentHighlightsKey, resolvableCommentRanges } from "./comment-decorations";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { CommentForHighlight, CommentRange } from "./comment-decorations";
+import {
+  commentHighlightsKey,
+  commentIdAtPos,
+  jumpTargetForComment,
+  resolvableCommentRanges,
+} from "./comment-decorations";
 import { createEditorState, docJson } from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
 
@@ -54,6 +71,15 @@ export interface EditorSelection {
   readonly from: number;
   readonly to: number;
   readonly text: string;
+}
+
+/** Imperative surface exposed via the forwarded ref (item B's "Jump"). */
+export interface ReportEditorHandle {
+  /** Scroll the editor to the comment's anchor position, selecting the
+   *  anchored range. Returns `false` (and does nothing) when the comment's
+   *  relative position no longer resolves against the current doc — the
+   *  degraded, version-pinned state has nowhere live to jump to. */
+  readonly jumpToComment: (comment: CommentForHighlight) => boolean;
 }
 
 export interface ReportEditorProps {
@@ -77,6 +103,13 @@ export interface ReportEditorProps {
    *  doc comment). Read reactively: a new array reference re-seeds the
    *  decoration set, mapped against the CURRENT doc's bounds. */
   readonly comments?: readonly CommentForHighlight[];
+  /** Fired when the user clicks inside a comment highlight, with that
+   *  comment's id (item B: click-highlight → focus the panel comment). */
+  readonly onCommentClick?: (commentId: string) => void;
+  /** Fired with the RESOLVED highlight ranges each time the `comments` prop
+   *  is (re)seeded — a comment absent from the reported ranges did not
+   *  resolve against the current doc (degraded / version-pinned, item D). */
+  readonly onCommentRangesChange?: (ranges: readonly CommentRange[]) => void;
   /** Applied to the mounted `<iframe>` element itself (sizing/borders) — NOT
    *  a typography/prose class anymore: the iframe's own document carries the
    *  report's real CSS, so there's nothing left for the parent's classes to
@@ -90,14 +123,19 @@ function selectionInfo(view: EditorView): EditorSelection | null {
   return { from, to, text: view.state.doc.textBetween(from, to, " ") };
 }
 
-export function ReportEditor({
-  initialDoc,
-  shell,
-  onChange,
-  onSelectionChange,
-  comments,
-  className,
-}: ReportEditorProps) {
+export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(function ReportEditor(
+  {
+    initialDoc,
+    shell,
+    onChange,
+    onSelectionChange,
+    comments,
+    onCommentClick,
+    onCommentRangesChange,
+    className,
+  },
+  ref,
+) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewRef = useRef<EditorView>();
   const onChangeRef = useRef(onChange);
@@ -106,6 +144,34 @@ export function ReportEditor({
   onSelectionChangeRef.current = onSelectionChange;
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
+  const onCommentClickRef = useRef(onCommentClick);
+  onCommentClickRef.current = onCommentClick;
+  const onCommentRangesChangeRef = useRef(onCommentRangesChange);
+  onCommentRangesChangeRef.current = onCommentRangesChange;
+
+  // Item B's "Jump": resolve the comment against the CURRENT doc and move
+  // the selection there — `scrollIntoView` on the transaction makes the
+  // iframe's own scroll container bring the anchor into view. Selecting the
+  // full anchored range (not just a cursor at `from`) doubles as a visual
+  // "this is the spot" flash without any extra decoration machinery.
+  useImperativeHandle(
+    ref,
+    () => ({
+      jumpToComment(comment) {
+        const view = viewRef.current;
+        if (!view) return false;
+        const target = jumpTargetForComment(view.state.doc.content.size, comment);
+        if (!target) return false;
+        const tr = view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, target.from, target.to))
+          .scrollIntoView();
+        view.dispatch(tr);
+        view.focus();
+        return true;
+      },
+    }),
+    [],
+  );
 
   // `srcDoc` is built on the CLIENT only. `buildIframeDocument` parses with the
   // browser's `DOMParser` (comment-aware, per the CSP-bypass fix) — which does
@@ -153,6 +219,15 @@ export function ReportEditor({
             if (tr.docChanged) onChangeRef.current(docJson(next));
             onSelectionChangeRef.current?.(selectionInfo(view));
           },
+          // Item B: a click inside a comment highlight surfaces that
+          // comment in the panel. Returning false leaves ProseMirror's own
+          // click handling (caret placement, selection) untouched — this
+          // observes the click, it never consumes it.
+          handleClick(clickedView, pos) {
+            const commentId = commentIdAtPos(commentHighlightsKey.getState(clickedView.state), pos);
+            if (commentId) onCommentClickRef.current?.(commentId);
+            return false;
+          },
         },
       );
       viewRef.current = view;
@@ -168,6 +243,7 @@ export function ReportEditor({
       if (ranges.length > 0) {
         view.dispatch(view.state.tr.setMeta(commentHighlightsKey, ranges));
       }
+      onCommentRangesChangeRef.current?.(ranges);
     }
 
     // Mount timing (claude-review #171 finding 1): a freshly-rendered `srcdoc`
@@ -197,12 +273,14 @@ export function ReportEditor({
   }, []);
 
   // Re-seed the comment highlight decorations whenever the comments list
-  // changes (new comment added, or the sidebar's revalidated list arrives).
+  // changes (new comment added, or the sidebar's revalidated list arrives),
+  // and report the resolved ranges back to the caller (items C/D).
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const ranges = resolvableCommentRanges(view.state.doc.content.size, comments ?? []);
     view.dispatch(view.state.tr.setMeta(commentHighlightsKey, ranges));
+    onCommentRangesChangeRef.current?.(ranges);
   }, [comments]);
 
   return (
@@ -226,4 +304,4 @@ export function ReportEditor({
       className={className}
     />
   );
-}
+});

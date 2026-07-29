@@ -13,22 +13,34 @@
 // transaction carries no such meta, so the existing DecorationSet re-maps
 // itself via ProseMirror's own position mapping (`old.map(...)`) instead of
 // being recomputed from the raw comment list on every keystroke.
+//
+// Intent coloring (comment-UX adoptions, item A): each range carries the
+// comment's normalized intent, rendered as a `comment-highlight--<intent>`
+// class modifier alongside the base class. The colors themselves live in
+// comment-colors.ts (the overlay-owned palette) and reach the iframe via
+// `IFRAME_INJECTED_CSS` (iframe-document.ts) — same document as the spans.
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { type HighlightIntent, normalizeIntent } from "./comment-colors";
 
 export interface CommentRange {
   readonly commentId: string;
   readonly from: number;
   readonly to: number;
+  /** The comment's normalized intent — drives the highlight's color class. */
+  readonly intent: HighlightIntent;
 }
 
-/** The shape this module needs from a comment for highlight resolution — just
- *  the id plus the anchor's opaque `relative` slot. Deliberately NOT the full
- *  `Comment` domain type: this module stays decoupled from arp-domain,
- *  matching the anchor's own "relative is opaque" design (ADR-0064 §2a). */
+/** The shape this module needs from a comment for highlight resolution — the
+ *  id, the anchor's opaque `relative` slot, and (optionally) the intent.
+ *  Deliberately NOT the full `Comment` domain type: this module stays
+ *  decoupled from arp-domain, matching the anchor's own "relative is opaque"
+ *  design (ADR-0064 §2a). `intent` is the wire's plain string — normalized
+ *  here, unknown values degrading to `note`. */
 export interface CommentForHighlight {
   readonly id: string;
   readonly anchor: { readonly relative?: unknown };
+  readonly intent?: string;
 }
 
 /** Keep only the comments whose `relative` is a plausible `{from,to}` PM
@@ -49,9 +61,38 @@ export function resolvableCommentRanges(
     if (typeof from !== "number" || typeof to !== "number") continue;
     if (!Number.isInteger(from) || !Number.isInteger(to)) continue;
     if (from < 1 || to > docSize || from >= to) continue;
-    ranges.push({ commentId: c.id, from, to });
+    ranges.push({ commentId: c.id, from, to, intent: normalizeIntent(c.intent) });
   }
   return ranges;
+}
+
+/** Resolve ONE comment to its jump target — the range Jump scrolls the
+ *  editor to (bidirectional linking, item B). Same resolution rules as the
+ *  highlight painting above (a comment is jumpable exactly when it is
+ *  highlightable); `null` when the relative position no longer resolves
+ *  against the current doc (the degraded, version-pinned state — item D). */
+export function jumpTargetForComment(
+  docSize: number,
+  comment: CommentForHighlight,
+): CommentRange | null {
+  return resolvableCommentRanges(docSize, [comment])[0] ?? null;
+}
+
+/** The comment id whose highlight covers `pos`, or `null` — the pure half of
+ *  click-highlight→focus-panel (item B). `DecorationSet.find(pos, pos)`
+ *  returns every decoration touching `pos` (inclusive of both endpoints);
+ *  overlapping highlights resolve to the first seeded one, which is fine for
+ *  a best-effort focus affordance. */
+export function commentIdAtPos(
+  decorations: DecorationSet | null | undefined,
+  pos: number,
+): string | null {
+  if (!decorations) return null;
+  for (const deco of decorations.find(pos, pos)) {
+    const commentId = (deco.spec as { readonly commentId?: unknown }).commentId;
+    if (typeof commentId === "string") return commentId;
+  }
+  return null;
 }
 
 const HIGHLIGHT_CLASS = "comment-highlight";
@@ -74,7 +115,7 @@ export function commentHighlightsPlugin(): Plugin {
               Decoration.inline(
                 r.from,
                 r.to,
-                { class: HIGHLIGHT_CLASS },
+                { class: `${HIGHLIGHT_CLASS} ${HIGHLIGHT_CLASS}--${r.intent}` },
                 { commentId: r.commentId },
               ),
             ),

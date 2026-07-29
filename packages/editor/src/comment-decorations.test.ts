@@ -3,6 +3,8 @@
 // (`resolvableCommentRanges`) and the ProseMirror plugin that turns resolved
 // ranges into a `DecorationSet`. Both run without a DOM — `EditorState.apply`
 // and `DecorationSet` are plain JS, same rationale as editor-state.test.ts.
+// Intent coloring (comment-UX adoptions, item A): ranges carry the comment's
+// normalized intent, and each decoration gains a `--<intent>` class modifier.
 import { reportSchema } from "arp-report-html";
 import { Node as PMNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
@@ -10,6 +12,8 @@ import { describe, expect, it } from "vitest";
 import {
   commentHighlightsKey,
   commentHighlightsPlugin,
+  commentIdAtPos,
+  jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
 
@@ -31,7 +35,24 @@ describe("resolvableCommentRanges", () => {
     const ranges = resolvableCommentRanges(docSize, [
       { id: "comment_1", anchor: { relative: { from: 1, to: 6 } } },
     ]);
-    expect(ranges).toEqual([{ commentId: "comment_1", from: 1, to: 6 }]);
+    expect(ranges).toEqual([{ commentId: "comment_1", from: 1, to: 6, intent: "note" }]);
+  });
+
+  it("carries each comment's intent through to its range", () => {
+    const ranges = resolvableCommentRanges(docSize, [
+      { id: "c-add", anchor: { relative: { from: 1, to: 3 } }, intent: "add" },
+      { id: "c-remove", anchor: { relative: { from: 4, to: 6 } }, intent: "remove" },
+      { id: "c-enh", anchor: { relative: { from: 7, to: 9 } }, intent: "enhancement" },
+    ]);
+    expect(ranges.map((r) => r.intent)).toEqual(["add", "remove", "enhancement"]);
+  });
+
+  it("normalizes an unknown or missing intent to `note` (never an unpaintable range)", () => {
+    const ranges = resolvableCommentRanges(docSize, [
+      { id: "c-unknown", anchor: { relative: { from: 1, to: 3 } }, intent: "shout" },
+      { id: "c-missing", anchor: { relative: { from: 4, to: 6 } } },
+    ]);
+    expect(ranges.map((r) => r.intent)).toEqual(["note", "note"]);
   });
 
   it("skips a comment whose relative range extends past the doc's end", () => {
@@ -78,8 +99,8 @@ describe("resolvableCommentRanges", () => {
       { id: "ok-2", anchor: { relative: { from: 7, to: 12 } } },
     ]);
     expect(ranges).toEqual([
-      { commentId: "ok-1", from: 1, to: 3 },
-      { commentId: "ok-2", from: 7, to: 12 },
+      { commentId: "ok-1", from: 1, to: 3, intent: "note" },
+      { commentId: "ok-2", from: 7, to: 12, intent: "note" },
     ]);
   });
 });
@@ -103,7 +124,9 @@ describe("commentHighlightsPlugin", () => {
   it("populates decorations at the given ranges when dispatched via plugin meta", () => {
     const state = stateWithPlugin();
     const next = state.apply(
-      state.tr.setMeta(commentHighlightsKey, [{ commentId: "comment_1", from: 1, to: 6 }]),
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 6, intent: "note" },
+      ]),
     );
     const decorations = commentHighlightsKey.getState(next);
     const found = decorations?.find();
@@ -112,10 +135,55 @@ describe("commentHighlightsPlugin", () => {
     expect(found?.[0]?.to).toBe(6);
   });
 
+  it("renders each decoration with the base class plus its intent color modifier", () => {
+    const state = stateWithPlugin();
+    const next = state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 3, intent: "remove" },
+        { commentId: "comment_2", from: 7, to: 9, intent: "note" },
+      ]),
+    );
+    const found = commentHighlightsKey.getState(next)?.find() ?? [];
+    // `Decoration.inline`'s attrs live on `.type.attrs` (not part of PM's
+    // public typings) — read via a structural cast, same trick as `.spec`.
+    const classes = found.map(
+      (d) => (d as unknown as { type: { attrs: { class: string } } }).type.attrs.class,
+    );
+    expect(classes).toContain("comment-highlight comment-highlight--remove");
+    expect(classes).toContain("comment-highlight comment-highlight--note");
+  });
+
+  it("resolves a click position back to its comment id (bidirectional linking, item B)", () => {
+    const state = stateWithPlugin();
+    const next = state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 6, intent: "note" },
+        { commentId: "comment_2", from: 8, to: 12, intent: "add" },
+      ]),
+    );
+    const decorations = commentHighlightsKey.getState(next);
+    expect(commentIdAtPos(decorations, 3)).toBe("comment_1");
+    expect(commentIdAtPos(decorations, 9)).toBe("comment_2");
+  });
+
+  it("returns null for a click outside every highlight, or with no decoration set", () => {
+    const state = stateWithPlugin();
+    const next = state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 3, intent: "note" },
+      ]),
+    );
+    const decorations = commentHighlightsKey.getState(next);
+    expect(commentIdAtPos(decorations, 10)).toBeNull();
+    expect(commentIdAtPos(undefined, 2)).toBeNull();
+  });
+
   it("re-maps existing decorations across an unrelated edit (no meta on that transaction)", () => {
     const state = stateWithPlugin();
     const seeded = state.apply(
-      state.tr.setMeta(commentHighlightsKey, [{ commentId: "comment_1", from: 1, to: 6 }]),
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 6, intent: "note" },
+      ]),
     );
     // Insert two characters at the very start of the doc — the highlighted
     // range should shift right by 2, re-mapped automatically (no new meta).
@@ -125,5 +193,25 @@ describe("commentHighlightsPlugin", () => {
     expect(found).toHaveLength(1);
     expect(found?.[0]?.from).toBe(3);
     expect(found?.[0]?.to).toBe(8);
+  });
+});
+
+describe("jumpTargetForComment", () => {
+  const docSize = 13;
+
+  it("resolves a live-anchored comment to its {from,to} jump target", () => {
+    const target = jumpTargetForComment(docSize, {
+      id: "comment_1",
+      anchor: { relative: { from: 2, to: 7 } },
+      intent: "add",
+    });
+    expect(target).toEqual({ commentId: "comment_1", from: 2, to: 7, intent: "add" });
+  });
+
+  it("returns null when the relative position no longer resolves (degraded anchor)", () => {
+    expect(
+      jumpTargetForComment(docSize, { id: "c", anchor: { relative: { from: 5, to: 999 } } }),
+    ).toBeNull();
+    expect(jumpTargetForComment(docSize, { id: "c", anchor: {} })).toBeNull();
   });
 });
