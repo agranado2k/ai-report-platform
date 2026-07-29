@@ -6,7 +6,14 @@ import type { WriteGrant } from "arp-application";
 import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
-import { commentBody, folderBody, listBody, reportBody, type WireContext } from "./resource";
+import {
+  commentBody,
+  folderBody,
+  listBody,
+  reportBody,
+  type WireAuthor,
+  type WireContext,
+} from "./resource";
 import type { AclShareWire, AclWire, ReportDetailWire, WriteGrantWire } from "./wire";
 
 /** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
@@ -191,23 +198,40 @@ export function listWriteGrantsToHttp(
 
 /** POST /api/v1/reports/{slug}/comments — 201 with the created comment resource
  *  (ADR-0064 §7). Also used for a reply — a reply IS a comment resource, just
- *  with `parent_id` set. */
+ *  with `parent_id` set. `authorByUserId` folds the route-layer Author Identity
+ *  projection (ADR-0048/ADR-0063) onto the response EXACTLY like
+ *  `listCommentsToHttp` — same map shape, same null fallback — so a just-posted
+ *  comment renders its author immediately instead of "Unknown user" until the
+ *  next list refetch (2026-07-29 dogfood paper cut #3). */
 export function addCommentToHttp(
   result: Result<Comment, AppError>,
   ctx: WireContext,
+  authorByUserId?: ReadonlyMap<UserId, WireAuthor>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 201, contentType: "application/json", body: commentBody(result.value, ctx) };
+  return {
+    status: 201,
+    contentType: "application/json",
+    body: commentBody(result.value, ctx, authorByUserId?.get(result.value.authorUserId) ?? null),
+  };
 }
 
 /** PATCH /api/v1/reports/{slug}/comments/{comment_id} — 200 with the resolved
- *  comment resource (ADR-0064 §7, §3 — author-or-owner; idempotent). */
+ *  comment resource (ADR-0064 §7, §3 — author-or-owner; idempotent). Covers
+ *  BOTH the resolve and edit branches (they share the comment-resource shape),
+ *  so both get the same `authorByUserId` Author Identity projection as the
+ *  create/list responses above. */
 export function resolveCommentToHttp(
   result: Result<Comment, AppError>,
   ctx: WireContext,
+  authorByUserId?: ReadonlyMap<UserId, WireAuthor>,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: commentBody(result.value, ctx) };
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: commentBody(result.value, ctx, authorByUserId?.get(result.value.authorUserId) ?? null),
+  };
 }
 
 /** DELETE /api/v1/reports/{slug}/comments/{comment_id} — 204 No Content on
