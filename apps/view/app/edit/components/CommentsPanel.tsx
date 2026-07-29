@@ -22,8 +22,9 @@ import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, Select, Textarea } from "arp-ui";
 import { useState } from "react";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
+import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
-import type { CommentWire } from "../wire-types";
+import type { CommentWire, VersionWire } from "../wire-types";
 
 export interface CommentsPanelProps {
   readonly appOrigin: string;
@@ -38,6 +39,13 @@ export interface CommentsPanelProps {
    *  a "some older items are hidden" note at the foot of the list. */
   readonly hasMore?: boolean;
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
+  /** The editor's RESOLVED highlight ranges (ReportEditor's
+   *  onCommentRangesChange) — drives document-order sorting and the
+   *  degraded-anchor badge (../comment-order.ts, items C/D). */
+  readonly commentRanges: readonly ResolvedRange[];
+  /** The report's version list — resolves a degraded comment's pinned
+   *  version id to its human version NUMBER for the badge (item D). */
+  readonly versions: readonly VersionWire[];
   /** The editor's current non-empty selection, or `null` — gates whether the
    *  "new comment" composer renders at all (only present while `mode ===
    *  "edit"`, since selection tracking requires the mounted ReportEditor). */
@@ -351,12 +359,30 @@ function ReplyItem({
   );
 }
 
+/** Item D's "UI honesty" badge: a comment whose relative anchor no longer
+ *  resolves against the current document is version-pinned (ADR-0064 §2a) —
+ *  badge it visibly instead of rendering it like a live-anchored comment.
+ *  `warning` tone: distinct from the Open/Resolved state badges beside it. */
+function PinnedBadge({ versionNo }: { readonly versionNo: number | null }) {
+  return (
+    <Badge
+      tone="warning"
+      className="text-[10px]"
+      title="This comment's anchor no longer matches the current document — it stays pinned to the version it was written against."
+    >
+      {versionNo === null ? "Pinned to an earlier version" : `Pinned to v${versionNo}`}
+    </Badge>
+  );
+}
+
 function CommentThread({
   appOrigin,
   slug,
   editToken,
   root,
   replies,
+  degraded,
+  pinnedVersionNo,
   comments,
   onCommentsChange,
 }: {
@@ -365,6 +391,10 @@ function CommentThread({
   readonly editToken: string;
   readonly root: CommentWire;
   readonly replies: readonly CommentWire[];
+  /** True when the root's anchor failed to resolve (item D). */
+  readonly degraded: boolean;
+  /** The pinned version's number, when the versions list resolves it. */
+  readonly pinnedVersionNo: number | null;
   readonly comments: readonly CommentWire[];
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
 }) {
@@ -471,11 +501,14 @@ function CommentThread({
           <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
           <IntentChip intent={root.intent} />
         </div>
-        {root.resolved_at ? (
-          <Badge tone="success">Resolved</Badge>
-        ) : (
-          <Badge tone="neutral">Open</Badge>
-        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {degraded ? <PinnedBadge versionNo={pinnedVersionNo} /> : null}
+          {root.resolved_at ? (
+            <Badge tone="success">Resolved</Badge>
+          ) : (
+            <Badge tone="neutral">Open</Badge>
+          )}
+        </div>
       </div>
       <p className="mb-1 text-xs italic text-subtle">
         "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
@@ -623,11 +656,12 @@ export function CommentsPanel({
   currentVersionId,
   comments,
   onCommentsChange,
+  commentRanges,
+  versions,
   pendingSelection,
   onSelectionConsumed,
   hasMore,
 }: CommentsPanelProps) {
-  const roots = comments.filter((c) => c.parent_id === null);
   const repliesByRoot = new Map<string, CommentWire[]>();
   for (const c of comments) {
     if (c.parent_id === null) continue;
@@ -635,13 +669,14 @@ export function CommentsPanel({
     list.push(c);
     repliesByRoot.set(c.parent_id, list);
   }
+  // Document order, not newest-first (item C): roots sort by where their
+  // anchor lives in the document — resolved position first, raw
+  // relative.from as the fallback, created_at last (../comment-order.ts).
+  const orderedRoots = orderRootComments(comments, commentRanges);
   // Note: shownCount is the ROOT-thread count; the fetch cap counts all comments
   // (incl. replies), so in a reply-heavy truncated set this number is an
   // approximation of how many were fetched — acceptable for a "some hidden" hint.
-  const truncNote = truncationNote(roots.length, hasMore ?? false);
-  const sortedRoots = [...roots].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  const truncNote = truncationNote(orderedRoots.length, hasMore ?? false);
 
   return (
     <section className="flex w-full flex-col gap-2" aria-label="Comments">
@@ -660,10 +695,10 @@ export function CommentsPanel({
         <p className="mb-2 text-xs text-subtle">Select text in the document to add a comment.</p>
       )}
 
-      {sortedRoots.length === 0 ? (
+      {orderedRoots.length === 0 ? (
         <p className="text-sm text-muted">No comments yet.</p>
       ) : (
-        sortedRoots.map((root) => (
+        orderedRoots.map(({ comment: root, degraded }) => (
           <CommentThread
             key={root.id}
             appOrigin={appOrigin}
@@ -671,6 +706,8 @@ export function CommentsPanel({
             editToken={editToken}
             root={root}
             replies={repliesByRoot.get(root.id) ?? []}
+            degraded={degraded}
+            pinnedVersionNo={versionNoForPin(versions, root.anchor.version_pinned.version_id)}
             comments={comments}
             onCommentsChange={onCommentsChange}
           />

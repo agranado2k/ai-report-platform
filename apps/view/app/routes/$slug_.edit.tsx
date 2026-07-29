@@ -45,7 +45,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { resolveViewableReport } from "arp-application";
 import { makeSlug, versionIdToWire } from "arp-domain";
-import { type EditorSelection, ReportEditor } from "arp-editor";
+import { type CommentRange, type EditorSelection, ReportEditor } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -310,6 +310,10 @@ export default function EditReport() {
   const [panel, setPanel] = useState<PanelState>(INITIAL_PANEL_STATE);
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
+  // The editor's RESOLVED highlight ranges (onCommentRangesChange) — the
+  // panel's document-order sort + degraded-anchor badge read these (items
+  // C/D) so position resolution stays inside arp-editor.
+  const [commentRanges, setCommentRanges] = useState<readonly CommentRange[]>([]);
 
   // The edit token + its expiry, refreshed silently in the background (the
   // effect below). EVERY cross-origin write (save, comments, versions) must
@@ -502,6 +506,7 @@ export default function EditReport() {
                 docRef.current = next;
               }}
               onSelectionChange={setSelection}
+              onCommentRangesChange={setCommentRanges}
               className="h-full w-full border-0"
             />
           </div>
@@ -550,6 +555,8 @@ export default function EditReport() {
                   comments={comments}
                   hasMore={commentsHasMore}
                   onCommentsChange={setComments}
+                  commentRanges={commentRanges}
+                  versions={versions}
                   pendingSelection={mode === "edit" ? selection : null}
                   onSelectionConsumed={() => setSelection(null)}
                 />
