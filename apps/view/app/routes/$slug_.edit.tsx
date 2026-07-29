@@ -45,7 +45,12 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { resolveViewableReport } from "arp-application";
 import { makeSlug, versionIdToWire } from "arp-domain";
-import { type CommentRange, type EditorSelection, ReportEditor } from "arp-editor";
+import {
+  type CommentRange,
+  type EditorSelection,
+  ReportEditor,
+  type ReportEditorHandle,
+} from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -314,6 +319,11 @@ export default function EditReport() {
   // panel's document-order sort + degraded-anchor badge read these (items
   // C/D) so position resolution stays inside arp-editor.
   const [commentRanges, setCommentRanges] = useState<readonly CommentRange[]>([]);
+  // Bidirectional linking (item B): clicking a highlight opens the panel
+  // focused on that comment; the panel's Jump drives the editor back via the
+  // imperative handle (ReportEditorHandle.jumpToComment).
+  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
+  const editorRef = useRef<ReportEditorHandle>(null);
 
   // The edit token + its expiry, refreshed silently in the background (the
   // effect below). EVERY cross-origin write (save, comments, versions) must
@@ -499,6 +509,7 @@ export default function EditReport() {
           <div className={mode === "edit" ? "h-full" : "hidden"}>
             <ReportEditor
               key={slug}
+              ref={editorRef}
               initialDoc={doc as PMDocJson}
               shell={shell}
               comments={highlightComments}
@@ -507,6 +518,10 @@ export default function EditReport() {
               }}
               onSelectionChange={setSelection}
               onCommentRangesChange={setCommentRanges}
+              onCommentClick={(commentId) => {
+                setFocusedCommentId(commentId);
+                setPanel(openPanel("comments"));
+              }}
               className="h-full w-full border-0"
             />
           </div>
@@ -557,6 +572,11 @@ export default function EditReport() {
                   onCommentsChange={setComments}
                   commentRanges={commentRanges}
                   versions={versions}
+                  focusedCommentId={focusedCommentId}
+                  onJump={(commentId) => {
+                    const comment = comments.find((c) => c.id === commentId);
+                    if (comment) editorRef.current?.jumpToComment(comment);
+                  }}
                   pendingSelection={mode === "edit" ? selection : null}
                   onSelectionConsumed={() => setSelection(null)}
                 />

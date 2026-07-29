@@ -19,8 +19,8 @@
 // runtime, and `Record<Intent, …>` below still gives us drift-safety.
 import type { Intent } from "arp-domain";
 import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
-import { Badge, Button, Card, Select, Textarea } from "arp-ui";
-import { useState } from "react";
+import { Badge, Button, Card, cx, Select, Textarea } from "arp-ui";
+import { useEffect, useRef, useState } from "react";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
 import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
@@ -47,6 +47,14 @@ export interface CommentsPanelProps {
   /** The report's version list — resolves a degraded comment's pinned
    *  version id to its human version NUMBER for the badge (item D). */
   readonly versions: readonly VersionWire[];
+  /** The comment to open/focus in the panel — set when the user clicks that
+   *  comment's highlight in the editor (item B: click-highlight →
+   *  focus-panel). The matching thread scrolls into view and gets a ring. */
+  readonly focusedCommentId?: string | null;
+  /** Item B's "Jump": scroll the editor to this comment's anchor position.
+   *  The panel only offers the affordance for comments whose anchor RESOLVED
+   *  (a degraded, version-pinned comment has nowhere live to jump to). */
+  readonly onJump?: (commentId: string) => void;
   /** The editor's current non-empty selection, or `null` — gates whether the
    *  "new comment" composer renders at all (only present while `mode ===
    *  "edit"`, since selection tracking requires the mounted ReportEditor). */
@@ -406,6 +414,9 @@ function CommentThread({
   replies,
   degraded,
   pinnedVersionNo,
+  focused,
+  canJump,
+  onJump,
   comments,
   onCommentsChange,
 }: {
@@ -418,9 +429,21 @@ function CommentThread({
   readonly degraded: boolean;
   /** The pinned version's number, when the versions list resolves it. */
   readonly pinnedVersionNo: number | null;
+  /** True when this thread was focused by a highlight click (item B). */
+  readonly focused: boolean;
+  /** Whether Jump is offered — the anchor resolved to a live position. */
+  readonly canJump: boolean;
+  readonly onJump: () => void;
   readonly comments: readonly CommentWire[];
   readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
 }) {
+  // Item B (click-highlight → focus-panel): when this thread becomes the
+  // focused one, bring it into the panel's own scrollport. The ring below is
+  // the matching visual cue.
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focused) containerRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focused]);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyIntent, setReplyIntent] = useState("note");
@@ -517,178 +540,195 @@ function CommentThread({
   };
 
   return (
-    <Card className="mb-3 p-3">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Avatar name={root.author?.name ?? null} email={root.author?.email ?? null} />
-          <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
-          <IntentChip intent={root.intent} />
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {degraded ? <PinnedBadge versionNo={pinnedVersionNo} /> : null}
-          {root.resolved_at ? (
-            <Badge tone="success">Resolved</Badge>
-          ) : (
-            <Badge tone="neutral">Open</Badge>
-          )}
-        </div>
-      </div>
-      <p className="mb-1 text-xs italic text-subtle">
-        "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
-      </p>
-      {editOpen ? (
-        <div className="mt-1">
-          <Textarea
-            value={editBody}
-            onChange={(e) => setEditBody(e.target.value)}
-            onKeyDown={(e) =>
-              handleComposerKeyDown(e, {
-                onSubmit: () => {
-                  if (!editBusy) void submitEdit();
-                },
-                onCancel: () => {
-                  if (!editBusy) setEditOpen(false);
-                },
-              })
-            }
-            placeholder="Edit comment…"
-            rows={3}
-            className="w-full"
-            aria-label="Edit comment body"
-          />
-          <ErrorText message={editError} />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 text-xs text-subtle">
-              <span id={`edit-intent-label-${root.id}`}>Intent</span>
-              <Select
-                size="sm"
-                aria-labelledby={`edit-intent-label-${root.id}`}
-                value={editIntent}
-                onChange={(e) => setEditIntent(e.target.value)}
-                disabled={editBusy}
-              >
-                {INTENT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setEditOpen(false)}
-                disabled={editBusy}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={submitEdit}
-                disabled={editBusy || !editBody.trim()}
-              >
-                {editBusy ? "Saving…" : "Save"}
-              </Button>
-            </div>
+    // Wrapper div carries the focus ref — arp-ui's Card is a plain function
+    // component (no forwardRef), so the scroll target lives one level up.
+    <div ref={containerRef}>
+      <Card
+        className={cx("mb-3 p-3", focused && "ring-2 ring-brand/40")}
+        aria-current={focused || undefined}
+      >
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Avatar name={root.author?.name ?? null} email={root.author?.email ?? null} />
+            <span className="truncate text-xs font-medium text-fg">{authorLabel(root)}</span>
+            <IntentChip intent={root.intent} />
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {degraded ? <PinnedBadge versionNo={pinnedVersionNo} /> : null}
+            {root.resolved_at ? (
+              <Badge tone="success">Resolved</Badge>
+            ) : (
+              <Badge tone="neutral">Open</Badge>
+            )}
           </div>
         </div>
-      ) : (
-        <p className="text-sm text-fg">{root.body}</p>
-      )}
-      <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
-        {relativeTime(root.created_at)}
-        {isEdited(root.edited_at) ? " · edited" : ""}
-      </p>
-
-      {replies.map((reply) => (
-        <ReplyItem
-          key={reply.id}
-          reply={reply}
-          appOrigin={appOrigin}
-          slug={slug}
-          editToken={editToken}
-          comments={comments}
-          onCommentsChange={onCommentsChange}
-        />
-      ))}
-
-      <ErrorText message={resolveError} />
-      <ErrorText message={replyError} />
-
-      {replyOpen ? (
-        <div className="mt-2">
-          <Textarea
-            value={replyBody}
-            onChange={(e) => setReplyBody(e.target.value)}
-            onKeyDown={(e) =>
-              handleComposerKeyDown(e, {
-                onSubmit: () => {
-                  if (!replyBusy) void submitReply();
-                },
-                onCancel: () => {
-                  if (!replyBusy) setReplyOpen(false);
-                },
-              })
-            }
-            placeholder="Reply…"
-            rows={2}
-            className="w-full"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 text-xs text-subtle">
-              <span id={`reply-intent-label-${root.id}`}>Intent</span>
-              <Select
-                size="sm"
-                aria-labelledby={`reply-intent-label-${root.id}`}
-                value={replyIntent}
-                onChange={(e) => setReplyIntent(e.target.value)}
-                disabled={replyBusy}
-              >
-                {INTENT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setReplyOpen(false)}
-                disabled={replyBusy}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={submitReply}
-                disabled={replyBusy || !replyBody.trim()}
-              >
-                {replyBusy ? "Posting…" : "Reply"}
-              </Button>
+        <p className="mb-1 text-xs italic text-subtle">
+          "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
+        </p>
+        {editOpen ? (
+          <div className="mt-1">
+            <Textarea
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              onKeyDown={(e) =>
+                handleComposerKeyDown(e, {
+                  onSubmit: () => {
+                    if (!editBusy) void submitEdit();
+                  },
+                  onCancel: () => {
+                    if (!editBusy) setEditOpen(false);
+                  },
+                })
+              }
+              placeholder="Edit comment…"
+              rows={3}
+              className="w-full"
+              aria-label="Edit comment body"
+            />
+            <ErrorText message={editError} />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 text-xs text-subtle">
+                <span id={`edit-intent-label-${root.id}`}>Intent</span>
+                <Select
+                  size="sm"
+                  aria-labelledby={`edit-intent-label-${root.id}`}
+                  value={editIntent}
+                  onChange={(e) => setEditIntent(e.target.value)}
+                  disabled={editBusy}
+                >
+                  {INTENT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setEditOpen(false)}
+                  disabled={editBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={submitEdit}
+                  disabled={editBusy || !editBody.trim()}
+                >
+                  {editBusy ? "Saving…" : "Save"}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : editOpen ? null : (
-        <div className="mt-2 flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setReplyOpen(true)}>
-            Reply
-          </Button>
-          <Button variant="ghost" size="sm" onClick={openEdit}>
-            Edit
-          </Button>
-          {root.resolved_at ? null : (
-            <Button variant="ghost" size="sm" onClick={resolve} disabled={resolveBusy}>
-              {resolveBusy ? "Resolving…" : "Resolve"}
+        ) : (
+          <p className="text-sm text-fg">{root.body}</p>
+        )}
+        <p className="mt-1 text-[10px] text-subtle" title={formatTimestamp(root.created_at)}>
+          {relativeTime(root.created_at)}
+          {isEdited(root.edited_at) ? " · edited" : ""}
+        </p>
+
+        {replies.map((reply) => (
+          <ReplyItem
+            key={reply.id}
+            reply={reply}
+            appOrigin={appOrigin}
+            slug={slug}
+            editToken={editToken}
+            comments={comments}
+            onCommentsChange={onCommentsChange}
+          />
+        ))}
+
+        <ErrorText message={resolveError} />
+        <ErrorText message={replyError} />
+
+        {replyOpen ? (
+          <div className="mt-2">
+            <Textarea
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
+              onKeyDown={(e) =>
+                handleComposerKeyDown(e, {
+                  onSubmit: () => {
+                    if (!replyBusy) void submitReply();
+                  },
+                  onCancel: () => {
+                    if (!replyBusy) setReplyOpen(false);
+                  },
+                })
+              }
+              placeholder="Reply…"
+              rows={2}
+              className="w-full"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 text-xs text-subtle">
+                <span id={`reply-intent-label-${root.id}`}>Intent</span>
+                <Select
+                  size="sm"
+                  aria-labelledby={`reply-intent-label-${root.id}`}
+                  value={replyIntent}
+                  onChange={(e) => setReplyIntent(e.target.value)}
+                  disabled={replyBusy}
+                >
+                  {INTENT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setReplyOpen(false)}
+                  disabled={replyBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={submitReply}
+                  disabled={replyBusy || !replyBody.trim()}
+                >
+                  {replyBusy ? "Posting…" : "Reply"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : editOpen ? null : (
+          <div className="mt-2 flex gap-2">
+            {canJump ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onJump}
+                title="Scroll the document to this comment's anchor"
+              >
+                Jump
+              </Button>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={() => setReplyOpen(true)}>
+              Reply
             </Button>
-          )}
-        </div>
-      )}
-    </Card>
+            <Button variant="ghost" size="sm" onClick={openEdit}>
+              Edit
+            </Button>
+            {root.resolved_at ? null : (
+              <Button variant="ghost" size="sm" onClick={resolve} disabled={resolveBusy}>
+                {resolveBusy ? "Resolving…" : "Resolve"}
+              </Button>
+            )}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -701,6 +741,8 @@ export function CommentsPanel({
   onCommentsChange,
   commentRanges,
   versions,
+  focusedCommentId,
+  onJump,
   pendingSelection,
   onSelectionConsumed,
   hasMore,
@@ -741,7 +783,7 @@ export function CommentsPanel({
       {orderedRoots.length === 0 ? (
         <p className="text-sm text-muted">No comments yet.</p>
       ) : (
-        orderedRoots.map(({ comment: root, degraded }) => (
+        orderedRoots.map(({ comment: root, degraded, position }) => (
           <CommentThread
             key={root.id}
             appOrigin={appOrigin}
@@ -751,6 +793,9 @@ export function CommentsPanel({
             replies={repliesByRoot.get(root.id) ?? []}
             degraded={degraded}
             pinnedVersionNo={versionNoForPin(versions, root.anchor.version_pinned.version_id)}
+            focused={focusedCommentId === root.id}
+            canJump={position !== null && onJump !== undefined}
+            onJump={() => onJump?.(root.id)}
             comments={comments}
             onCommentsChange={onCommentsChange}
           />
