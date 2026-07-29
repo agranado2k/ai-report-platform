@@ -12,6 +12,8 @@ import { describe, expect, it } from "vitest";
 import {
   commentHighlightsKey,
   commentHighlightsPlugin,
+  commentIdAtPos,
+  jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
 
@@ -151,6 +153,31 @@ describe("commentHighlightsPlugin", () => {
     expect(classes).toContain("comment-highlight comment-highlight--note");
   });
 
+  it("resolves a click position back to its comment id (bidirectional linking, item B)", () => {
+    const state = stateWithPlugin();
+    const next = state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 6, intent: "note" },
+        { commentId: "comment_2", from: 8, to: 12, intent: "add" },
+      ]),
+    );
+    const decorations = commentHighlightsKey.getState(next);
+    expect(commentIdAtPos(decorations, 3)).toBe("comment_1");
+    expect(commentIdAtPos(decorations, 9)).toBe("comment_2");
+  });
+
+  it("returns null for a click outside every highlight, or with no decoration set", () => {
+    const state = stateWithPlugin();
+    const next = state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 3, intent: "note" },
+      ]),
+    );
+    const decorations = commentHighlightsKey.getState(next);
+    expect(commentIdAtPos(decorations, 10)).toBeNull();
+    expect(commentIdAtPos(undefined, 2)).toBeNull();
+  });
+
   it("re-maps existing decorations across an unrelated edit (no meta on that transaction)", () => {
     const state = stateWithPlugin();
     const seeded = state.apply(
@@ -166,5 +193,25 @@ describe("commentHighlightsPlugin", () => {
     expect(found).toHaveLength(1);
     expect(found?.[0]?.from).toBe(3);
     expect(found?.[0]?.to).toBe(8);
+  });
+});
+
+describe("jumpTargetForComment", () => {
+  const docSize = 13;
+
+  it("resolves a live-anchored comment to its {from,to} jump target", () => {
+    const target = jumpTargetForComment(docSize, {
+      id: "comment_1",
+      anchor: { relative: { from: 2, to: 7 } },
+      intent: "add",
+    });
+    expect(target).toEqual({ commentId: "comment_1", from: 2, to: 7, intent: "add" });
+  });
+
+  it("returns null when the relative position no longer resolves (degraded anchor)", () => {
+    expect(
+      jumpTargetForComment(docSize, { id: "c", anchor: { relative: { from: 5, to: 999 } } }),
+    ).toBeNull();
+    expect(jumpTargetForComment(docSize, { id: "c", anchor: {} })).toBeNull();
   });
 });

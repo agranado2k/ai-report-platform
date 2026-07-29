@@ -66,6 +66,35 @@ export function resolvableCommentRanges(
   return ranges;
 }
 
+/** Resolve ONE comment to its jump target — the range Jump scrolls the
+ *  editor to (bidirectional linking, item B). Same resolution rules as the
+ *  highlight painting above (a comment is jumpable exactly when it is
+ *  highlightable); `null` when the relative position no longer resolves
+ *  against the current doc (the degraded, version-pinned state — item D). */
+export function jumpTargetForComment(
+  docSize: number,
+  comment: CommentForHighlight,
+): CommentRange | null {
+  return resolvableCommentRanges(docSize, [comment])[0] ?? null;
+}
+
+/** The comment id whose highlight covers `pos`, or `null` — the pure half of
+ *  click-highlight→focus-panel (item B). `DecorationSet.find(pos, pos)`
+ *  returns every decoration touching `pos` (inclusive of both endpoints);
+ *  overlapping highlights resolve to the first seeded one, which is fine for
+ *  a best-effort focus affordance. */
+export function commentIdAtPos(
+  decorations: DecorationSet | null | undefined,
+  pos: number,
+): string | null {
+  if (!decorations) return null;
+  for (const deco of decorations.find(pos, pos)) {
+    const commentId = (deco.spec as { readonly commentId?: unknown }).commentId;
+    if (typeof commentId === "string") return commentId;
+  }
+  return null;
+}
+
 const HIGHLIGHT_CLASS = "comment-highlight";
 
 /** Plugin state key — exported so callers (ReportEditor.tsx, tests) can both

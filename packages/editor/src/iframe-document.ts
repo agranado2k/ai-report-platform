@@ -46,6 +46,7 @@ export const IFRAME_INJECTED_CSS = `
   background: ${COMMENT_INTENT_COLORS.note.background};
   box-shadow: inset 0 -2px ${COMMENT_INTENT_COLORS.note.underline};
   border-radius: 2px;
+  cursor: pointer;
 }
 ${INTENT_HIGHLIGHT_RULES}
 @media print {
