@@ -51,27 +51,26 @@
 // document-order sorting and the degraded-anchor badge (items C/D) without
 // re-implementing position resolution outside this package.
 import type { PMDocJson, Shell } from "arp-report-html";
-import { TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ClickPoint, CommentForHighlight, CommentRange } from "./comment-decorations";
 import {
   clickedCommentId,
   commentHighlightsKey,
-  jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
-import { createEditorState, docJson } from "./editor-state";
+import type { EditorSelection } from "./editor-state";
+import {
+  createEditorState,
+  docJson,
+  jumpToCommentTransaction,
+  reportableSelection,
+} from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
 
-/** The editor's current text selection, forwarded to the caller so it can
- *  build an ADR-0064 anchor when the user clicks "Comment" (`from === to`
- *  means an empty/collapsed selection, reported as `null`). */
-export interface EditorSelection {
-  readonly from: number;
-  readonly to: number;
-  readonly text: string;
-}
+// Re-exported for callers that import it from this module (the type moved to
+// editor-state.ts so the pure selection-reporting gate is testable DOM-free).
+export type { EditorSelection } from "./editor-state";
 
 /** Imperative surface exposed via the forwarded ref (item B's "Jump"). */
 export interface ReportEditorHandle {
@@ -117,12 +116,6 @@ export interface ReportEditorProps {
   readonly className?: string;
 }
 
-function selectionInfo(view: EditorView): EditorSelection | null {
-  const { from, to } = view.state.selection;
-  if (from === to) return null;
-  return { from, to, text: view.state.doc.textBetween(from, to, " ") };
-}
-
 export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(function ReportEditor(
   {
     initialDoc,
@@ -153,18 +146,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
   // the selection there — `scrollIntoView` on the transaction makes the
   // iframe's own scroll container bring the anchor into view. Selecting the
   // full anchored range (not just a cursor at `from`) doubles as a visual
-  // "this is the spot" flash without any extra decoration machinery.
+  // "this is the spot" flash without any extra decoration machinery. The
+  // transaction is built by the pure `jumpToCommentTransaction`, which flags
+  // it as programmatic so `reportableSelection` (dispatchTransaction below)
+  // reports `null` — a Jump must reveal the anchor, never open the
+  // new-comment composer (2026-07-29 dogfood paper cut #1).
   useImperativeHandle(
     ref,
     () => ({
       jumpToComment(comment) {
         const view = viewRef.current;
         if (!view) return false;
-        const target = jumpTargetForComment(view.state.doc.content.size, comment);
-        if (!target) return false;
-        const tr = view.state.tr
-          .setSelection(TextSelection.create(view.state.doc, target.from, target.to))
-          .scrollIntoView();
+        const tr = jumpToCommentTransaction(view.state, comment);
+        if (!tr) return false;
         view.dispatch(tr);
         view.focus();
         return true;
@@ -230,7 +224,7 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             const next = view.state.apply(tr);
             view.updateState(next);
             if (tr.docChanged) onChangeRef.current(docJson(next));
-            onSelectionChangeRef.current?.(selectionInfo(view));
+            onSelectionChangeRef.current?.(reportableSelection(tr, next));
           },
           handleDOMEvents: {
             mousedown(_view, event) {
