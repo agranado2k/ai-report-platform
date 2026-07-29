@@ -95,6 +95,44 @@ export function commentIdAtPos(
   return null;
 }
 
+/** A viewport point captured from a pointer event (`clientX`/`clientY`). */
+export interface ClickPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** How far (px, per axis) the pointer may drift between mousedown and click
+ *  before we treat the gesture as a drag, not a click — mirrors
+ *  prosemirror-view's own `updateAllowDefault` threshold. */
+const CLICK_SLOP_PX = 4;
+
+/** Resolve a DOM-level mousedown→click pair to the comment id under it, or
+ *  `null` (2026-07-29 dogfood E3 fix). This deliberately does NOT use
+ *  ProseMirror's `handleClick` prop: PM's internal `MouseDown` tracker is
+ *  destroyed by Chrome's synthesized `mousemove` (`buttons === 0`, same
+ *  coords) delivered between mousedown and mouseup inside the editor's
+ *  sandboxed iframe, so `handleClick` never fires there. The native `click`
+ *  DOM event survives that quirk — the caller feeds us the tracked mousedown
+ *  point, the click point, and the view's `posAtCoords`, and this function
+ *  applies the same movement-slop rule PM would have (`null` for a drag —
+ *  selecting text across a highlight must not steal focus to its comment). */
+export function clickedCommentId(
+  decorations: DecorationSet | null | undefined,
+  down: ClickPoint | null,
+  up: ClickPoint,
+  posAtPoint: (point: { readonly left: number; readonly top: number }) => {
+    readonly pos: number;
+  } | null,
+): string | null {
+  if (!down) return null;
+  if (Math.abs(up.x - down.x) > CLICK_SLOP_PX || Math.abs(up.y - down.y) > CLICK_SLOP_PX) {
+    return null;
+  }
+  const found = posAtPoint({ left: up.x, top: up.y });
+  if (!found) return null;
+  return commentIdAtPos(decorations, found.pos);
+}
+
 const HIGHLIGHT_CLASS = "comment-highlight";
 
 /** Plugin state key — exported so callers (ReportEditor.tsx, tests) can both

@@ -6,8 +6,10 @@ export {
   normalizeIntent,
 } from "./comment-colors";
 export {
+  type ClickPoint,
   type CommentForHighlight,
   type CommentRange,
+  clickedCommentId,
   commentHighlightsKey,
   commentIdAtPos,
   jumpTargetForComment,

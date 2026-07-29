@@ -54,10 +54,10 @@ import type { PMDocJson, Shell } from "arp-report-html";
 import { TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { CommentForHighlight, CommentRange } from "./comment-decorations";
+import type { ClickPoint, CommentForHighlight, CommentRange } from "./comment-decorations";
 import {
+  clickedCommentId,
   commentHighlightsKey,
-  commentIdAtPos,
   jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
@@ -204,6 +204,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       const body = iframe?.contentDocument?.body;
       if (!body) return; // defensive — shouldn't happen once `load` has fired.
 
+      // Item B: a click inside a comment highlight surfaces that comment in
+      // the panel. Wired through RAW DOM events (`handleDOMEvents`), NOT the
+      // `handleClick` prop (2026-07-29 dogfood E3 fix): PM's `handleClick`
+      // rides its internal `MouseDown` tracker, which Chrome kills between
+      // mousedown and mouseup inside this sandboxed iframe by synthesizing a
+      // `mousemove` with `buttons === 0` at the unmoved cursor position
+      // (prosemirror-view reads `buttons === 0` as "button released outside
+      // the window" and drops the tracker) — so `handleClick` NEVER fired on
+      // the mounted editor even though its pure lookup was unit-tested. The
+      // native `click` event is delivered regardless of PM's tracker; the
+      // drag-vs-click discrimination (`clickedCommentId`) is ours. Both
+      // handlers return false — they observe, never consume.
+      let pointerDown: ClickPoint | null = null;
       const view = new EditorView(
         // `{ mount: body }` makes the iframe's OWN <body> — carrying the
         // shell's original classes/attributes — the PM editable root
@@ -219,14 +232,22 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             if (tr.docChanged) onChangeRef.current(docJson(next));
             onSelectionChangeRef.current?.(selectionInfo(view));
           },
-          // Item B: a click inside a comment highlight surfaces that
-          // comment in the panel. Returning false leaves ProseMirror's own
-          // click handling (caret placement, selection) untouched — this
-          // observes the click, it never consumes it.
-          handleClick(clickedView, pos) {
-            const commentId = commentIdAtPos(commentHighlightsKey.getState(clickedView.state), pos);
-            if (commentId) onCommentClickRef.current?.(commentId);
-            return false;
+          handleDOMEvents: {
+            mousedown(_view, event) {
+              pointerDown = { x: event.clientX, y: event.clientY };
+              return false;
+            },
+            click(clickedView, event) {
+              const commentId = clickedCommentId(
+                commentHighlightsKey.getState(clickedView.state),
+                pointerDown,
+                { x: event.clientX, y: event.clientY },
+                (point) => clickedView.posAtCoords(point),
+              );
+              pointerDown = null;
+              if (commentId) onCommentClickRef.current?.(commentId);
+              return false;
+            },
           },
         },
       );
