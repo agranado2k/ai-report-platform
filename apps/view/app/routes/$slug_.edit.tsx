@@ -487,7 +487,13 @@ export default function EditReport() {
     // TopBar/ReportEditor at all) on every "can't render" branch above, so
     // this element's presence is equivalent to reaching the "render" decision
     // kind, i.e. the et= token round-trip + APP_ORIGIN wiring both worked.
-    <div className="flex h-dvh flex-col overflow-hidden" data-testid="unified-editor">
+    // `print:*` (item E): drop the screen-only viewport clamp when printing so
+    // the document pane isn't clipped to one screenful — with the chrome
+    // (TopBar/panel/toggle) print:hidden, only the document prints.
+    <div
+      className="flex h-dvh flex-col overflow-hidden print:h-auto print:overflow-visible"
+      data-testid="unified-editor"
+    >
       <TopBar
         docTitle={docTitle}
         mode={mode}
@@ -497,11 +503,11 @@ export default function EditReport() {
         onSave={onSave}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 print:block">
         {/* The document pane fills the viewport height and scrolls on its OWN
             (the report iframe carries the scroll), edge-to-edge with no chrome
             padding — it should read like a real web page, not a card in a form. */}
-        <main className="min-w-0 flex-1 overflow-hidden">
+        <main className="min-w-0 flex-1 overflow-hidden print:overflow-visible">
           {/* ReportEditor stays mounted at ALL times (even when hidden) so
               in-progress edits are never lost by switching to Compare — the mode
               switch only toggles visibility via CSS. `h-full` makes the iframe
@@ -551,7 +557,7 @@ export default function EditReport() {
           // Full-height panel: the tab header stays put, and ONLY the
           // comments/versions list below it scrolls — its own independent
           // scrollbar, separate from the document pane's.
-          <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-surface">
+          <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-surface print:hidden">
             <div className="shrink-0 px-4 pt-4">
               <PanelHeader
                 tab={panel.tab}
@@ -598,7 +604,7 @@ export default function EditReport() {
         ) : (
           // Collapsed-edge affordance: a `‹` chevron pinned to the top-right of
           // the document, badged with the active-comment count. Opens to Comments.
-          <div className="shrink-0">
+          <div className="shrink-0 print:hidden">
             <PanelToggle
               unresolvedCount={activeCommentCount}
               onOpen={() => setPanel(openPanel("comments"))}

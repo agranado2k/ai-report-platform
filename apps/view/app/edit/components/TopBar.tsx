@@ -31,7 +31,9 @@ export function TopBar({
   onSave,
 }: TopBarProps) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3">
+    // `print:hidden` (comment-UX adoptions, item E): printing the /edit route
+    // keeps only the document (with its highlight marks) — never the chrome.
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3 print:hidden">
       <div className="flex min-w-0 items-center gap-3">
         <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-subtle">
           Centaur Spec
