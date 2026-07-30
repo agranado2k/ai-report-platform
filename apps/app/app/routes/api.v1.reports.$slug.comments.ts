@@ -19,6 +19,7 @@
 import {
   type Anchor,
   type AppError,
+  type Comment,
   err,
   makeCommentId,
   makeIntent,
@@ -97,7 +98,7 @@ export const action = corsRoute(
       mode: "write",
       slug: true,
       parseBody: true,
-      run: ({ actor, slug, body, idempotencyKey }) => {
+      run: async ({ actor, slug, body, idempotencyKey }) => {
         const anchor = parseAnchor(body.anchor);
         if (!anchor.ok) return anchor;
         // Optional; absent → `note`, an explicitly invalid value → 422 (ADR-0064
@@ -108,10 +109,11 @@ export const action = corsRoute(
         const commentActor = { orgId: actor.orgId, userId: actor.userId };
 
         const parentRaw = body.parent_comment_id;
+        let created: Result<Comment, AppError>;
         if (typeof parentRaw === "string") {
           const parentCommentId = makeCommentId(parentRaw);
           if (!parentCommentId.ok) return parentCommentId;
-          return ops().replyToComment(commentActor, {
+          created = await ops().replyToComment(commentActor, {
             slug,
             parentCommentId: parentCommentId.value,
             body: commentBody,
@@ -119,17 +121,32 @@ export const action = corsRoute(
             intent: intent.value,
             idempotencyKey,
           });
+        } else {
+          created = await ops().addComment(commentActor, {
+            slug,
+            body: commentBody,
+            anchor: anchor.value,
+            intent: intent.value,
+            idempotencyKey,
+          });
         }
+        if (!created.ok) return created;
 
-        return ops().addComment(commentActor, {
-          slug,
-          body: commentBody,
-          anchor: anchor.value,
-          intent: intent.value,
-          idempotencyKey,
-        });
+        // Same route-layer Author Identity projection as the GET list above
+        // (ADR-0048/ADR-0063; 2026-07-29 dogfood paper cut #3): without it a
+        // just-posted comment renders as "Unknown user" until the next reload.
+        const authorByUserId = await resolveAuthorIdentities(
+          uniqueCommentAuthorIds([created.value]),
+          identityStore(),
+        );
+        return ok({ comment: created.value, authorByUserId });
       },
-      toHttp: (result) => addCommentToHttp(result, wireContext()),
+      toHttp: (result) =>
+        addCommentToHttp(
+          result.ok ? ok(result.value.comment) : result,
+          wireContext(),
+          result.ok ? result.value.authorByUserId : undefined,
+        ),
     }),
   }),
 );

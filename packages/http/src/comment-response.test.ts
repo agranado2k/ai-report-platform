@@ -91,6 +91,33 @@ describe("addCommentToHttp", () => {
     expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
   });
+
+  // 2026-07-29 dogfood paper cut #3: the create/reply response lacked the
+  // Author Identity enrichment the GET list applies, so a just-posted comment
+  // rendered as "Unknown user" (a "?" avatar) until reload. The 201 must fold
+  // the same authorByUserId map, with the same null-handling, as
+  // listCommentsToHttp (ADR-0048 — Author Identity is a route-layer
+  // projection).
+  it("folds the created comment's resolved author { name, email } in from the map", () => {
+    const authorByUserId = new Map([
+      [userId(U1), { email: "alice@example.com", name: "Alice Ackerman" }],
+    ]);
+    const res = addCommentToHttp(ok(comment()), CTX, authorByUserId);
+    expect((res.body as { author: unknown }).author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: "alice@example.com",
+      name: "Alice Ackerman",
+    });
+  });
+
+  it("falls back to a null author identity when the map has no entry", () => {
+    const res = addCommentToHttp(ok(comment()), CTX, new Map());
+    expect((res.body as { author: unknown }).author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: null,
+      name: null,
+    });
+  });
 });
 
 describe("resolveCommentToHttp", () => {
@@ -107,6 +134,21 @@ describe("resolveCommentToHttp", () => {
       CTX,
     );
     expect(res.status).toBe(403);
+  });
+
+  // Same enrichment as addCommentToHttp above — PATCH (edit AND resolve)
+  // shares the comment-resource shape, so its 200 gets the same route-layer
+  // Author Identity projection (2026-07-29 dogfood paper cut #3).
+  it("folds the comment's resolved author { name, email } in from the map", () => {
+    const authorByUserId = new Map([
+      [userId(U1), { email: "alice@example.com", name: "Alice Ackerman" }],
+    ]);
+    const res = resolveCommentToHttp(ok(comment()), CTX, authorByUserId);
+    expect((res.body as { author: unknown }).author).toEqual({
+      id: userIdToWire(userId(U1)),
+      email: "alice@example.com",
+      name: "Alice Ackerman",
+    });
   });
 });
 

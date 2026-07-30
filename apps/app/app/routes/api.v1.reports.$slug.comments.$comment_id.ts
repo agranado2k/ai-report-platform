@@ -14,14 +14,16 @@
 // ALWAYS routed to `loader`, never `action` (React-Router only sends
 // POST/PUT/PATCH/DELETE to `action`), so this action-only resource still needs
 // a `loader` for `corsRoute` to answer the preflight; a stray GET reads as 405.
-import { type AppError, makeCommentId, ok, type Result } from "arp-domain";
+import { type AppError, type Comment, makeCommentId, ok, type Result } from "arp-domain";
 import {
   deleteCommentToHttp,
   parseCommentPatch,
   parseJsonBody,
   resolveCommentToHttp,
 } from "arp-http";
-import { ops } from "../server/container.server";
+import { resolveAuthorIdentities } from "../server/author-email.server";
+import { uniqueCommentAuthorIds } from "../server/comment-dto.server";
+import { identityStore, ops } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle, methodNotAllowedLoader, methods } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
@@ -60,23 +62,39 @@ export const action = corsRoute(
         if (!patch.ok) return patch; // 422 on a bad body/intent
 
         const commentActor = { orgId: actor.orgId, userId: actor.userId };
-        if (patch.value.kind === "edit") {
-          return ops().editComment(commentActor, {
-            slug,
-            commentId: commentId.value,
-            body: patch.value.body,
-            intent: patch.value.intent,
-            expectedEditedAt: patch.value.expectedEditedAt,
-            idempotencyKey,
-          });
-        }
-        return ops().resolveComment(commentActor, {
-          slug,
-          commentId: commentId.value,
-          idempotencyKey,
-        });
+        const patched: Result<Comment, AppError> =
+          patch.value.kind === "edit"
+            ? await ops().editComment(commentActor, {
+                slug,
+                commentId: commentId.value,
+                body: patch.value.body,
+                intent: patch.value.intent,
+                expectedEditedAt: patch.value.expectedEditedAt,
+                idempotencyKey,
+              })
+            : await ops().resolveComment(commentActor, {
+                slug,
+                commentId: commentId.value,
+                idempotencyKey,
+              });
+        if (!patched.ok) return patched;
+
+        // Same route-layer Author Identity projection as the list/create
+        // responses (ADR-0048/ADR-0063; 2026-07-29 dogfood paper cut #3) — an
+        // edited/resolved comment is optimistically swapped into the panel's
+        // list, so its 200 must carry the enriched author too.
+        const authorByUserId = await resolveAuthorIdentities(
+          uniqueCommentAuthorIds([patched.value]),
+          identityStore(),
+        );
+        return ok({ comment: patched.value, authorByUserId });
       },
-      toHttp: (result) => resolveCommentToHttp(result, wireContext()),
+      toHttp: (result) =>
+        resolveCommentToHttp(
+          result.ok ? ok(result.value.comment) : result,
+          wireContext(),
+          result.ok ? result.value.authorByUserId : undefined,
+        ),
     }),
     DELETE: handle({
       mode: "write",

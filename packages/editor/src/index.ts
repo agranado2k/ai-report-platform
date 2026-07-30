@@ -6,18 +6,22 @@ export {
   normalizeIntent,
 } from "./comment-colors";
 export {
+  type ClickPoint,
   type CommentForHighlight,
   type CommentRange,
+  clickedCommentId,
   commentHighlightsKey,
   commentIdAtPos,
   jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
-export { createEditorState, docJson, editorPlugins } from "./editor-state";
-export { buildIframeDocument, buildReadOnlyIframeDocument } from "./iframe-document";
 export {
+  createEditorState,
+  docJson,
   type EditorSelection,
-  ReportEditor,
-  type ReportEditorHandle,
-  type ReportEditorProps,
-} from "./ReportEditor";
+  editorPlugins,
+  jumpToCommentTransaction,
+  reportableSelection,
+} from "./editor-state";
+export { buildIframeDocument, buildReadOnlyIframeDocument } from "./iframe-document";
+export { ReportEditor, type ReportEditorHandle, type ReportEditorProps } from "./ReportEditor";

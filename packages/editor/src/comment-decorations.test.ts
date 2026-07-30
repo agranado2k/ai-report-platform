@@ -10,12 +10,14 @@ import { Node as PMNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { describe, expect, it } from "vitest";
 import {
+  clickedCommentId,
   commentHighlightsKey,
   commentHighlightsPlugin,
   commentIdAtPos,
   jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
+import { createEditorState } from "./editor-state";
 
 const oneParagraphDoc = {
   type: "doc",
@@ -193,6 +195,69 @@ describe("commentHighlightsPlugin", () => {
     expect(found).toHaveLength(1);
     expect(found?.[0]?.from).toBe(3);
     expect(found?.[0]?.to).toBe(8);
+  });
+});
+
+// Regression for the 2026-07-29 dogfood E3 escalation: on live Chrome the
+// click-highlight → panel-focus path was DEAD even though `commentIdAtPos`'s
+// unit tests passed. Root cause: ProseMirror's internal `MouseDown` click
+// tracker (the machinery behind the `handleClick` prop) is destroyed by a
+// Chrome-synthesized `mousemove` with `buttons === 0` delivered between
+// mousedown and mouseup inside the editor's sandboxed iframe — so PM's
+// `handleClick` is never consulted, while native caret placement still works
+// (which is why every OTHER editor interaction passed). The fix routes the
+// affordance through raw DOM events (`handleDOMEvents` mousedown + click)
+// with our own movement-slop check; `clickedCommentId` is that decision
+// logic, tested here against a REAL `createEditorState` plugin stack (the
+// full seeded-plugin seam the old tests never crossed).
+describe("clickedCommentId", () => {
+  function seededState() {
+    const state = createEditorState(oneParagraphDoc);
+    return state.apply(
+      state.tr.setMeta(commentHighlightsKey, [
+        { commentId: "comment_1", from: 1, to: 6, intent: "note" },
+      ]),
+    );
+  }
+  const posInside = () => ({ pos: 3 });
+  const posOutside = () => ({ pos: 10 });
+
+  it("resolves a stationary click inside a highlight to its comment id", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(clickedCommentId(decorations, { x: 40, y: 12 }, { x: 40, y: 12 }, posInside)).toBe(
+      "comment_1",
+    );
+  });
+
+  it("tolerates sub-slop jitter between mousedown and click (a real finger/mouse press)", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(clickedCommentId(decorations, { x: 40, y: 12 }, { x: 43, y: 14 }, posInside)).toBe(
+      "comment_1",
+    );
+  });
+
+  it("ignores a drag (movement beyond the slop): selecting text must not focus a comment", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(clickedCommentId(decorations, { x: 40, y: 12 }, { x: 90, y: 12 }, posInside)).toBeNull();
+  });
+
+  it("returns null for a click outside every highlight", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(
+      clickedCommentId(decorations, { x: 200, y: 12 }, { x: 200, y: 12 }, posOutside),
+    ).toBeNull();
+  });
+
+  it("returns null when no mousedown was tracked (e.g. a synthetic click event)", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(clickedCommentId(decorations, null, { x: 40, y: 12 }, posInside)).toBeNull();
+  });
+
+  it("returns null when the coordinates resolve to no document position", () => {
+    const decorations = commentHighlightsKey.getState(seededState());
+    expect(
+      clickedCommentId(decorations, { x: 40, y: 12 }, { x: 40, y: 12 }, () => null),
+    ).toBeNull();
   });
 });
 

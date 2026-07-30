@@ -51,27 +51,26 @@
 // document-order sorting and the degraded-anchor badge (items C/D) without
 // re-implementing position resolution outside this package.
 import type { PMDocJson, Shell } from "arp-report-html";
-import { TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { CommentForHighlight, CommentRange } from "./comment-decorations";
+import type { ClickPoint, CommentForHighlight, CommentRange } from "./comment-decorations";
 import {
+  clickedCommentId,
   commentHighlightsKey,
-  commentIdAtPos,
-  jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
-import { createEditorState, docJson } from "./editor-state";
+import type { EditorSelection } from "./editor-state";
+import {
+  createEditorState,
+  docJson,
+  jumpToCommentTransaction,
+  reportableSelection,
+} from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
 
-/** The editor's current text selection, forwarded to the caller so it can
- *  build an ADR-0064 anchor when the user clicks "Comment" (`from === to`
- *  means an empty/collapsed selection, reported as `null`). */
-export interface EditorSelection {
-  readonly from: number;
-  readonly to: number;
-  readonly text: string;
-}
+// Re-exported for callers that import it from this module (the type moved to
+// editor-state.ts so the pure selection-reporting gate is testable DOM-free).
+export type { EditorSelection } from "./editor-state";
 
 /** Imperative surface exposed via the forwarded ref (item B's "Jump"). */
 export interface ReportEditorHandle {
@@ -117,12 +116,6 @@ export interface ReportEditorProps {
   readonly className?: string;
 }
 
-function selectionInfo(view: EditorView): EditorSelection | null {
-  const { from, to } = view.state.selection;
-  if (from === to) return null;
-  return { from, to, text: view.state.doc.textBetween(from, to, " ") };
-}
-
 export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(function ReportEditor(
   {
     initialDoc,
@@ -153,18 +146,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
   // the selection there — `scrollIntoView` on the transaction makes the
   // iframe's own scroll container bring the anchor into view. Selecting the
   // full anchored range (not just a cursor at `from`) doubles as a visual
-  // "this is the spot" flash without any extra decoration machinery.
+  // "this is the spot" flash without any extra decoration machinery. The
+  // transaction is built by the pure `jumpToCommentTransaction`, which flags
+  // it as programmatic so `reportableSelection` (dispatchTransaction below)
+  // reports `null` — a Jump must reveal the anchor, never open the
+  // new-comment composer (2026-07-29 dogfood paper cut #1).
   useImperativeHandle(
     ref,
     () => ({
       jumpToComment(comment) {
         const view = viewRef.current;
         if (!view) return false;
-        const target = jumpTargetForComment(view.state.doc.content.size, comment);
-        if (!target) return false;
-        const tr = view.state.tr
-          .setSelection(TextSelection.create(view.state.doc, target.from, target.to))
-          .scrollIntoView();
+        const tr = jumpToCommentTransaction(view.state, comment);
+        if (!tr) return false;
         view.dispatch(tr);
         view.focus();
         return true;
@@ -204,6 +198,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       const body = iframe?.contentDocument?.body;
       if (!body) return; // defensive — shouldn't happen once `load` has fired.
 
+      // Item B: a click inside a comment highlight surfaces that comment in
+      // the panel. Wired through RAW DOM events (`handleDOMEvents`), NOT the
+      // `handleClick` prop (2026-07-29 dogfood E3 fix): PM's `handleClick`
+      // rides its internal `MouseDown` tracker, which Chrome kills between
+      // mousedown and mouseup inside this sandboxed iframe by synthesizing a
+      // `mousemove` with `buttons === 0` at the unmoved cursor position
+      // (prosemirror-view reads `buttons === 0` as "button released outside
+      // the window" and drops the tracker) — so `handleClick` NEVER fired on
+      // the mounted editor even though its pure lookup was unit-tested. The
+      // native `click` event is delivered regardless of PM's tracker; the
+      // drag-vs-click discrimination (`clickedCommentId`) is ours. Both
+      // handlers return false — they observe, never consume.
+      let pointerDown: ClickPoint | null = null;
       const view = new EditorView(
         // `{ mount: body }` makes the iframe's OWN <body> — carrying the
         // shell's original classes/attributes — the PM editable root
@@ -217,16 +224,24 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             const next = view.state.apply(tr);
             view.updateState(next);
             if (tr.docChanged) onChangeRef.current(docJson(next));
-            onSelectionChangeRef.current?.(selectionInfo(view));
+            onSelectionChangeRef.current?.(reportableSelection(tr, next));
           },
-          // Item B: a click inside a comment highlight surfaces that
-          // comment in the panel. Returning false leaves ProseMirror's own
-          // click handling (caret placement, selection) untouched — this
-          // observes the click, it never consumes it.
-          handleClick(clickedView, pos) {
-            const commentId = commentIdAtPos(commentHighlightsKey.getState(clickedView.state), pos);
-            if (commentId) onCommentClickRef.current?.(commentId);
-            return false;
+          handleDOMEvents: {
+            mousedown(_view, event) {
+              pointerDown = { x: event.clientX, y: event.clientY };
+              return false;
+            },
+            click(clickedView, event) {
+              const commentId = clickedCommentId(
+                commentHighlightsKey.getState(clickedView.state),
+                pointerDown,
+                { x: event.clientX, y: event.clientY },
+                (point) => clickedView.posAtCoords(point),
+              );
+              pointerDown = null;
+              if (commentId) onCommentClickRef.current?.(commentId);
+              return false;
+            },
           },
         },
       );

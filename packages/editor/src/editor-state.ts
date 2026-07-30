@@ -9,9 +9,14 @@ import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { Node as PMNode } from "prosemirror-model";
-import type { Plugin } from "prosemirror-state";
-import { EditorState } from "prosemirror-state";
-import { commentHighlightsPlugin } from "./comment-decorations";
+import type { Plugin, Transaction } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
+import {
+  type CommentForHighlight,
+  commentHighlightsPlugin,
+  jumpTargetForComment,
+} from "./comment-decorations";
+import { trimSelectionBleed } from "./selection-trim";
 
 /** Look up a mark type reportSchema is known to define (schema.ts builds on
  *  prosemirror-schema-basic, which always defines `strong`/`em`) — throws
@@ -56,4 +61,59 @@ export function createEditorState(doc: PMDocJson): EditorState {
  *  `_source.json` sidecar on save. */
 export function docJson(state: EditorState): PMDocJson {
   return state.doc.toJSON() as PMDocJson;
+}
+
+/** The editor's current text selection, forwarded to the caller so it can
+ *  build an ADR-0064 anchor when the user clicks "Comment" (`from === to`
+ *  means an empty/collapsed selection, reported as `null`). Lives here (not
+ *  ReportEditor.tsx) so the pure selection-reporting gate below is testable
+ *  without a DOM; ReportEditor re-exports it unchanged. */
+export interface EditorSelection {
+  readonly from: number;
+  readonly to: number;
+  readonly text: string;
+}
+
+/** Transaction meta flag marking a PROGRAMMATIC selection (item B's "Jump").
+ *  A transaction carrying it must never be reported as a pending selection —
+ *  see `reportableSelection` below. */
+const PROGRAMMATIC_SELECTION_META = "arp-editor$programmaticSelection";
+
+/** Build the "Jump" transaction (item B): resolve the comment against the
+ *  CURRENT doc, select the anchored range (the visual "here it is" cue), and
+ *  scroll it into view. Returns `null` when the comment's relative position
+ *  no longer resolves (the degraded, version-pinned state — item D). The
+ *  transaction is flagged as programmatic so the selection it sets does NOT
+ *  open the new-comment composer (2026-07-29 dogfood paper cut #1 — Jump
+ *  should reveal, never start authoring). */
+export function jumpToCommentTransaction(
+  state: EditorState,
+  comment: CommentForHighlight,
+): Transaction | null {
+  const target = jumpTargetForComment(state.doc.content.size, comment);
+  if (!target) return null;
+  return state.tr
+    .setSelection(TextSelection.create(state.doc, target.from, target.to))
+    .setMeta(PROGRAMMATIC_SELECTION_META, true)
+    .scrollIntoView();
+}
+
+/** The selection a just-applied transaction should report to the caller as
+ *  the PENDING (commentable) selection, or `null` — the pure gate behind
+ *  ReportEditor's `onSelectionChange`. Null when the selection is collapsed
+ *  (nothing to comment on) OR when the transaction was programmatic (a Jump
+ *  must not trip the composer's pendingSelection gate). The reported range is
+ *  bleed-trimmed (selection-trim.ts) and the quote is derived from the SAME
+ *  trimmed range, so the stored anchor and its text_quote always agree
+ *  (2026-07-29 dogfood paper cut #2). */
+export function reportableSelection(tr: Transaction, state: EditorState): EditorSelection | null {
+  if (tr.getMeta(PROGRAMMATIC_SELECTION_META)) return null;
+  const { from, to } = state.selection;
+  if (from === to) return null;
+  const trimmed = trimSelectionBleed(state.doc, from, to);
+  return {
+    from: trimmed.from,
+    to: trimmed.to,
+    text: state.doc.textBetween(trimmed.from, trimmed.to, " "),
+  };
 }
