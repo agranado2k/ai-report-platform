@@ -171,10 +171,31 @@ function writeGrantBody(g: WriteGrant): WriteGrantWire {
   };
 }
 
-/** POST /api/v1/reports/{slug}/write-grants — 201 with the new/refreshed grant. */
-export function grantWriteToHttp(result: Result<WriteGrant, AppError>): HttpResponse {
+/** Where the grantee ENTERS the editor (ADR-0063): the app's canWrite
+ *  edit-token mint. Passed by the route (which knows the request's app origin
+ *  + slug, mirroring how the upload route passes `viewBaseUrl`). */
+export interface GrantEntryOptions {
+  /** The app origin, e.g. "https://app.example" (no trailing slash). */
+  readonly appOrigin: string;
+  readonly slug: string;
+}
+
+/** POST /api/v1/reports/{slug}/write-grants — 201 with the new/refreshed grant.
+ *  With `entry`, the resource carries `open_url` — the link the owner sends
+ *  the grantee (grants are silent, ADR-0060: the response is the only place
+ *  the entry URL surfaces). */
+export function grantWriteToHttp(
+  result: Result<WriteGrant, AppError>,
+  entry?: GrantEntryOptions,
+): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 201, contentType: "application/json", body: writeGrantBody(result.value) };
+  const body = entry
+    ? {
+        ...writeGrantBody(result.value),
+        open_url: `${entry.appOrigin}/reports/${entry.slug}/open`,
+      }
+    : writeGrantBody(result.value);
+  return { status: 201, contentType: "application/json", body };
 }
 
 /** DELETE /api/v1/reports/{slug}/write-grants/{email} — 204 No Content on success

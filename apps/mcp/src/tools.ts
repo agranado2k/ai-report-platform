@@ -377,7 +377,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "requires the `acl:write` scope. Works CROSS-ORG — the grantee is typically outside " +
         "your org (they don't need to have signed up yet; the grant matches by email once they " +
         "do). Confers NO view access by itself — share viewing separately with reports_set_acl " +
-        "if they also need to open it in the viewer.",
+        "if they also need to open it in the viewer. The result carries `open_url` — share it " +
+        "with the grantee: it opens the editor for them (no notification is sent otherwise).",
       inputSchema: {
         slug: SLUG_INPUT,
         email: z.string().describe("The grantee's email address."),

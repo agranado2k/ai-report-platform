@@ -235,6 +235,21 @@ describe("write-grant resource mappers (ADR-0060)", () => {
     });
   });
 
+  it("grantWriteToHttp with the entry-URL opts → the resource carries open_url (the grantee's editor entry)", () => {
+    const res = grantWriteToHttp(ok(grant), {
+      appOrigin: "https://app.example.test",
+      slug: "abcde12345",
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      object: "write_grant",
+      email: "grantee@x.com",
+      granted_by: userIdToWire(userId(U1)),
+      granted_at: new Date(1_700_000_000_000).toISOString(),
+      open_url: "https://app.example.test/reports/abcde12345/open",
+    });
+  });
+
   it("grantWriteToHttp NotAllowed (non-owner) → 403 problem", () => {
     const res = grantWriteToHttp(
       err({ kind: "NotAllowed", message: "you do not own this report" }),

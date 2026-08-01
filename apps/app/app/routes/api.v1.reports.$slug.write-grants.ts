@@ -6,7 +6,7 @@
 // Thin transport adapter over the deepened `handle()` seam + `ops()`; the use
 // cases own the ownership authz.
 import { grantWriteToHttp, listWriteGrantsToHttp } from "arp-http";
-import { ops } from "../server/container.server";
+import { appOrigin, ops } from "../server/container.server";
 import { handle, methods } from "../server/handle.server";
 
 // GET — list, owner-only (listWriteGrants owns authz via the loadOwnedReport
@@ -33,6 +33,11 @@ export const action = methods({
         { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
         { slug, email: typeof body.email === "string" ? body.email : "", idempotencyKey },
       ),
-    toHttp: (result) => grantWriteToHttp(result),
+    // `open_url` (the grantee's one-click editor entry — the app's canWrite
+    // edit-token mint) rides the grant response, mirroring how the upload
+    // route passes `viewBaseUrl`: grants are silent (ADR-0060), so the
+    // response is the only place the entry URL surfaces for the owner to send.
+    toHttp: (result, ctx) =>
+      grantWriteToHttp(result, { appOrigin: appOrigin(ctx.args.request), slug: ctx.slug }),
   }),
 });
