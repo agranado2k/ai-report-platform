@@ -107,6 +107,60 @@ export async function mintSecondTestSession(): Promise<TestSession> {
  *  verification code 424242). See `tests/e2e/README.md`. */
 export const SECOND_FIXTURE_EMAIL = "silver+clerk_test@agranado.com";
 
+/** ADR-0074 — the THIRD identity, sharing the second fixture's `agranado.com`
+ *  domain so the shared-team-org scenario can prove two same-domain identities
+ *  land in ONE org. Unlike fixtures 1/2 this one is find-or-CREATED
+ *  programmatically (`ensureThirdFixtureUser`) — code, not a clicked fixture,
+ *  so it self-heals after an instance reset. See `tests/e2e/README.md`. */
+export const THIRD_FIXTURE_EMAIL = "gold+clerk_test@agranado.com";
+
+/**
+ * Find-or-create the third fixture user on the dev Clerk instance (idempotent:
+ * the lookup wins on every run after the first). Creation marks the address
+ * verified (`skip_password_requirement` + a pre-verified email) — a `+clerk_test`
+ * test-mode address on a dev instance, so no real inbox is involved. The
+ * webhook doesn't fire into e2e (the dev instance's Svix endpoint targets no
+ * preview), so the scenario exercises the first-WRITE JIT join path — the
+ * webhook's chain is the same code (resolveCanonicalTeamOrg), unit-tested.
+ */
+export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
+  const found = await clerkFetch(
+    `/users?email_address=${encodeURIComponent(THIRD_FIXTURE_EMAIL)}`,
+    secretKey,
+  );
+  if (!found.ok) throw new Error(`clerk users lookup failed: ${found.status}`);
+  const users = (await found.json()) as ReadonlyArray<{ id: string }>;
+  if (users[0]?.id) return; // already provisioned — the steady state
+
+  const created = await clerkFetch("/users", secretKey, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email_address: [THIRD_FIXTURE_EMAIL],
+      skip_password_requirement: true,
+    }),
+  });
+  if (!created.ok) {
+    throw new Error(
+      `clerk create third-fixture user failed: ${created.status} — if user creation is ` +
+        "restricted on this instance, hand-provision gold+clerk_test@agranado.com once " +
+        "(see tests/e2e/README.md, fixture 3)",
+    );
+  }
+}
+
+/** Mint a session for the THIRD identity (ADR-0074 shared-team-org scenario),
+ *  find-or-creating the user first. Same `E2E_CLERK_SECRET_KEY` gate as the
+ *  other fixtures. */
+export async function mintThirdTestSession(): Promise<TestSession> {
+  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error("@auth e2e needs E2E_CLERK_SECRET_KEY");
+  }
+  await ensureThirdFixtureUser(secretKey);
+  return mintTestSessionFor(secretKey, THIRD_FIXTURE_EMAIL);
+}
+
 /**
  * Mint a Clerk **sign-in ticket** (`POST /sign_in_tokens`) for a user by
  * email, given a Clerk secret key. Unlike `mintTestSessionFor` (a backend

@@ -73,13 +73,25 @@ If this fixture is ever lost (Clerk instance reset, account deleted — cf. the
 ADR-0049 instance-hygiene incident) — recreate it exactly as above and treat any
 drift as a **fixture bug**, not a test bug (ADR-0068 §6's explicit call).
 
-> **One-time cleanup after PR #158's review wave:** the team-org slug scheme
-> gained a domain-hash suffix (review #158 C-1), so any `agranado-com` Clerk
-> org JIT-created on the dev instance under the OLD scheme is now stale —
-> lookups use the new slug and the old org would leave the fixture user with
-> a divergent oldest-membership. Delete the old `agranado-com` org in the dev
-> Clerk dashboard; the next fixture sign-in re-provisions under the new slug
-> (with the `publicMetadata.domain` anchor the join guard requires).
+> **Slug-scheme note (superseded by ADR-0074):** the PR #158 domain-hash slug
+> scheme is retired — team orgs are no longer looked up by slug at all. The
+> join key is the app-owned `orgs.domain` DB index; the Clerk-side identity
+> check is the `publicMetadata.domain` anchor (verified fail-closed), with a
+> bounded anchor scan adopting any pre-index org. An old anchorless
+> `agranado-com` org on the dev instance is simply never matched (the scan
+> requires an exact anchor); the chain creates a fresh anchored org instead —
+> no manual cleanup required, though deleting stale orgs keeps the dashboard
+> tidy.
+
+## Fixture 3 — the third identity (ADR-0074, same-domain colleague)
+
+| | |
+|---|---|
+| Purpose | The `Two same-domain identities share one team org` scenario in `tests/e2e/smoke/team-org-upload.feature` — proving fixture 2 and fixture 3 (both `@agranado.com`) land in ONE org (the assertion the pre-ADR-0074 smoke deliberately dodged). |
+| Email | `gold+clerk_test@agranado.com` — hardcoded as `THIRD_FIXTURE_EMAIL` in `tests/e2e/support/clerk-session.ts`. |
+| Provisioning | **Programmatic, not clicked**: `ensureThirdFixtureUser()` find-or-creates the Clerk user via the Backend API (`GET /users?email_address=` → `POST /users` on miss) on first use, so it self-heals after an instance reset — no ADR-017 exception needed for this one. If the instance ever restricts Backend-API user creation, hand-provision it once exactly like fixture 2. |
+| Org (ADR-0068 §1) | Same `agranado.com` team domain as fixture 2 — that's the point: two identities, one domain, one org. |
+| Minting a session for it | `mintThirdTestSession()` — same `E2E_CLERK_SECRET_KEY` gate as the other fixtures; runs the find-or-create first. |
 
 ## Authenticated-browser scenarios (`@browser`)
 
