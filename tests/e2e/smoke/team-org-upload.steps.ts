@@ -91,17 +91,37 @@ When(
 Then(
   "the third identity's report listing includes both same-domain uploads",
   async ({ request }) => {
-    // The org-scoped listing (GET /api/v1/reports) as the THIRD identity. Its
-    // own upload proves the actor resolves; the SECOND identity's slug being
-    // visible proves both identities share one org row — the ADR-0074 invariant.
-    const res = await request.get("/api/v1/reports?limit=100", {
+    // The listing must be read through a surface whose org is DETERMINISTIC.
+    // A bare session GET is not: an org-less session's read path resolves the
+    // user's OLDEST Clerk membership, and both fixtures carry older decoy
+    // memberships (gold's forced-task decoy org; silver's legacy hand-made
+    // org) that have no DB mirror — the GET would 401/empty regardless of the
+    // join outcome. So the third identity first mints an `arp_` API key via
+    // the WRITE path (/settings/api-keys — its actor's org comes from the
+    // ADR-0074 canonical chain, the thing under test), then lists with the
+    // key: door 1 carries the key's issuing org directly.
+    const keyRes = await request.post("/settings/api-keys", {
       headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+      // Unique name per run — the ADR-0039 derived idempotency key
+      // fingerprints on (name, scopes), and a replayed mint returns a null
+      // secret by design.
+      form: { name: `arp-e2e-team-org-${Date.now().toString(36)}` },
+    });
+    const keyBody = (await keyRes.json()) as { secret?: string };
+    expect(keyRes.status(), JSON.stringify(keyBody)).toBe(200);
+    expect(typeof keyBody.secret, "key mint must return the one-time secret").toBe("string");
+
+    const res = await request.get("/api/v1/reports?limit=100", {
+      headers: { Authorization: `Bearer ${keyBody.secret}` },
     });
     const listing = (await res.json()) as {
       data?: ReadonlyArray<{ slug?: string }>;
     };
     expect(res.status(), JSON.stringify(listing)).toBe(200);
     const slugs = (listing.data ?? []).map((r) => r.slug);
+    // Its own upload proves the actor resolved into the key's org; the SECOND
+    // identity's slug being visible proves both identities share one org row —
+    // the ADR-0074 invariant.
     expect(slugs, "third identity's own upload must be listed").toContain(thirdBody.slug);
     expect(
       slugs,

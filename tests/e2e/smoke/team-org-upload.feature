@@ -21,9 +21,14 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # is a pass" is what let the dead slug-keyed lookup ship): two identities at
   # the SAME corporate domain must resolve to ONE shared org. The third fixture
   # (gold+clerk_test@agranado.com, find-or-created programmatically — see
-  # tests/e2e/README.md) uploads its own report, then must SEE the second
-  # fixture's report in its org-scoped listing — only possible if both landed
-  # in the same org row.
+  # tests/e2e/README.md) carries a self-created DECOY org, replicating the
+  # duplicate that force_organization_selection produces in prod (and, on the
+  # dev instance, the only way a fresh user's backend-minted session comes out
+  # `active` instead of `pending`/401). It uploads its own report — landing it
+  # in the CANONICAL domain org despite the decoy — then must see the second
+  # fixture's report in its org listing (read via an API key it mints, whose
+  # org is the canonically-resolved one): only possible if both identities
+  # landed in the same org row.
   Scenario: Two same-domain identities share one team org
     Given I am signed in as the second (team-org) Clerk test user
     And I am also signed in as the third (same-domain) Clerk test user

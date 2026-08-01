@@ -116,12 +116,25 @@ export const THIRD_FIXTURE_EMAIL = "gold+clerk_test@agranado.com";
 
 /**
  * Find-or-create the third fixture user on the dev Clerk instance (idempotent:
- * the lookup wins on every run after the first). Creation marks the address
+ * every step short-circuits once its state exists). Creation marks the address
  * verified (`skip_password_requirement` + a pre-verified email) — a `+clerk_test`
  * test-mode address on a dev instance, so no real inbox is involved. The
  * webhook doesn't fire into e2e (the dev instance's Svix endpoint targets no
  * preview), so the scenario exercises the first-WRITE JIT join path — the
  * webhook's chain is the same code (resolveCanonicalTeamOrg), unit-tested.
+ *
+ * PENDING-SESSION HEAL (the PR #222 CI 401): the dev instance runs
+ * `force_organization_selection: true` (same as prod), and Clerk gives a user
+ * with ZERO org memberships a **pending** session (`tasks:
+ * [{key: "choose-organization"}]`) — its JWT carries `sts: "pending"`, which
+ * @clerk/backend treats as signed-out, so every request 401s at the cascade's
+ * end. In prod the ADR-0074 webhook pre-joins the user before they ever sign
+ * in; the e2e preview gets no webhook, so we replicate what the forced task
+ * itself would produce: a self-created DECOY org (anchorless, exactly like the
+ * duplicate a forced user creates in the browser). That flips the session to
+ * `active` AND makes the scenario faithfully reproduce the production shape
+ * the sticky-after-mirror policy must handle — the app must IGNORE this decoy
+ * and land the user in the domain's canonical org.
  */
 export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
   const found = await clerkFetch(
@@ -130,21 +143,51 @@ export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
   );
   if (!found.ok) throw new Error(`clerk users lookup failed: ${found.status}`);
   const users = (await found.json()) as ReadonlyArray<{ id: string }>;
-  if (users[0]?.id) return; // already provisioned — the steady state
+  let userId = users[0]?.id;
 
-  const created = await clerkFetch("/users", secretKey, {
+  if (!userId) {
+    const created = await clerkFetch("/users", secretKey, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email_address: [THIRD_FIXTURE_EMAIL],
+        skip_password_requirement: true,
+      }),
+    });
+    if (!created.ok) {
+      throw new Error(
+        `clerk create third-fixture user failed: ${created.status} — if user creation is ` +
+          "restricted on this instance, hand-provision gold+clerk_test@agranado.com once " +
+          "(see tests/e2e/README.md, fixture 3)",
+      );
+    }
+    userId = ((await created.json()) as { id: string }).id;
+  }
+
+  // The pending-session heal (see the doc comment): a zero-membership user
+  // cannot mint a usable session under force_organization_selection.
+  const memberships = await clerkFetch(
+    `/users/${userId}/organization_memberships?limit=1`,
+    secretKey,
+  );
+  if (!memberships.ok) {
+    throw new Error(`clerk membership lookup failed for fixture 3: ${memberships.status}`);
+  }
+  const page = (await memberships.json()) as { data?: ReadonlyArray<unknown> };
+  if ((page.data ?? []).length > 0) return; // has an org → sessions mint active
+
+  const decoy = await clerkFetch("/organizations", secretKey, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email_address: [THIRD_FIXTURE_EMAIL],
-      skip_password_requirement: true,
-    }),
+    // Deliberately NO publicMetadata.domain anchor: the anchor scan must never
+    // adopt this org — it plays the role of the forced task's duplicate.
+    body: JSON.stringify({ name: "arp-e2e-gold-decoy-org", created_by: userId }),
   });
-  if (!created.ok) {
+  if (!decoy.ok) {
     throw new Error(
-      `clerk create third-fixture user failed: ${created.status} — if user creation is ` +
-        "restricted on this instance, hand-provision gold+clerk_test@agranado.com once " +
-        "(see tests/e2e/README.md, fixture 3)",
+      `clerk create decoy org for fixture 3 failed: ${decoy.status} — without at least one ` +
+        "membership the instance's force_organization_selection makes every session PENDING " +
+        "(sts:'pending' → 401). See tests/e2e/README.md, fixture 3.",
     );
   }
 }
