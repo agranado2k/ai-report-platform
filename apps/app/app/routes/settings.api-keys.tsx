@@ -44,9 +44,9 @@ function mcpEndpoint(request: Request): string {
 }
 
 export async function loader(args: LoaderFunctionArgs) {
-  // Read path — never provisions (the app-wide gate already redirects anon
-  // document requests to sign-in). A signed-in user with no mirror yet simply
-  // has no keys; provisioning happens on the first mint (the POST below).
+  // Read path (the app-wide gate already redirects anon document requests to
+  // sign-in). A signed-in user with no mirror yet is lazily provisioned on
+  // this first read (ADR-0048 amendment 2026-08-01) and simply has no keys.
   const actor = await resolveActorForRead(args);
   if (!actor.ok) throw errorToJson(actor.error);
   const endpoint = mcpEndpoint(args.request);

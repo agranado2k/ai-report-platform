@@ -1,7 +1,8 @@
 // Live wiring for the actor-resolution seam (server-only). The CASCADE itself —
 // the four front doors (`arp_` API key → Clerk session → forwarded Clerk OAuth
 // token → slug-bound edit token), their order, terminal-vs-fall-through rules,
-// the read/write differences (JIT provisioning on write only; null-vs-401), and
+// the read/write differences (JIT provisioning on write + on a session read's
+// mirror miss, ADR-0048 amendment; null-vs-401), and
 // the STRUCTURAL slug gate on the edit-token door — lives in resolve-actor.
 // server.ts, where it is unit-tested with every door injected. This module only
 // builds the REAL deps from the composition root (container.server.ts) and the
@@ -158,9 +159,12 @@ export async function resolveUploadActor(
 type ReadResolvedActor = Pick<Actor, "userId" | "orgId" | "scopes">;
 
 /**
- * Resolve the acting principal for a READ — same doors, but NEVER provisions
- * (GET loaders stay safe/idempotent): an unmirrored / credential-less request
- * resolves to ok(null) (the caller renders an empty list / 401s).
+ * Resolve the acting principal for a READ — same doors. A session-authenticated
+ * read that misses the identity mirror lazily provisions through the same
+ * `provisionIdentity` as the write path (ADR-0048 amendment 2026-08-01 — a
+ * one-time write on first read); a credential-less request, or a session
+ * without the email claim, still resolves to ok(null) (the caller renders an
+ * empty list / 401s).
  */
 export async function resolveActorForRead(
   args: LoaderFunctionArgs,
