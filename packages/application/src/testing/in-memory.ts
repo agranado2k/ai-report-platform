@@ -8,6 +8,7 @@ import {
   type AppError,
   type Comment,
   type CommentId,
+  conflict,
   type DomainEvent,
   err,
   type Folder,
@@ -729,6 +730,10 @@ export class InMemoryIdentityStore implements IdentityStore {
   /** Test-only introspection: the `kind` each mirrored org was created with
    *  (ADR-0068 §3), keyed by our internal OrgId. */
   readonly kindByOrgId = new Map<OrgId, OrgKind>();
+  /** The app-owned domain index (`orgs.domain`, ADR-0074) — at most one OrgId
+   *  per domain, mirroring the partial unique index. Exposed for test
+   *  introspection (the set-domain-if-null heal assertions). */
+  readonly domainByOrgId = new Map<OrgId, string>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -747,6 +752,51 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.orgByClerkOrgId.get(clerkOrgId) ?? null);
   }
 
+  async findTeamOrgByDomain(
+    domain: string,
+  ): Promise<Result<{ orgId: OrgId; clerkOrgId: string } | null, AppError>> {
+    const normalized = domain.toLowerCase();
+    for (const [clerkOrgId, orgIdValue] of this.orgByClerkOrgId) {
+      if (this.domainByOrgId.get(orgIdValue) === normalized) {
+        return ok({ orgId: orgIdValue, clerkOrgId });
+      }
+    }
+    return ok(null);
+  }
+
+  async upsertTeamOrg(input: {
+    readonly clerkOrgId: string;
+    readonly name: string;
+    readonly domain: string;
+  }): Promise<Result<{ orgId: OrgId }, AppError>> {
+    const domain = input.domain.toLowerCase();
+    const owner = [...this.domainByOrgId.entries()].find(([, d]) => d === domain)?.[0] ?? null;
+
+    const existing = this.orgByClerkOrgId.get(input.clerkOrgId);
+    if (existing) {
+      // set-domain-if-null heal — never re-key an already-domained row, and
+      // never claim a domain another row owns (the partial unique index).
+      if (!this.domainByOrgId.has(existing)) {
+        if (owner !== null && owner !== existing) {
+          return err(conflict(`domain "${domain}" already belongs to another org`));
+        }
+        this.domainByOrgId.set(existing, domain);
+      }
+      return ok({ orgId: existing });
+    }
+
+    if (owner !== null) {
+      return err(conflict(`domain "${domain}" already belongs to another org`));
+    }
+    this.seq += 1;
+    const orgIdValue = makeOrgId(`org-${this.seq}`);
+    this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
+    this.rootFolderByOrgId.set(orgIdValue, makeFolderId(`folder-${this.seq}`));
+    this.kindByOrgId.set(orgIdValue, "team");
+    this.domainByOrgId.set(orgIdValue, domain);
+    return ok({ orgId: orgIdValue });
+  }
+
   async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
@@ -754,6 +804,7 @@ export class InMemoryIdentityStore implements IdentityStore {
     readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
+    readonly domain?: string | null;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054).
     if (this.deleted.has(input.clerkUserId)) {
@@ -764,17 +815,21 @@ export class InMemoryIdentityStore implements IdentityStore {
     const existing = this.byClerk.get(this.key(input.clerkUserId, input.clerkOrgId));
     if (existing) {
       this.seedUser(existing.userId, input.email, input.displayName);
+      this.recordDomainIfNull(existing.orgId, input.domain);
       return ok(existing);
     }
 
     // Org: find-or-create by clerkOrgId — a JIT team-org join (ADR-0068 §3)
     // reuses the SAME org + root folder a previous colleague's sign-up already
     // created; `kind` is recorded only on first creation, mirroring the real
-    // Drizzle adapter's onConflictDoNothing semantics.
+    // Drizzle adapter's onConflictDoNothing semantics. A team `domain` is
+    // recorded on creation and set-if-null on an existing row (ADR-0074 heal),
+    // mirroring upsertTeamOrg.
     let orgIdValue = this.orgByClerkOrgId.get(input.clerkOrgId);
     let rootFolderIdValue: FolderId;
     if (orgIdValue) {
       rootFolderIdValue = this.rootFolderByOrgId.get(orgIdValue) as FolderId;
+      this.recordDomainIfNull(orgIdValue, input.domain);
     } else {
       this.seq += 1;
       orgIdValue = makeOrgId(`org-${this.seq}`);
@@ -782,6 +837,7 @@ export class InMemoryIdentityStore implements IdentityStore {
       this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
       this.rootFolderByOrgId.set(orgIdValue, rootFolderIdValue);
       this.kindByOrgId.set(orgIdValue, input.kind);
+      this.recordDomainIfNull(orgIdValue, input.domain);
     }
 
     this.seq += 1;
@@ -826,6 +882,16 @@ export class InMemoryIdentityStore implements IdentityStore {
     const resolved = this.userIdByEmail.get(email.trim().toLowerCase()) ?? null;
     if (resolved !== null && this.isDeletedUser(resolved)) return ok(null); // ADR-0054
     return ok(resolved);
+  }
+
+  /** Record a team org's domain into the index ONLY when the row has none yet
+   *  and no other row owns it (mirrors the real adapter's COALESCE + partial
+   *  unique index; ADR-0074 set-domain-if-null heal). */
+  private recordDomainIfNull(orgIdValue: OrgId, domain: string | null | undefined): void {
+    if (!domain || this.domainByOrgId.has(orgIdValue)) return;
+    const normalized = domain.toLowerCase();
+    for (const d of this.domainByOrgId.values()) if (d === normalized) return; // owned elsewhere
+    this.domainByOrgId.set(orgIdValue, normalized);
   }
 
   /** Whether this internal UserId belongs to a soft-deleted Clerk user. */

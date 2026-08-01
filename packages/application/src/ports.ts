@@ -513,6 +513,33 @@ export interface IdentityStore {
    */
   findOrgByClerkOrgId(clerkOrgId: string): Promise<Result<OrgId | null, AppError>>;
   /**
+   * The team org owning `domain` in the app-owned domain index (`orgs.domain`,
+   * ADR-0074), or null when no org row carries it — either nobody at that
+   * domain has been provisioned, or the row predates migration 0018 and hasn't
+   * been healed yet (in which case the caller falls through to the Clerk
+   * anchor scan). This DB column is the canonical join key: Clerk's
+   * organization-domains feature is 402-gated on the free plan.
+   */
+  findTeamOrgByDomain(
+    domain: string,
+  ): Promise<Result<{ readonly orgId: OrgId; readonly clerkOrgId: string } | null, AppError>>;
+  /**
+   * Find-or-create the ORG row (kind `team`, plan free, Root folder included)
+   * for an existing Clerk team org — the `user.created` webhook's org-only
+   * write (ADR-0074; the USER row still mirrors at first write per ADR-0048).
+   * On a `clerk_org_id` conflict the existing row wins and its `domain` is set
+   * ONLY if currently null (the set-domain-if-null heal for pre-0018 rows —
+   * House Numbers' shape); an already-domained row is never re-keyed. When a
+   * DIFFERENT org row already owns `domain` (the concurrent same-domain
+   * first-sign-up race, caught by the partial unique index), resolves to
+   * `err(Conflict)` — the caller re-reads the index and joins the winner.
+   */
+  upsertTeamOrg(input: {
+    readonly clerkOrgId: string;
+    readonly name: string;
+    readonly domain: string;
+  }): Promise<Result<{ readonly orgId: OrgId }, AppError>>;
+  /**
    * Create the User + Org (Plan `free`) + Root folder for a fresh identity, OR —
    * when `clerkOrgId` already names an existing mirrored Org (a domain's team org
    * a new colleague is JIT-joining, ADR-0068 §3) — join it: the Org insert is a
@@ -534,6 +561,10 @@ export interface IdentityStore {
     readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
+    /** The team org's email domain (ADR-0074), recorded into the domain index
+     *  on the Org row's first creation and set-if-null on an existing row (the
+     *  same heal `upsertTeamOrg` performs). Omitted/null for personal orgs. */
+    readonly domain?: string | null;
   }): Promise<Result<ProvisionedIdentity, AppError>>;
   /**
    * Soft-delete our mirrored user (stamp `deleted_at`) for a Clerk `user.deleted`
