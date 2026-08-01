@@ -6,6 +6,7 @@ export {
   type ButtonVariant,
   buttonClass,
   Card,
+  Checkbox,
   CheckIcon,
   CopyIcon,
   cx,
