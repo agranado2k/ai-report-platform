@@ -2,11 +2,9 @@
 // (ADR-0060 §3, §5). OWNER-ONLY (ADR-0059 §2) + `acl:write` scope (ADR-0016) —
 // like `getAcl`, this is share config and stays the owner's business.
 import type { AppError, Result, Slug } from "arp-domain";
-import { err, insufficientScope } from "arp-domain";
+import { ACL_WRITE_SCOPE, err, insufficientScope } from "arp-domain";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { ReportRepository, WriteGrant, WriteGrantStore } from "../ports";
-
-const ACL_WRITE_SCOPE = "acl:write";
 
 export interface ListWriteGrantsDeps {
   readonly reports: ReportRepository;

@@ -4,7 +4,15 @@
 // ClerkOrgProvisioner ports (ADR-0024): the policy — derive the org key from the
 // email's domain (ADR-0068 §1), then join-or-create the right Clerk org and
 // find-or-create the mirror — lives here; all I/O is behind the ports.
-import { type AppError, ok, type Result, resolveOrgKey } from "arp-domain";
+import {
+  ACL_WRITE_SCOPE,
+  type AppError,
+  ok,
+  REPORTS_WRITE_SCOPE,
+  type Result,
+  resolveOrgKey,
+  type Scope,
+} from "arp-domain";
 import type {
   ClerkIdentity,
   ClerkOrgProvisioner,
@@ -25,7 +33,7 @@ export interface ProvisionIdentityDeps {
  *  same scopes to a session/OAuth read — a browser/MCP-OAuth caller isn't
  *  API-key-scoped, so it holds full access on both the read and write path
  *  (ADR-0060 §3 — `listWriteGrants` needs `acl:write` on the read path too). */
-export const SELF_SCOPES = ["reports:write", "acl:write"];
+export const SELF_SCOPES: readonly Scope[] = [REPORTS_WRITE_SCOPE, ACL_WRITE_SCOPE];
 
 /** Display name for a user's personal org, derived from their email local-part. */
 function personalOrgName(email: string): string {

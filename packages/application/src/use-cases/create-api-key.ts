@@ -12,7 +12,9 @@ import {
   err,
   type OrgId,
   ok,
+  REPORTS_WRITE_SCOPE,
   type Result,
+  type Scope,
   type UserId,
   validationError,
 } from "arp-domain";
@@ -25,8 +27,8 @@ import type {
   UnitOfWork,
 } from "../ports";
 
-/** The only Scope the settings UI offers today (ADR-0016). */
-const DEFAULT_SCOPES: readonly string[] = ["reports:write"];
+/** The Scope a key is minted with when the caller doesn't pick (ADR-0016). */
+const DEFAULT_SCOPES: readonly Scope[] = [REPORTS_WRITE_SCOPE];
 const ROUTE = "POST /settings/api-keys";
 
 export interface CreateApiKeyDeps extends IdempotentWriteDeps {

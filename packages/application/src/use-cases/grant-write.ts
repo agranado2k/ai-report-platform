@@ -10,6 +10,7 @@
 // audit_log row (ADR-0070), committed together in one UnitOfWork (ADR-0037 §5)
 // → return the grant.
 import {
+  ACL_WRITE_SCOPE,
   type AppError,
   err,
   insufficientScope,
@@ -33,7 +34,6 @@ import type {
   WriteGrantStore,
 } from "../ports";
 
-const ACL_WRITE_SCOPE = "acl:write";
 const ROUTE = "POST /api/v1/reports/{slug}/write-grants";
 
 export interface GrantWriteDeps extends IdempotentWriteDeps {
