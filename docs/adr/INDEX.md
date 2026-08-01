@@ -47,6 +47,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0071 | [Extract shared `packages/ui` + `packages/editor`](0071-extract-ui-editor-packages.md) | Accepted (2026-07-10) — pure refactor; single source of truth for `iframe-document.ts`'s CSP ahead of ADR-0063's `apps/view` editor; amended same day to move the Forge & Ember `theme.css` tokens into `arp-ui` too |
 | 0072 | [MCP agent onboarding — a layered rollout to teach host agents the workflow](0072-mcp-agent-onboarding.md) | Accepted (2026-07-16) — refines ADR-0051/ADR-003; Layer 0 (server `instructions` + sharpened tool descriptions) implemented this PR, Layer 1 (`SKILL.md`) / Layer 2 (plugin/extension/prompts) tracked follow-ups |
 | 0073 | [Prune the unused FP helpers — delete `pipe()` and the `Result` combinators](0073-prune-unused-fp-helpers.md) | Accepted (2026-07-28) — corrects one ADR-024 claim; ADR-024's no-FP-library decision stands |
+| 0074 | [Silent domain auto-join — the app-owned domain index replaces slug keying](0074-silent-domain-auto-join.md) | Accepted (2026-08-01) — amends ADR-0068 (join key + session-org trust) and ADR-0048 (webhook writes the org row); extends the ADR-0054 webhook to `user.created` |
 
 ## Backlog (ADRs 1–30 from the spec)
 

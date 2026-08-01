@@ -124,7 +124,7 @@ Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Se
 | `GH_REPO_ADMIN_TOKEN` | GitHub PAT (admin scope for the github_repo module) | shared |
 | `CLERK_SECRET_KEY_STAGING` | Clerk test instance secret key | prod (preview target, ADR-0048) |
 | `CLERK_SECRET_KEY_PROD` | Clerk live instance secret key | prod (production target) |
-| `CLERK_WEBHOOK_SIGNING_SECRET` | Clerk dashboard → Webhooks signing secret (`whsec_…`) for the `user.deleted` endpoint at `app.<apex>/webhooks/clerk` (ADR-0054) | prod (`TF_VAR_clerk_webhook_signing_secret`, app project only) |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | Clerk dashboard → Webhooks signing secret (`whsec_…`) for the endpoint at `app.<apex>/webhooks/clerk`. The endpoint's Svix **event filter must include BOTH `user.deleted` (ADR-0054) and `user.created` (ADR-0074 silent domain auto-join)** — adding an event to the filter is a dashboard-only step. NB Clerk organization-domains cannot replace the auto-join: enabling it 402s on the free plan (it's the $100/mo B2B add-on; ADR-0074 records the revisit triggers), which is why the join key is the app-owned `orgs.domain` index. | prod (`TF_VAR_clerk_webhook_signing_secret`, app project only) |
 | `GRAFANA_OTLP_ENDPOINT` | Grafana Cloud OTLP gateway URL (Connections → OTLP) — sets `OTEL_EXPORTER_OTLP_ENDPOINT` (ADR-0055) | prod (`TF_VAR_grafana_otlp_endpoint`, app project, prod+preview) |
 | `GRAFANA_OTLP_HEADERS` | OTLP basic-auth header `Authorization=Basic base64(instanceID:token)` — sets `OTEL_EXPORTER_OTLP_HEADERS` (ADR-0055) | prod (`TF_VAR_grafana_otlp_headers`, app project, prod+preview) |
 | `RESEND_API_KEY` | Resend send-only domain key | shared (pass-through) |

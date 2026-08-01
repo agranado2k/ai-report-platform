@@ -40,6 +40,16 @@ terraform {
 #   - Personal accounts: enabled (everyone gets a personal org by default)
 #   - Allow members to create orgs: yes
 #   - Allow admins to invite by email: yes (used by folder_collaborators)
+#   - Default membership limit: 20 (raised from the free-tier default 5 via
+#     PATCH /v1/instance/organization_settings {"max_allowed_memberships": 20}
+#     — free; headroom for team orgs, ADR-0074)
+#   - Slugs: auto-generated on prod (slug_disabled) — NOTHING may key on org
+#     slugs (the join key is the app-owned orgs.domain index, ADR-0074)
+#   - Organization domains: leave DISABLED — enabling 402s on the free plan
+#     (Verified Domains = the $100/mo B2B add-on). Team-org identity lives in
+#     publicMetadata.domain (the anchor), verified fail-closed before any join.
+#     ADR-0074 records when to buy the add-on (>20 members/org, >100
+#     multi-member orgs, custom roles, SSO-linked orgs).
 #
 # [Sessions]
 #   - Session lifetime: 7 days
@@ -51,7 +61,11 @@ terraform {
 #   - https://staging.app.<domain>  (staging env only)
 #   - http://localhost:3000        (dev only — remove for prod instance)
 #
-# [Webhooks]  (configured per the spec; outside this module's scope)
+# [Webhooks]  (Svix endpoint; outside this module's scope — dashboard-only)
+#   - Endpoint: https://app.<domain>/webhooks/clerk
+#   - Event filter MUST include: user.deleted (ADR-0054 soft-delete mirror)
+#     AND user.created (ADR-0074 silent domain auto-join)
+#   - Signing secret (whsec_…) → TF_VAR_clerk_webhook_signing_secret
 #
 # Take the publishable_key + secret_key from the dashboard and put them in
 # .tfvars.local as TF_VAR_clerk_publishable_key_<env> and
