@@ -4,6 +4,7 @@ import type { IdempotencyKeyRef } from "../ports";
 import {
   FakePlanLimiter,
   FixedClock,
+  InMemoryApiKeyStore,
   InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
@@ -166,6 +167,27 @@ describe("InMemoryAuditLogger", () => {
     ]);
     expect(first).toHaveLength(0);
     expect(audit.recorded()).toHaveLength(1);
+  });
+});
+
+describe("InMemoryApiKeyStore", () => {
+  it("round-trips a multi-scope key verbatim through create → verify → listForUser", async () => {
+    const store = new InMemoryApiKeyStore();
+    const created = await store.create({
+      actingUserId: userId("u1"),
+      issuedInOrgId: orgId("o1"),
+      name: "sharing-agent",
+      scopes: ["reports:write", "acl:write"],
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.value.summary.scopes).toEqual(["reports:write", "acl:write"]);
+
+    const verified = await store.verify(created.value.token);
+    expect(verified.ok && verified.value?.scopes).toEqual(["reports:write", "acl:write"]);
+
+    const listed = await store.listForUser(userId("u1"));
+    expect(listed.ok && listed.value[0]?.scopes).toEqual(["reports:write", "acl:write"]);
   });
 });
 
