@@ -527,9 +527,18 @@ importers:
       '@types/react':
         specifier: ^18.3.12
         version: 18.3.30
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.30)
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)
 
 packages:
 

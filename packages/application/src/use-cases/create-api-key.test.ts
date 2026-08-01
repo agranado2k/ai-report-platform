@@ -44,14 +44,47 @@ describe("createApiKey use case", () => {
     expect(r.ok && r.value.summary.name).toBe("spaced");
   });
 
-  it("honours an explicit scopes override", async () => {
+  it("honours an explicit scopes override within the issuable set", async () => {
+    const deps = makeDeps();
+    const r = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "sharing-agent", scopes: ["reports:write", "acl:write"] },
+    );
+    expect(r.ok && r.value.summary.scopes).toEqual(["reports:write", "acl:write"]);
+  });
+
+  it("rejects an unknown scope with ValidationError (422) — nothing is minted", async () => {
+    const deps = makeDeps();
+    const r = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "bad", scopes: ["reports:write", "reports:admin"] },
+    );
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+    expect(deps.apiKeys.keys).toHaveLength(0);
+  });
+
+  it("rejects a non-issuable (unenforced) scope even though ADR-0016 defines it", async () => {
     const deps = makeDeps();
     const r = await createApiKey(
       deps,
       { userId: alice, orgId: orgA },
       { name: "readonly", scopes: ["reports:read"] },
     );
-    expect(r.ok && r.value.summary.scopes).toEqual(["reports:read"]);
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+    expect(deps.apiKeys.keys).toHaveLength(0);
+  });
+
+  it("rejects an empty scope selection with ValidationError (422)", async () => {
+    const deps = makeDeps();
+    const r = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "none", scopes: [] },
+    );
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+    expect(deps.apiKeys.keys).toHaveLength(0);
   });
 
   it("records an api_key.created audit row without the plaintext secret (ADR-0070)", async () => {
@@ -82,6 +115,34 @@ describe("createApiKey idempotency (ADR-0039 — explicit key only)", () => {
     expect(first.value.token).not.toBeNull();
     expect(second.value.token).not.toBeNull();
     expect(second.value.summary.id).not.toBe(first.value.summary.id);
+  });
+
+  it("the fingerprint distinguishes scope sets: same name + same key with different scopes is a reuse error, and without a key two mints coexist", async () => {
+    const deps = makeDeps();
+    const first = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "ci", scopes: ["reports:write"], idempotencyKey: "mint-1" },
+    );
+    expect(first.ok).toBe(true);
+    // Same explicit key, different scopes → the (name, scopes) fingerprint
+    // mismatch is surfaced, never a silent replay of the narrower key.
+    const reused = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "ci", scopes: ["reports:write", "acl:write"], idempotencyKey: "mint-1" },
+    );
+    expect(!reused.ok && reused.error.kind).toBe("IdempotencyKeyReuseDifferentBody");
+    // Without an idempotency key the second same-named mint simply coexists,
+    // each carrying its own scopes.
+    const second = await createApiKey(
+      deps,
+      { userId: alice, orgId: orgA },
+      { name: "ci", scopes: ["reports:write", "acl:write"] },
+    );
+    expect(second.ok && second.value.summary.scopes).toEqual(["reports:write", "acl:write"]);
+    const list = await deps.apiKeys.listForUser(alice);
+    expect(list.ok && list.value.length).toBe(2);
   });
 
   it("with an explicit key, a retry replays the summary with token: null — the secret is never persisted", async () => {

@@ -35,7 +35,9 @@ import {
   type FolderId,
   type OrgId,
   ok,
+  REPORTS_WRITE_SCOPE,
   type Result,
+  type Scope,
   clerkOrgId as toClerkOrgId,
   clerkUserId as toClerkUserId,
   type UserId,
@@ -63,7 +65,7 @@ export interface Actor {
  *  token authorizes editing THIS report's content, not managing its sharing
  *  (`acl:write` — grant/revoke/setAcl/listWriteGrants all gate on that scope
  *  and must stay owner/Clerk-session-only). */
-export const EDIT_TOKEN_SCOPES: readonly string[] = ["reports:write"];
+export const EDIT_TOKEN_SCOPES: readonly Scope[] = [REPORTS_WRITE_SCOPE];
 
 export interface ResolveActorOptions {
   readonly mode: "read" | "write";

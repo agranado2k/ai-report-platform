@@ -1,8 +1,9 @@
 // createApiKey — mint a new ApiKey for the acting user in their acting org
 // (ADR-0008 / ADR-0016). Pure orchestration over the ApiKeyStore port
 // (ADR-0024): trims + validates the name (blank → 422 instead of minting an
-// unnamed key), defaults to the Phase-1 `reports:write` Scope when the
-// caller doesn't override it. The secret is returned exactly once — the
+// unnamed key), validates any scope selection against KEY_ISSUABLE_SCOPES
+// (unknown/unenforced/empty → 422), defaults to the `reports:write` Scope
+// when the caller doesn't pick. The secret is returned exactly once — the
 // store never re-displays it (only the hashed/prefixed ApiKeySummary). The
 // create + a `api_key.created` audit_log row (ADR-0070) commit together in
 // one UnitOfWork (ADR-0037 section 5) -- the audit meta deliberately never
@@ -10,9 +11,13 @@
 import {
   type AppError,
   err,
+  KEY_ISSUABLE_SCOPES,
+  makeScopes,
   type OrgId,
   ok,
+  REPORTS_WRITE_SCOPE,
   type Result,
+  type Scope,
   type UserId,
   validationError,
 } from "arp-domain";
@@ -25,8 +30,8 @@ import type {
   UnitOfWork,
 } from "../ports";
 
-/** The only Scope the settings UI offers today (ADR-0016). */
-const DEFAULT_SCOPES: readonly string[] = ["reports:write"];
+/** The Scope a key is minted with when the caller doesn't pick (ADR-0016). */
+const DEFAULT_SCOPES: readonly Scope[] = [REPORTS_WRITE_SCOPE];
 const ROUTE = "POST /settings/api-keys";
 
 export interface CreateApiKeyDeps extends IdempotentWriteDeps {
@@ -65,6 +70,16 @@ export async function createApiKey(
   const name = input.name.trim();
   if (!name) return err(validationError("give your key a name", "name"));
 
+  // Scope selection is validated against the ISSUABLE subset (ADR-0016) —
+  // unknown / unenforced / empty selections are a 422, never persisted. The
+  // default stays the lone `reports:write` when the caller doesn't pick.
+  let scopes: readonly Scope[] = DEFAULT_SCOPES;
+  if (input.scopes !== undefined) {
+    const made = makeScopes(input.scopes, KEY_ISSUABLE_SCOPES);
+    if (!made.ok) return made;
+    scopes = made.value;
+  }
+
   // Idempotency (ADR-0039), EXPLICIT-KEY ONLY — a deliberate narrowing: the
   // derived fallback would fingerprint on (name, scopes), silently replaying a
   // user's intentional second same-named key within 24h AND returning it
@@ -77,7 +92,7 @@ export async function createApiKey(
       actingUserId: actor.userId,
       route: ROUTE,
       key: input.idempotencyKey,
-      fingerprint: [name, (input.scopes ?? DEFAULT_SCOPES).join(",")],
+      fingerprint: [name, scopes.join(",")],
     });
     if (!idem.ok) return idem;
     if (idem.value.outcome === "replay") {
@@ -100,7 +115,7 @@ export async function createApiKey(
       actingUserId: actor.userId,
       issuedInOrgId: actor.orgId,
       name,
-      scopes: input.scopes ?? DEFAULT_SCOPES,
+      scopes,
     });
     if (!created.ok) return created;
     const audited = await deps.audit.record([

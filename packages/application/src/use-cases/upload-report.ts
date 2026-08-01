@@ -15,6 +15,7 @@ import {
   notFound,
   type OrgId,
   ok,
+  REPORTS_WRITE_SCOPE,
   type ReportId,
   type Result,
   type ScanStatus,
@@ -41,7 +42,6 @@ import type {
 } from "../ports";
 
 const ROUTE = "POST /api/v1/reports";
-const WRITE_SCOPE = "reports:write";
 
 export interface UploadReportDeps extends WriteGrantCheckDeps {
   readonly reports: ReportRepository;
@@ -112,7 +112,8 @@ export async function uploadReport(
   cmd: UploadCommand,
 ): Promise<Result<UploadOutcome, AppError>> {
   // 1. Scope.
-  if (!cmd.actor.scopes.includes(WRITE_SCOPE)) return err(insufficientScope(WRITE_SCOPE));
+  if (!cmd.actor.scopes.includes(REPORTS_WRITE_SCOPE))
+    return err(insufficientScope(REPORTS_WRITE_SCOPE));
 
   // 2. Sync pre-checks (MIME/zip/entry-doc/caps) + content hash.
   const processed = await deps.bundles.process(cmd.upload.filename, cmd.upload.bytes);

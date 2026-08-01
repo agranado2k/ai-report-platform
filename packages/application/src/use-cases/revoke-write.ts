@@ -6,6 +6,7 @@
 // `grant.write.revoked` audit_log row (ADR-0070) commit together in one
 // UnitOfWork (ADR-0037 §5).
 import {
+  ACL_WRITE_SCOPE,
   type AppError,
   err,
   insufficientScope,
@@ -18,7 +19,6 @@ import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-wr
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork, WriteGrantStore } from "../ports";
 
-const ACL_WRITE_SCOPE = "acl:write";
 const ROUTE = "DELETE /api/v1/reports/{slug}/write-grants/{email}";
 
 export interface RevokeWriteDeps extends IdempotentWriteDeps {

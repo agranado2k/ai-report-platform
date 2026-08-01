@@ -16,7 +16,8 @@ export const INSTRUCTIONS =
   "publish a new version while keeping that URL; use folders_list/folders_create " +
   "and reports_move to organize reports into folders; use reports_list_comments, " +
   "reports_add_comment, and reports_resolve_comment to read and resolve reviewer " +
-  "feedback on a report.";
+  "feedback on a report. Sharing tools (reports_set_acl, reports_grant_write, " +
+  "reports_revoke_write) need an API key minted with the acl:write scope.";
 
 // Patterns an onboarding string must NOT match — each reads as "this server can
 // reach any/all/every user's or org's data", the over-claim ADR-0069/0059/0060

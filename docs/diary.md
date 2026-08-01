@@ -3258,3 +3258,30 @@ so ADR-0074 lands the free-tier architecture in worktree `worktree/domain-auto-j
   `gold+clerk_test@agranado.com`); the old "either outcome is a pass" gap is closed.
 - Config (applied live, free): instance default membership limit raised 5 → 20. Operator step
   remaining: add `user.created` to the Svix endpoint filter (dashboard-only; docs/infra.md).
+
+### 2026-08-01 — API-key scope picker ships: `acl:write` becomes mintable (ADR-0016's own trigger)
+
+The MCP sharing flow was dead on arrival for dashboard-minted keys: every sharing tool
+(`reports_set_acl`, `reports_grant_write`, …) 403'd with `missing required scope: acl:write`
+because issuance was hardcoded to `["reports:write"]` and the create form had no scope selection —
+ADR-0016 §Deferred explicitly said the picker lands "when a second scope gains key-reachable
+mutations", and `acl:write` gates five of them today. Shipped in worktree
+`worktree/api-key-scope-picker` (branch `feat/api-key-scope-picker`):
+
+- **Closed `Scope` vocabulary** in `packages/domain/src/scope.ts` (`Scope` union, `API_KEY_SCOPES`,
+  `KEY_ISSUABLE_SCOPES`, `makeScopes` smart constructor) — consolidates the previously duplicated
+  string constants across set-acl/grant-write/revoke-write/list-write-grants/upload-report/
+  provision-identity/resolve-actor/create-api-key.
+- **Issuance validation**: `createApiKey` rejects unknown/unenforced/empty selections (422) via
+  `makeScopes` against `KEY_ISSUABLE_SCOPES` (`reports:write` + `acl:write` — deliberately only the
+  enforced subset; `reports:read`/`folders:write` stay unissuable, #224 tracks the enforcement gap).
+  Default unchanged — a no-selection mint is still `reports:write`-only.
+- **Settings UI**: scope checkboxes on the create form (reports:write defaultChecked, acl:write
+  opt-in), scope Badge chips on the created banner and every key row, honest page copy (no more
+  hardcoded "reports:write" sentence; the Connect panel notes sharing needs `acl:write`). New
+  `Checkbox` primitive in `arp-ui`.
+- Docs: ADR-0016 dated More-information note (deferral fired, picker shipped), `docs/mcp-usage.md`
+  minting step, MCP server instructions one-liner, glossary `Scope` entry.
+
+Unblocks the `yKKotLYxkE` sharing flow post-deploy: mint a fresh key with `acl:write` checked and
+the original agent flow works verbatim. Existing keys are untouched (immutable — mint a new one).

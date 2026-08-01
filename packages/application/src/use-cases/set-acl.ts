@@ -10,6 +10,7 @@
 // this closes a latent gap where the prune and the persist were two
 // unwrapped writes). Returns the updated Report.
 import {
+  ACL_WRITE_SCOPE,
   type AclMode,
   type AppError,
   err,
@@ -37,7 +38,6 @@ import type {
   UnitOfWork,
 } from "../ports";
 
-const ACL_WRITE_SCOPE = "acl:write";
 const ROUTE = "POST /api/v1/reports/{slug}/acl";
 
 export interface SetAclDeps extends IdempotentWriteDeps {

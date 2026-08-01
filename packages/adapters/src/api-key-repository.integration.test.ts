@@ -53,6 +53,24 @@ describe("DrizzleApiKeyRepository (pglite integration)", () => {
     }
   });
 
+  it("round-trips a multi-scope key verbatim (reports:write + acl:write)", async () => {
+    const created = await repo.create({
+      actingUserId: seed.userId,
+      issuedInOrgId: seed.orgId,
+      name: "sharing-agent",
+      scopes: ["reports:write", "acl:write"],
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.value.summary.scopes).toEqual(["reports:write", "acl:write"]);
+
+    const v = await repo.verify(created.value.token);
+    expect(v.ok && v.value?.scopes).toEqual(["reports:write", "acl:write"]);
+
+    const list = await repo.listForUser(seed.userId);
+    expect(list.ok && list.value[0]?.scopes).toEqual(["reports:write", "acl:write"]);
+  });
+
   it("verify bumps last_used_at on a hit", async () => {
     const created = await mint();
     if (!created.ok) return;
