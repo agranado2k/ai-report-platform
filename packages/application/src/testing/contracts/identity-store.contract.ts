@@ -267,6 +267,161 @@ export function describeIdentityStoreContract(
       expect(second.ok && second.value.items[0]?.userId).not.toBe(cursor);
     });
 
+    // ── Domain-keyed team-org index (ADR-0074) ─────────────────────────────
+    it("findTeamOrgByDomain returns null when no org row carries the domain", async () => {
+      const r = await h.store.findTeamOrgByDomain("housenumbers.io");
+      expect(r.ok && r.value).toBeNull();
+    });
+
+    it("upsertTeamOrg creates the org row + Root folder; findTeamOrgByDomain resolves it", async () => {
+      const up = await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_hn",
+        name: "House Numbers",
+        domain: "housenumbers.io",
+      });
+      expect(up.ok).toBe(true);
+      if (!up.ok) return;
+
+      const found = await h.store.findTeamOrgByDomain("housenumbers.io");
+      expect(found.ok && found.value).toEqual({
+        orgId: up.value.orgId,
+        clerkOrgId: "clerk_org_hn",
+      });
+
+      // The Root-folder invariant holds: a later member's createIdentity against
+      // the same Clerk org reuses this org row (and its Root folder resolves).
+      const member = await mirror({
+        clerkUserId: "clerk_user_hn",
+        clerkOrgId: "clerk_org_hn",
+        email: "arthur@housenumbers.io",
+        orgName: "housenumbers.io",
+        kind: "team",
+        domain: "housenumbers.io",
+      });
+      expect(member.ok).toBe(true);
+      if (member.ok) expect(member.value.orgId).toBe(up.value.orgId);
+    });
+
+    it("upsertTeamOrg is idempotent — a replay resolves the same org row", async () => {
+      const input = {
+        clerkOrgId: "clerk_org_hn",
+        name: "housenumbers.io",
+        domain: "housenumbers.io",
+      };
+      const a = await h.store.upsertTeamOrg(input);
+      const b = await h.store.upsertTeamOrg(input);
+      expect(a.ok && b.ok).toBe(true);
+      if (a.ok && b.ok) expect(b.value.orgId).toBe(a.value.orgId);
+    });
+
+    it("upsertTeamOrg heals a pre-existing row whose domain is null (set-domain-if-null)", async () => {
+      // A pre-0018 mirror: the org row exists (via createIdentity without a
+      // domain) but carries no domain — the House Numbers shape.
+      const legacy = await mirror({
+        clerkUserId: "clerk_user_legacy",
+        clerkOrgId: "clerk_org_legacy",
+        email: "ann@legacy.example",
+        orgName: "legacy.example",
+        kind: "team",
+      });
+      expect(legacy.ok).toBe(true);
+      if (!legacy.ok) return;
+      const before = await h.store.findTeamOrgByDomain("legacy.example");
+      expect(before.ok && before.value).toBeNull();
+
+      const healed = await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_legacy",
+        name: "legacy.example",
+        domain: "legacy.example",
+      });
+      expect(healed.ok).toBe(true);
+      if (!healed.ok) return;
+      expect(healed.value.orgId).toBe(legacy.value.orgId);
+
+      const after = await h.store.findTeamOrgByDomain("legacy.example");
+      expect(after.ok && after.value).toEqual({
+        orgId: legacy.value.orgId,
+        clerkOrgId: "clerk_org_legacy",
+      });
+    });
+
+    it("upsertTeamOrg never re-keys an already-domained row (first domain wins)", async () => {
+      await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_hn",
+        name: "housenumbers.io",
+        domain: "housenumbers.io",
+      });
+      const rekeyed = await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_hn",
+        name: "housenumbers.io",
+        domain: "other.example",
+      });
+      expect(rekeyed.ok).toBe(true); // resolves the row — but domain is sticky
+      const original = await h.store.findTeamOrgByDomain("housenumbers.io");
+      expect(original.ok && original.value?.clerkOrgId).toBe("clerk_org_hn");
+      const hijack = await h.store.findTeamOrgByDomain("other.example");
+      expect(hijack.ok && hijack.value).toBeNull();
+    });
+
+    it("upsertTeamOrg returns Conflict when a DIFFERENT Clerk org already owns the domain", async () => {
+      await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_hn",
+        name: "housenumbers.io",
+        domain: "housenumbers.io",
+      });
+      const loser = await h.store.upsertTeamOrg({
+        clerkOrgId: "clerk_org_dupe",
+        name: "housenumbers.io",
+        domain: "housenumbers.io",
+      });
+      expect(loser.ok).toBe(false);
+      if (!loser.ok) expect(loser.error.kind).toBe("Conflict");
+      // The winner is untouched — the caller re-reads and joins it.
+      const winner = await h.store.findTeamOrgByDomain("housenumbers.io");
+      expect(winner.ok && winner.value?.clerkOrgId).toBe("clerk_org_hn");
+    });
+
+    it("createIdentity records the team domain on first org creation and heals a null-domain row", async () => {
+      // First creation with a domain → indexed immediately.
+      const first = await mirror({
+        clerkUserId: "clerk_user_t1",
+        clerkOrgId: "clerk_org_t1",
+        email: "a@teamone.example",
+        orgName: "teamone.example",
+        kind: "team",
+        domain: "teamone.example",
+      });
+      expect(first.ok).toBe(true);
+      const indexed = await h.store.findTeamOrgByDomain("teamone.example");
+      expect(indexed.ok && indexed.value?.clerkOrgId).toBe("clerk_org_t1");
+
+      // Legacy null-domain row + a later domain-carrying provision → healed.
+      await mirror({
+        clerkUserId: "clerk_user_t2",
+        clerkOrgId: "clerk_org_t2",
+        email: "a@teamtwo.example",
+        orgName: "teamtwo.example",
+        kind: "team",
+      });
+      expect((await h.store.findTeamOrgByDomain("teamtwo.example")).ok).toBe(true);
+      await mirror({
+        clerkUserId: "clerk_user_t3",
+        clerkOrgId: "clerk_org_t2",
+        email: "b@teamtwo.example",
+        orgName: "teamtwo.example",
+        kind: "team",
+        domain: "teamtwo.example",
+      });
+      const healed = await h.store.findTeamOrgByDomain("teamtwo.example");
+      expect(healed.ok && healed.value?.clerkOrgId).toBe("clerk_org_t2");
+    });
+
+    it("a personal identity never lands in the domain index", async () => {
+      await mirror(); // ann@example.com, personal, no domain
+      const r = await h.store.findTeamOrgByDomain("example.com");
+      expect(r.ok && r.value).toBeNull();
+    });
+
     it("setDisplayNameIfNull writes only a null name (true), never overwrites (false), and skips soft-deleted (false)", async () => {
       const unnamed = await mirror({
         clerkUserId: "cu_write",

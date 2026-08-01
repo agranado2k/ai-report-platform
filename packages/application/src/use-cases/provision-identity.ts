@@ -1,11 +1,17 @@
 // provisionIdentity — resolve a Clerk identity into our UploadActor, creating the
 // mirror (User + Org + Root folder) on first sight (ADR-0048, extended by
-// ADR-0068). Pure orchestration over the IdentityStore + ClerkOrgProvisioner
-// ports (ADR-0024): the policy — derive the org key from the email's domain
-// (ADR-0068 §1), then join-or-create the right Clerk org and find-or-create the
-// mirror — lives here; all I/O is behind the ports.
+// ADR-0068, re-keyed by ADR-0074). Pure orchestration over the IdentityStore +
+// ClerkOrgProvisioner ports (ADR-0024): the policy — derive the org key from the
+// email's domain (ADR-0068 §1), then join-or-create the right Clerk org and
+// find-or-create the mirror — lives here; all I/O is behind the ports.
 import { type AppError, ok, type Result, resolveOrgKey } from "arp-domain";
-import type { ClerkIdentity, ClerkOrgProvisioner, IdentityStore } from "../ports";
+import type {
+  ClerkIdentity,
+  ClerkOrgProvisioner,
+  IdentityStore,
+  ProvisionedIdentity,
+} from "../ports";
+import { resolveCanonicalTeamOrg } from "./resolve-team-org";
 import type { UploadActor } from "./upload-report";
 
 export interface ProvisionIdentityDeps {
@@ -27,6 +33,15 @@ function personalOrgName(email: string): string {
   return `${local && local.length > 0 ? local : "user"}'s workspace`;
 }
 
+function toActor(provisioned: ProvisionedIdentity): UploadActor {
+  return {
+    userId: provisioned.userId,
+    orgId: provisioned.orgId,
+    folderId: provisioned.rootFolderId,
+    scopes: SELF_SCOPES,
+  };
+}
+
 export async function provisionIdentity(
   deps: ProvisionIdentityDeps,
   identity: ClerkIdentity,
@@ -34,66 +49,92 @@ export async function provisionIdentity(
   // 0. Derive the ONE org this user belongs to from their email (ADR-0068 §1):
   //    a public-provider address → `personal` (keyed by the full address,
   //    ADR-0048's original 1:1 model, unchanged); any other domain → that
-  //    domain's `team` org (multi-member by design). This also decides the
-  //    Org's display name and — on first mirror — its `kind` column.
+  //    domain's `team` org (multi-member by design).
   const resolved = resolveOrgKey(identity.email);
   if (!resolved.ok) return resolved;
   const { kind, key } = resolved.value;
-  const orgName: string = kind === "personal" ? personalOrgName(identity.email) : key; // key = the domain for a team org
 
-  // 1. Ensure the user has an active Clerk org. A session already carrying one
-  //    is trusted as-is (the one-user-one-org invariant means it can only be
-  //    correct — ADR-0068 §1's "org-mode unlock is correct by construction").
-  //    Otherwise, join-or-create by kind:
-  //      - personal: create (or reuse, idempotently) the user's own org.
-  //      - team: find the domain's existing org and join it, or create it as
-  //        the domain's first sign-up (ADR-0068 §3).
+  if (kind === "personal") return provisionPersonal(deps, identity);
+  return provisionTeam(deps, identity, key);
+}
+
+/** The original ADR-0048 personal flow, unchanged: a session already carrying
+ *  an org is trusted as-is (personal orgs are 1:1 — it can only be the user's
+ *  own), otherwise create (or idempotently reuse) the user's personal org. */
+async function provisionPersonal(
+  deps: ProvisionIdentityDeps,
+  identity: ClerkIdentity,
+): Promise<Result<UploadActor, AppError>> {
+  const orgName = personalOrgName(identity.email);
   let clerkOrgId: string | null = identity.clerkOrgId;
   if (!clerkOrgId) {
-    if (kind === "personal") {
-      const created = await deps.clerkOrgs.createPersonalOrg(identity.clerkUserId, orgName);
-      if (!created.ok) return created;
-      clerkOrgId = created.value;
-    } else {
-      const existing = await deps.clerkOrgs.findTeamOrgByDomain(key);
-      if (!existing.ok) return existing;
-      if (existing.value) {
-        clerkOrgId = existing.value;
-        const joined = await deps.clerkOrgs.ensureMembership(clerkOrgId, identity.clerkUserId);
-        if (!joined.ok) return joined;
-      } else {
-        const created = await deps.clerkOrgs.createTeamOrg(key, identity.clerkUserId);
-        if (!created.ok) return created;
-        clerkOrgId = created.value; // first member — Clerk auto-assigns org admin
-      }
-    }
+    const created = await deps.clerkOrgs.createPersonalOrg(identity.clerkUserId, orgName);
+    if (!created.ok) return created;
+    clerkOrgId = created.value;
   }
 
-  // 2. Find-or-create the mirrored identity (idempotent across requests). The
-  //    Org row itself is a find-or-create keyed on `clerkOrgId` (a second
-  //    colleague joining a team org reuses the SAME Org + Root folder, ADR-0068
-  //    §3); `kind` only takes effect on the Org's first creation.
   const found = await deps.identities.findByClerk(identity.clerkUserId, clerkOrgId);
   if (!found.ok) return found;
+  if (found.value) return ok(toActor(found.value));
 
-  let provisioned = found.value;
-  if (!provisioned) {
-    const created = await deps.identities.createIdentity({
-      clerkUserId: identity.clerkUserId,
-      clerkOrgId,
-      email: identity.email,
-      displayName: identity.displayName,
-      orgName,
-      kind,
-    });
-    if (!created.ok) return created;
-    provisioned = created.value;
+  const created = await deps.identities.createIdentity({
+    clerkUserId: identity.clerkUserId,
+    clerkOrgId,
+    email: identity.email,
+    displayName: identity.displayName,
+    orgName,
+    kind: "personal",
+  });
+  if (!created.ok) return created;
+  return ok(toActor(created.value));
+}
+
+/** The team flow (ADR-0074): the session's active org is honored ONLY when the
+ *  (user, org) pair is already mirrored — "sticky-after-mirror". ADR-0068's
+ *  blanket session-org trust was the hole that let Clerk's forced
+ *  org-selection task (which runs BEFORE our provisioning ever sees the user)
+ *  park a second same-domain user in a self-created duplicate org: whatever
+ *  org the session carried short-circuited the domain resolution entirely. On
+ *  a mirror miss the session org is now IGNORED and the canonical org is
+ *  resolved by domain — DB index → anchor scan → create (the shared
+ *  resolveCanonicalTeamOrg chain, same as the `user.created` webhook) — then
+ *  mirrored; the mirror write records/heals the `orgs.domain` index too. Once
+ *  mirrored, the user's org never re-keys (ADR-0068's sticky-membership rule,
+ *  unchanged). */
+async function provisionTeam(
+  deps: ProvisionIdentityDeps,
+  identity: ClerkIdentity,
+  domain: string,
+): Promise<Result<UploadActor, AppError>> {
+  if (identity.clerkOrgId) {
+    const mirrored = await deps.identities.findByClerk(identity.clerkUserId, identity.clerkOrgId);
+    if (!mirrored.ok) return mirrored;
+    if (mirrored.value) return ok(toActor(mirrored.value)); // sticky-after-mirror
   }
 
-  return ok({
-    userId: provisioned.userId,
-    orgId: provisioned.orgId,
-    folderId: provisioned.rootFolderId,
-    scopes: SELF_SCOPES,
+  const canonical = await resolveCanonicalTeamOrg(deps, {
+    domain,
+    clerkUserId: identity.clerkUserId,
   });
+  if (!canonical.ok) return canonical;
+
+  // Find-or-create the mirror against the CANONICAL org (idempotent across
+  // requests; a second colleague reuses the same Org row + Root folder,
+  // ADR-0068 §3). `domain` rides along so the org row is indexed/healed even
+  // on the find-or-create path (ADR-0074 set-domain-if-null).
+  const found = await deps.identities.findByClerk(identity.clerkUserId, canonical.value.clerkOrgId);
+  if (!found.ok) return found;
+  if (found.value) return ok(toActor(found.value));
+
+  const created = await deps.identities.createIdentity({
+    clerkUserId: identity.clerkUserId,
+    clerkOrgId: canonical.value.clerkOrgId,
+    email: identity.email,
+    displayName: identity.displayName,
+    orgName: canonical.value.orgName,
+    kind: "team",
+    domain,
+  });
+  if (!created.ok) return created;
+  return ok(toActor(created.value));
 }

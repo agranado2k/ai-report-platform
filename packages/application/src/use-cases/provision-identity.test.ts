@@ -100,7 +100,12 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
       async findPersonalOrg(): Promise<Result<string | null, AppError>> {
         return err({ kind: "Unexpected", message: "clerk down" });
       },
-      async findTeamOrgByDomain(): Promise<Result<string | null, AppError>> {
+      async verifyOrgAnchor(): Promise<Result<void, AppError>> {
+        return err({ kind: "Unexpected", message: "clerk down" });
+      },
+      async findOrgByAnchorScan(): Promise<
+        Result<{ clerkOrgId: string; name: string } | null, AppError>
+      > {
         return err({ kind: "Unexpected", message: "clerk down" });
       },
       async createTeamOrg(): Promise<Result<string, AppError>> {
@@ -182,7 +187,7 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
       expect(d.clerkOrgs.membershipCalls).toHaveLength(2);
     });
 
-    it("propagates a team-org lookup failure", async () => {
+    it("propagates a team-org anchor-scan failure", async () => {
       const failing: ClerkOrgProvisioner = {
         async createPersonalOrg(): Promise<Result<string, AppError>> {
           return err({ kind: "Unexpected", message: "unused" });
@@ -190,7 +195,12 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
         async findPersonalOrg(): Promise<Result<string | null, AppError>> {
           return err({ kind: "Unexpected", message: "unused" });
         },
-        async findTeamOrgByDomain(): Promise<Result<string | null, AppError>> {
+        async verifyOrgAnchor(): Promise<Result<void, AppError>> {
+          return err({ kind: "Unexpected", message: "unused" });
+        },
+        async findOrgByAnchorScan(): Promise<
+          Result<{ clerkOrgId: string; name: string } | null, AppError>
+        > {
           return err({ kind: "Unexpected", message: "clerk down" });
         },
         async createTeamOrg(): Promise<Result<string, AppError>> {
@@ -225,6 +235,109 @@ describe("provisionIdentity (ADR-0048 JIT provisioning, extended by ADR-0068 dom
       const r = await provisionIdentity(d, secondAtDomain);
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.kind).toBe("Unexpected");
+    });
+  });
+
+  describe("sticky-after-mirror session-org policy (ADR-0074)", () => {
+    it("IGNORES a non-canonical session-carried org on mirror miss — the user lands in the canonical domain org", async () => {
+      // The production bug this closes: Clerk's forced org-selection task runs
+      // BEFORE our provisioning, so a second same-domain user arrives with a
+      // freshly self-created duplicate org in their session. The old blanket
+      // session-org trust short-circuited the domain branch and mirrored the
+      // duplicate; now the mirror-miss path re-resolves by domain.
+      const d = deps();
+      const first = await provisionIdentity(d, firstAtDomain); // canonical org exists
+      const second = await provisionIdentity(d, {
+        ...secondAtDomain,
+        clerkOrgId: clerkOrgId("org_selfmade_duplicate"), // the forced task's duplicate
+      });
+
+      expect(first.ok && second.ok).toBe(true);
+      if (!first.ok || !second.ok) return;
+      expect(second.value.orgId).toBe(first.value.orgId); // canonical, NOT the duplicate
+      expect(second.value.folderId).toBe(first.value.folderId);
+      // The duplicate org was never mirrored.
+      const dupe = await d.identities.findOrgByClerkOrgId("org_selfmade_duplicate");
+      expect(dupe.ok && dupe.value).toBeNull();
+      // And the user was joined to the canonical Clerk org.
+      expect(d.clerkOrgs.membershipCalls).toEqual([
+        { clerkOrgId: "clerk-team-org-housenumbers.io", clerkUserId: "u_dave" },
+      ]);
+    });
+
+    it("stays sticky once mirrored: a session carrying the mirrored org short-circuits (no re-resolution)", async () => {
+      const d = deps();
+      await provisionIdentity(d, firstAtDomain);
+      const joined = await provisionIdentity(d, secondAtDomain);
+      expect(joined.ok).toBe(true);
+      const membershipCallsBefore = d.clerkOrgs.membershipCalls.length;
+
+      const repeat = await provisionIdentity(d, {
+        ...secondAtDomain,
+        clerkOrgId: clerkOrgId("clerk-team-org-housenumbers.io"),
+      });
+
+      expect(repeat.ok).toBe(true);
+      if (repeat.ok && joined.ok) expect(repeat.value.orgId).toBe(joined.value.orgId);
+      // Sticky path — the canonical chain (and its membership call) never ran.
+      expect(d.clerkOrgs.membershipCalls.length).toBe(membershipCallsBefore);
+    });
+
+    it("adopts an existing unmirrored Clerk org via the anchor scan (the House Numbers shape)", async () => {
+      const d = deps();
+      // Clerk org exists (anchor backfilled), but NO DB row mirrors it yet.
+      d.clerkOrgs.addClerkOrg("org_hn_live", { name: "House Numbers", anchor: "housenumbers.io" });
+
+      const r = await provisionIdentity(d, firstAtDomain);
+
+      expect(r.ok).toBe(true);
+      expect(d.clerkOrgs.teamOrgCalls).toHaveLength(0); // adopted, never created
+      expect(d.clerkOrgs.membershipCalls).toEqual([
+        { clerkOrgId: "org_hn_live", clerkUserId: "u_carol" },
+      ]);
+      // The adoption recorded the org row into the domain index.
+      const indexed = await d.identities.findTeamOrgByDomain("housenumbers.io");
+      expect(indexed.ok && indexed.value?.clerkOrgId).toBe("org_hn_live");
+    });
+
+    it("heals a pre-index org row (null domain) on the next same-domain provision", async () => {
+      const d = deps();
+      // A pre-0018 mirror: carol was provisioned into org_hn_live before the
+      // domain column existed — org row present, domain null.
+      d.clerkOrgs.addClerkOrg("org_hn_live", { name: "House Numbers", anchor: "housenumbers.io" });
+      const legacy = await d.identities.createIdentity({
+        clerkUserId: "u_carol",
+        clerkOrgId: "org_hn_live",
+        email: "carol@housenumbers.io",
+        displayName: "Carol Chen",
+        orgName: "House Numbers",
+        kind: "team",
+      });
+      expect(legacy.ok).toBe(true);
+      expect((await d.identities.findTeamOrgByDomain("housenumbers.io")).ok).toBe(true);
+
+      const r = await provisionIdentity(d, secondAtDomain);
+
+      expect(r.ok).toBe(true);
+      if (r.ok && legacy.ok) expect(r.value.orgId).toBe(legacy.value.orgId); // same org
+      const healed = await d.identities.findTeamOrgByDomain("housenumbers.io");
+      expect(healed.ok && healed.value?.clerkOrgId).toBe("org_hn_live");
+    });
+
+    it("FAILS CLOSED when the DB index points at a Clerk org whose anchor mismatches", async () => {
+      const d = deps();
+      // Index says org_evil owns the domain, but the Clerk org anchors nothing.
+      d.clerkOrgs.addClerkOrg("org_evil", { name: "Evil", anchor: null });
+      await d.identities.upsertTeamOrg({
+        clerkOrgId: "org_evil",
+        name: "Evil",
+        domain: "housenumbers.io",
+      });
+
+      const r = await provisionIdentity(d, firstAtDomain);
+
+      expect(r.ok).toBe(false);
+      expect(d.clerkOrgs.membershipCalls).toHaveLength(0); // never joined
     });
   });
 });

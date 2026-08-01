@@ -73,13 +73,32 @@ If this fixture is ever lost (Clerk instance reset, account deleted — cf. the
 ADR-0049 instance-hygiene incident) — recreate it exactly as above and treat any
 drift as a **fixture bug**, not a test bug (ADR-0068 §6's explicit call).
 
-> **One-time cleanup after PR #158's review wave:** the team-org slug scheme
-> gained a domain-hash suffix (review #158 C-1), so any `agranado-com` Clerk
-> org JIT-created on the dev instance under the OLD scheme is now stale —
-> lookups use the new slug and the old org would leave the fixture user with
-> a divergent oldest-membership. Delete the old `agranado-com` org in the dev
-> Clerk dashboard; the next fixture sign-in re-provisions under the new slug
-> (with the `publicMetadata.domain` anchor the join guard requires).
+> **Slug-scheme note (superseded by ADR-0074):** the PR #158 domain-hash slug
+> scheme is retired — team orgs are no longer looked up by slug at all. The
+> join key is the app-owned `orgs.domain` DB index; the Clerk-side identity
+> check is the `publicMetadata.domain` anchor (verified fail-closed), with a
+> bounded anchor scan adopting any pre-index org. An old anchorless
+> `agranado-com` org on the dev instance is simply never matched (the scan
+> requires an exact anchor); the chain creates a fresh anchored org instead —
+> no manual cleanup required, though deleting stale orgs keeps the dashboard
+> tidy.
+
+## Run-scoped team fixtures (ADR-0074, same-domain colleagues)
+
+The `Two same-domain identities share one team org` scenario in
+`tests/e2e/smoke/team-org-upload.feature` uses a PAIR of **run-scoped** identities —
+`silver-<runId>+clerk_test@agranado.com` / `gold-<runId>+clerk_test@agranado.com`
+(`runScopedTeamEmail` in `tests/e2e/support/clerk-session.ts`; `runId` fixed at worker
+start) — proving both land in ONE org (the assertion the pre-ADR-0074 smoke
+deliberately dodged).
+
+| | |
+|---|---|
+| Why run-scoped (PR #222 round 3) | The per-PR Neon branch persists across pushes and forks from **prod** data — and a REUSED fixture can carry a poisoned mirror from an earlier run / older code (the original `silver` fixture is mirrored to its legacy hand-made "Ag47 Org" via historical ADR-0047 soft-isolation-window writes). ADR-0074's **sticky-after-mirror** policy then CORRECTLY honors that mirror forever, masking the canonical chain the scenario exists to prove. A user that didn't exist before this run cannot be mirrored anywhere, on any branch state. |
+| Provisioning | **Programmatic, code-not-clicked**: `ensureTeamFixtureUser()` find-or-creates each Clerk user via the Backend API (`+clerk_test` test-mode addresses — no real inbox; the domain needn't receive mail). If the instance ever restricts Backend-API user creation, this scenario cannot run — fail-loud, no silent skip. |
+| Decoy org (`arp-e2e-decoy-<localpart>`) | The dev instance runs `force_organization_selection: true` (same as prod), and Clerk gives a **zero-membership** user a `pending` session (task `choose-organization`) whose JWT carries `sts: "pending"` — @clerk/backend treats that as signed-out, so every request 401s (the PR #222 round-2 failure). In prod the ADR-0074 webhook pre-joins the user; e2e previews get no webhook, so the helper creates what the forced task itself would: an **anchorless decoy org** with the user as creator. Sessions then mint `active` — and since Clerk auto-activates the sole membership, the session actively CARRIES the decoy, faithfully reproducing the production duplicate-org shape: the app must ignore it (no `publicMetadata.domain`, so the anchor scan never adopts it) and land the user in the canonical domain org. |
+| Assertion mechanics | Two-fold. (1) Clerk-side: after the second identity's first upload, the step asserts it holds a membership in the **anchored** `agranado.com` org (`findAnchoredOrgMembership` — BAPI read; absence fails loud, proving the canonical chain didn't join). (2) App-side: its session is **re-minted with that org active** (`POST /v1/sessions` `active_organization_id`, verified against the live BAPI — the v2 token's `o.id` claim reaches the app's `getAuth` as the session org, exactly like a browser session after the forced task's org selection), then a bare `GET /api/v1/reports` must list BOTH identities' uploads. A session *without* an active org can't be used for the read: the read path resolves an org-less session via the user's *oldest* membership — the unmirrored decoy. NOT `POST /settings/api-keys`: that dashboard action is cookie-session territory — a Bearer-token POST gets redirected to the sign-in HTML (the PR #222 round-2 failure). |
+| Cleanup / accumulation | An `After({ tags: "@run-scoped" })` hook best-effort deletes both users (removing their canonical-org memberships — the shared anchored org's member count stays flat; the dev instance cap was raised 5 → 20 to match prod) and their decoy orgs after every attempt, pass or fail. Cleanup failures log loudly but never fail the scenario; leaked users/orgs from crashed runs accumulate slowly on the (test-only) dev instance — a periodic sweep is a noted follow-up. |
 
 ## Authenticated-browser scenarios (`@browser`)
 

@@ -13,6 +13,7 @@ import type {
 import { folders, orgs, users } from "arp-db/schema";
 import {
   type AppError,
+  conflict,
   err,
   folderId,
   normalizeEmailAddress,
@@ -72,6 +73,87 @@ export class DrizzleIdentityStore implements IdentityStore {
     }
   }
 
+  async findTeamOrgByDomain(
+    domain: string,
+  ): Promise<Result<{ orgId: OrgId; clerkOrgId: string } | null, AppError>> {
+    try {
+      // The app-owned domain index (ADR-0074): `orgs.domain` is the canonical
+      // team-org join key (Clerk organization-domains is 402-gated on the free
+      // plan). A miss means either nobody at this domain is provisioned or the
+      // row predates migration 0018 (caller falls through to the anchor scan).
+      const [o] = await this.ctx
+        .current()
+        .select({ id: orgs.id, clerkOrgId: orgs.clerkOrgId })
+        .from(orgs)
+        .where(eq(orgs.domain, domain.toLowerCase()))
+        .limit(1);
+      return ok(o ? { orgId: orgId(o.id), clerkOrgId: o.clerkOrgId } : null);
+    } catch (e) {
+      return thrown("identity.findTeamOrgByDomain", e);
+    }
+  }
+
+  async upsertTeamOrg(input: {
+    readonly clerkOrgId: string;
+    readonly name: string;
+    readonly domain: string;
+  }): Promise<Result<{ orgId: OrgId }, AppError>> {
+    try {
+      // The webhook's org-only write (ADR-0074): find-or-create the Org row
+      // (kind `team`) + its Root folder; the USER row still mirrors at first
+      // write (ADR-0048). On a clerk_org_id conflict the existing row wins and
+      // COALESCE sets `domain` ONLY if currently null — the set-domain-if-null
+      // heal for pre-0018 rows (House Numbers) — never re-keying a domained row.
+      const provisioned = await this.ctx.run(async () => {
+        const db = this.ctx.current();
+        await db
+          .insert(orgs)
+          .values({
+            id: uuidv7(),
+            clerkOrgId: input.clerkOrgId,
+            name: input.name,
+            kind: "team",
+            domain: input.domain.toLowerCase(),
+            planLimitsJson: {},
+          })
+          .onConflictDoUpdate({
+            target: orgs.clerkOrgId,
+            set: {
+              domain: sql`coalesce(${orgs.domain}, excluded.domain)`,
+              updatedAt: new Date(),
+            },
+          });
+        const [o] = await db
+          .select({ id: orgs.id })
+          .from(orgs)
+          .where(eq(orgs.clerkOrgId, input.clerkOrgId))
+          .limit(1);
+        if (!o) throw new Error("org missing after upsert");
+
+        // Root-folder invariant (same find-or-create as createIdentity).
+        let root = await this.rootFolderId(o.id);
+        if (!root) {
+          await db
+            .insert(folders)
+            .values({ id: uuidv7(), orgId: o.id, name: "Root", slug: "root", parentId: null })
+            .onConflictDoNothing();
+          root = await this.rootFolderId(o.id);
+        }
+        if (!root) throw new Error("root folder missing after insert");
+        return { orgId: orgId(o.id) };
+      });
+      return ok(provisioned);
+    } catch (e) {
+      // A 23505 on orgs_domain_uniq = a DIFFERENT org row already owns the
+      // domain (the concurrent same-domain first-sign-up race). Typed Conflict
+      // so the caller re-reads the index and joins the winner (ADR-0074).
+      if (isDomainUniqueViolation(e)) {
+        return err(conflict(`domain "${input.domain}" already belongs to another org`));
+      }
+      return thrown("identity.upsertTeamOrg", e);
+    }
+  }
+
   async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
@@ -79,6 +161,7 @@ export class DrizzleIdentityStore implements IdentityStore {
     readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
+    readonly domain?: string | null;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     try {
       // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054). A
@@ -129,18 +212,30 @@ export class DrizzleIdentityStore implements IdentityStore {
 
         // Org: find-or-create by clerk_org_id (Plan defaults to `free`). `kind`
         // is set only on first creation (ADR-0068 §3) — a JIT join to an
-        // existing team org hits the onConflictDoNothing branch and the
-        // existing row's kind (set by whoever created it) is left untouched.
-        await db
-          .insert(orgs)
-          .values({
-            id: uuidv7(),
-            clerkOrgId: input.clerkOrgId,
-            name: input.orgName,
-            kind: input.kind,
-            planLimitsJson: {},
-          })
-          .onConflictDoNothing();
+        // existing team org hits the on-conflict branch and the existing row's
+        // kind (set by whoever created it) is left untouched. A team `domain`
+        // (ADR-0074) is recorded on creation; on conflict COALESCE sets it
+        // ONLY if currently null (the same set-domain-if-null heal as
+        // upsertTeamOrg). Personal provisions (no domain) keep the pure
+        // do-nothing conflict path — zero write churn on re-provision.
+        const domain = input.domain ? input.domain.toLowerCase() : null;
+        const orgInsert = db.insert(orgs).values({
+          id: uuidv7(),
+          clerkOrgId: input.clerkOrgId,
+          name: input.orgName,
+          kind: input.kind,
+          domain,
+          planLimitsJson: {},
+        });
+        await (domain
+          ? orgInsert.onConflictDoUpdate({
+              target: orgs.clerkOrgId,
+              set: {
+                domain: sql`coalesce(${orgs.domain}, excluded.domain)`,
+                updatedAt: new Date(),
+              },
+            })
+          : orgInsert.onConflictDoNothing());
         const [o] = await db
           .select({ id: orgs.id })
           .from(orgs)
@@ -164,6 +259,11 @@ export class DrizzleIdentityStore implements IdentityStore {
       });
       return ok(provisioned);
     } catch (e) {
+      // Same typed race signal as upsertTeamOrg (ADR-0074): another org row
+      // already owns this domain → caller re-resolves via the index.
+      if (isDomainUniqueViolation(e)) {
+        return err(conflict(`domain "${input.domain}" already belongs to another org`));
+      }
       return thrown("identity.createIdentity", e);
     }
   }
@@ -298,6 +398,28 @@ export class DrizzleIdentityStore implements IdentityStore {
       .limit(1);
     return f?.id;
   }
+}
+
+/** Whether a thrown DB error is a unique violation on `orgs_domain_uniq`
+ *  (ADR-0074's partial unique index). Postgres surfaces code 23505 with the
+ *  constraint name; drivers (neon-serverless, pglite) may wrap the error, so
+ *  walk `cause` and fall back to a message match on the index name. */
+function isDomainUniqueViolation(e: unknown): boolean {
+  let current: unknown = e;
+  for (let depth = 0; depth < 5 && current !== null && typeof current === "object"; depth += 1) {
+    const candidate = current as {
+      code?: unknown;
+      constraint?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    const constraint = typeof candidate.constraint === "string" ? candidate.constraint : "";
+    const message = typeof candidate.message === "string" ? candidate.message : "";
+    if (candidate.code === "23505" && constraint === "orgs_domain_uniq") return true;
+    if (message.includes("orgs_domain_uniq")) return true;
+    current = candidate.cause;
+  }
+  return false;
 }
 
 function thrown(op: string, e: unknown): Result<never, AppError> {

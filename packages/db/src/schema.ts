@@ -69,6 +69,13 @@ export const orgs = pgTable(
     // (corporate-domain, multi-member by design). Default `personal` makes the
     // migration backfill-free and behavior-neutral for every existing org.
     kind: orgKindEnum("kind").notNull().default("personal"),
+    // ADR-0074: the app-owned team-org join key — the lowercased email domain
+    // (e.g. "housenumbers.io") for `team` orgs; NULL for personal orgs and for
+    // team rows mirrored before this column existed (healed set-if-null on
+    // first touch). Clerk's organization-domains feature is 402-gated on the
+    // free plan, so THIS column (with the partial unique index below) is the
+    // one-domain-one-org invariant, not Clerk.
+    domain: text("domain"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
@@ -77,6 +84,11 @@ export const orgs = pgTable(
     uniqueIndex("orgs_clerk_org_id_uniq").on(t.clerkOrgId),
     index("orgs_plan_idx").on(t.plan),
     index("orgs_kind_idx").on(t.kind),
+    // One org per domain (ADR-0074) — partial so the many NULLs (personal orgs,
+    // unhealed pre-migration rows) never collide. This index is what closes the
+    // concurrent same-domain-first-sign-up race: the losing insert gets a 23505
+    // and re-reads + joins the winner.
+    uniqueIndex("orgs_domain_uniq").on(t.domain).where(sql`${t.domain} is not null`),
   ],
 );
 

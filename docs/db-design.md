@@ -83,12 +83,13 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | `clerk_org_id` | text | unique; mirror of Clerk org |
 | `name` | text | |
 | `kind` | `org_kind` | `personal` / `team` (ADR-0061/0068); default `personal`; set at JIT provisioning by the domain rule (migration `0014`) |
+| `domain` | text NULL | the team-org join key (ADR-0074): the lowercased email domain for `team` orgs, written on `user.created` webhook adopt/create or first-write JIT; NULL for personal orgs and pre-0018 team rows (healed set-if-null on first touch). App-owned one-domain-one-org invariant — Clerk organization-domains is 402-gated on the free plan (migration `0018`) |
 | `plan` | `plan` | default `free` |
 | `plan_limits_json` | jsonb | quota ceilings (`PlanLimits`, ADR-006) |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | soft delete |
 
-Indexes: `clerk_org_id` unique, `plan`, `kind`.
+Indexes: `clerk_org_id` unique, `plan`, `kind`, `domain` partial unique (`WHERE domain IS NOT NULL`, ADR-0074 — closes the concurrent same-domain first-sign-up race: the losing insert re-reads and joins the winner).
 
 #### `users` — mirror of Clerk
 | Column | Type | Notes |

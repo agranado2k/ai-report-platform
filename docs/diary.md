@@ -3228,3 +3228,33 @@ branch `refactor/write-front-door`):
   from a plaintext password; never replay a secret — a replayed mint returns `token: null`).
 - ADR-0070's magic-link exclusion stands (no org-shaped actor at those call sites) — audit for
   sendMagicLink/redeemMagicLink stays a flagged follow-up, per ADR-0070 §4.
+
+### 2026-08-01 — Silent domain auto-join ships free-tier (ADR-0074): the DB domain index replaces slug keying
+
+The ADR-0068 promise ("same-domain sign-ups share one org") was broken in prod twice over, verified
+live: the slug-keyed team-org lookup was dead code (`slug_disabled: true` — Clerk auto-generates
+slugs, so the deterministic slug can never exist), and the blanket session-org trust let Clerk's
+forced org-selection task (which runs BEFORE our JIT provisioning) park `processing@housenumbers.io`
+in a duplicate org. The natural Clerk fix — organization domains — **402s on the free plan** (it's
+the $100/mo B2B Authentication add-on; Pro at $25/mo doesn't include it). Nothing we need is paid,
+so ADR-0074 lands the free-tier architecture in worktree `worktree/domain-auto-join`
+(branch `feat/domain-auto-join`):
+
+- **`orgs.domain` + partial unique index (migration 0018)** is the canonical one-domain-one-org
+  join key; Clerk-side identity is the `publicMetadata.domain` anchor, verified fail-closed before
+  any join. Slug keying deleted; the fake now models anchorless orgs (the representability gap that
+  hid the bug).
+- **One resolution chain** (`resolveCanonicalTeamOrg`: DB index → bounded anchor scan (adopt, ≤200
+  orgs) → create; Conflict → join the race winner) shared by the new `user.created` webhook branch
+  and first-write JIT. The webhook pre-grants membership so the forced task becomes
+  select-not-create; primary VERIFIED email only; membership-cap → typed `PlanLimitExceeded` →
+  200 + warn (retries can't raise a plan cap). Recorded ADR-0048 deviation: the ORG row is written
+  at webhook time (it IS the index); the USER row still mirrors at first write.
+- **Sticky-after-mirror**: a team user's session org is honored only once the (user, org) pair is
+  mirrored; on a mirror miss the canonical chain runs and the session org is ignored.
+- **Heals in place**: pre-index rows (House Numbers) get set-domain-if-null on first touch or are
+  adopted by the anchor scan on the next same-domain sign-up — no manual SQL.
+- e2e smoke now ASSERTS two same-domain identities share one org (third programmatic fixture
+  `gold+clerk_test@agranado.com`); the old "either outcome is a pass" gap is closed.
+- Config (applied live, free): instance default membership limit raised 5 → 20. Operator step
+  remaining: add `user.created` to the Svix endpoint filter (dashboard-only; docs/infra.md).

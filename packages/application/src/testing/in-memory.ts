@@ -8,6 +8,7 @@ import {
   type AppError,
   type Comment,
   type CommentId,
+  conflict,
   type DomainEvent,
   err,
   type Folder,
@@ -729,6 +730,10 @@ export class InMemoryIdentityStore implements IdentityStore {
   /** Test-only introspection: the `kind` each mirrored org was created with
    *  (ADR-0068 §3), keyed by our internal OrgId. */
   readonly kindByOrgId = new Map<OrgId, OrgKind>();
+  /** The app-owned domain index (`orgs.domain`, ADR-0074) — at most one OrgId
+   *  per domain, mirroring the partial unique index. Exposed for test
+   *  introspection (the set-domain-if-null heal assertions). */
+  readonly domainByOrgId = new Map<OrgId, string>();
   private seq = 0;
 
   private key(clerkUserId: string, clerkOrgId: string): string {
@@ -747,6 +752,51 @@ export class InMemoryIdentityStore implements IdentityStore {
     return ok(this.orgByClerkOrgId.get(clerkOrgId) ?? null);
   }
 
+  async findTeamOrgByDomain(
+    domain: string,
+  ): Promise<Result<{ orgId: OrgId; clerkOrgId: string } | null, AppError>> {
+    const normalized = domain.toLowerCase();
+    for (const [clerkOrgId, orgIdValue] of this.orgByClerkOrgId) {
+      if (this.domainByOrgId.get(orgIdValue) === normalized) {
+        return ok({ orgId: orgIdValue, clerkOrgId });
+      }
+    }
+    return ok(null);
+  }
+
+  async upsertTeamOrg(input: {
+    readonly clerkOrgId: string;
+    readonly name: string;
+    readonly domain: string;
+  }): Promise<Result<{ orgId: OrgId }, AppError>> {
+    const domain = input.domain.toLowerCase();
+    const owner = [...this.domainByOrgId.entries()].find(([, d]) => d === domain)?.[0] ?? null;
+
+    const existing = this.orgByClerkOrgId.get(input.clerkOrgId);
+    if (existing) {
+      // set-domain-if-null heal — never re-key an already-domained row, and
+      // never claim a domain another row owns (the partial unique index).
+      if (!this.domainByOrgId.has(existing)) {
+        if (owner !== null && owner !== existing) {
+          return err(conflict(`domain "${domain}" already belongs to another org`));
+        }
+        this.domainByOrgId.set(existing, domain);
+      }
+      return ok({ orgId: existing });
+    }
+
+    if (owner !== null) {
+      return err(conflict(`domain "${domain}" already belongs to another org`));
+    }
+    this.seq += 1;
+    const orgIdValue = makeOrgId(`org-${this.seq}`);
+    this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
+    this.rootFolderByOrgId.set(orgIdValue, makeFolderId(`folder-${this.seq}`));
+    this.kindByOrgId.set(orgIdValue, "team");
+    this.domainByOrgId.set(orgIdValue, domain);
+    return ok({ orgId: orgIdValue });
+  }
+
   async createIdentity(input: {
     readonly clerkUserId: string;
     readonly clerkOrgId: string;
@@ -754,6 +804,7 @@ export class InMemoryIdentityStore implements IdentityStore {
     readonly displayName: string | null;
     readonly orgName: string;
     readonly kind: OrgKind;
+    readonly domain?: string | null;
   }): Promise<Result<ProvisionedIdentity, AppError>> {
     // Deletion is terminal — never resurrect a soft-deleted user (ADR-0054).
     if (this.deleted.has(input.clerkUserId)) {
@@ -764,17 +815,21 @@ export class InMemoryIdentityStore implements IdentityStore {
     const existing = this.byClerk.get(this.key(input.clerkUserId, input.clerkOrgId));
     if (existing) {
       this.seedUser(existing.userId, input.email, input.displayName);
+      this.recordDomainIfNull(existing.orgId, input.domain);
       return ok(existing);
     }
 
     // Org: find-or-create by clerkOrgId — a JIT team-org join (ADR-0068 §3)
     // reuses the SAME org + root folder a previous colleague's sign-up already
     // created; `kind` is recorded only on first creation, mirroring the real
-    // Drizzle adapter's onConflictDoNothing semantics.
+    // Drizzle adapter's onConflictDoNothing semantics. A team `domain` is
+    // recorded on creation and set-if-null on an existing row (ADR-0074 heal),
+    // mirroring upsertTeamOrg.
     let orgIdValue = this.orgByClerkOrgId.get(input.clerkOrgId);
     let rootFolderIdValue: FolderId;
     if (orgIdValue) {
       rootFolderIdValue = this.rootFolderByOrgId.get(orgIdValue) as FolderId;
+      this.recordDomainIfNull(orgIdValue, input.domain);
     } else {
       this.seq += 1;
       orgIdValue = makeOrgId(`org-${this.seq}`);
@@ -782,6 +837,7 @@ export class InMemoryIdentityStore implements IdentityStore {
       this.orgByClerkOrgId.set(input.clerkOrgId, orgIdValue);
       this.rootFolderByOrgId.set(orgIdValue, rootFolderIdValue);
       this.kindByOrgId.set(orgIdValue, input.kind);
+      this.recordDomainIfNull(orgIdValue, input.domain);
     }
 
     this.seq += 1;
@@ -826,6 +882,16 @@ export class InMemoryIdentityStore implements IdentityStore {
     const resolved = this.userIdByEmail.get(email.trim().toLowerCase()) ?? null;
     if (resolved !== null && this.isDeletedUser(resolved)) return ok(null); // ADR-0054
     return ok(resolved);
+  }
+
+  /** Record a team org's domain into the index ONLY when the row has none yet
+   *  and no other row owns it (mirrors the real adapter's COALESCE + partial
+   *  unique index; ADR-0074 set-domain-if-null heal). */
+  private recordDomainIfNull(orgIdValue: OrgId, domain: string | null | undefined): void {
+    if (!domain || this.domainByOrgId.has(orgIdValue)) return;
+    const normalized = domain.toLowerCase();
+    for (const d of this.domainByOrgId.values()) if (d === normalized) return; // owned elsewhere
+    this.domainByOrgId.set(orgIdValue, normalized);
   }
 
   /** Whether this internal UserId belongs to a soft-deleted Clerk user. */
@@ -1048,19 +1114,30 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
   }
 }
 
-/** Fake Clerk org creator — returns a deterministic id and records its calls. */
+/** Fake Clerk org provisioner (ADR-0074 surface) — models Clerk-side orgs as
+ *  `{ name, anchor }` records keyed by Clerk org id. Crucially an org CAN
+ *  exist WITHOUT a `publicMetadata.domain` anchor (`anchor: null`) — the
+ *  representability gap the old domain-Map keying couldn't express, which is
+ *  exactly what hid the dead slug lookup in production. */
 export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
   readonly calls: { readonly clerkUserId: string; readonly name: string }[] = [];
   /** When set, findPersonalOrg resolves to this org id; null means "no org yet". */
   personalOrgId: string | null = null;
 
-  /** domain → existing team org's Clerk id (ADR-0068 §3). Set a domain here
-   *  BEFORE calling to simulate "a colleague already created this team org";
-   *  `createTeamOrg` also registers here, so a second call in the same test
-   *  (simulating a second colleague) finds what the first created. */
-  readonly teamOrgsByDomain = new Map<string, string>();
+  /** The Clerk instance's orgs: id → { name, anchor }. Seed via addClerkOrg()
+   *  to simulate pre-existing orgs (with or without an anchor);
+   *  `createTeamOrg` registers here too. */
+  readonly clerkOrgRecords = new Map<string, { name: string; anchor: string | null }>();
   readonly teamOrgCalls: { readonly domain: string; readonly createdBy: string }[] = [];
   readonly membershipCalls: { readonly clerkOrgId: string; readonly clerkUserId: string }[] = [];
+  /** Test toggle: ensureMembership fails with the typed member-cap error
+   *  (ADR-0074 — the webhook acks it instead of retrying). */
+  memberCapReached = false;
+
+  /** Seed a Clerk-side org (optionally anchorless — the pre-anchor legacy shape). */
+  addClerkOrg(id: string, org: { name?: string; anchor?: string | null } = {}): void {
+    this.clerkOrgRecords.set(id, { name: org.name ?? id, anchor: org.anchor ?? null });
+  }
 
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     this.calls.push({ clerkUserId, name });
@@ -1071,18 +1148,44 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
     return ok(this.personalOrgId);
   }
 
-  async findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>> {
-    return ok(this.teamOrgsByDomain.get(domain) ?? null);
+  async verifyOrgAnchor(clerkOrgId: string, domain: string): Promise<Result<void, AppError>> {
+    // Fail-closed like the real adapter: missing org, null anchor, and
+    // mismatched anchor are all refusals (ADR-0074 tenant-boundary guard).
+    const org = this.clerkOrgRecords.get(clerkOrgId);
+    if (!org || org.anchor !== domain.toLowerCase()) {
+      return err({
+        kind: "Unexpected",
+        message: `team-org anchor mismatch for domain "${domain}" on ${clerkOrgId} — refusing to join`,
+      });
+    }
+    return ok(undefined);
+  }
+
+  async findOrgByAnchorScan(
+    domain: string,
+  ): Promise<Result<{ clerkOrgId: string; name: string } | null, AppError>> {
+    // Exact anchor match only — an anchorless org is never adoptable.
+    for (const [id, org] of this.clerkOrgRecords) {
+      if (org.anchor === domain.toLowerCase()) return ok({ clerkOrgId: id, name: org.name });
+    }
+    return ok(null);
   }
 
   async createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>> {
     this.teamOrgCalls.push({ domain, createdBy });
-    const id = `clerk-team-org-${domain}`;
-    this.teamOrgsByDomain.set(domain, id);
+    const normalized = domain.toLowerCase();
+    const id = `clerk-team-org-${normalized}`;
+    this.clerkOrgRecords.set(id, { name: normalized, anchor: normalized });
     return ok(id);
   }
 
   async ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>> {
+    if (this.memberCapReached) {
+      return err({
+        kind: "PlanLimitExceeded",
+        message: `clerk org ${clerkOrgId} is at its membership cap`,
+      });
+    }
     this.membershipCalls.push({ clerkOrgId, clerkUserId });
     return ok(undefined);
   }
