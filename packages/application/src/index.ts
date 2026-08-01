@@ -19,6 +19,7 @@ export * from "./use-cases/get-acl";
 export * from "./use-cases/get-report";
 export * from "./use-cases/get-report-acl";
 export * from "./use-cases/grant-write";
+export * from "./use-cases/handle-user-created";
 export * from "./use-cases/handle-user-deleted";
 export * from "./use-cases/list-api-keys";
 export * from "./use-cases/list-comments";
