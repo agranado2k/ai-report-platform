@@ -41,3 +41,12 @@ With ADR-0059, only the owner can modify a report. The target model needs the ow
 ## More information
 
 Implementation: `WriteGrantStore` port modeled on `GrantStore` (`ports.ts`), Drizzle adapter + in-memory fake + port-contract suite (ADR-0046 tiers), `grantWrite`/`revokeWrite`/`listWriteGrants` use cases, the `canWrite` extension for `rename`/`reUpload`/`move`. Glossary: **Write grant** added; **Collaborator**/**Grant level** marked superseded.
+
+**Note (2026-08-01) — grant responses carry the editor entry URL.** Grants stay silent (no
+notification email — that deferral stands, tracked as issue #227), but silence plus the raw-served
+viewer's lack of Edit chrome left a grantee with no road into the in-viewer editor (ADR-0063). The
+grant (create) response — `POST …/write-grants` and the MCP `reports_grant_write` result — now
+carries `open_url` (`{appOrigin}/reports/{slug}/open`, the app's canWrite edit-token mint), so the
+granting owner has a link to send the grantee. Additive wire change (`WriteGrantWire.open_url`,
+optional; absent on list entries). A "Shared with you" dashboard listing for cross-org grantees is
+issue #226.

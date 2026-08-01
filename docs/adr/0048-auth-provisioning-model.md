@@ -50,6 +50,20 @@ B. **Clerk Personal Accounts** (no org for solo users) — avoids MRO cost, but 
 - First authenticated request pays a one-time provisioning cost (Clerk org create + mirror); subsequent requests are a single lookup.
 - No webhook means our mirror can drift from Clerk on out-of-band changes (email edits, deletions) until the deferred sync layer lands.
 
+## Amendment (2026-08-01) — reads lazily provision on a mirror miss
+
+The original decision provisioned on WRITE only; reads resolved an unmirrored identity to
+`ok(null)` (empty dashboard). That denied genuine org members who have only ever viewed: with no
+`users` mirror row, `findByClerk` misses, the dashboard's read actor is null, and the
+`/reports/{slug}/open` edit-token mint is unreachable — review #150 H-1 already fixed this exact
+class for the org-mode viewer unlock ("do NOT require a mirrored users row"), and this amendment
+generalizes it to the read door. **The session read door now falls through to the SAME
+`provisionIdentity` as the write door when the mirror lookup misses and the session carries the
+email claim** (one-time write on first read; steady-state reads stay pure lookups; a session
+without the email claim still resolves to `ok(null)` — reads never 401 there). Post-ADR-0074,
+provisioning converges the user onto the canonical domain org, which is what makes this safe for
+the unmirrored-org-member shape. OAuth/API-key/edit-token reads are unchanged (never provision).
+
 ## More information
 
 Delivered in slices: 1a — `provisionIdentity` use case + `IdentityStore`/`ClerkOrgProvisioner` ports + Drizzle/in-memory adapters (no Clerk wired); 1b — `@clerk/remix`, sign-in/up, `resolveUploadActor`→session, the real Clerk provisioner, drop `DEMO_ACTOR`, testing-token e2e. Tracked by GitHub issue #54. Cost research: Clerk pricing (MRO model), 2026-06.
