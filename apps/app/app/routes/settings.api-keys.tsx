@@ -17,12 +17,14 @@ import {
   Button,
   buttonClass,
   Card,
+  Checkbox,
   CopyButton,
   cx,
   Input,
   KeyIcon,
   PageShell,
 } from "../components";
+import { scopesFromForm } from "../server/api-key-scopes.server";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { appOrigin, ops } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
@@ -73,15 +75,30 @@ export async function action(args: ActionFunctionArgs) {
     return json({ ok: true as const });
   }
 
-  // Default intent: create.
+  // Default intent: create. The scope checkboxes submit as repeated `scopes`
+  // entries; the use case validates the selection against KEY_ISSUABLE_SCOPES
+  // (unknown/empty → 422 rendered by the error card below).
   const name = String(form.get("name") ?? "");
   const created = await ops().createApiKey(
     { userId: actor.value.userId, orgId: actor.value.orgId },
-    { name },
+    { name, scopes: scopesFromForm(form) },
   );
   if (!created.ok) return errorToJson(created.error);
-  return json({ ok: true as const, secret: created.value.token, name: created.value.summary.name });
+  return json({
+    ok: true as const,
+    secret: created.value.token,
+    name: created.value.summary.name,
+    scopes: created.value.summary.scopes,
+  });
 }
+
+// The two KEY_ISSUABLE_SCOPES (ADR-0016) as display literals. NOT imported
+// from arp-domain: this component ships to the browser and the domain barrel
+// pulls node:crypto (signed-token) into the client bundle. Tamper-safety
+// doesn't live here anyway — createApiKey re-validates every selection
+// against KEY_ISSUABLE_SCOPES server-side.
+const REPORTS_WRITE_SCOPE = "reports:write";
+const ACL_WRITE_SCOPE = "acl:write";
 
 function formatDate(ms: number | null): string {
   return ms ? new Date(ms).toLocaleDateString() : "never";
@@ -100,7 +117,7 @@ export default function ApiKeys() {
   // renders nothing rather than an empty secret box.
   const created =
     data && "secret" in data && data.secret
-      ? (data as unknown as { secret: string; name: string })
+      ? (data as unknown as { secret: string; name: string; scopes: readonly string[] })
       : null;
 
   return (
@@ -149,8 +166,8 @@ export default function ApiKeys() {
               <h2 className="text-lg font-semibold text-fg">API keys &amp; MCP tokens</h2>
               <p className="mt-1 max-w-prose text-sm text-muted">
                 Connect AI agents to your reports over the Model Context Protocol. Each key is a
-                bearer token with the <code className="font-mono text-xs">reports:write</code> scope
-                — treat it like a password.
+                bearer token carrying only the scopes you pick when creating it — treat it like a
+                password.
               </p>
             </div>
           </div>
@@ -166,7 +183,8 @@ export default function ApiKeys() {
             </div>
             <p className="mt-2 text-sm text-muted">
               Add Centaur as a connector in Claude Desktop / Code, then paste a key below — the
-              agent can search, upload, organise &amp; publish your reports.
+              agent can search, upload &amp; organise your reports. Sharing them with others needs a
+              key minted with <code className="font-mono text-xs">acl:write</code>.
             </p>
             <div className="mt-3 flex items-center gap-3 rounded-control border border-border bg-bg px-3 py-2 font-mono text-xs">
               <span className="shrink-0 text-subtle">endpoint</span>
@@ -176,15 +194,59 @@ export default function ApiKeys() {
           </div>
 
           <Card className="p-5">
-            <Form method="post" className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <Form method="post" className="flex flex-col gap-4">
               <input type="hidden" name="intent" value="create" />
-              <div className="flex-1">
+              <div>
                 <label htmlFor="name" className="mb-1 block text-sm text-muted">
                   Key name
                 </label>
                 <Input id="name" name="name" placeholder="e.g. mcp-server, ci-uploader" />
               </div>
-              <Button type="submit" variant="primary" disabled={busy}>
+              <fieldset>
+                <legend className="mb-2 block text-sm text-muted">Scopes</legend>
+                <div className="flex flex-col gap-2">
+                  <label
+                    htmlFor="scope-reports-write"
+                    className="flex cursor-pointer items-start gap-2.5 text-sm"
+                  >
+                    <Checkbox
+                      id="scope-reports-write"
+                      name="scopes"
+                      value={REPORTS_WRITE_SCOPE}
+                      defaultChecked
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0">
+                      <code className="font-mono text-xs text-fg">{REPORTS_WRITE_SCOPE}</code>
+                      <span className="text-muted">
+                        {" "}
+                        — upload &amp; manage your reports (default)
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    htmlFor="scope-acl-write"
+                    className="flex cursor-pointer items-start gap-2.5 text-sm"
+                  >
+                    <Checkbox
+                      id="scope-acl-write"
+                      name="scopes"
+                      value={ACL_WRITE_SCOPE}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0">
+                      <code className="font-mono text-xs text-fg">{ACL_WRITE_SCOPE}</code>
+                      <span className="text-muted">
+                        {" "}
+                        — share &amp; manage access — lets MCP agents call{" "}
+                        <code className="font-mono text-xs">reports_set_acl</code> /{" "}
+                        <code className="font-mono text-xs">reports_grant_write</code>
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+              <Button type="submit" variant="primary" disabled={busy} className="self-start">
                 {busy ? "Creating…" : "Create key"}
               </Button>
             </Form>
@@ -205,6 +267,14 @@ export default function ApiKeys() {
               <div className="mt-2 flex items-center gap-3 rounded-control bg-bg p-3">
                 <code className="overflow-x-auto font-mono text-xs text-fg">{created.secret}</code>
                 <CopyButton value={created.secret} className="ml-auto shrink-0" />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-subtle">scopes</span>
+                {created.scopes.map((s) => (
+                  <Badge key={s} tone="brand" className="font-mono">
+                    {s}
+                  </Badge>
+                ))}
               </div>
             </Card>
           ) : null}
@@ -234,6 +304,13 @@ export default function ApiKeys() {
                     </div>
                     <div className="text-xs text-subtle">
                       created {formatDate(k.createdAt)} · last used {formatDate(k.lastUsedAt)}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {k.scopes.map((s) => (
+                        <Badge key={s} tone="neutral" className="font-mono">
+                          {s}
+                        </Badge>
+                      ))}
                     </div>
                   </div>
                   {k.revokedAt ? (
