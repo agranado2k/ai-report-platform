@@ -567,14 +567,34 @@ describe("decideServe view — interstitial sits BEHIND the ACL gate", () => {
 // the Phase 5-E `oa=` owner degrade).
 // ---------------------------------------------------------------------------
 describe("decideServe edit — token/cookie decision", () => {
-  it("no token at all → redirect to the public viewer", async () => {
+  // The tokenless/invalid-token funnel (grantee-discoverability fix): the app's
+  // /reports/{slug}/open is the ONE edit-token mint, so a visitor with no valid
+  // capability is sent there instead of being silently degraded to the
+  // read-only viewer.
+  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open`;
+
+  it("no token at all → funnel to the app's edit-token mint (/open)", async () => {
     expect(await decideEdit(buildReport({ verdict: "clean" }))).toEqual({
+      kind: "redirect",
+      to: OPEN,
+    });
+  });
+
+  it("no token AND no appOrigin → today's degrade to the public viewer (nowhere to funnel)", async () => {
+    expect(await decideEdit(buildReport({ verdict: "clean" }), { appOrigin: undefined })).toEqual({
       kind: "redirect",
       to: `/${SLUG}`,
     });
   });
 
-  it("fails closed with no secret, even with a well-formed ?et= → redirect", async () => {
+  it("no token AND no secret → today's degrade (a funnel could only loop — no mint validates here)", async () => {
+    expect(await decideEdit(buildReport({ verdict: "clean" }), { secret: undefined })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}`,
+    });
+  });
+
+  it("fails closed with no secret, even with a well-formed ?et= → redirect to the public viewer", async () => {
     const et = editToken();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
@@ -601,31 +621,31 @@ describe("decideServe edit — token/cookie decision", () => {
     ["expired", () => editToken(900, NOW - 1000)],
     ["malformed", () => "not-a-real-token"],
     ["wrong-slug", () => editToken(900, NOW, OTHER_SLUG)],
-  ])("an %s ?et= token → redirect to the public viewer", async (_n, tokenOf) => {
+  ])("an %s ?et= token → funnel to the app mint (a fresh mint re-admits a writer)", async (_n, tokenOf) => {
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         path: `/${SLUG}/edit?et=${encodeURIComponent(tokenOf())}`,
       }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: OPEN });
   });
 
-  it("an ACCESS token (even owner:true) presented as ?et= is rejected (cross-parse) → redirect", async () => {
+  it("an ACCESS token (even owner:true) presented as ?et= is rejected (cross-parse) → funnel to /open", async () => {
     const owner = accessToken({ owner: true });
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         path: `/${SLUG}/edit?et=${encodeURIComponent(owner)}`,
       }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: OPEN });
   });
 
-  it("edit: an invalid ?et= does NOT fall back to a valid cookie (unlike view) → redirect", async () => {
+  it("edit: an invalid ?et= does NOT fall back to a valid cookie (unlike view) → funnel to /open", async () => {
     const cookie = editToken();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         path: `/${SLUG}/edit?et=garbage`,
         cookie: `arp_edit=${cookie}`,
       }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: OPEN });
   });
 
   it("a valid ?et= takes precedence over an existing cookie → set-cookie (fresh mint wins)", async () => {
@@ -659,27 +679,27 @@ describe("decideServe edit — token/cookie decision", () => {
     }
   });
 
-  it("a cookie header WITHOUT an arp_edit entry → redirect (no capability present)", async () => {
+  it("a cookie header WITHOUT an arp_edit entry → funnel to /open (no capability present)", async () => {
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), { cookie: "other=1; another=2" }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: OPEN });
   });
 
-  it("an empty arp_edit cookie value is treated as absent → redirect", async () => {
+  it("an empty arp_edit cookie value is treated as absent → funnel to /open", async () => {
     expect(await decideEdit(buildReport({ verdict: "clean" }), { cookie: "arp_edit=" })).toEqual({
       kind: "redirect",
-      to: `/${SLUG}`,
+      to: OPEN,
     });
   });
 
-  it("expired arp_edit cookie → redirect to the public viewer", async () => {
+  it("expired arp_edit cookie → funnel to /open (a writer's session seamlessly re-mints)", async () => {
     const et = editToken();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         cookie: `arp_edit=${et}`,
         now: NOW + 901,
       }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: OPEN });
   });
 
   it("the edit gate does NOT consult the report ACL — a private report serves to a valid edit cookie", async () => {
@@ -749,14 +769,14 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
     });
   });
 
-  it("denied WITHOUT oa → bare public-viewer redirect, and no degrade warning", async () => {
+  it("denied WITHOUT oa → funnel to the app mint, and no degrade warning", async () => {
     const warn = vi.fn();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         path: `/${SLUG}/edit?et=garbage`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
     expect(warn).not.toHaveBeenCalled();
   });
 
