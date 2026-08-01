@@ -39,6 +39,7 @@ import type {
   DrainScansDeps,
   EmailSender,
   GrantStore,
+  HandleUserCreatedDeps,
   HandleUserDeletedDeps,
   IdentityStore,
   NonceStore,
@@ -274,6 +275,17 @@ export function provisionDeps(): ProvisionIdentityDeps {
  */
 export function userWebhookDeps(): HandleUserDeletedDeps {
   return { identities: identityStore(), apiKeys: apiKeyStore() };
+}
+
+/**
+ * Deps for the Clerk `user.created` webhook handler (ADR-0074 silent domain
+ * auto-join): the IdentityStore (the `orgs.domain` index + the org-row write)
+ * and the real Clerk org provisioner (anchor verify/scan, create, join).
+ * Reuses `provisionDeps()`'s memoized pair so the webhook and first-write JIT
+ * provisioning run the SAME wiring — one resolution path, never two.
+ */
+export function userCreatedDeps(): HandleUserCreatedDeps {
+  return provisionDeps();
 }
 
 /**
