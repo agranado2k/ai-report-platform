@@ -41,8 +41,20 @@ async function clerkFetch(path: string, secretKey: string, init?: RequestInit): 
  * (`E2E_TEST_USER_EMAIL`) fixture; `mintTestSessionFor` lets a scenario mint
  * one for a SPECIFIC address — e.g. the ADR-0068 §6 second identity — without
  * relying on env-var plumbing per fixture.
+ *
+ * `activeOrganizationId` (optional) is passed through to Clerk's
+ * `POST /v1/sessions` `active_organization_id` parameter (verified live
+ * against the dev instance): the session then carries that org as its active
+ * org, and the minted JWT's v2 `o.id` claim surfaces it to the app's
+ * `getAuth` as the session org — letting a scenario exercise the
+ * session-carries-an-org paths (e.g. the read path's direct org resolution)
+ * that a bare backend-minted session (no org context) never hits.
  */
-export async function mintTestSessionFor(secretKey: string, email: string): Promise<TestSession> {
+export async function mintTestSessionFor(
+  secretKey: string,
+  email: string,
+  activeOrganizationId?: string,
+): Promise<TestSession> {
   const form = { "Content-Type": "application/x-www-form-urlencoded" };
 
   const usersRes = await clerkFetch(`/users?email_address=${encodeURIComponent(email)}`, secretKey);
@@ -51,10 +63,12 @@ export async function mintTestSessionFor(secretKey: string, email: string): Prom
   const userId = users[0]?.id;
   if (!userId) throw new Error(`no Clerk user for ${email}`);
 
+  const sessionParams = new URLSearchParams({ user_id: userId });
+  if (activeOrganizationId) sessionParams.set("active_organization_id", activeOrganizationId);
   const sessionRes = await clerkFetch("/sessions", secretKey, {
     method: "POST",
     headers: form,
-    body: new URLSearchParams({ user_id: userId }),
+    body: sessionParams,
   });
   if (!sessionRes.ok) throw new Error(`clerk createSession failed: ${sessionRes.status}`);
   const sessionId = ((await sessionRes.json()) as { id: string }).id;
@@ -202,6 +216,43 @@ export async function mintThirdTestSession(): Promise<TestSession> {
   }
   await ensureThirdFixtureUser(secretKey);
   return mintTestSessionFor(secretKey, THIRD_FIXTURE_EMAIL);
+}
+
+/**
+ * The Clerk org id of the user's membership whose `publicMetadata.domain`
+ * anchor equals `domain` (ADR-0074's canonical team org), or null when the
+ * user holds no such membership. Read-only BAPI lookup — used by the
+ * shared-team-org scenario to (a) assert the Clerk-side auto-join actually
+ * happened after the first write, and (b) re-mint the session with that org
+ * active for the org-scoped listing read.
+ */
+export async function findAnchoredOrgMembership(
+  secretKey: string,
+  email: string,
+  domain: string,
+): Promise<string | null> {
+  const usersRes = await clerkFetch(`/users?email_address=${encodeURIComponent(email)}`, secretKey);
+  if (!usersRes.ok) throw new Error(`clerk users lookup failed: ${usersRes.status}`);
+  const users = (await usersRes.json()) as ReadonlyArray<{ id: string }>;
+  const userId = users[0]?.id;
+  if (!userId) throw new Error(`no Clerk user for ${email}`);
+
+  const membershipsRes = await clerkFetch(
+    `/users/${userId}/organization_memberships?limit=20`,
+    secretKey,
+  );
+  if (!membershipsRes.ok) {
+    throw new Error(`clerk membership lookup failed: ${membershipsRes.status}`);
+  }
+  const memberships = (await membershipsRes.json()) as {
+    data?: ReadonlyArray<{
+      organization: { id: string; public_metadata?: { domain?: unknown } };
+    }>;
+  };
+  const match = (memberships.data ?? []).find(
+    (m) => m.organization.public_metadata?.domain === domain.toLowerCase(),
+  );
+  return match?.organization.id ?? null;
 }
 
 /**

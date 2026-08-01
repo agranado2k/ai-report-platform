@@ -1,9 +1,12 @@
 import { type APIResponse, expect } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import {
+  findAnchoredOrgMembership,
   mintSecondTestSession,
+  mintTestSessionFor,
   mintThirdTestSession,
   type TestSession,
+  THIRD_FIXTURE_EMAIL,
 } from "../support/clerk-session";
 
 const { Given, When, Then } = createBdd();
@@ -31,6 +34,23 @@ function sessionAuthHeader(): Record<string, string> {
   return { Authorization: `Bearer ${session.jwt}` };
 }
 
+/** Assert status BEFORE parsing JSON, so an auth-redirect HTML body (or any
+ *  non-JSON error page) fails with the real status + raw body — never as a
+ *  bare SyntaxError from `.json()` (the PR #222 round-2 lesson). */
+async function expectJson(
+  res: APIResponse,
+  expectedStatus: number,
+  label: string,
+): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  expect(res.status(), `${label}: ${text.slice(0, 500)}`).toBe(expectedStatus);
+  expect(
+    res.headers()["content-type"] ?? "",
+    `${label}: expected a JSON body, got: ${text.slice(0, 200)}`,
+  ).toContain("application/json");
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
 // Escape the parens — Cucumber Expressions treat `()` as optional-text syntax,
 // so the literal "(team-org)" in the .feature file must be matched as `\(...\)`.
 Given("I am signed in as the second \\(team-org) Clerk test user", async () => {
@@ -46,7 +66,10 @@ When(
         file: { name: "report.html", mimeType: "text/html", buffer: Buffer.from(HTML, "utf8") },
       },
     });
-    body = (await response.json()) as Record<string, unknown>;
+    // Parsed leniently here — the dedicated Then step asserts the status and
+    // shows the raw body on mismatch.
+    const text = await response.text();
+    body = safeParse(text);
   },
 );
 
@@ -83,45 +106,59 @@ When(
         },
       },
     });
-    thirdBody = (await res.json()) as Record<string, unknown>;
-    expect(res.status(), JSON.stringify(thirdBody)).toBe(201);
+    thirdBody = await expectJson(res, 201, "third identity's upload");
   },
 );
 
 Then(
   "the third identity's report listing includes both same-domain uploads",
   async ({ request }) => {
-    // The listing must be read through a surface whose org is DETERMINISTIC.
-    // A bare session GET is not: an org-less session's read path resolves the
-    // user's OLDEST Clerk membership, and both fixtures carry older decoy
-    // memberships (gold's forced-task decoy org; silver's legacy hand-made
-    // org) that have no DB mirror — the GET would 401/empty regardless of the
-    // join outcome. So the third identity first mints an `arp_` API key via
-    // the WRITE path (/settings/api-keys — its actor's org comes from the
-    // ADR-0074 canonical chain, the thing under test), then lists with the
-    // key: door 1 carries the key's issuing org directly.
-    const keyRes = await request.post("/settings/api-keys", {
-      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
-      // Unique name per run — the ADR-0039 derived idempotency key
-      // fingerprints on (name, scopes), and a replayed mint returns a null
-      // secret by design.
-      form: { name: `arp-e2e-team-org-${Date.now().toString(36)}` },
-    });
-    const keyBody = (await keyRes.json()) as { secret?: string };
-    expect(keyRes.status(), JSON.stringify(keyBody)).toBe(200);
-    expect(typeof keyBody.secret, "key mint must return the one-time secret").toBe("string");
+    // The listing must be read through a session whose org is DETERMINISTIC.
+    // A bare (org-less) backend-minted session is not: the read path resolves
+    // such a session via the user's OLDEST Clerk membership, and both fixtures
+    // carry older unmirrored memberships (gold's forced-task decoy org;
+    // silver's legacy hand-made org), so a bare GET would fail regardless of
+    // the join outcome. Instead:
+    //  1. Resolve gold's membership in the ANCHORED domain org via the Clerk
+    //     Backend API — its existence is itself the Clerk-side auto-join
+    //     assertion (the upload's canonical chain must have joined gold).
+    //  2. Re-mint gold's session with that org ACTIVE (POST /v1/sessions
+    //     `active_organization_id`, verified against the live BAPI — the v2
+    //     token's `o.id` claim carries it to the app's getAuth), exactly like
+    //     a browser session after the user selects the org in Clerk's forced
+    //     task.
+    //  3. Bare GET /api/v1/reports with that session — the read path uses the
+    //     session org directly, no oldest-membership guess.
+    const secretKey = process.env.E2E_CLERK_SECRET_KEY;
+    expect(secretKey, "@auth e2e needs E2E_CLERK_SECRET_KEY").toBeTruthy();
+    const domain = THIRD_FIXTURE_EMAIL.split("@")[1] as string;
 
+    const canonicalOrgId = await findAnchoredOrgMembership(
+      secretKey as string,
+      THIRD_FIXTURE_EMAIL,
+      domain,
+    );
+    expect(
+      canonicalOrgId,
+      `after its first upload the third identity must be a MEMBER of the anchored "${domain}" ` +
+        "org in Clerk (the ADR-0074 canonical chain's join) — no such membership found",
+    ).toBeTruthy();
+
+    const orgSession = await mintTestSessionFor(
+      secretKey as string,
+      THIRD_FIXTURE_EMAIL,
+      canonicalOrgId as string,
+    );
     const res = await request.get("/api/v1/reports?limit=100", {
-      headers: { Authorization: `Bearer ${keyBody.secret}` },
+      headers: { Authorization: `Bearer ${orgSession.jwt}` },
     });
-    const listing = (await res.json()) as {
+    const listing = (await expectJson(res, 200, "third identity's org listing")) as {
       data?: ReadonlyArray<{ slug?: string }>;
     };
-    expect(res.status(), JSON.stringify(listing)).toBe(200);
     const slugs = (listing.data ?? []).map((r) => r.slug);
-    // Its own upload proves the actor resolved into the key's org; the SECOND
-    // identity's slug being visible proves both identities share one org row —
-    // the ADR-0074 invariant.
+    // Its own upload proves the session org is the org the write path mirrored
+    // into; the SECOND identity's slug being visible proves both identities
+    // share one org row — the ADR-0074 invariant.
     expect(slugs, "third identity's own upload must be listed").toContain(thirdBody.slug);
     expect(
       slugs,
@@ -129,3 +166,13 @@ Then(
     ).toContain(body.slug);
   },
 );
+
+/** Parse a response body as JSON when possible; otherwise wrap the raw text so
+ *  a later status assertion can still display it (never a bare SyntaxError). */
+function safeParse(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { raw_non_json_body: text.slice(0, 500) };
+  }
+}

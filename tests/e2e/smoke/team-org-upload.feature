@@ -26,9 +26,10 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # dev instance, the only way a fresh user's backend-minted session comes out
   # `active` instead of `pending`/401). It uploads its own report — landing it
   # in the CANONICAL domain org despite the decoy — then must see the second
-  # fixture's report in its org listing (read via an API key it mints, whose
-  # org is the canonically-resolved one): only possible if both identities
-  # landed in the same org row.
+  # fixture's report in its org listing, read with a session re-minted with the
+  # canonical (anchored) org ACTIVE — like a browser session after the forced
+  # task's org selection: only possible if both identities landed in the same
+  # org row.
   Scenario: Two same-domain identities share one team org
     Given I am signed in as the second (team-org) Clerk test user
     And I am also signed in as the third (same-domain) Clerk test user
