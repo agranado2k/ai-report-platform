@@ -1114,19 +1114,30 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
   }
 }
 
-/** Fake Clerk org creator — returns a deterministic id and records its calls. */
+/** Fake Clerk org provisioner (ADR-0074 surface) — models Clerk-side orgs as
+ *  `{ name, anchor }` records keyed by Clerk org id. Crucially an org CAN
+ *  exist WITHOUT a `publicMetadata.domain` anchor (`anchor: null`) — the
+ *  representability gap the old domain-Map keying couldn't express, which is
+ *  exactly what hid the dead slug lookup in production. */
 export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
   readonly calls: { readonly clerkUserId: string; readonly name: string }[] = [];
   /** When set, findPersonalOrg resolves to this org id; null means "no org yet". */
   personalOrgId: string | null = null;
 
-  /** domain → existing team org's Clerk id (ADR-0068 §3). Set a domain here
-   *  BEFORE calling to simulate "a colleague already created this team org";
-   *  `createTeamOrg` also registers here, so a second call in the same test
-   *  (simulating a second colleague) finds what the first created. */
-  readonly teamOrgsByDomain = new Map<string, string>();
+  /** The Clerk instance's orgs: id → { name, anchor }. Seed via addClerkOrg()
+   *  to simulate pre-existing orgs (with or without an anchor);
+   *  `createTeamOrg` registers here too. */
+  readonly clerkOrgRecords = new Map<string, { name: string; anchor: string | null }>();
   readonly teamOrgCalls: { readonly domain: string; readonly createdBy: string }[] = [];
   readonly membershipCalls: { readonly clerkOrgId: string; readonly clerkUserId: string }[] = [];
+  /** Test toggle: ensureMembership fails with the typed member-cap error
+   *  (ADR-0074 — the webhook acks it instead of retrying). */
+  memberCapReached = false;
+
+  /** Seed a Clerk-side org (optionally anchorless — the pre-anchor legacy shape). */
+  addClerkOrg(id: string, org: { name?: string; anchor?: string | null } = {}): void {
+    this.clerkOrgRecords.set(id, { name: org.name ?? id, anchor: org.anchor ?? null });
+  }
 
   async createPersonalOrg(clerkUserId: string, name: string): Promise<Result<string, AppError>> {
     this.calls.push({ clerkUserId, name });
@@ -1137,18 +1148,44 @@ export class FakeClerkOrgProvisioner implements ClerkOrgProvisioner {
     return ok(this.personalOrgId);
   }
 
-  async findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>> {
-    return ok(this.teamOrgsByDomain.get(domain) ?? null);
+  async verifyOrgAnchor(clerkOrgId: string, domain: string): Promise<Result<void, AppError>> {
+    // Fail-closed like the real adapter: missing org, null anchor, and
+    // mismatched anchor are all refusals (ADR-0074 tenant-boundary guard).
+    const org = this.clerkOrgRecords.get(clerkOrgId);
+    if (!org || org.anchor !== domain.toLowerCase()) {
+      return err({
+        kind: "Unexpected",
+        message: `team-org anchor mismatch for domain "${domain}" on ${clerkOrgId} — refusing to join`,
+      });
+    }
+    return ok(undefined);
+  }
+
+  async findOrgByAnchorScan(
+    domain: string,
+  ): Promise<Result<{ clerkOrgId: string; name: string } | null, AppError>> {
+    // Exact anchor match only — an anchorless org is never adoptable.
+    for (const [id, org] of this.clerkOrgRecords) {
+      if (org.anchor === domain.toLowerCase()) return ok({ clerkOrgId: id, name: org.name });
+    }
+    return ok(null);
   }
 
   async createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>> {
     this.teamOrgCalls.push({ domain, createdBy });
-    const id = `clerk-team-org-${domain}`;
-    this.teamOrgsByDomain.set(domain, id);
+    const normalized = domain.toLowerCase();
+    const id = `clerk-team-org-${normalized}`;
+    this.clerkOrgRecords.set(id, { name: normalized, anchor: normalized });
     return ok(id);
   }
 
   async ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>> {
+    if (this.memberCapReached) {
+      return err({
+        kind: "PlanLimitExceeded",
+        message: `clerk org ${clerkOrgId} is at its membership cap`,
+      });
+    }
     this.membershipCalls.push({ clerkOrgId, clerkUserId });
     return ok(undefined);
   }

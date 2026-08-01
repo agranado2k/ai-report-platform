@@ -17,7 +17,8 @@ function clerk422(code: string, message: string): unknown {
   };
 }
 
-/** A Clerk API fake: no existing memberships and a fresh org id, unless overridden. */
+/** A Clerk API fake: no existing memberships, a fresh org id, an empty org
+ *  list, and no org resolving by id, unless overridden. */
 function fakeApi(over: Partial<ClerkOrgApi> = {}): ClerkOrgApi {
   return {
     async createOrganization() {
@@ -26,8 +27,11 @@ function fakeApi(over: Partial<ClerkOrgApi> = {}): ClerkOrgApi {
     async getOrganizationMembershipList() {
       return { data: [] };
     },
-    async getOrganizationBySlug() {
+    async getOrganization() {
       return null;
+    },
+    async listOrganizations() {
+      return { data: [], totalCount: 0 };
     },
     async createOrganizationMembership() {
       return { id: "orgmem_new" };
@@ -172,118 +176,201 @@ describe("ClerkBackendOrgProvisioner", () => {
     });
   });
 
-  describe("findTeamOrgByDomain (ADR-0068 §3 — JIT join-or-create)", () => {
-    it("resolves to null when no team org exists for the domain (never creates)", async () => {
-      let created = 0;
+  describe("verifyOrgAnchor (ADR-0074 — tenant-boundary guard on a DB-index hit)", () => {
+    it("passes when the org's publicMetadata.domain anchor matches exactly", async () => {
       const api = fakeApi({
-        async createOrganization() {
-          created += 1;
-          return { id: "org_should_not_be_created" };
-        },
-      });
-
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("housenumbers.io");
-
-      expect(r.ok && r.value).toBe(null);
-      expect(created).toBe(0);
-    });
-
-    it("resolves the existing team org via the hash-suffixed slug AND a matching domain anchor", async () => {
-      const api = fakeApi({
-        async getOrganizationBySlug(slug) {
-          // dots aren't valid in a Clerk org slug — the adapter maps them to
-          // hyphens plus a short domain hash so distinct domains can never
-          // collide (review #158 C-1), deterministically, so a later lookup
-          // for the same domain always resolves the same slug.
-          return slug === "housenumbers-io-132690cd"
-            ? { id: "org_team_existing", domain: "housenumbers.io" }
+        async getOrganization(id) {
+          return id === "org_hn"
+            ? { id: "org_hn", name: "House Numbers", domainAnchor: "housenumbers.io" }
             : null;
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("housenumbers.io");
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_hn",
+        "housenumbers.io",
+      );
 
-      expect(r.ok && r.value).toBe("org_team_existing");
+      expect(r.ok).toBe(true);
     });
 
-    it("derives the slug consistently for a two-level-TLD domain (e.g. acme.co.uk)", async () => {
+    it("matches case-insensitively on the requested domain (anchors are stored lowercased)", async () => {
       const api = fakeApi({
-        async getOrganizationBySlug(slug) {
-          return slug === "acme-co-uk-4b625665"
-            ? { id: "org_team_existing", domain: "acme.co.uk" }
-            : null;
+        async getOrganization() {
+          return { id: "org_hn", name: "House Numbers", domainAnchor: "housenumbers.io" };
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("acme.co.uk");
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_hn",
+        "HouseNumbers.IO",
+      );
 
-      expect(r.ok && r.value).toBe("org_team_existing");
+      expect(r.ok).toBe(true);
     });
 
-    it("gives colliding lookalike domains DISTINCT slugs (my-company.com vs my.company.com)", async () => {
-      // A bare dot→hyphen substitution would map both to "my-company-com" —
-      // the hash suffix keeps them apart (review #158 C-1).
-      const seen: string[] = [];
+    it("FAILS CLOSED when the anchor names a different domain (tenant-boundary crossing)", async () => {
       const api = fakeApi({
-        async getOrganizationBySlug(slug) {
-          seen.push(slug);
-          return null;
-        },
-      });
-      const prov = new ClerkBackendOrgProvisioner(api);
-      await prov.findTeamOrgByDomain("my-company.com");
-      await prov.findTeamOrgByDomain("my.company.com");
-
-      expect(seen).toHaveLength(2);
-      expect(seen[0]).not.toBe(seen[1]);
-    });
-
-    it("FAILS CLOSED when the resolved org's domain anchor doesn't match (tenant-boundary guard)", async () => {
-      const api = fakeApi({
-        async getOrganizationBySlug() {
-          // Simulates a slug collision / tampered metadata: the slug resolves,
-          // but the org anchors a DIFFERENT domain.
-          return { id: "org_someone_elses", domain: "acme.co.uk" };
+        async getOrganization() {
+          return { id: "org_other", name: "Acme", domainAnchor: "acme.co.uk" };
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("acme-co.uk");
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_other",
+        "acme-co.uk",
+      );
 
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error.message).toContain("collision");
+      if (!r.ok) expect(r.error.message).toContain("anchor");
     });
 
-    it("FAILS CLOSED on a null anchor (an org predating the anchor scheme)", async () => {
+    it("FAILS CLOSED on a null anchor — a DB-indexed org must carry its anchor", async () => {
       const api = fakeApi({
-        async getOrganizationBySlug() {
-          return { id: "org_legacy", domain: null };
+        async getOrganization() {
+          return { id: "org_legacy", name: "Legacy", domainAnchor: null };
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("housenumbers.io");
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_legacy",
+        "housenumbers.io",
+      );
+
+      expect(r.ok).toBe(false);
+    });
+
+    it("FAILS CLOSED when the org no longer exists in Clerk (index/Clerk drift)", async () => {
+      const api = fakeApi(); // getOrganization → null
+
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_gone",
+        "housenumbers.io",
+      );
 
       expect(r.ok).toBe(false);
     });
 
     it("maps a lookup failure to an Unexpected AppError", async () => {
       const api = fakeApi({
-        async getOrganizationBySlug() {
+        async getOrganization() {
           throw new Error("clerk 500");
         },
       });
 
-      const r = await new ClerkBackendOrgProvisioner(api).findTeamOrgByDomain("housenumbers.io");
+      const r = await new ClerkBackendOrgProvisioner(api).verifyOrgAnchor(
+        "org_hn",
+        "housenumbers.io",
+      );
 
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.kind).toBe("Unexpected");
     });
   });
 
-  describe("createTeamOrg (ADR-0068 §3)", () => {
-    it("creates the team org named after the domain, with a Clerk-safe deterministic slug", async () => {
+  describe("findOrgByAnchorScan (ADR-0074 — DB-index-miss adoption path)", () => {
+    it("finds an existing unmirrored org by its publicMetadata.domain anchor", async () => {
+      const api = fakeApi({
+        async listOrganizations() {
+          return {
+            data: [
+              { id: "org_a", name: "A", domainAnchor: null },
+              { id: "org_hn", name: "House Numbers", domainAnchor: "housenumbers.io" },
+            ],
+            totalCount: 2,
+          };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findOrgByAnchorScan("housenumbers.io");
+
+      expect(r.ok && r.value).toEqual({ clerkOrgId: "org_hn", name: "House Numbers" });
+    });
+
+    it("resolves to null when no org anchors the domain (never adopts a null anchor)", async () => {
+      const api = fakeApi({
+        async listOrganizations() {
+          return {
+            data: [
+              { id: "org_a", name: "A", domainAnchor: null },
+              { id: "org_b", name: "B", domainAnchor: "other.example" },
+            ],
+            totalCount: 2,
+          };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findOrgByAnchorScan("housenumbers.io");
+
+      expect(r.ok && r.value).toBe(null);
+    });
+
+    it("paginates until the match (page size 100)", async () => {
+      const pages: { limit: number; offset: number }[] = [];
+      const api = fakeApi({
+        async listOrganizations(p) {
+          pages.push(p);
+          const data =
+            p.offset === 0
+              ? Array.from({ length: 100 }, (_, i) => ({
+                  id: `org_${i}`,
+                  name: `Org ${i}`,
+                  domainAnchor: null,
+                }))
+              : [{ id: "org_hn", name: "House Numbers", domainAnchor: "housenumbers.io" }];
+          return { data, totalCount: 101 };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findOrgByAnchorScan("housenumbers.io");
+
+      expect(r.ok && r.value?.clerkOrgId).toBe("org_hn");
+      expect(pages).toEqual([
+        { limit: 100, offset: 0 },
+        { limit: 100, offset: 100 },
+      ]);
+    });
+
+    it("stops at the 200-org scan bound (the ADR-0074 scalability cap) and resolves null", async () => {
+      let calls = 0;
+      const api = fakeApi({
+        async listOrganizations(p) {
+          calls += 1;
+          return {
+            data: Array.from({ length: p.limit }, (_, i) => ({
+              id: `org_${p.offset + i}`,
+              name: "filler",
+              domainAnchor: null,
+            })),
+            totalCount: 10_000,
+          };
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findOrgByAnchorScan("housenumbers.io");
+
+      expect(r.ok && r.value).toBe(null);
+      expect(calls).toBe(2); // 2 × 100 = the 200-org bound
+    });
+
+    it("maps a list failure to an Unexpected AppError", async () => {
+      const api = fakeApi({
+        async listOrganizations() {
+          throw new Error("clerk 500");
+        },
+      });
+
+      const r = await new ClerkBackendOrgProvisioner(api).findOrgByAnchorScan("housenumbers.io");
+
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.kind).toBe("Unexpected");
+    });
+  });
+
+  describe("createTeamOrg (ADR-0074 — slug-less, anchor-stamped)", () => {
+    it("creates the team org named after the domain with a metadata anchor and NO slug", async () => {
       const calls: {
         name: string;
-        slug?: string;
         createdBy: string;
         publicMetadata?: Readonly<Record<string, string>>;
       }[] = [];
@@ -295,15 +382,16 @@ describe("ClerkBackendOrgProvisioner", () => {
       });
 
       const r = await new ClerkBackendOrgProvisioner(api).createTeamOrg(
-        "housenumbers.io",
+        "HouseNumbers.IO",
         "user_abc",
       );
 
       expect(r.ok && r.value).toBe("org_team_new");
+      // No `slug` key at all — the prod instance auto-generates slugs
+      // (slug_disabled: true), and nothing keys on them anymore (ADR-0074).
       expect(calls).toEqual([
         {
           name: "housenumbers.io",
-          slug: "housenumbers-io-132690cd",
           createdBy: "user_abc",
           publicMetadata: { domain: "housenumbers.io" },
         },
@@ -321,35 +409,6 @@ describe("ClerkBackendOrgProvisioner", () => {
 
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.kind).toBe("Unexpected");
-    });
-
-    it("recovers from a concurrent create race: re-resolves the org and joins it (no 500)", async () => {
-      // Two first sign-ups at a new domain race; the loser's create hits
-      // Clerk's unique slug. It must join the winner's org, not 500
-      // (review #158 M-1).
-      let membershipCalls = 0;
-      const api = fakeApi({
-        async createOrganization() {
-          throw new Error("slug taken");
-        },
-        async getOrganizationBySlug(slug) {
-          return slug === "housenumbers-io-132690cd"
-            ? { id: "org_team_winner", domain: "housenumbers.io" }
-            : null;
-        },
-        async createOrganizationMembership() {
-          membershipCalls += 1;
-          return { id: "orgmem_raced" };
-        },
-      });
-
-      const r = await new ClerkBackendOrgProvisioner(api).createTeamOrg(
-        "housenumbers.io",
-        "user_loser",
-      );
-
-      expect(r.ok && r.value).toBe("org_team_winner");
-      expect(membershipCalls).toBe(1);
     });
   });
 
@@ -404,17 +463,35 @@ describe("ClerkBackendOrgProvisioner", () => {
       expect(r.ok).toBe(true);
     });
 
-    it("does NOT swallow other 422s (e.g. quota exceeded) — review #158 H-2", async () => {
+    it("maps the member-cap quota error to the typed PlanLimitExceeded (ADR-0074)", async () => {
+      // The webhook acks a cap with 200 + alert instead of retrying (Svix
+      // retries can't fix a plan cap) — that branch keys on THIS kind.
       const api = fakeApi({
         async createOrganizationMembership() {
           throw clerk422("organization_membership_quota_exceeded", "quota exceeded");
         },
       });
 
+      const r = await new ClerkBackendOrgProvisioner(api).ensureMembership("org_team", "user_21st");
+
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.kind).toBe("PlanLimitExceeded");
+        expect(r.error.message).toContain("quota");
+      }
+    });
+
+    it("does NOT swallow other 422s (e.g. invalid role) — review #158 H-2", async () => {
+      const api = fakeApi({
+        async createOrganizationMembership() {
+          throw clerk422("invalid_role", "role does not exist");
+        },
+      });
+
       const r = await new ClerkBackendOrgProvisioner(api).ensureMembership("org_team", "user_new");
 
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error.message).toContain("quota");
+      if (!r.ok) expect(r.error.kind).toBe("Unexpected");
     });
 
     it("maps a Clerk createOrganizationMembership failure to an Unexpected AppError", async () => {

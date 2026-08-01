@@ -639,26 +639,41 @@ export interface ClerkOrgProvisioner {
    */
   findPersonalOrg(clerkUserId: string): Promise<Result<string | null, AppError>>;
   /**
-   * Resolve an EXISTING team org for a corporate email domain (ADR-0068 §3), or
-   * null when nobody at that domain has signed up yet. The adapter derives
-   * whatever Clerk-specific identifier it needs (e.g. a slug) FROM `domain`
-   * internally — this port speaks in plain email domains, not Clerk slugs.
-   * Read-only — never creates (mirrors `findPersonalOrg`'s read/write split).
+   * TENANT-BOUNDARY GUARD (ADR-0074): verify that the Clerk org a DB-index hit
+   * points at really anchors `domain` in its `publicMetadata.domain`. Fails
+   * CLOSED — err on a mismatched anchor, a null anchor (a DB-indexed org must
+   * carry the anchor its creation/adoption stamped), or an org that no longer
+   * exists in Clerk (index/Clerk drift). Callers must not join on err.
    */
-  findTeamOrgByDomain(domain: string): Promise<Result<string | null, AppError>>;
+  verifyOrgAnchor(clerkOrgId: string, domain: string): Promise<Result<void, AppError>>;
   /**
-   * Create a brand-new team org for a corporate domain (ADR-0068 §3) — the
-   * FIRST sign-up at that domain. `domain` is both the org's display name and
-   * the input to the adapter's deterministic Clerk-identifier derivation (so a
-   * later joiner's `findTeamOrgByDomain` finds this same org). Resolves to the
-   * new Clerk org id.
+   * Bounded client-side scan of the instance's organizations for one whose
+   * `publicMetadata.domain` anchor equals `domain` (ADR-0074) — used ONLY on a
+   * DB-index miss, to ADOPT an existing unmirrored Clerk org (e.g. one created
+   * before the index existed). Never matches a null anchor. The adapter caps
+   * the scan (~200 orgs, documented in ADR-0074 with its revisit trigger);
+   * beyond the cap resolves null and the caller falls through to create.
+   */
+  findOrgByAnchorScan(
+    domain: string,
+  ): Promise<Result<{ readonly clerkOrgId: string; readonly name: string } | null, AppError>>;
+  /**
+   * Create a brand-new team org for a corporate domain (ADR-0068 §3 /
+   * ADR-0074) — the FIRST sign-up at that domain. `domain` (lowercased) is the
+   * org's display name AND its `publicMetadata.domain` anchor; no slug is sent
+   * (the prod instance auto-generates slugs and nothing keys on them).
+   * Resolves to the new Clerk org id. Uniqueness is NOT enforced here — the
+   * DB domain index is the race closer (the caller records the org row and
+   * treats a Conflict as "join the winner instead").
    */
   createTeamOrg(domain: string, createdBy: string): Promise<Result<string, AppError>>;
   /**
    * Add `clerkUserId` as a member of an EXISTING Clerk org (ADR-0068 §3 — every
    * sign-up after a team org's first joins this way). Idempotent: an
    * already-a-member user is a no-op success, not an error (concurrency-safe
-   * like `createPersonalOrg`'s check-then-act dedupe).
+   * like `createPersonalOrg`'s check-then-act dedupe). A Clerk membership-cap
+   * rejection surfaces as the typed `PlanLimitExceeded` (ADR-0074) so the
+   * webhook can ack-not-retry it.
    */
   ensureMembership(clerkOrgId: string, clerkUserId: string): Promise<Result<void, AppError>>;
 }

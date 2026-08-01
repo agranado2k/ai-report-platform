@@ -34,6 +34,7 @@ export * from "./use-cases/rename-report";
 export * from "./use-cases/reply-to-comment";
 export * from "./use-cases/resolve-access";
 export * from "./use-cases/resolve-comment";
+export * from "./use-cases/resolve-team-org";
 export * from "./use-cases/revoke-api-key";
 export * from "./use-cases/revoke-write";
 export * from "./use-cases/save-edited-version";
