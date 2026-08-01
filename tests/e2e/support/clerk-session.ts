@@ -121,15 +121,34 @@ export async function mintSecondTestSession(): Promise<TestSession> {
  *  verification code 424242). See `tests/e2e/README.md`. */
 export const SECOND_FIXTURE_EMAIL = "silver+clerk_test@agranado.com";
 
-/** ADR-0074 — the THIRD identity, sharing the second fixture's `agranado.com`
- *  domain so the shared-team-org scenario can prove two same-domain identities
- *  land in ONE org. Unlike fixtures 1/2 this one is find-or-CREATED
- *  programmatically (`ensureThirdFixtureUser`) — code, not a clicked fixture,
- *  so it self-heals after an instance reset. See `tests/e2e/README.md`. */
-export const THIRD_FIXTURE_EMAIL = "gold+clerk_test@agranado.com";
+/** The corporate domain the team-org scenarios exercise (NOT on the
+ *  public-provider list, so it resolves to a `team` org — ADR-0068 §1). */
+export const TEAM_ORG_DOMAIN = "agranado.com";
+
+/** A RUN-SCOPED team-fixture address (ADR-0074 shared-team-org scenario):
+ *  `<prefix>-<runId>+clerk_test@agranado.com`. Fresh identities per run are
+ *  the contamination fix from PR #222 round 3: a REUSED fixture can carry a
+ *  poisoned mirror from an earlier run / older code in the (persistent,
+ *  prod-forked) preview DB branch, and ADR-0074's sticky-after-mirror policy
+ *  then CORRECTLY honors that mirror forever — masking the canonical chain
+ *  this scenario exists to prove. A user that didn't exist before this run
+ *  cannot be mirrored anywhere, on any branch state. Keeps `+clerk_test`
+ *  (test-mode: no real inbox, code 424242) and the team domain. */
+export function runScopedTeamEmail(prefix: string, runId: string): string {
+  return `${prefix}-${runId}+clerk_test@${TEAM_ORG_DOMAIN}`;
+}
+
+/** What `ensureTeamFixtureUser` provisioned — the ids the cleanup hook needs. */
+export interface TeamFixture {
+  readonly email: string;
+  readonly userId: string;
+  /** The pending-session-heal decoy org (null when the user already had a
+   *  membership — never the case for a run-scoped identity). */
+  readonly decoyOrgId: string | null;
+}
 
 /**
- * Find-or-create the third fixture user on the dev Clerk instance (idempotent:
+ * Find-or-create a team-fixture user on the dev Clerk instance (idempotent:
  * every step short-circuits once its state exists). Creation marks the address
  * verified (`skip_password_requirement` + a pre-verified email) — a `+clerk_test`
  * test-mode address on a dev instance, so no real inbox is involved. The
@@ -137,7 +156,7 @@ export const THIRD_FIXTURE_EMAIL = "gold+clerk_test@agranado.com";
  * preview), so the scenario exercises the first-WRITE JIT join path — the
  * webhook's chain is the same code (resolveCanonicalTeamOrg), unit-tested.
  *
- * PENDING-SESSION HEAL (the PR #222 CI 401): the dev instance runs
+ * PENDING-SESSION HEAL (the PR #222 round-2 CI 401): the dev instance runs
  * `force_organization_selection: true` (same as prod), and Clerk gives a user
  * with ZERO org memberships a **pending** session (`tasks:
  * [{key: "choose-organization"}]`) — its JWT carries `sts: "pending"`, which
@@ -146,15 +165,17 @@ export const THIRD_FIXTURE_EMAIL = "gold+clerk_test@agranado.com";
  * in; the e2e preview gets no webhook, so we replicate what the forced task
  * itself would produce: a self-created DECOY org (anchorless, exactly like the
  * duplicate a forced user creates in the browser). That flips the session to
- * `active` AND makes the scenario faithfully reproduce the production shape
- * the sticky-after-mirror policy must handle — the app must IGNORE this decoy
- * and land the user in the domain's canonical org.
+ * `active` — Clerk then auto-activates the sole membership, so the session
+ * CARRIES the decoy as its active org — and makes the scenario faithfully
+ * reproduce the production shape the sticky-after-mirror policy must handle:
+ * the app must IGNORE the (unmirrored) decoy and land the user in the domain's
+ * canonical org.
  */
-export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
-  const found = await clerkFetch(
-    `/users?email_address=${encodeURIComponent(THIRD_FIXTURE_EMAIL)}`,
-    secretKey,
-  );
+export async function ensureTeamFixtureUser(
+  secretKey: string,
+  email: string,
+): Promise<TeamFixture> {
+  const found = await clerkFetch(`/users?email_address=${encodeURIComponent(email)}`, secretKey);
   if (!found.ok) throw new Error(`clerk users lookup failed: ${found.status}`);
   const users = (await found.json()) as ReadonlyArray<{ id: string }>;
   let userId = users[0]?.id;
@@ -164,15 +185,14 @@ export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        email_address: [THIRD_FIXTURE_EMAIL],
+        email_address: [email],
         skip_password_requirement: true,
       }),
     });
     if (!created.ok) {
       throw new Error(
-        `clerk create third-fixture user failed: ${created.status} — if user creation is ` +
-          "restricted on this instance, hand-provision gold+clerk_test@agranado.com once " +
-          "(see tests/e2e/README.md, fixture 3)",
+        `clerk create team-fixture user ${email} failed: ${created.status} — if user creation ` +
+          "is restricted on this instance, see tests/e2e/README.md (run-scoped team fixtures)",
       );
     }
     userId = ((await created.json()) as { id: string }).id;
@@ -185,37 +205,55 @@ export async function ensureThirdFixtureUser(secretKey: string): Promise<void> {
     secretKey,
   );
   if (!memberships.ok) {
-    throw new Error(`clerk membership lookup failed for fixture 3: ${memberships.status}`);
+    throw new Error(`clerk membership lookup failed for ${email}: ${memberships.status}`);
   }
   const page = (await memberships.json()) as { data?: ReadonlyArray<unknown> };
-  if ((page.data ?? []).length > 0) return; // has an org → sessions mint active
+  if ((page.data ?? []).length > 0) return { email, userId, decoyOrgId: null };
 
+  const localPart = email.split("@")[0] ?? "fixture";
   const decoy = await clerkFetch("/organizations", secretKey, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // Deliberately NO publicMetadata.domain anchor: the anchor scan must never
     // adopt this org — it plays the role of the forced task's duplicate.
-    body: JSON.stringify({ name: "arp-e2e-gold-decoy-org", created_by: userId }),
+    body: JSON.stringify({ name: `arp-e2e-decoy-${localPart}`, created_by: userId }),
   });
   if (!decoy.ok) {
     throw new Error(
-      `clerk create decoy org for fixture 3 failed: ${decoy.status} — without at least one ` +
+      `clerk create decoy org for ${email} failed: ${decoy.status} — without at least one ` +
         "membership the instance's force_organization_selection makes every session PENDING " +
-        "(sts:'pending' → 401). See tests/e2e/README.md, fixture 3.",
+        "(sts:'pending' → 401). See tests/e2e/README.md (run-scoped team fixtures).",
     );
   }
+  const decoyOrgId = ((await decoy.json()) as { id: string }).id;
+  return { email, userId, decoyOrgId };
 }
 
-/** Mint a session for the THIRD identity (ADR-0074 shared-team-org scenario),
- *  find-or-creating the user first. Same `E2E_CLERK_SECRET_KEY` gate as the
- *  other fixtures. */
-export async function mintThirdTestSession(): Promise<TestSession> {
-  const secretKey = process.env.E2E_CLERK_SECRET_KEY;
-  if (!secretKey) {
-    throw new Error("@auth e2e needs E2E_CLERK_SECRET_KEY");
+/**
+ * Best-effort cleanup for a run-scoped team fixture (the accumulation bound):
+ * deletes the Clerk user (which removes its memberships — keeping the shared
+ * canonical org's member count flat across runs) and its decoy org. NEVER
+ * throws — a cleanup failure must not fail (or mask) the scenario; it logs
+ * loudly instead, and a leaked user is caught by the periodic sweep
+ * (follow-up; see the PR). A 404 is success (already cleaned / retried).
+ */
+export async function cleanupTeamFixture(secretKey: string, fixture: TeamFixture): Promise<void> {
+  const results: string[] = [];
+  const del = async (path: string, label: string) => {
+    try {
+      const res = await clerkFetch(path, secretKey, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) results.push(`${label}: HTTP ${res.status}`);
+    } catch (e) {
+      results.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  await del(`/users/${fixture.userId}`, `user ${fixture.email}`);
+  if (fixture.decoyOrgId) await del(`/organizations/${fixture.decoyOrgId}`, "decoy org");
+  if (results.length > 0) {
+    console.warn(
+      `team-fixture cleanup incomplete (will accumulate on the dev instance until swept): ${results.join("; ")}`,
+    );
   }
-  await ensureThirdFixtureUser(secretKey);
-  return mintTestSessionFor(secretKey, THIRD_FIXTURE_EMAIL);
 }
 
 /**
