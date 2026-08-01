@@ -18,7 +18,7 @@ No config file, no pasted secret. (Requires the operator to have created the Cle
 
 ### B. API key — headless / config-file clients
 
-Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.centaurspec.com/settings/api-keys` (shown once).
+Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.centaurspec.com/settings/api-keys` (shown once). When minting, check **`acl:write`** if your agent will share reports (`reports_set_acl` / `reports_grant_write`) — the default `reports:write` scope only uploads & manages them.
 
 - **Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS) via the `mcp-remote` bridge:
   ```json
