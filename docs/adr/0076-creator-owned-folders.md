@@ -40,6 +40,34 @@ ADR-0059 §5 deliberately kept folders org-scoped: "a shared org folder tree is 
 - **Flagged (pre-existing, not fixed here):** `POST /api/v1/reports`'s documented `folder_path` placement is parsed but **silently ignored** by the route (every create lands in the actor's Root) — so upload-time folder targeting needed no visibility work in this iteration; when `folder_path` resolution is actually implemented it MUST resolve only actor-visible folders, and path segments it creates are owned by the actor (private) per §3. Tracked as a follow-up issue.
 - **Flagged:** `folder_collaborators` + `grant_level` remain dead schema awaiting their cleanup migration (unchanged from ADR-0060) — now alongside the live `folder_shares` table; the cleanup must not confuse the two.
 
+## Amendment (2026-08-02) — the deferred dashboard UI shipped, plus an opt-in cascade
+
+§6 closed with "Dashboard share UI is a follow-up issue — API + MCP only in this iteration" (issue #231). That UI has now shipped, and building it surfaced one gap in the model worth recording.
+
+1. **The management surface is the sidebar.** Every non-Root folder row carries a visibility badge (`Private` / `Org` / `Shared with N`) and a `<details>` kebab — the same idiom the report rows already use — holding the private ⇄ org toggle, the share roster (email + granted-at), add-by-email, per-row remove, and the legacy-adoption warning. It posts to the dashboard's **cookie-authenticated Remix action**, which calls the same four use cases; the browser never touches the Bearer `/api/v1` routes. A session carries `SELF_SCOPES`, so the `acl:write` gate in §6 is satisfied without a new door.
+2. **Root renders nothing.** §3 makes the Root unmanageable in *either* direction, so the sidebar renders no affordance for it at all rather than rendering-then-erroring.
+3. **The rule is mirrored, never re-derived.** `manageable` / `blockedReason` / `adoptionNotice` are computed in the LOADER by `folderManagement` (`apps/app/app/server/folder-sharing.server.ts`), a mirror of `loadManagedFolder`, and shipped to the components as plain data. Two reasons: the dashboard components must not import `arp-domain` (its barrel pulls `node:crypto` into the client bundle), and an independently-invented client rule would drift from the server that actually decides. A folder owned by someone else renders the controls **disabled with the server's own reason**, not hidden.
+4. **The adoption warning arrives before the click.** Adoption (§6) is permanent and has no transfer path, so a legacy folder's menu states it up front: "You'll become this folder's owner. Other members won't be able to change its sharing, and ownership can't be transferred."
+5. **The share roster costs one query, for one folder.** Only `?manage=<id>` loads a roster; every other badge falls back to `Private`/`Org` rather than inventing a count it never fetched. A roster per sidebar row would be an N+1 on the dashboard's hot path.
+
+### The nested-folder gap, and why the cascade stayed a UI-layer loop
+
+**The gap.** This ADR's repair is per-folder and NOT recursive. Making a parent `private` leaves pre-existing descendants `org` — and §5's `graftOrphansToRoot` then re-parents those descendants under Root in every other member's sidebar. So the names still leak, from a folder whose owner has just been told it is private. The per-folder model is right (a descendant may have its own owner and its own intent), but "make this private" without a way to reach what is inside it is a half-repair.
+
+**The decision.** The UI adds an explicit, clearly-labelled opt-in — "Also apply to everything inside this folder" — implemented in the **action layer** as a loop over `collectFolderDescendants` (a pure, cycle-safe tree walk in `arp-domain`, next to `graftOrphansToRoot`) that calls the **existing `setFolderVisibility` use case once per folder**.
+
+**Why not recursive domain or SQL semantics:**
+
+- Every iteration re-runs `loadManagedFolder`, so a descendant the actor does not own is refused by exactly the same authorization path it would hit on its own. A recursive SQL `UPDATE` would have to re-implement that gate — the classic place an authorization bypass gets introduced.
+- Per-folder ownership is the model. A recursive transition would have to decide, in the domain, what happens to a descendant someone else owns; the loop doesn't decide — it asks, and reports the answer.
+- Each folder still gets its own `folder.visibility_set` audit row (ADR-0070), with its own `adopted` flag. One recursive statement would collapse that to a single, less truthful record.
+
+**Consequences, accepted:**
+
+- **Partial failure is normal, and is reported honestly.** The banner names every folder that changed and every folder that did not, with the server's own reason for each, and never counts a refusal as a success (`cascadeSummary`, unit-tested for exactly that).
+- **Scope is the actor's VISIBLE tree.** A descendant the actor cannot see is not in the tree the loop walks, so it is never silently "skipped" — it was never a candidate. This is the one limit the per-folder copy can't spell out row by row, and it is the deliberate consequence of "existence is private": the UI cannot warn about a folder it must not admit exists.
+- **It is N calls, not one.** Fine at current folder counts, and each one is the audited, authorized call it should be. If a tree ever gets deep enough for this to matter, the fix is a batched *use case* — not recursive SQL underneath the guard.
+
 ## More information
 
 Implementation: predicate in `DrizzleFolderRepository` (owner/legacy/org legs + EXISTS on `folder_shares`), mirrored by `InMemoryFolderRepository` (shared `FolderShareStore` instance); guards `loadVisibleFolder`/`loadWritableFolder`/`loadManagedFolder` replace `loadOwnedFolder`; matrix tests in `folder-repository.contract.ts` + `folder-share-store.contract.ts` run against both runners (ADR-0046). Glossary: **Folder** sharpened; **Folder share**, **Folder visibility** added.

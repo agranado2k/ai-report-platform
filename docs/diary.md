@@ -3373,3 +3373,51 @@ worktree `folder-visibility`, branch `feat/folder-visibility`.
   runners (ADR-0046); the team-org e2e smoke gains the folder-visibility scenario.
 - Flagged (pre-existing): `folder_path` on upload is parsed but silently ignored (everything
   lands in Root) — no visibility work needed there yet; follow-up issue filed.
+
+## 2026-08-02 — The folder sharing UI shipped, plus an opt-in cascade (ADR-0076 §6, issue #231)
+
+ADR-0076 (PR #230) shipped the model, the API and the MCP tools but deliberately deferred the
+dashboard. That left the incident folder's only repair path as a hand-run MCP call — which is
+exactly why "Engeneering" in the House Numbers org was never fixed. Worktree
+`folder-share-ui`, branch `feat/folder-share-ui`. Closes #231; ADR-0076 gains a dated
+amendment recording both the UI and the cascade decision.
+
+- **Sidebar management.** Every non-Root folder row gets a visibility badge (`Private` / `Org` /
+  `Shared with N`) and a `<details>` kebab — the SAME idiom the report rows use — holding the
+  private ⇄ org toggle, the share roster (email + granted-at), add-by-email, per-row remove, the
+  out-of-org inert-share warning, and the legacy-adoption notice. It posts to the dashboard's
+  cookie-authenticated Remix action, which calls the same four use cases; the browser never
+  touches the Bearer `/api/v1` routes (a session carries `SELF_SCOPES`, so `acl:write` is met).
+- **Root renders no controls at all** — the domain refuses a visibility call on it in either
+  direction, so render-then-error would be a lie.
+- **The management rule is mirrored, not re-derived.** `folderManagement`
+  (`apps/app/app/server/folder-sharing.server.ts`) is a mirror of `loadManagedFolder`, computed
+  in the LOADER: dashboard components must not import `arp-domain` (its barrel drags
+  `node:crypto` into the client bundle), and a second client-side rule would drift from the
+  server that decides. A non-owner sees the controls DISABLED with the server's own reason.
+- **The adoption warning arrives before the click**, because adoption is permanent and has no
+  transfer path.
+- **The nested-folder gap, and the cascade.** ADR-0076's repair is per-folder, so a parent going
+  private leaves already-`org` descendants visible — and §5's grafting then re-parents them under
+  Root in every colleague's sidebar, name and all. The UI adds an explicit opt-in ("Also apply to
+  everything inside this folder") implemented as an **action-layer loop** over a new pure
+  `collectFolderDescendants` (arp-domain, next to `graftOrphansToRoot`), calling the existing
+  `setFolderVisibility` use case once per folder. Deliberately NOT recursive domain/SQL
+  semantics: every iteration re-runs `loadManagedFolder` (no second authorization path), each
+  folder keeps its own `folder.visibility_set` audit row, and partial failure is reported
+  honestly — the banner names what changed and what didn't, with the server's reason, and never
+  counts a refusal as success.
+- **One roster, one query.** Only `?manage=<id>` loads a folder's shares; every other badge falls
+  back to `Private`/`Org` rather than inventing a count it never fetched (no N+1 on the
+  dashboard's hot path).
+- **e2e that actually runs.** `tests/e2e/features/folder-sharing.feature` +
+  `folder-sharing.steps.ts` drive the dashboard action with two run-scoped identities at one team
+  domain (the `team-org-upload.steps.ts` fixture pattern, `@run-scoped` cleanup hook) and assert
+  on the server-rendered sidebar. `playwright.config.ts` now opts features in BY NAME — a glob
+  over `tests/e2e/features/**` would still fail collection on the step-less `@wip` corpus, so
+  listing a feature is the difference between coverage and decoration. The step-less
+  `share-folders.feature` stub was deleted and its catalog entry replaced; the Gherkin tag
+  vocabulary gained the harness's execution tags (`@smoke`/`@auth`/`@browser`/`@run-scoped`).
+- **Not e2e-covered, deliberately:** legacy adoption. `owner_id IS NULL` only comes from the
+  pre-ADR-0076 backfill; there is no supported way to mint one through the product, so the
+  adoption warning and the owner-or-legacy gate are pinned by unit tests instead.
