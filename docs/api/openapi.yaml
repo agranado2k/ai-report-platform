@@ -31,11 +31,14 @@ paths:
     get:
       operationId: listReports
       tags: [Reports]
-      summary: List the acting org's reports (cursor-paginated + searchable)
+      summary: List your visible reports in the acting org (cursor-paginated + searchable)
       description: >
-        Returns the signed-in org's reports as a cursor-paginated list envelope
-        (`{ object: "list", data, has_more }`, ADR-0053), newest-created first.
-        Org-scoped: a caller only ever sees its own org's reports. A session with
+        Returns the acting org's reports VISIBLE TO YOU as a cursor-paginated list
+        envelope (`{ object: "list", data, has_more }`, ADR-0053), newest-created
+        first. Org-scoped and visibility-scoped (ADR-0075): the list contains only
+        reports you own, org reports whose acl mode shares them broadly (`org` /
+        `public`), and reports you hold a write grant on — other owners'
+        private/password/allowlist reports are not listed at all. A session with
         no active organization → 401 (an explicit Problem, not an empty list).
       security:
         - apiKey: []
