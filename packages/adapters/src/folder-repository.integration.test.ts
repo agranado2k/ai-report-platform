@@ -18,7 +18,14 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
   afterEach(() => tdb.close());
 
   function build(id: string, name: string): Folder {
-    const r = createFolder({ id: folderId(id), orgId: ids.orgId, parentId: ids.folderId, name });
+    const r = createFolder({
+      id: folderId(id),
+      orgId: ids.orgId,
+      parentId: ids.folderId,
+      ownerId: null, // legacy shape — visible to every viewer (ADR-0076)
+      visibility: "org",
+      name,
+    });
     if (!r.ok) throw new Error("bad test folder");
     return r.value;
   }
@@ -27,7 +34,7 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
     const saved = await repo.save(build("00000000-0000-4000-8000-0000000000c1", "Archive"));
     expect(saved.ok).toBe(true);
 
-    const list = await repo.listByOrg(ids.orgId);
+    const list = await repo.listByOrg(ids.orgId, { userId: ids.userId });
     expect(list.ok).toBe(true);
     if (!list.ok) return;
     expect(list.value.map((f) => f.slug)).toContain("archive");
@@ -68,7 +75,7 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
     const del = await repo.softDelete(f.id);
     expect(del.ok).toBe(true);
 
-    const list = await repo.listByOrg(ids.orgId);
+    const list = await repo.listByOrg(ids.orgId, { userId: ids.userId });
     expect(list.ok && list.value.some((x) => x.id === f.id)).toBe(false);
     const found = await repo.findById(f.id);
     expect(found.ok && found.value?.deletedAt).not.toBeNull();
@@ -83,7 +90,7 @@ describe("DrizzleFolderRepository (pglite integration)", () => {
     const recreated = await repo.save(build("00000000-0000-4000-8000-0000000000c8", "Quarterly"));
     expect(recreated.ok).toBe(true);
 
-    const list = await repo.listByOrg(ids.orgId);
+    const list = await repo.listByOrg(ids.orgId, { userId: ids.userId });
     expect(list.ok && list.value.filter((f) => f.slug === "quarterly").length).toBe(1);
   });
 });

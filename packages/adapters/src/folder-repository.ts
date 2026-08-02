@@ -1,23 +1,29 @@
 // DrizzleFolderRepository — persists the Folder aggregate against the `folders`
 // table (ADR-0020). Sibling-slug uniqueness is enforced by the DB
 // (folders_org_parent_slug_uniq); a violation maps to a client-correctable
-// ValidationError. Row<->domain mapping is a pure function (unit-testable);
-// queries are integration-tested against pglite (ADR-0046).
-import type { FolderListQuery, FolderPage, FolderRepository } from "arp-application";
-import { folders } from "arp-db/schema";
+// ValidationError. Listing is visibility-scoped to the viewer (ADR-0076,
+// mirroring DrizzleReportRepository's ADR-0075 predicate): a folder is listed
+// iff the viewer owns it, it's legacy (owner_id NULL), its visibility is
+// `org`, or a `folder_shares` row matches the viewer (userId OR normalized
+// email — the ADR-0060 §2 dual match). Row<->domain mapping is a pure function
+// (unit-testable); queries are integration-tested against pglite (ADR-0046).
+import type { FolderListQuery, FolderPage, FolderRepository, FolderViewer } from "arp-application";
+import { folderShares, folders } from "arp-db/schema";
 import {
   type AppError,
   err,
   type Folder,
   type FolderId,
   folderId,
+  normalizeEmailAddress,
   type OrgId,
   ok,
   orgId,
   type Result,
+  userId,
   validationError,
 } from "arp-domain";
-import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, isNull, lt, or, sql } from "drizzle-orm";
 import type { DbContext } from "./client";
 
 type FolderRow = typeof folders.$inferSelect;
@@ -27,6 +33,8 @@ export function rowToFolder(row: FolderRow): Folder {
     id: folderId(row.id),
     orgId: orgId(row.orgId),
     parentId: row.parentId === null ? null : folderId(row.parentId),
+    ownerId: row.ownerId === null ? null : userId(row.ownerId),
+    visibility: row.visibility,
     name: row.name,
     slug: row.slug,
     deletedAt: row.deletedAt === null ? null : row.deletedAt.getTime(),
@@ -45,25 +53,55 @@ function isUniqueViolation(e: unknown): boolean {
 export class DrizzleFolderRepository implements FolderRepository {
   constructor(private readonly ctx: DbContext) {}
 
-  async listByOrg(org: OrgId): Promise<Result<readonly Folder[], AppError>> {
+  /** The ADR-0076 visibility predicate (see the file header). `db` is needed
+   *  for the EXISTS subquery on folder_shares. */
+  private visibilityFor(db: ReturnType<DbContext["current"]>, viewer: FolderViewer) {
+    const normalizedEmail = viewer.email ? normalizeEmailAddress(viewer.email) : undefined;
+    const shareUserMatch = eq(folderShares.granteeUserId, viewer.userId);
+    const shareMatch = normalizedEmail
+      ? or(shareUserMatch, eq(folderShares.granteeEmail, normalizedEmail))
+      : shareUserMatch;
+    return or(
+      eq(folders.ownerId, viewer.userId),
+      isNull(folders.ownerId), // legacy (pre-ADR-0076) — visible to everyone
+      eq(folders.visibility, "org"),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(folderShares)
+          .where(and(eq(folderShares.folderId, folders.id), shareMatch)),
+      ),
+    );
+  }
+
+  async listByOrg(org: OrgId, viewer: FolderViewer): Promise<Result<readonly Folder[], AppError>> {
     try {
       const db = this.ctx.current();
+      const visibility = this.visibilityFor(db, viewer);
+      const filters = [eq(folders.orgId, org), isNull(folders.deletedAt)];
+      if (visibility) filters.push(visibility);
       const rows = await db
         .select()
         .from(folders)
-        .where(and(eq(folders.orgId, org), isNull(folders.deletedAt)));
+        .where(and(...filters));
       return ok(rows.map(rowToFolder));
     } catch (e) {
       return errUnexpected("listFoldersByOrg", e);
     }
   }
 
-  async searchByOrg(org: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>> {
+  async searchByOrg(
+    org: OrgId,
+    viewer: FolderViewer,
+    q: FolderListQuery,
+  ): Promise<Result<FolderPage, AppError>> {
     // Cursor pagination (ADR-0053): keyset on the folder id (UUIDv7), DESC = newest
     // first; starting_after pages forward (id < cursor), ending_before pages back.
     try {
       const db = this.ctx.current();
       const filters = [eq(folders.orgId, org), isNull(folders.deletedAt)];
+      const visibility = this.visibilityFor(db, viewer);
+      if (visibility) filters.push(visibility);
       const back = q.endingBefore !== undefined;
       if (q.startingAfter) filters.push(lt(folders.id, q.startingAfter));
       if (q.endingBefore) filters.push(gt(folders.id, q.endingBefore));
@@ -82,6 +120,23 @@ export class DrizzleFolderRepository implements FolderRepository {
     }
   }
 
+  async hasChildFolders(org: OrgId, parent: FolderId): Promise<Result<boolean, AppError>> {
+    // The deleteFolder emptiness guard — org-scoped, NOT visibility-scoped
+    // (ADR-0076): an invisible subfolder must still block the delete, and a
+    // bare boolean surfaces no metadata.
+    try {
+      const db = this.ctx.current();
+      const [row] = await db
+        .select({ one: sql`1` })
+        .from(folders)
+        .where(and(eq(folders.orgId, org), eq(folders.parentId, parent), isNull(folders.deletedAt)))
+        .limit(1);
+      return ok(row !== undefined);
+    } catch (e) {
+      return errUnexpected("hasChildFolders", e);
+    }
+  }
+
   async findById(id: FolderId): Promise<Result<Folder | null, AppError>> {
     try {
       const db = this.ctx.current();
@@ -96,13 +151,16 @@ export class DrizzleFolderRepository implements FolderRepository {
     try {
       const db = this.ctx.current();
       // Insert, or update the mutable fields on conflict by id (rename → name/slug,
-      // reparent → parentId, soft-delete → deletedAt). ADR-0036.
+      // reparent → parentId, visibility/adoption → ownerId/visibility,
+      // soft-delete → deletedAt). ADR-0036 / ADR-0076.
       await db
         .insert(folders)
         .values({
           id: folder.id,
           orgId: folder.orgId,
           parentId: folder.parentId,
+          ownerId: folder.ownerId,
+          visibility: folder.visibility,
           name: folder.name,
           slug: folder.slug,
           deletedAt: folder.deletedAt === null ? null : new Date(folder.deletedAt),
@@ -111,6 +169,8 @@ export class DrizzleFolderRepository implements FolderRepository {
           target: folders.id,
           set: {
             parentId: folder.parentId,
+            ownerId: folder.ownerId,
+            visibility: folder.visibility,
             name: folder.name,
             slug: folder.slug,
             deletedAt: folder.deletedAt === null ? null : new Date(folder.deletedAt),
