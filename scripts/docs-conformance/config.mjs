@@ -162,6 +162,11 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
+  "share-folders": {
+    title: "Creator-owned folder visibility and sharing (ADR-0076)",
+    phase: "@phase-2",
+    status: "wip",
+  },
   // cross-org-collaboration.feature describes the ADR-009 folder_collaborators
   // design, superseded by ADR-0060 (report-write-grants.feature, above) — kept
   // catalogued rather than deleted (the feature file itself still exists,
