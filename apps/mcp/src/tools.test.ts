@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -275,6 +275,19 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });
 
+  it("folders_create states the ADR-0076 private-by-default rule and how to widen it", () => {
+    const d = descriptionOf("folders_create");
+    expect(d).toMatch(/private/i);
+    expect(d).toMatch(/folders_share/);
+    expect(d).toMatch(/folders_set_visibility/);
+  });
+
+  it("reports_move warns that an invisible destination folder reads as not-found", () => {
+    const d = descriptionOf("reports_move");
+    expect(d).toMatch(/visible/i);
+    expect(d).toMatch(/not found|404/i);
+  });
+
   it("reports_grant_write tells the caller to share the returned open_url with the grantee", () => {
     const d = descriptionOf("reports_grant_write");
     expect(d).toMatch(/open_url/);
@@ -416,5 +429,25 @@ describe("folder sharing tools (ADR-0076)", () => {
     expect(writeDesc("folders_set_visibility")).toMatch(/acl:write/);
     expect(writeDesc("folders_share")).toMatch(/NO rename|visibility/i);
     expect(writeDesc("folders_share")).toMatch(/acl:write/);
+  });
+
+  it("folders_share says a share is only effective for someone in the same org", () => {
+    const d =
+      (
+        collectTools(registerWriteTools, {} as ApiClient).get("folders_share")?.config as {
+          description?: string;
+        }
+      )?.description ?? "";
+    expect(d).toMatch(/same org|their own org/i);
+  });
+
+  it("folders_set_visibility takes its enum from the domain vocabulary, not a hand-written list", () => {
+    const tools = collectTools(registerWriteTools, {} as ApiClient);
+    const schema = (
+      tools.get("folders_set_visibility")?.config as {
+        inputSchema?: Record<string, { options?: readonly string[] }>;
+      }
+    )?.inputSchema?.visibility;
+    expect(schema?.options).toEqual([...FOLDER_VISIBILITIES]);
   });
 });

@@ -6,7 +6,7 @@
 // react instead of the call throwing a protocol error.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
 import { z } from "zod";
 import type { ApiClient, ApiResult, Problem } from "./client";
 
@@ -333,8 +333,10 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       title: "Move a report",
       description:
         "Move a report into a different folder. Requires write access (ADR-0059/0060): the " +
-        "report's owner or a write grantee. The destination folder must be in the REPORT's org. " +
-        "Use folders_list to find the folder id.",
+        "report's owner or a write grantee. The destination folder must be in the REPORT's org " +
+        "AND visible to you (ADR-0076) — a folder you cannot see reads as NOT FOUND, since its " +
+        "existence is private. Use folders_list to find the folder id: it lists exactly the " +
+        "folders you may target.",
       inputSchema: {
         slug: SLUG_INPUT,
         folder_id: z.string().describe("The destination folder_ id (from folders_list)."),
@@ -556,7 +558,11 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       description:
         "Create a folder to organize reports into — pair with reports_move (or reports_upload's " +
         "folder_path) once it exists. `parent_id` is required — new folders nest under an " +
-        "existing one; use folders_list to find the root (or another) folder id.",
+        "existing one; use folders_list to find the root (or another) folder id. The new folder " +
+        "is OWNED by you, and its visibility is PRIVATE when created under the Root (nobody else " +
+        "sees it, not even its name), else inherited from the parent (ADR-0076). To let others " +
+        "see it, use folders_share for specific people or folders_set_visibility for the whole " +
+        "org.",
       inputSchema: {
         name: z.string().describe("The folder name."),
         parent_id: z.string().describe("Parent folder_ id (required; from folders_list)."),
@@ -602,11 +608,12 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "with via folders_share) or `org` (every org member). OWNER-only for owned folders; a " +
         "LEGACY folder (created before per-user ownership — `owner` is null in folders_list) is " +
         "ADOPTED: calling this makes YOU its owner. Requires the `acl:write` scope. The Root " +
-        "folder is always org-visible and cannot be made private. Visibility gates the folder " +
-        "itself, not the reports inside it — report access stays governed by each report's acl.",
+        "folder is always org-visible and is never owned — calling this on it is an error in " +
+        "either direction. Visibility gates the folder itself, not the reports inside it — " +
+        "report access stays governed by each report's acl.",
       inputSchema: {
         id: z.string().describe("The folder_ id (from folders_list)."),
-        visibility: z.enum(["private", "org"]).describe("Who can see the folder."),
+        visibility: z.enum(FOLDER_VISIBILITIES).describe("Who can see the folder."),
       },
       annotations: MUTATE,
     },
@@ -623,7 +630,10 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "create rights and NO access to the reports inside (share those with reports_set_acl / " +
         "reports_grant_write). OWNER-only (or any member for a legacy owner-less folder); " +
         "requires the `acl:write` scope. The grantee doesn't need an account yet — the share " +
-        "matches by email once they sign up.",
+        "matches by email once they sign up. A share is only EFFECTIVE for someone in the same " +
+        "org as the folder: folder listings are org-scoped, so a grantee whose account lives in " +
+        "another org never sees it. The grant is still recorded, and starts working if they " +
+        "later join.",
       inputSchema: {
         id: z.string().describe("The folder_ id (from folders_list)."),
         email: z.string().describe("The grantee's email address."),
