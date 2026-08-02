@@ -97,8 +97,10 @@ export async function loader(args: LoaderFunctionArgs) {
   if (before && !before.ok)
     log.warn(`dashboard: malformed ending_before cursor — ${before.error.message}`);
 
+  // Visibility-scoped (ADR-0075): the list shows only what THIS user may see —
+  // their own reports, org/public-shared ones, and write-granted ones.
   const searchR = await ops().searchReports(
-    { orgId: actor.orgId },
+    { orgId: actor.orgId, userId: actor.userId },
     {
       query: q || undefined,
       folderId: selectedFolderIdDecoded?.ok ? selectedFolderIdDecoded.value : undefined,
