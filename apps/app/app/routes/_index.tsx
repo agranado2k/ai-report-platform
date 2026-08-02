@@ -13,6 +13,7 @@ import {
   makeReportId,
   makeSlug,
   reportIdToWire,
+  visibleFolderOrRoot,
 } from "arp-domain";
 import {
   AppHeader,
@@ -139,11 +140,21 @@ export async function loader(args: LoaderFunctionArgs) {
 
   return json({
     folders,
-    items: result.items.map((r) => ({
-      ...r,
-      id: reportIdToWire(r.id),
-      folderId: folderIdToWire(r.folderId),
-    })),
+    items: result.items.map((r) => {
+      const folderId = folderIdToWire(r.folderId);
+      return {
+        ...r,
+        id: reportIdToWire(r.id),
+        folderId,
+        // A visible report can live in an INVISIBLE folder (ADR-0075/0076), so
+        // its folderId resolves to nothing in `folders`. Resolve the id the UI
+        // should BIND to here, on the server, where arp-domain is already
+        // loaded: the label groups it under Root's name rather than leaking
+        // anything, and the Move control preselects Root rather than whatever
+        // option the browser picks first for an unmatched <select> value.
+        displayFolderId: root ? visibleFolderOrRoot(folderId, folders, root.id) : folderId,
+      };
+    }),
     hasPrev,
     hasNext,
     q,
@@ -257,10 +268,9 @@ export default function Index() {
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
   const root = folders.find((f) => f.parentId === null);
-  // A visible report can live in an INVISIBLE folder (ADR-0075/0076) — its
-  // folder name is unresolvable for this viewer, so group it under Root's
-  // label rather than leaking anything (or rendering a dash).
-  const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? root?.name ?? "—";
+  // Plain lookup: the loader has already resolved every id the UI binds to
+  // down to a folder that is actually in `folders` (see `displayFolderId`).
+  const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
   const createParent = selectedFolderId ?? rootId;
   const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
 
@@ -390,7 +400,7 @@ export default function Index() {
                       <code className="font-mono">{r.slug}</code>
                       <span className="inline-flex items-center gap-1">
                         <FolderIcon className="h-3.5 w-3.5" />
-                        {folderName(r.folderId)}
+                        {folderName(r.displayFolderId)}
                       </span>
                     </div>
                   </div>
@@ -410,7 +420,7 @@ export default function Index() {
                         <input type="hidden" name="slug" value={r.slug} />
                         <Select
                           name="toFolderId"
-                          defaultValue={r.folderId}
+                          defaultValue={r.displayFolderId}
                           aria-label={`Move ${r.title} to folder`}
                           size="sm"
                           className="min-w-0 flex-1 text-xs"

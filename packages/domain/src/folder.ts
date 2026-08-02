@@ -158,6 +158,22 @@ export function graftOrphansToRoot<T extends TreeNodeRef>(
   return nodes.map((n) => (isUnrooted(n, byId) ? { ...n, parentId: rootId } : n));
 }
 
+/** Resolve a folder reference for RENDERING (ADR-0076 §partial-visibility).
+ *  A visible report can live in a folder this viewer cannot see, so its
+ *  `folderId` is not among the visible nodes. Fall back to `rootId` — the same
+ *  place `graftOrphansToRoot` puts orphaned subtrees — so anything BOUND to
+ *  that id (a folder-name label, a Move control's selected option) points at a
+ *  folder that is actually on screen. Getting this wrong on a form control is
+ *  not cosmetic: a `<select>` whose value matches no option preselects the
+ *  first one, so submitting the form untouched silently moves the report. */
+export function visibleFolderOrRoot<T extends TreeNodeRef>(
+  folderId: string,
+  nodes: readonly T[],
+  rootId: string,
+): string {
+  return nodes.some((n) => n.id === folderId) ? folderId : rootId;
+}
+
 /** Can `node` NOT reach a top-level ancestor by following parent links? True
  *  when its immediate parent is missing from the set (the invisible-ancestor
  *  case) or when walking up revisits a node (a cycle). A chain that ends at an

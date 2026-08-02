@@ -10,6 +10,7 @@ import {
   isFolderBroadlyVisibleTo,
   renameFolder,
   setFolderVisibility,
+  visibleFolderOrRoot,
 } from "./folder";
 
 const org = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -256,5 +257,24 @@ describe("graftOrphansToRoot (ADR-0076)", () => {
     const once = graftOrphansToRoot([child], "root");
     expect(once).toEqual([child]);
     expect(graftOrphansToRoot(once, "root")).toEqual([child]);
+  });
+});
+
+describe("visibleFolderOrRoot (ADR-0076)", () => {
+  const nodes = [
+    { id: "root", parentId: null },
+    { id: "a", parentId: "root" },
+  ];
+
+  it("returns the folder id unchanged when it IS among the visible nodes", () => {
+    expect(visibleFolderOrRoot("a", nodes, "root")).toBe("a");
+  });
+
+  it("falls back to the Root when the folder is invisible to this viewer", () => {
+    expect(visibleFolderOrRoot("hidden", nodes, "root")).toBe("root");
+  });
+
+  it("falls back for the Root's own id when the Root itself is not rendered", () => {
+    expect(visibleFolderOrRoot("hidden", [], "root")).toBe("root");
   });
 });
