@@ -132,10 +132,15 @@ paths:
       tags: [Folders]
       summary: List the acting org's folders (cursor-paginated)
       description: >
-        Returns the signed-in org's folders as a cursor-paginated list envelope
-        (`{ object: "list", data, has_more }`, ADR-0053), newest-created first;
-        `parent_id` links them into the tree (Root has a null parent). Org-scoped
-        (ADR-0036). A session with no active organization → 401.
+        Returns the folders the acting USER may see as a cursor-paginated list
+        envelope (`{ object: "list", data, has_more }`, ADR-0053), newest-created
+        first; `parent_id` links them into the tree (Root has a null parent).
+        Org-scoped (ADR-0036) AND visibility-scoped (ADR-0076): a folder is
+        listed only when the caller owns it, it is a legacy (owner-less) row,
+        its visibility is `org`, or it is shared with them. A visible folder
+        whose parent is invisible carries that parent's (opaque) id — tree
+        builders graft such folders under Root. A session with no active
+        organization → 401.
       security:
         - apiKey: []
       parameters:
@@ -157,9 +162,13 @@ paths:
       summary: Create a folder
       description: >
         Create a folder under `parent_id` in the acting org (ADR-0036). The
-        parent must exist and belong to your org; folders nest at most 8 levels
-        deep. To create a top-level folder, pass the Root folder's id as
-        `parent_id` (every folder lives under Root).
+        parent must exist, belong to your org, be visible to you, and be
+        writable by you (ADR-0076 — anyone for legacy/org-visible parents,
+        owner-only for private ones); folders nest at most 8 levels deep. The
+        new folder is OWNED by you; its visibility is `private` when created
+        under the Root, else inherited from the parent (ADR-0076). To create a
+        top-level folder, pass the Root folder's id as `parent_id` (every
+        folder lives under Root).
       security:
         - apiKey: []
       parameters:
@@ -189,8 +198,10 @@ paths:
       tags: [Folders]
       summary: Rename a folder
       description: >
-        Change a folder's display name (ADR-0036). The folder must belong to your
-        org. The folder's slug is left unchanged (stable identifier).
+        Change a folder's display name (ADR-0036). The folder must belong to
+        your org and be writable by you (ADR-0076: its owner, or anyone for a
+        legacy/org-visible folder; an invisible private folder reads 404). The
+        folder's slug is left unchanged (stable identifier).
       security:
         - apiKey: []
       parameters:
@@ -223,9 +234,10 @@ paths:
       tags: [Folders]
       summary: Delete a folder
       description: >
-        Soft-delete a folder (ADR-0036). The folder must belong to your org. The
-        Root folder cannot be deleted, and a folder that still contains
-        subfolders or reports is rejected (422) — empty it first.
+        Soft-delete a folder (ADR-0036). The folder must belong to your org and
+        be writable by you (ADR-0076). The Root folder cannot be deleted, and a
+        folder that still contains subfolders or reports — even ones invisible
+        to you — is rejected (422); empty it first.
       security:
         - apiKey: []
       parameters:
@@ -245,6 +257,147 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/folders/{id}/visibility:
+    post:
+      operationId: setFolderVisibility
+      tags: [Folders]
+      summary: Set a folder's visibility
+      description: >
+        Set who may SEE the folder (ADR-0076): `private` (its owner + people
+        it's shared with) or `org` (every member). Requires the `acl:write`
+        scope. OWNER-only for owned folders; a LEGACY (owner-less, pre-ADR-0076)
+        folder is ADOPTED — the caller becomes its owner. The Root folder is
+        always org-visible (422 on an attempt to make it private).
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
+          description: The folder id.
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetFolderVisibilityRequest' }
+      responses:
+        '200':
+          description: The updated folder (a legacy folder comes back adopted — `owner` set).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Folder' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/folders/{id}/shares:
+    get:
+      operationId: listFolderShares
+      tags: [Folders]
+      summary: List a folder's shares
+      description: >
+        List everyone the folder's visibility is shared with (ADR-0076).
+        Requires the `acl:write` scope; OWNER-only (or any member for a legacy
+        owner-less folder) — share config is the owner's business, mirroring
+        GET /reports/{slug}/write-grants (ADR-0060).
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
+          description: The folder id.
+      responses:
+        '200':
+          description: A list envelope of folder_share resources.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FolderShareList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: shareFolder
+      tags: [Folders]
+      summary: Share a folder's visibility with someone
+      description: >
+        Give `email` VISIBILITY of the folder (ADR-0076) — it appears in their
+        folder tree and becomes a valid move target for them. Confers NO
+        rename/delete/create rights and NO access to the reports inside (those
+        stay governed by each report's acl). Requires the `acl:write` scope;
+        OWNER-only (or any member for a legacy owner-less folder). The grantee
+        needn't have signed up yet — `grantee_user_id` resolves
+        opportunistically now, else the share matches by email once they do.
+        Re-sharing the same email upserts in place.
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
+          description: The folder id.
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShareFolderRequest' }
+      responses:
+        '201':
+          description: The created/refreshed folder_share resource.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FolderShare' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/folders/{id}/shares/{email}:
+    delete:
+      operationId: unshareFolder
+      tags: [Folders]
+      summary: Revoke a folder share
+      description: >
+        Revoke a previously shared folder visibility (ADR-0076). Requires the
+        `acl:write` scope; OWNER-only (or any member for a legacy owner-less
+        folder). Idempotent — unsharing an email with no share still 204s.
+        `email` is URL-encoded and normalized (case/whitespace-insensitive)
+        before the lookup.
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
+          description: The folder id.
+        - name: email
+          in: path
+          required: true
+          schema: { type: string, format: email }
+          description: The grantee's email (URL-encoded).
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204': { description: Revoked (or no share existed — idempotent). }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/reports/{slug}/move:
     post:
       operationId: moveReport
@@ -254,8 +407,9 @@ paths:
         Reassign the report identified by `slug` to the folder `folder_id`
         (ADR-0036). Ownership-gated (ADR-0059): the caller must be the report's
         owner (write grants extend this under ADR-0060), and the target folder
-        must belong to the REPORT's org. The slug and the report's versions are
-        unchanged.
+        must belong to the REPORT's org AND be visible to the caller (ADR-0076
+        — someone else's private folder reads 404). The slug and the report's
+        versions are unchanged.
       security:
         - apiKey: []
       parameters:
@@ -1517,9 +1671,9 @@ components:
           description: True if more items follow; page on with `starting_after` = the last id.
 
     Folder:
-      description: A `folder` resource — a tree-structured organizing unit (ADR-0036, ADR-0053).
+      description: A `folder` resource — a tree-structured organizing unit (ADR-0036, ADR-0053, ADR-0076).
       type: object
-      required: [object, id, name, slug, parent_id, mode]
+      required: [object, id, name, slug, parent_id, visibility, owner, mode]
       properties:
         object: { type: string, enum: [folder] }
         id: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
@@ -1531,6 +1685,18 @@ components:
           type: [string, 'null']
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: Parent folder id; null for the org Root folder.
+        visibility:
+          type: string
+          enum: [private, org]
+          description: >
+            Who may see the folder (ADR-0076): `private` (owner + shares) or
+            `org` (every member). A legacy folder (`owner` null) reads as
+            visible-to-all regardless.
+        owner:
+          type: [string, 'null']
+          description: >
+            The owning user's `user_…` External Id (ADR-0052), or null for a
+            legacy pre-ADR-0076 folder (org-wide visible + writable).
         mode:
           type: string
           enum: [prod, dev]
@@ -1555,6 +1721,58 @@ components:
         name:
           type: string
           description: The folder's new display name.
+
+    SetFolderVisibilityRequest:
+      type: object
+      required: [visibility]
+      properties:
+        visibility:
+          type: string
+          enum: [private, org]
+          description: Who may see the folder (ADR-0076).
+
+    ShareFolderRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          description: The grantee's email address (normalized before storage).
+
+    FolderShare:
+      description: >
+        A per-folder visibility share (ADR-0076) — lets `email` SEE the folder.
+        No surrogate id: wire-addressed by `(folder id, email)`. Confers
+        visibility only — never write, and no access to the reports inside.
+      type: object
+      required: [object, email, granted_by, granted_at]
+      properties:
+        object: { type: string, enum: [folder_share] }
+        email:
+          type: string
+          format: email
+          description: The grantee's normalized email.
+        granted_by:
+          type: string
+          description: The sharing owner's `user_…` External Id (ADR-0052).
+        granted_at:
+          type: string
+          format: date-time
+          description: When the share was created (or last refreshed by a re-share).
+
+    FolderShareList:
+      description: A list of a folder's shares (ADR-0053 list envelope).
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: { type: string, enum: [list] }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/FolderShare' }
+        has_more:
+          type: boolean
+          description: Always false today — folder shares aren't paginated (a small, per-folder roster).
 
     RenameReportRequest:
       type: object

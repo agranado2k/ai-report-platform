@@ -3339,3 +3339,37 @@ branch `fix/visibility-scoped-listing`.
   dashboard queries their own org; this change only affects the org-scoped list). UX follow-up
   noted in the ADR: a listed view-only row still links to owner-gated `/open`, which bounces
   non-owners home.
+
+## 2026-08-02 — Creator-owned, visibility-scoped folders (ADR-0076)
+
+**Operator product decision, reversing ADR-0059 §5's "folders stay org-scoped":** a folder is
+visible only to its creator unless shared with specific users or with the whole org. Trigger
+incident: the "Engineering" folder (created via MCP by one House Numbers member) appeared in
+every member's sidebar. Recorded as **ADR-0076** (`docs/adr/0076-creator-owned-folders.md`);
+worktree `folder-visibility`, branch `feat/folder-visibility`.
+
+- Migration 0019: `folders.owner_id` (NULL = legacy), `folders.visibility` enum `private|org`
+  (existing rows backfilled to `org` — no surprise disappearances; column default then flips to
+  the fail-safe `private`), new `folder_shares` mirroring `report_write_grants` (email-keyed,
+  lazy `grantee_user_id`). The ADR-009 `folder_collaborators` corpse is NOT reused and still
+  awaits its cleanup migration.
+- Visibility predicate (mirrors ADR-0075): owner OR legacy OR `org` OR folder-share match —
+  enforced in `FolderRepository.listByOrg`/`searchByOrg` (sidebar, `GET /api/v1/folders`, MCP
+  `folders_list`) and the folder guards. An invisible same-org folder reads 404 on writes/moves
+  (existence is private). New folders: owned by creator, `private` under Root, else inherit the
+  parent's visibility. Root is ALWAYS `org` (invariant — default uploads).
+- Writes unchanged in spirit: shares grant VISIBILITY only; rename/delete/create-children stay
+  open to any member for legacy + org-visible folders, owner-only for private. deleteFolder's
+  emptiness guards (`hasReportsInFolder` + new `hasChildFolders`) deliberately NOT scoped.
+- Partial visibility: `graftOrphansToRoot` (pure, arp-domain) grafts visible folders with
+  invisible ancestors under Root in the dashboard tree; a visible report in an invisible folder
+  groups under Root's label.
+- Sharing surface (API + MCP; dashboard share UI is a filed follow-up):
+  `POST /folders/{id}/visibility` (owner-or-legacy; legacy folders are ADOPTED by the caller —
+  the incident's repair path), `GET|POST /folders/{id}/shares`, `DELETE /folders/{id}/shares/
+  {email}`; MCP `folders_set_visibility` / `folders_share` / `folders_unshare` /
+  `folders_list_shares`. All gate on the SAME `acl:write` scope as report sharing.
+- Contract suites carry the folder visibility matrix + the FolderShareStore contract on BOTH
+  runners (ADR-0046); the team-org e2e smoke gains the folder-visibility scenario.
+- Flagged (pre-existing): `folder_path` on upload is parsed but silently ignored (everything
+  lands in Root) — no visibility work needed there yet; follow-up issue filed.

@@ -32,7 +32,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0056 | [Report sharing & ACLs — app-authorized, viewer-verified access tokens](0056-report-sharing-acls.md) | Accepted (2026-06-24) — extends ADR-0038; "owner = any org member" amended by 0059; P4/P5 collaborators superseded by 0060 |
 | 0057 | [Transactional email via Resend (the allowlist magic link)](0057-transactional-email-resend.md) | Accepted (2026-06-26) — supports ADR-0056 |
 | 0058 | ["Forge & Ember" warm-dark design system](0058-forge-and-ember-design-system.md) | Accepted (2026-06-29) — amends ADR-0050 |
-| 0059 | [Per-user report ownership — the creator is the owner](0059-per-user-report-ownership.md) | Accepted (2026-07-06) — amends ADR-0056; §3 listing decision amended by 0075 |
+| 0059 | [Per-user report ownership — the creator is the owner](0059-per-user-report-ownership.md) | Accepted (2026-07-06) — amends ADR-0056; §3 listing decision amended by 0075; §5 folder clause reversed by 0076 |
 | 0060 | [Per-report write grants — supersedes folder collaborators](0060-per-report-write-grants.md) | Accepted (2026-07-06) — supersedes ADR-009 + ADR-0056 P4/P5 |
 | 0061 | [Organization types & membership — personal and team orgs](0061-organization-types-and-membership.md) | Accepted (2026-07-06) — activates ADR-005; requires 0059 first; deferred decisions resolved + membership model amended by 0068 |
 | 0062 | [Editing model & "Report HTML" schema](0062-editing-model-report-html-schema.md) | Accepted (2026-07-07) — ratifies the PR #144 spike verdict |
@@ -49,6 +49,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0073 | [Prune the unused FP helpers — delete `pipe()` and the `Result` combinators](0073-prune-unused-fp-helpers.md) | Accepted (2026-07-28) — corrects one ADR-024 claim; ADR-024's no-FP-library decision stands |
 | 0074 | [Silent domain auto-join — the app-owned domain index replaces slug keying](0074-silent-domain-auto-join.md) | Accepted (2026-08-01) — amends ADR-0068 (join key + session-org trust) and ADR-0048 (webhook writes the org row); extends the ADR-0054 webhook to `user.created` |
 | 0075 | [Visibility-scoped report listing — the list shows only what the viewer may see](0075-visibility-scoped-report-listing.md) | Accepted (2026-08-01) — amends ADR-0059 §3 (lists); extends ADR-0060's grant carve-out to lists; #226 stays open for cross-org |
+| 0076 | [Creator-owned folders — visibility-scoped folder trees](0076-creator-owned-folders.md) | Accepted (2026-08-02) — reverses ADR-0059 §5; mirrors 0075's predicate + 0060's grant shape; `folder_collaborators` corpse still awaiting cleanup, NOT reused |
 
 ## Backlog (ADRs 1–30 from the spec)
 
