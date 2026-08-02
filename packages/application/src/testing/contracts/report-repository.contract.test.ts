@@ -3,7 +3,7 @@
 // packages/adapters/src/report-repository.contract.test.ts (ADR-0046) — any
 // divergence between the two fails in exactly one of the two runs.
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
-import { InMemoryReportRepository } from "../in-memory";
+import { InMemoryReportRepository, InMemoryWriteGrantStore } from "../in-memory";
 import {
   describeReportRepositoryContract,
   type ReportFixtureOverrides,
@@ -12,6 +12,8 @@ import {
 const ORG_ID = orgId("contract-org");
 const FOLDER_ID = folderId("contract-folder");
 const UPLOADER_ID = userId("contract-user");
+const COLLEAGUE_ID = userId("contract-colleague");
+const COLLEAGUE_EMAIL = "colleague@contract.test";
 
 function slugFor(n: number): string {
   return `rc${n.toString().padStart(8, "0")}`; // 10 chars, nanoid alphabet
@@ -29,12 +31,22 @@ function versionIdFixture(): ReturnType<typeof versionId> {
 }
 
 describeReportRepositoryContract("in-memory", async () => {
-  const repo = new InMemoryReportRepository();
+  // The repo shares the write-grant store instance so grants recorded through
+  // the harness reach the ADR-0075 visibility predicate (like the real
+  // adapter's SQL reads the report_write_grants table directly).
+  const writeGrants = new InMemoryWriteGrantStore();
+  const repo = new InMemoryReportRepository(writeGrants);
   let seq = 0;
 
   return {
     repo,
     orgId: ORG_ID,
+    owner: { userId: UPLOADER_ID, email: "owner@contract.test" },
+    colleague: { userId: COLLEAGUE_ID, email: COLLEAGUE_EMAIL },
+    async grantWrite(reportId, granteeEmail, granteeUserId) {
+      const granted = await writeGrants.grant(reportId, granteeEmail, UPLOADER_ID, granteeUserId);
+      if (!granted.ok) throw new Error(`grantWrite failed: ${granted.error.message}`);
+    },
     nextVersionId: versionIdFixture,
     makeReport(overrides: ReportFixtureOverrides = {}) {
       seq += 1;

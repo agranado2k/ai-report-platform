@@ -74,6 +74,29 @@ export async function seedIdentity(ctx: DbContext): Promise<SeededIdentity> {
   return { orgId: orgId(SEED_ORG), userId: userId(SEED_USER), folderId: folderId(SEED_FOLDER) };
 }
 
+const SEED_COLLEAGUE = "00000000-0000-4000-8000-000000000004";
+const SEED_COLLEAGUE_EMAIL = "colleague@test.local";
+
+export interface SeededColleague {
+  readonly userId: UserId;
+  readonly email: string;
+}
+
+/**
+ * Insert a SECOND user (same org membership semantics — org scope is carried by
+ * the caller's actor, not a membership row) for the ADR-0075 visibility-matrix
+ * contract tests: a same-org colleague who owns nothing but can be the target
+ * of a userId-resolved write grant (the FK on `report_write_grants` needs a
+ * real `users` row).
+ */
+export async function seedColleague(ctx: DbContext): Promise<SeededColleague> {
+  await ctx
+    .current()
+    .insert(users)
+    .values({ id: SEED_COLLEAGUE, clerkUserId: "user_colleague", email: SEED_COLLEAGUE_EMAIL });
+  return { userId: userId(SEED_COLLEAGUE), email: SEED_COLLEAGUE_EMAIL };
+}
+
 export const SAMPLE_REPORT_ID = reportId("00000000-0000-4000-8000-0000000000a1");
 export const SAMPLE_VERSION_ID = versionId("00000000-0000-4000-8000-0000000000b1");
 

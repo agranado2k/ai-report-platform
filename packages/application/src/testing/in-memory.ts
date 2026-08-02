@@ -72,6 +72,7 @@ import type {
   ReportSearchQuery,
   ReportSummary,
   ReportVersionSummary,
+  ReportViewer,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
@@ -160,18 +161,17 @@ export class InMemoryFolderRepository implements FolderRepository, TxSnapshottab
 export class InMemoryReportRepository implements ReportRepository, TxSnapshottable {
   private readonly byId = new Map<string, Report>();
   private readonly slugToId = new Map<string, string>();
-  // Monotonic per-id write sequence, bumped on every save() (create AND
-  // re-save) — mirrors the real adapter's `updated_at`, which the DB bumps on
-  // every upsert. listByOrg sorts on this descending, matching the adapter's
-  // `ORDER BY updated_at DESC` including re-save reordering.
-  private readonly lastWriteSeq = new Map<string, number>();
-  private writeSeq = 0;
   // Version `uploaded_at` is DB-stamped (defaultNow()), not part of the pure
   // domain ReportVersion — mirrors the real adapter's INSERT-time timestamp: a
   // version id gets its stamp once, on first save, and keeps it across re-saves
   // (a scan-status refresh does not touch uploaded_at, same as the real upsert).
   private readonly versionUploadedAt = new Map<string, number>();
   private uploadSeq = 0;
+
+  /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg —
+   *  share the SAME store instance the test grants through. Omitted = the
+   *  grant leg never matches (fine for tests not exercising grants). */
+  constructor(private readonly writeGrants?: WriteGrantStore) {}
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -182,24 +182,25 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
     return ok(this.byId.get(id) ?? null);
   }
 
-  async listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
-    const summaries = [...this.byId.values()]
-      .filter((r) => r.orgId === orgId && r.deletedAt === null)
-      // Newest-last-write first — matches the adapter's `ORDER BY updated_at
-      // DESC`, including a re-save (rename, promote, move) bumping a report
-      // back to the front (ReportRepository contract suite, ADR-0046).
-      .sort((a, b) => (this.lastWriteSeq.get(b.id) ?? 0) - (this.lastWriteSeq.get(a.id) ?? 0))
-      .map((r) => ({
-        id: r.id,
-        slug: r.slug,
-        title: r.title,
-        isPublished: r.liveVersionId !== null,
-        folderId: r.folderId,
-      }));
-    return ok(summaries);
+  /** The ADR-0075 visibility predicate — mirrors the adapter's SQL: owned OR
+   *  broadly shared (`org`/`public`) OR write-granted (userId-or-email match,
+   *  ADR-0060 §2). Anything else is invisible — existence is private. */
+  private async isVisibleTo(r: Report, viewer: ReportViewer): Promise<boolean> {
+    if (r.ownerId === viewer.userId) return true;
+    if (r.acl.mode === "org" || r.acl.mode === "public") return true;
+    if (!this.writeGrants) return false;
+    const grant = await this.writeGrants.findFor(r.id, {
+      userId: viewer.userId,
+      email: viewer.email,
+    });
+    return grant.ok && grant.value !== null;
   }
 
-  async searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
+  async searchByOrg(
+    orgId: OrgId,
+    viewer: ReportViewer,
+    q: ReportSearchQuery,
+  ): Promise<Result<ReportPage, AppError>> {
     const needle = q.query?.trim().toLowerCase();
     const matched = [...this.byId.values()]
       .filter((r) => r.orgId === orgId && r.deletedAt === null)
@@ -209,7 +210,11 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
           ? r.title.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle)
           : true,
       );
-    const { items, hasMore } = keysetPage(matched, q); // keyset on id DESC (ADR-0053)
+    const visible: Report[] = [];
+    for (const r of matched) {
+      if (await this.isVisibleTo(r, viewer)) visible.push(r);
+    }
+    const { items, hasMore } = keysetPage(visible, q); // keyset on id DESC (ADR-0053)
     return ok({
       items: items.map((r) => ({
         id: r.id,
@@ -222,11 +227,19 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
     });
   }
 
+  async hasReportsInFolder(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>> {
+    // The deleteFolder emptiness guard — org-scoped, NOT visibility-scoped
+    // (ADR-0075): an invisible report must still block the delete.
+    return ok(
+      [...this.byId.values()].some(
+        (r) => r.orgId === orgId && r.folderId === folderId && r.deletedAt === null,
+      ),
+    );
+  }
+
   async save(report: Report): Promise<Result<void, AppError>> {
     this.byId.set(report.id, report);
     this.slugToId.set(report.slug, report.id);
-    this.writeSeq += 1;
-    this.lastWriteSeq.set(report.id, this.writeSeq);
     for (const v of report.versions) {
       if (!this.versionUploadedAt.has(v.id)) {
         this.uploadSeq += 1;
@@ -269,8 +282,6 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
     return {
       byId: new Map(this.byId),
       slugToId: new Map(this.slugToId),
-      lastWriteSeq: new Map(this.lastWriteSeq),
-      writeSeq: this.writeSeq,
       versionUploadedAt: new Map(this.versionUploadedAt),
       uploadSeq: this.uploadSeq,
     };
@@ -280,15 +291,11 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
     const s = snapshot as {
       byId: Map<string, Report>;
       slugToId: Map<string, string>;
-      lastWriteSeq: Map<string, number>;
-      writeSeq: number;
       versionUploadedAt: Map<string, number>;
       uploadSeq: number;
     };
     restoreMap(this.byId, s.byId);
     restoreMap(this.slugToId, s.slugToId);
-    restoreMap(this.lastWriteSeq, s.lastWriteSeq);
-    this.writeSeq = s.writeSeq;
     restoreMap(this.versionUploadedAt, s.versionUploadedAt);
     this.uploadSeq = s.uploadSeq;
   }

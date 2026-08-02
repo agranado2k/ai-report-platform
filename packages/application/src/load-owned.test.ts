@@ -37,10 +37,10 @@ const FAILING_REPORTS: ReportRepository = {
   async findById() {
     return err({ kind: "Unexpected", message: "db down" });
   },
-  async listByOrg() {
+  async searchByOrg() {
     return err({ kind: "Unexpected", message: "db down" });
   },
-  async searchByOrg() {
+  async hasReportsInFolder() {
     return err({ kind: "Unexpected", message: "db down" });
   },
   async save() {
