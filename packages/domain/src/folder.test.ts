@@ -33,6 +33,8 @@ function build(overrides: Partial<Folder> = {}): Folder {
   };
 }
 
+const createBase = { id, orgId: org, parentId: null, ownerId: owner, visibility: "org" } as const;
+
 describe("createFolder", () => {
   it("creates a folder with a slug derived from the name", () => {
     const r = createFolder({
@@ -72,22 +74,17 @@ describe("createFolder", () => {
     expect(r.ok && r.value.slug).toBe("archive");
   });
 
-  it("trims the name and rejects an empty one", () => {
-    const base = { id, orgId: org, parentId: null, ownerId: owner, visibility: "org" } as const;
-    expect(createFolder({ ...base, name: "   " }).ok).toBe(false);
-    const r = createFolder({ ...base, name: "  Docs  " });
+  it("rejects a blank name", () => {
+    expect(createFolder({ ...createBase, name: "   " }).ok).toBe(false);
+  });
+
+  it("trims surrounding whitespace from the name", () => {
+    const r = createFolder({ ...createBase, name: "  Docs  " });
     expect(r.ok && r.value.name).toBe("Docs");
   });
 
   it("rejects a name with no alphanumeric characters", () => {
-    const r = createFolder({
-      id,
-      orgId: org,
-      parentId: null,
-      ownerId: owner,
-      visibility: "org",
-      name: "///",
-    });
+    const r = createFolder({ ...createBase, name: "///" });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.kind).toBe("ValidationError");
@@ -122,8 +119,11 @@ describe("inheritedVisibility (ADR-0076)", () => {
     expect(inheritedVisibility(root)).toBe("private");
   });
 
-  it("a child of a non-root folder inherits its parent's visibility", () => {
+  it("a child of an ORG-visible non-root folder is org too", () => {
     expect(inheritedVisibility(build({ visibility: "org" }))).toBe("org");
+  });
+
+  it("a child of a PRIVATE non-root folder stays private", () => {
     expect(inheritedVisibility(build({ visibility: "private" }))).toBe("private");
   });
 });
@@ -174,10 +174,14 @@ describe("setFolderVisibility (ADR-0076)", () => {
 });
 
 describe("visibility + write predicates (ADR-0076)", () => {
-  it("owner sees and writes their private folder; others do neither", () => {
+  it("the OWNER sees and writes their private folder", () => {
     const f = build({ visibility: "private" });
     expect(isFolderBroadlyVisibleTo(f, owner)).toBe(true);
     expect(canWriteFolder(f, owner)).toBe(true);
+  });
+
+  it("a NON-owner neither sees nor writes a private folder", () => {
+    const f = build({ visibility: "private" });
     expect(isFolderBroadlyVisibleTo(f, other)).toBe(false);
     expect(canWriteFolder(f, other)).toBe(false);
   });

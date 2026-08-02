@@ -14,6 +14,10 @@ export interface FolderShareStoreContractHarness {
   /** A folder id the store's shares are scoped to (a real FK to a saved
    *  folder on the Drizzle harness; any id at all on the fake). */
   readonly folderId: FolderId;
+  /** A SECOND, distinct folder id (also a real FK on the Drizzle harness).
+   *  Without it every assertion here would hold for a store that ignored the
+   *  folder correlation entirely and matched shares by grantee alone. */
+  readonly otherFolderId: FolderId;
   /** A user id that exists (a real FK on the Drizzle harness) to use as
    *  `grantedBy` / an opportunistically-resolved `grantee_user_id`. */
   readonly existingUserId: UserId;
@@ -105,6 +109,43 @@ export function describeFolderShareStoreContract(
       await h.store.revoke(h.folderId, "a@b.com");
       const listed = await h.store.listByFolder(h.folderId);
       expect(listed.ok && listed.value).toEqual([]);
+    });
+
+    // ── Folder correlation ────────────────────────────────────────────────
+    // Every assertion above uses ONE folder, so a store that dropped the
+    // folder term entirely — matching purely on grantee — would satisfy them
+    // all. These pin the correlation: a share is a share OF a folder.
+
+    it("findFor does NOT match a share granted on a DIFFERENT folder", async () => {
+      await h.store.grant(h.otherFolderId, "a@b.com", h.existingUserId, h.existingUserId);
+      const byEmail = await h.store.findFor(h.folderId, {
+        userId: STRANGER,
+        email: "a@b.com",
+      });
+      expect(byEmail.ok && byEmail.value).toBeNull();
+      const byUserId = await h.store.findFor(h.folderId, {
+        userId: h.existingUserId,
+        email: "unrelated@x.com",
+      });
+      expect(byUserId.ok && byUserId.value).toBeNull();
+    });
+
+    it("listByFolder returns only THIS folder's shares", async () => {
+      await h.store.grant(h.folderId, "mine@b.com", h.existingUserId, null);
+      await h.store.grant(h.otherFolderId, "theirs@b.com", h.existingUserId, null);
+      const listed = await h.store.listByFolder(h.folderId);
+      expect(listed.ok && listed.value.map((s) => s.granteeEmail)).toEqual(["mine@b.com"]);
+    });
+
+    it("revoke on one folder leaves the same grantee's share on another intact", async () => {
+      await h.store.grant(h.folderId, "a@b.com", h.existingUserId, null);
+      await h.store.grant(h.otherFolderId, "a@b.com", h.existingUserId, null);
+      await h.store.revoke(h.folderId, "a@b.com");
+      const survivor = await h.store.findFor(h.otherFolderId, {
+        userId: STRANGER,
+        email: "a@b.com",
+      });
+      expect(survivor.ok && survivor.value?.granteeEmail).toBe("a@b.com");
     });
   });
 }

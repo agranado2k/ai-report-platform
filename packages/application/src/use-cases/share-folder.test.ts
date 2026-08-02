@@ -201,24 +201,23 @@ describe("unshareFolder use case (ADR-0076)", () => {
 });
 
 describe("listFolderShares authz (ADR-0076)", () => {
-  it("requires acl:write and denies a non-owner", async () => {
+  it("requires the acl:write scope", async () => {
     const d = await setup();
-    const noScope = await listFolderShares(
-      d,
-      { ...actorMe, scopes: [] },
-      { folderId: folderId(F1) },
-    );
-    expect(!noScope.ok && noScope.error.kind).toBe("InsufficientScope");
+    const r = await listFolderShares(d, { ...actorMe, scopes: [] }, { folderId: folderId(F1) });
+    expect(!r.ok && r.error.kind).toBe("InsufficientScope");
+  });
 
+  it("denies a non-owner (share management is owner-or-legacy only)", async () => {
+    const d = await setup();
     const f = await d.folders.findById(folderId(F1));
     if (!f.ok || !f.value) throw new Error("setup failed");
     await d.folders.save({ ...f.value, visibility: "org" });
-    const nonOwner = await listFolderShares(
+    const r = await listFolderShares(
       d,
       { orgId: orgA, userId: other, scopes: SCOPED },
       { folderId: folderId(F1) },
     );
-    expect(!nonOwner.ok && nonOwner.error.kind).toBe("NotAllowed");
+    expect(!r.ok && r.error.kind).toBe("NotAllowed");
   });
 });
 

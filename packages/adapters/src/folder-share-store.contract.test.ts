@@ -5,7 +5,7 @@
 // `folder_shares` FKs (folder + users rows must exist).
 import { describeFolderShareStoreContract } from "arp-application/testing";
 import { DrizzleFolderShareStore } from "./folder-share-store";
-import { makeTestDb, seedIdentity } from "./testing/pglite";
+import { makeTestDb, seedIdentity, seedSecondFolder } from "./testing/pglite";
 
 describeFolderShareStoreContract("drizzle+pglite", async () => {
   const tdb = await makeTestDb();
@@ -13,6 +13,7 @@ describeFolderShareStoreContract("drizzle+pglite", async () => {
   return {
     store: new DrizzleFolderShareStore(tdb.ctx),
     folderId: ids.folderId, // the seeded Root — a real FK target
+    otherFolderId: await seedSecondFolder(tdb.ctx),
     existingUserId: ids.userId,
     async teardown() {
       await tdb.close();

@@ -17,6 +17,18 @@ const rootB = folderId("00000000-0000-7000-8000-0000000000b0");
 const actorA = userId("00000000-0000-7000-8000-0000000000d1");
 const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
 
+/** A folder one level under org A's Root — `private` by the ADR-0076 default,
+ *  so inheritance tests can start from either visibility. */
+async function makeParent(d: Awaited<ReturnType<typeof setup>>) {
+  const parent = await createFolder(
+    d,
+    { orgId: orgA, userId: actorA },
+    { parentId: rootA, name: "Parent" },
+  );
+  if (!parent.ok) throw new Error("setup failed");
+  return parent.value;
+}
+
 /** A fresh fake with each org's Root seeded (as identity provisioning would). */
 async function setup() {
   const access = makeFolderAccessDeps();
@@ -96,30 +108,27 @@ describe("createFolder use case", () => {
     expect(r.ok && r.value.visibility).toBe("private");
   });
 
-  it("a child of a non-root folder INHERITS its parent's visibility (ADR-0076)", async () => {
+  it("a child of a PRIVATE non-root folder inherits private (ADR-0076)", async () => {
     const d = await setup();
-    const parent = await createFolder(
-      d,
-      { orgId: orgA, userId: actorA },
-      { parentId: rootA, name: "Parent" },
-    );
-    if (!parent.ok) throw new Error("setup failed");
-    // Parent is private (root child default) → child inherits private.
+    const parent = await makeParent(d); // private — it is a child of the Root
     const child = await createFolder(
       d,
       { orgId: orgA, userId: actorA },
-      { parentId: parent.value.id, name: "Child" },
+      { parentId: parent.id, name: "Child" },
     );
     expect(child.ok && child.value.visibility).toBe("private");
+  });
 
-    // Flip the parent to org, create another child → inherits org.
-    await d.folders.save({ ...parent.value, visibility: "org" });
-    const child2 = await createFolder(
+  it("a child of an ORG-VISIBLE non-root folder inherits org (ADR-0076)", async () => {
+    const d = await setup();
+    const parent = await makeParent(d);
+    await d.folders.save({ ...parent, visibility: "org" });
+    const child = await createFolder(
       d,
       { orgId: orgA, userId: actorA },
-      { parentId: parent.value.id, name: "Child2" },
+      { parentId: parent.id, name: "Child" },
     );
-    expect(child2.ok && child2.value.visibility).toBe("org");
+    expect(child.ok && child.value.visibility).toBe("org");
   });
 
   it("rejects creating inside another user's PRIVATE folder as NotFound — not resolvable (ADR-0076)", async () => {

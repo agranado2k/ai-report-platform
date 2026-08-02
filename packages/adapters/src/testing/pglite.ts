@@ -79,6 +79,26 @@ export async function seedIdentity(ctx: DbContext): Promise<SeededIdentity> {
   return { orgId: orgId(SEED_ORG), userId: userId(SEED_USER), folderId: folderId(SEED_FOLDER) };
 }
 
+const SEED_SECOND_FOLDER = "00000000-0000-4000-8000-000000000005";
+
+/**
+ * Insert a SECOND folder under the seeded Root, so a contract test can prove a
+ * store correlates its rows to a folder rather than matching on the grantee
+ * alone. Private + owned, the shape the ADR-0076 predicate actually gates on.
+ */
+export async function seedSecondFolder(ctx: DbContext): Promise<FolderId> {
+  await ctx.current().insert(folders).values({
+    id: SEED_SECOND_FOLDER,
+    orgId: SEED_ORG,
+    parentId: SEED_FOLDER,
+    ownerId: SEED_USER,
+    name: "Second",
+    slug: "second",
+    visibility: "private",
+  });
+  return folderId(SEED_SECOND_FOLDER);
+}
+
 const SEED_COLLEAGUE = "00000000-0000-4000-8000-000000000004";
 const SEED_COLLEAGUE_EMAIL = "colleague@test.local";
 

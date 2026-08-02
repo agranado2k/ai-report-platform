@@ -199,6 +199,57 @@ export function describeFolderRepositoryContract(
         expect(names(listed)).toContain("Shared by email");
       });
 
+      it("a share on ONE folder does NOT reveal a colleague's OTHER private folders", async () => {
+        // Without a second folder every share assertion above would still pass
+        // for a predicate that dropped the folder correlation from its EXISTS
+        // probe — i.e. one share would unlock every private folder in the org.
+        const shared = h.makeFolder({
+          name: "Shared one",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        const unshared = h.makeFolder({
+          name: "Still secret",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(shared);
+        await h.repo.save(unshared);
+        await h.shares.grant(shared.id, "colleague@test.local", h.ownerUserId, h.colleagueUserId);
+
+        const listed = await h.repo.listByOrg(h.orgId, {
+          userId: h.colleagueUserId,
+          email: "colleague@test.local",
+        });
+        expect(names(listed)).toContain("Shared one");
+        expect(names(listed)).not.toContain("Still secret");
+      });
+
+      it("searchByOrg keeps the same correlation on the paginated surface", async () => {
+        const shared = h.makeFolder({
+          name: "Search shared",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        const unshared = h.makeFolder({
+          name: "Search secret",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(shared);
+        await h.repo.save(unshared);
+        await h.shares.grant(shared.id, "colleague@test.local", h.ownerUserId, h.colleagueUserId);
+
+        const page = await h.repo.searchByOrg(
+          h.orgId,
+          { userId: h.colleagueUserId, email: "colleague@test.local" },
+          { limit: 100 },
+        );
+        const found = page.ok ? page.value.items.map((f) => f.name) : [];
+        expect(found).toContain("Search shared");
+        expect(found).not.toContain("Search secret");
+      });
+
       it("the Root is ALWAYS visible (legacy + org shape)", async () => {
         const listed = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
         expect(listed.ok && listed.value.some((f) => f.id === h.rootFolderId)).toBe(true);

@@ -445,25 +445,18 @@ describe("folder guards (ADR-0076)", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("loadWritableFolder admits anyone for a legacy or org-visible folder", async () => {
+  it("loadWritableFolder admits anyone for a LEGACY folder", async () => {
     const folders = new InMemoryFolderRepository();
     await folders.save(folder(F1, orgA, "Legacy"));
-    const legacy = await loadWritableFolder(
-      folders,
-      actorOther,
-      folderId(F1),
-      makeFolderAccessDeps(),
-    );
-    expect(legacy.ok).toBe(true);
-    const F2 = "00000000-0000-7000-8000-0000000000f2";
-    await folders.save(folder(F2, orgA, "Team", { ownerId: owner, visibility: "org" }));
-    const orgVisible = await loadWritableFolder(
-      folders,
-      actorOther,
-      folderId(F2),
-      makeFolderAccessDeps(),
-    );
-    expect(orgVisible.ok).toBe(true);
+    const r = await loadWritableFolder(folders, actorOther, folderId(F1), makeFolderAccessDeps());
+    expect(r.ok).toBe(true);
+  });
+
+  it("loadWritableFolder admits anyone for an ORG-VISIBLE folder", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Team", { ownerId: owner, visibility: "org" }));
+    const r = await loadWritableFolder(folders, actorOther, folderId(F1), makeFolderAccessDeps());
+    expect(r.ok).toBe(true);
   });
 
   it("loadWritableFolder denies a share-visible grantee with NotAllowed — visibility only", async () => {
@@ -478,20 +471,32 @@ describe("folder guards (ADR-0076)", () => {
     });
   });
 
-  it("loadManagedFolder admits the owner and (adoption path) anyone on a legacy folder", async () => {
+  it("loadManagedFolder admits the OWNER of a private folder", async () => {
     const folders = new InMemoryFolderRepository();
     await folders.save(folder(F1, orgA, "Mine", { ownerId: owner, visibility: "private" }));
-    const asOwner = await loadManagedFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
-    expect(asOwner.ok).toBe(true);
-    const F2 = "00000000-0000-7000-8000-0000000000f2";
-    await folders.save(folder(F2, orgA, "Legacy"));
-    const asAnyone = await loadManagedFolder(
-      folders,
-      actorOther,
-      folderId(F2),
-      makeFolderAccessDeps(),
-    );
-    expect(asAnyone.ok).toBe(true);
+    const r = await loadManagedFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
+    expect(r.ok).toBe(true);
+  });
+
+  it("loadManagedFolder admits ANYONE on a legacy folder (the adoption path)", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Legacy"));
+    const r = await loadManagedFolder(folders, actorOther, folderId(F1), makeFolderAccessDeps());
+    expect(r.ok).toBe(true);
+  });
+
+  it("loadManagedFolder denies a SHARE-visible non-owner with NotAllowed, not NotFound", async () => {
+    // The grantee can SEE the folder, so hiding it as NotFound would be a lie;
+    // shares confer visibility only, so managing its sharing stays owner-only.
+    const folders = new InMemoryFolderRepository();
+    const deps = makeFolderAccessDeps();
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: otherUser, visibility: "private" }));
+    await deps.folderShares.grant(folderId(F1), "me@test.local", otherUser, owner);
+    const r = await loadManagedFolder(folders, actorMe, folderId(F1), deps);
+    expect(!r.ok && r.error).toEqual({
+      kind: "NotAllowed",
+      message: "only the folder's owner can manage its sharing",
+    });
   });
 
   it("loadManagedFolder denies a non-owner on an owned, org-visible folder with NotAllowed", async () => {
