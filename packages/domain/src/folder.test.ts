@@ -147,10 +147,28 @@ describe("setFolderVisibility (ADR-0076)", () => {
     if (!r.ok) expect(r.error.kind).toBe("ValidationError");
   });
 
-  it("allows re-asserting org on the Root (no-op success)", () => {
+  it("rejects re-asserting org on the Root — the Root is not a manageable folder", () => {
     const root = build({ parentId: null, ownerId: null, visibility: "org" });
     const r = setFolderVisibility(root, "org", other);
-    expect(r.ok && r.value.visibility).toBe("org");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("ValidationError");
+  });
+
+  it("NEVER adopts the Root: a legacy Root stays ownerless and org after any attempt", () => {
+    const root = build({ parentId: null, ownerId: null, visibility: "org" });
+    for (const visibility of ["org", "private"] as const) {
+      const r = setFolderVisibility(root, visibility, other);
+      expect(r.ok).toBe(false);
+    }
+    // The pure transition never mutates, so the Root the caller holds is
+    // untouched — no owner was seized, visibility is still org.
+    expect(root.ownerId).toBeNull();
+    expect(root.visibility).toBe("org");
+  });
+
+  it("refuses to adopt an ALREADY-OWNED Root too (defence in depth)", () => {
+    const seized = build({ parentId: null, ownerId: owner, visibility: "org" });
+    expect(setFolderVisibility(seized, "org", other).ok).toBe(false);
   });
 });
 
@@ -202,5 +220,41 @@ describe("graftOrphansToRoot (ADR-0076)", () => {
     const named = { id: "x", parentId: "gone", name: "Kept" };
     const grafted = graftOrphansToRoot([{ ...root, name: "Root" }, named], "root");
     expect(grafted[1]).toEqual({ id: "x", parentId: "root", name: "Kept" });
+  });
+
+  // ── Degenerate parent links (F12) ───────────────────────────────────────
+  // A cycle can only reach the tree through corrupt data, but the renderer
+  // must not be the thing that discovers it: an unrooted node is grafted to
+  // the Root (reachable, nothing silently vanishes) rather than left to spin
+  // a parent walk forever.
+
+  it("grafts a SELF-PARENTED node to the Root instead of leaving it unreachable", () => {
+    const self = { id: "s", parentId: "s" };
+    expect(graftOrphansToRoot([root, self], "root")).toEqual([root, { id: "s", parentId: "root" }]);
+  });
+
+  it("grafts every member of a CYCLE among visible nodes — the tree never loops", () => {
+    const a = { id: "a", parentId: "b" };
+    const b = { id: "b", parentId: "a" };
+    expect(graftOrphansToRoot([root, a, b], "root")).toEqual([
+      root,
+      { id: "a", parentId: "root" },
+      { id: "b", parentId: "root" },
+    ]);
+  });
+
+  it("grafts a node whose ancestor chain LEADS INTO a cycle", () => {
+    const a = { id: "a", parentId: "b" };
+    const b = { id: "b", parentId: "a" };
+    const leaf = { id: "l", parentId: "a" };
+    const grafted = graftOrphansToRoot([root, a, b, leaf], "root");
+    expect(grafted.map((n) => n.parentId)).toEqual([null, "root", "root", "root"]);
+  });
+
+  it("is a stable no-op when rootId is ABSENT from the node set", () => {
+    const child = { id: "c", parentId: "root" };
+    const once = graftOrphansToRoot([child], "root");
+    expect(once).toEqual([child]);
+    expect(graftOrphansToRoot(once, "root")).toEqual([child]);
   });
 });

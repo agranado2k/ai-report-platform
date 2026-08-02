@@ -88,17 +88,26 @@ export function inheritedVisibility(parent: Folder): FolderVisibility {
   return parent.parentId === null ? "private" : parent.visibility;
 }
 
-/** Set a Folder's visibility (ADR-0076). The Root is always `org` — flipping
- *  it private is rejected. A legacy folder (ownerId null) is ADOPTED by the
- *  claimant: setting its visibility assigns them as owner (the repair path for
- *  pre-ADR-0076 org-visible folders); an already-owned folder keeps its owner. */
+/** Set a Folder's visibility (ADR-0076). A legacy folder (ownerId null) is
+ *  ADOPTED by the claimant: setting its visibility assigns them as owner (the
+ *  repair path for pre-ADR-0076 org-visible folders); an already-owned folder
+ *  keeps its owner.
+ *
+ *  The ROOT (parentId null) is never manageable — EITHER direction is rejected.
+ *  Rejecting Root→private alone would leave Root→org as a seizure: the Root is
+ *  a legacy row (ownerId null), so the adoption leg would hand the caller
+ *  permanent ownership of everyone's default upload placement and 403 every
+ *  other member out of managing it. Re-asserting `org` on a Root is a no-op in
+ *  visibility terms anyway, so nothing legitimate is lost by refusing it. */
 export function setFolderVisibility(
   folder: Folder,
   visibility: FolderVisibility,
   claimant: UserId,
 ): Result<Folder, AppError> {
-  if (folder.parentId === null && visibility === "private") {
-    return err(validationError("the Root folder is always org-visible", "visibility"));
+  if (folder.parentId === null) {
+    return err(
+      validationError("the Root folder is always org-visible and cannot be owned", "visibility"),
+    );
   }
   return ok({ ...folder, visibility, ownerId: folder.ownerId ?? claimant });
 }
@@ -133,15 +142,40 @@ export interface TreeNodeRef {
  *  visible folder whose parent is NOT in the visible set (an invisible
  *  ancestor) is re-parented to `rootId` for TREE RENDERING, so it stays
  *  reachable without leaking any invisible ancestor's name. Pure; the input
- *  order is preserved; nodes with a visible parent are untouched. */
+ *  order is preserved; nodes with a visible parent are untouched.
+ *
+ *  A node whose ancestor chain CYCLES (including a self-parent) is grafted for
+ *  the same reason: it can never reach the Root, so leaving it alone would
+ *  either drop it from the render or spin a parent walk forever. Corrupt data
+ *  should surface as a folder sitting oddly at the top level, never as a hung
+ *  or truncated sidebar. `rootId` need not be present in `nodes` — grafting is
+ *  idempotent either way. */
 export function graftOrphansToRoot<T extends TreeNodeRef>(
   nodes: readonly T[],
   rootId: string,
 ): readonly T[] {
-  const present = new Set(nodes.map((n) => n.id));
-  return nodes.map((n) =>
-    n.parentId !== null && !present.has(n.parentId) ? { ...n, parentId: rootId } : n,
-  );
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return nodes.map((n) => (isUnrooted(n, byId) ? { ...n, parentId: rootId } : n));
+}
+
+/** Can `node` NOT reach a top-level ancestor by following parent links? True
+ *  when its immediate parent is missing from the set (the invisible-ancestor
+ *  case) or when walking up revisits a node (a cycle). A chain that ends at an
+ *  absent ANCESTOR is fine: that ancestor is itself grafted, which re-roots the
+ *  whole chain below it. */
+function isUnrooted<T extends TreeNodeRef>(node: T, byId: ReadonlyMap<string, T>): boolean {
+  if (node.parentId === null) return false;
+  const parent = byId.get(node.parentId);
+  if (!parent) return true;
+  const seen = new Set<string>([node.id]);
+  let current: T | undefined = parent;
+  while (current) {
+    if (seen.has(current.id)) return true;
+    seen.add(current.id);
+    if (current.parentId === null) return false;
+    current = byId.get(current.parentId);
+  }
+  return false;
 }
 
 /** Rename a Folder (display name only; the slug stays stable so sibling-slug

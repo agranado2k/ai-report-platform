@@ -33,7 +33,13 @@ async function setup() {
 describe("setFolderVisibility use case (ADR-0076)", () => {
   it("the owner flips their folder private → org", async () => {
     const d = await setup();
-    await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
     const r = await setFolderVisibility(
       d,
       { orgId: orgA, userId: me, scopes: SCOPED },
@@ -96,7 +102,13 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
 
   it("requires the acl:write scope", async () => {
     const d = await setup();
-    await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
     const r = await setFolderVisibility(
       d,
       { orgId: orgA, userId: me, scopes: [] },
@@ -107,7 +119,13 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
 
   it("denies a non-owner on an owned folder (NotAllowed)", async () => {
     const d = await setup();
-    await d.folders.save(folder(F1, orgA, "Team", { ownerId: other, visibility: "org" }));
+    await d.folders.save(
+      folder(F1, orgA, "Team", {
+        parentId: folderId(ROOT),
+        ownerId: other,
+        visibility: "org",
+      }),
+    );
     const r = await setFolderVisibility(
       d,
       { orgId: orgA, userId: me, scopes: SCOPED },
@@ -149,7 +167,13 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
 describe("setFolderVisibility idempotency (ADR-0039)", () => {
   it("replays the recorded folder resource on an identical retry with an EXPLICIT key — one audit row", async () => {
     const d = await setup();
-    await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
     const actor = { orgId: orgA, userId: me, scopes: SCOPED };
     const input = { folderId: folderId(F1), visibility: "org" as const, idempotencyKey: "k1" };
     const first = await setFolderVisibility(d, actor, input);
@@ -161,7 +185,13 @@ describe("setFolderVisibility idempotency (ADR-0039)", () => {
 
   it("WITHOUT an explicit key it never replays — setting state is naturally idempotent (F1)", async () => {
     const d = await setup();
-    await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
     const actor = { orgId: orgA, userId: me, scopes: SCOPED };
     const input = { folderId: folderId(F1), visibility: "org" as const };
     await setFolderVisibility(d, actor, input);
