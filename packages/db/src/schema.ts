@@ -155,8 +155,9 @@ export const folders = pgTable(
     parentId: uuid("parent_id").references((): AnyPgColumn => folders.id, { onDelete: "restrict" }),
     // Creator-owned folders (ADR-0076, reverses ADR-0059 §5). NULL = legacy
     // (pre-ADR-0076) — such folders stay visible + writable to the whole org.
-    // Migration 0019 adds this without a backfill: legacy semantics ARE the
-    // preserved behavior.
+    // Migration 0019 adds the column and leaves it NULL on every pre-existing
+    // row (only `visibility` is backfilled, to 'org') — legacy semantics ARE
+    // the behavior we're preserving, so there is nothing to backfill here.
     ownerId: uuid("owner_id").references(() => users.id, { onDelete: "restrict" }),
     // Who may see the folder (ADR-0076). Migration 0019 backfills existing
     // rows to 'org' (no surprise disappearances), then sets the column

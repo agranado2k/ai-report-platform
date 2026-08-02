@@ -267,7 +267,9 @@ paths:
         it's shared with) or `org` (every member). Requires the `acl:write`
         scope. OWNER-only for owned folders; a LEGACY (owner-less, pre-ADR-0076)
         folder is ADOPTED — the caller becomes its owner. The Root folder is
-        always org-visible (422 on an attempt to make it private).
+        always org-visible and is never owned: calling this on a Root is a 422
+        in EITHER direction, since adopting it would hand one member permanent
+        ownership of everyone's default upload placement.
       security:
         - apiKey: []
       parameters:
@@ -306,6 +308,13 @@ paths:
         Requires the `acl:write` scope; OWNER-only (or any member for a legacy
         owner-less folder) — share config is the owner's business, mirroring
         GET /reports/{slug}/write-grants (ADR-0060).
+
+
+        A share is only EFFECTIVE within the folder's own org: folder listings
+        are org-scoped, so a grantee whose account lives in another org never
+        sees the folder. Such a grant is still accepted and listed here — it
+        starts working if they later join — so this roster may include emails
+        that currently resolve to nobody.
       security:
         - apiKey: []
       parameters:
@@ -323,6 +332,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       operationId: shareFolder
@@ -337,6 +347,13 @@ paths:
         needn't have signed up yet — `grantee_user_id` resolves
         opportunistically now, else the share matches by email once they do.
         Re-sharing the same email upserts in place.
+
+
+        A share is only EFFECTIVE within the folder's own org: folder listings
+        are org-scoped, so a grantee whose account lives in ANOTHER org never
+        sees the folder. Cross-org emails are deliberately still accepted (the
+        grantee may not have an account yet, and may later join) — the grant is
+        recorded and starts working when they do.
       security:
         - apiKey: []
       parameters:
@@ -396,6 +413,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/reports/{slug}/move:

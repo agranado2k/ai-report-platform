@@ -20,6 +20,13 @@ import { err, ok } from "./result";
 export const FOLDER_VISIBILITIES = ["private", "org"] as const;
 export type FolderVisibility = (typeof FOLDER_VISIBILITIES)[number];
 
+/** The Root folder's visibility — ALWAYS `org` (ADR-0076 §3), because every
+ *  member's default uploads land there. The `folders.visibility` column
+ *  defaults to the fail-safe `private`, so every place that provisions or
+ *  seeds a Root must write this EXPLICITLY; naming it keeps the three call
+ *  sites from drifting apart. `setFolderVisibility` refuses to change it. */
+export const ROOT_FOLDER_VISIBILITY: FolderVisibility = "org";
+
 export interface Folder {
   readonly id: FolderId;
   readonly orgId: OrgId;

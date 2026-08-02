@@ -345,7 +345,7 @@ app writes from the closed `AuditAction` union in
 `packages/application/src/audit.ts`. The vocabulary, grouped by resource:
 
 - **report**: `report.uploaded`, `report.renamed`, `report.moved`, `report.deleted`
-- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`
+- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`, `folder.visibility_set`, `folder.shared`, `folder.unshared`
 - **acl**: `acl.set`
 - **grant**: `grant.write.granted`, `grant.write.revoked`
 - **comment**: `comment.added`, `comment.replied`, `comment.resolved`, `comment.deleted`

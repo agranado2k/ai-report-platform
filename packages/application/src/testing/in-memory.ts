@@ -21,6 +21,7 @@ import {
   makeSlug,
   userId as makeUserId,
   versionId as makeVersionId,
+  normalizeEmailAddress,
   notAllowed,
   type OrgId,
   type OrgKind,
@@ -74,7 +75,6 @@ import type {
   ReportPage,
   ReportRepository,
   ReportSearchQuery,
-  ReportSummary,
   ReportVersionSummary,
   ReportViewer,
   ScanJobMessage,
@@ -1073,7 +1073,7 @@ export class InMemoryFolderShareStore implements FolderShareStore {
   private readonly shares = new Map<string, FolderShare>(); // `${folderId}|${normalizedEmail}`
 
   private key(folderId: FolderId, email: string): string {
-    return `${folderId}|${email.trim().toLowerCase()}`;
+    return `${folderId}|${normalizeEmailAddress(email)}`;
   }
 
   async grant(
@@ -1082,7 +1082,7 @@ export class InMemoryFolderShareStore implements FolderShareStore {
     grantedBy: UserId,
     granteeUserId: UserId | null,
   ): Promise<Result<void, AppError>> {
-    const normalized = email.trim().toLowerCase();
+    const normalized = normalizeEmailAddress(email);
     this.shares.set(this.key(folderId, email), {
       folderId,
       granteeEmail: normalized,

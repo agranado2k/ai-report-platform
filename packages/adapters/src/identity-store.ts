@@ -23,6 +23,7 @@ import {
   ok,
   orgId,
   type Result,
+  ROOT_FOLDER_VISIBILITY,
   type UserId,
   userId,
 } from "arp-domain";
@@ -144,7 +145,7 @@ export class DrizzleIdentityStore implements IdentityStore {
               name: "Root",
               slug: "root",
               parentId: null,
-              visibility: "org",
+              visibility: ROOT_FOLDER_VISIBILITY,
             })
             .onConflictDoNothing();
           root = await this.rootFolderId(o.id);
@@ -268,7 +269,7 @@ export class DrizzleIdentityStore implements IdentityStore {
               name: "Root",
               slug: "root",
               parentId: null,
-              visibility: "org",
+              visibility: ROOT_FOLDER_VISIBILITY,
             })
             .onConflictDoNothing();
           root = await this.rootFolderId(o.id);
