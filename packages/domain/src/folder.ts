@@ -201,6 +201,45 @@ function isUnrooted<T extends TreeNodeRef>(node: T, byId: ReadonlyMap<string, T>
   return false;
 }
 
+/** Every node BELOW `folderId` in a parent-linked tree, excluding the folder
+ *  itself (ADR-0076 §cascade). Pure + total: a breadth-first walk down the
+ *  child index, visiting each node at most once, so a corrupt parent CYCLE
+ *  terminates instead of spinning.
+ *
+ *  The caller supplies the node set, and that is the whole story about scope:
+ *  the dashboard passes the ACTOR'S VISIBLE tree, so a descendant the actor
+ *  cannot see is simply absent here and is never cascaded — the honest limit
+ *  the UI reports rather than papers over. This helper exists precisely
+ *  because ADR-0076's visibility model is PER-FOLDER: "apply to everything
+ *  inside" is a caller-side loop over these ids, calling the same
+ *  `setFolderVisibility` use case once per folder — NOT new recursive
+ *  domain or SQL semantics. */
+export function collectFolderDescendants<T extends TreeNodeRef>(
+  nodes: readonly T[],
+  folderId: string,
+): readonly string[] {
+  const childrenOf = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (n.parentId === null) continue;
+    const siblings = childrenOf.get(n.parentId);
+    if (siblings) siblings.push(n.id);
+    else childrenOf.set(n.parentId, [n.id]);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>([folderId]);
+  const queue: string[] = [folderId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const child of childrenOf.get(current) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
+}
+
 /** Rename a Folder (display name only; the slug stays stable so sibling-slug
  * uniqueness and any folder references are unaffected). Pure transition. */
 export function renameFolder(folder: Folder, name: string): Result<Folder, AppError> {

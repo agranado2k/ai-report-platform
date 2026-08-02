@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { folderId, orgId, userId } from "./brand";
 import {
   canWriteFolder,
+  collectFolderDescendants,
   createFolder,
   type Folder,
   folderSlug,
@@ -280,5 +281,57 @@ describe("visibleFolderOrRoot (ADR-0076)", () => {
 
   it("falls back for the Root's own id when the Root itself is not rendered", () => {
     expect(visibleFolderOrRoot("hidden", [], "root")).toBe("root");
+  });
+});
+
+describe("collectFolderDescendants (ADR-0076 §cascade)", () => {
+  const tree = [
+    { id: "root", parentId: null },
+    { id: "a", parentId: "root" },
+    { id: "a1", parentId: "a" },
+    { id: "a1x", parentId: "a1" },
+    { id: "b", parentId: "root" },
+  ];
+
+  it("returns every node BELOW the given folder, deepest-first order aside", () => {
+    expect([...collectFolderDescendants(tree, "a")].sort()).toEqual(["a1", "a1x"]);
+  });
+
+  it("excludes the folder itself — the caller applies its own change separately", () => {
+    expect(collectFolderDescendants(tree, "a")).not.toContain("a");
+  });
+
+  it("returns an empty list for a leaf", () => {
+    expect(collectFolderDescendants(tree, "a1x")).toEqual([]);
+  });
+
+  it("returns an empty list for a folder that is not in the visible set", () => {
+    expect(collectFolderDescendants(tree, "nope")).toEqual([]);
+  });
+
+  it("walks the whole subtree from the Root", () => {
+    expect([...collectFolderDescendants(tree, "root")].sort()).toEqual(["a", "a1", "a1x", "b"]);
+  });
+
+  it("terminates on a parent CYCLE instead of spinning forever", () => {
+    const cyclic = [
+      { id: "x", parentId: "y" },
+      { id: "y", parentId: "x" },
+      { id: "c", parentId: "x" },
+    ];
+    // No node under "c" — and crucially, the walk returns at all.
+    expect(collectFolderDescendants(cyclic, "c")).toEqual([]);
+    expect([...collectFolderDescendants(cyclic, "x")].sort()).toEqual(["c", "y"]);
+  });
+
+  it("only sees the nodes it is given — an INVISIBLE descendant is simply absent", () => {
+    // The dashboard passes the actor's VISIBLE tree, so a colleague's private
+    // subfolder is not in `nodes` and therefore never cascaded (the honest
+    // limit the UI reports rather than hides).
+    const visibleOnly = [
+      { id: "root", parentId: null },
+      { id: "a", parentId: "root" },
+    ];
+    expect(collectFolderDescendants(visibleOnly, "a")).toEqual([]);
   });
 });
