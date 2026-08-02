@@ -231,8 +231,10 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "List folders",
       description:
-        "List your folder tree as a cursor-paginated list ({object:'list', data, has_more}); " +
-        "each item has id (folder_…), name, slug, parent_id. Read-only. Use a folder_ id with " +
+        "List the folders YOU can see (ADR-0076: yours + org-visible + shared-with-you + " +
+        "legacy) as a cursor-paginated list ({object:'list', data, has_more}); each item has " +
+        "id (folder_…), name, slug, parent_id, visibility (private|org), and owner (a user_ " +
+        "id, or null for a legacy pre-ownership folder). Read-only. Use a folder_ id with " +
         "reports_search to scope a search, or when deciding where to organize a report.",
       inputSchema: {
         ...cursorInputs("folder"),
@@ -247,6 +249,24 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
           endingBefore: args.ending_before,
         }),
       ),
+  );
+
+  server.registerTool(
+    "folders_list_shares",
+    {
+      title: "List who a folder is shared with",
+      description:
+        "List everyone a folder's owner has shared its VISIBILITY with (ADR-0076) — returns a " +
+        "list of { object:'folder_share', email, granted_by, granted_at }. Read-only and " +
+        "OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` " +
+        "scope. Distinct from reports_get_acl (report VIEW access) and " +
+        "reports_list_write_grants (report WRITE access) — this is folder-tree visibility.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => toToolResult(await client.listFolderShares(args.id)),
   );
 }
 
@@ -571,5 +591,63 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       annotations: DESTROY,
     },
     async (args) => toToolResult(await client.deleteFolder(args.id)),
+  );
+
+  server.registerTool(
+    "folders_set_visibility",
+    {
+      title: "Set a folder's visibility",
+      description:
+        "Set who can SEE a folder (ADR-0076): `private` (only its owner + people it's shared " +
+        "with via folders_share) or `org` (every org member). OWNER-only for owned folders; a " +
+        "LEGACY folder (created before per-user ownership — `owner` is null in folders_list) is " +
+        "ADOPTED: calling this makes YOU its owner. Requires the `acl:write` scope. The Root " +
+        "folder is always org-visible and cannot be made private. Visibility gates the folder " +
+        "itself, not the reports inside it — report access stays governed by each report's acl.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+        visibility: z.enum(["private", "org"]).describe("Who can see the folder."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.setFolderVisibility(args.id, args.visibility)),
+  );
+
+  server.registerTool(
+    "folders_share",
+    {
+      title: "Share a folder with someone",
+      description:
+        "Give a specific person VISIBILITY of a folder by email (ADR-0076) — they can then see " +
+        "it in their folder tree and target it when moving reports. Confers NO rename/delete/" +
+        "create rights and NO access to the reports inside (share those with reports_set_acl / " +
+        "reports_grant_write). OWNER-only (or any member for a legacy owner-less folder); " +
+        "requires the `acl:write` scope. The grantee doesn't need an account yet — the share " +
+        "matches by email once they sign up.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+        email: z.string().describe("The grantee's email address."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.shareFolder(args.id, args.email)),
+  );
+
+  server.registerTool(
+    "folders_unshare",
+    {
+      title: "Revoke someone's folder share",
+      description:
+        "Revoke a previously shared folder visibility (ADR-0076). OWNER-only (or any member " +
+        "for a legacy owner-less folder); requires the `acl:write` scope. Idempotent — " +
+        "unsharing an email with no share still succeeds. Use folders_list_shares to see who " +
+        "currently has visibility.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+        email: z.string().describe("The grantee's email address to revoke."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.unshareFolder(args.id, args.email)),
   );
 }

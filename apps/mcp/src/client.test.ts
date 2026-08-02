@@ -211,6 +211,46 @@ describe("ApiClient writes", () => {
     expect(JSON.parse(calls[0]?.body as string)).toEqual({ name: "Q4" });
   });
 
+  it("setFolderVisibility POSTs /visibility with {visibility}", async () => {
+    const { fn, calls } = stub(json({ object: "folder", id: "f2", visibility: "private" }));
+    const r = await client(fn).setFolderVisibility("f2", "private");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2/visibility");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ visibility: "private" });
+  });
+
+  it("shareFolder POSTs /shares with the email", async () => {
+    const { fn, calls } = stub(json({ object: "folder_share", email: "pal@x.com" }, 201));
+    const r = await client(fn).shareFolder("f2", "pal@x.com");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2/shares");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ email: "pal@x.com" });
+  });
+
+  it("unshareFolder DELETEs /shares/{email} (URL-encoded)", async () => {
+    const { fn, calls } = stub(new Response(null, { status: 204 }));
+    const r = await client(fn).unshareFolder("f2", "a+b@x.com");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2/shares/a%2Bb%40x.com");
+  });
+
+  it("listFolderShares GETs the shares list envelope", async () => {
+    const { fn, calls } = stub(
+      json({
+        object: "list",
+        data: [{ object: "folder_share", email: "a@b.com" }],
+        has_more: false,
+      }),
+    );
+    const r = await client(fn).listFolderShares("f2");
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/f2/shares");
+  });
+
   it("deleteFolder DELETEs the folder id (204 → success)", async () => {
     const { fn, calls } = stub(new Response(null, { status: 204 }));
     const r = await client(fn).deleteFolder("f2");
