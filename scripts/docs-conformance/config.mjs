@@ -58,10 +58,16 @@ export const events = [
   "CommentEdited",
 ];
 
-/** Gherkin tag vocabulary. Every .feature must carry exactly one phase tag. */
+/** Gherkin tag vocabulary. Every .feature must carry exactly one phase tag.
+ *  `extra` also carries the EXECUTION tags the Playwright harness greps on
+ *  (playwright.config.ts) — `@smoke` selects the running set, `@auth` /
+ *  `@browser` gate on which Clerk credentials are configured, `@run-scoped`
+ *  binds a scenario to the fixture-cleanup hook. They were previously legal
+ *  only in tests/e2e/smoke/ (which this validator doesn't scan); a catalogued
+ *  use-case feature that actually RUNS needs them too. */
 export const featureTags = {
   phases: ["@phase-1", "@phase-1.5", "@phase-2", "@phase-2.5", "@phase-3", "@phase-4"],
-  extra: ["@wip", "@security"],
+  extra: ["@wip", "@security", "@smoke", "@auth", "@browser", "@run-scoped"],
 };
 
 /**
@@ -162,10 +168,16 @@ export const features = {
     phase: "@phase-2",
     status: "wip",
   },
-  "share-folders": {
-    title: "Creator-owned folder visibility and sharing (ADR-0076)",
+  // share-folders.feature was deleted (ADR-0076 UI PR): it was a step-less
+  // @wip skeleton whose own preamble pointed at the coverage that actually
+  // runs — the team-org smoke scenario plus the folder-repository /
+  // folder-share-store contract suites on both runners. Its remaining
+  // narrative (private-by-default, org share, person share, legacy adoption)
+  // is now carried end-to-end by folder-sharing.feature below, which runs.
+  "folder-sharing": {
+    title: "Manage folder visibility and sharing from the dashboard (ADR-0076)",
     phase: "@phase-2",
-    status: "wip",
+    status: "full",
   },
   // cross-org-collaboration.feature describes the ADR-009 folder_collaborators
   // design, superseded by ADR-0060 (report-write-grants.feature, above) — kept

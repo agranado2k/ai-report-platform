@@ -35,15 +35,21 @@ export function FolderShareMenu({
 }) {
   return (
     <details className="relative z-10 shrink-0" open={open}>
-      <summary className="flex size-6 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden">
+      {/* The accessible name is an `aria-label` rather than an `sr-only` span
+          because React SSR splits `text {expression}` with a comment node —
+          which would make the name unmatchable for anything reading the
+          markup (the e2e suite included) while reading identically to AT. */}
+      <summary
+        aria-label={`Sharing options for ${node.name}`}
+        className="flex size-6 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden"
+      >
         <MoreIcon className="h-3.5 w-3.5" />
-        <span className="sr-only">Sharing options for {node.name}</span>
       </summary>
       {/* Anchored LEFT, not right: the sidebar is only 14rem wide, so a
           right-anchored 18rem panel would hang off the page edge. Opening
           rightwards puts it over the (much wider) report list instead. */}
       <div className="absolute left-0 z-20 mt-1 w-72 rounded-card border border-border bg-surface p-2 text-left shadow-lg">
-        <p className="px-1 pb-1 text-xs font-semibold text-fg">Sharing — {node.name}</p>
+        <p className="px-1 pb-1 text-xs font-semibold text-fg">{`Sharing — ${node.name}`}</p>
 
         {node.manageable ? (
           <ManageControls node={node} manageHref={manageHref} inertShareNotice={inertShareNotice} />

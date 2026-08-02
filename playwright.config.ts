@@ -2,15 +2,23 @@ import { defineConfig, devices } from "@playwright/test";
 import { defineBddConfig } from "playwright-bdd";
 import { STORAGE_STATE_PATH } from "./tests/e2e/support/storage-state-path";
 
-// BDD execution harness (ADR-023, ADR-019). Walking-skeleton phase: only the
-// smoke feature is generated + run. The 29 product .feature files under
-// tests/e2e/features/ are intentionally NOT included yet — they have no step
-// definitions, and playwright-bdd errors at collection on a generated spec with
-// undefined steps. The `features` glob widens to 'tests/e2e/features/**' as step
-// definitions land with the upload API (1d) and viewer (1e).
+// BDD execution harness (ADR-023, ADR-019). The product .feature files under
+// tests/e2e/features/ are opted in ONE AT A TIME, by name: playwright-bdd
+// errors at collection on a generated spec with undefined steps, and most of
+// that corpus is still a step-less @wip skeleton. A feature is added to the
+// list below only once it has real step definitions next to it — a file that
+// is not listed here does not run, so listing it is the difference between
+// coverage and decoration.
+//
+//   - tests/e2e/features/folder-sharing.feature — ADR-0076 §6, the dashboard
+//     folder visibility + sharing UI (folder-sharing.steps.ts).
 const testDir = defineBddConfig({
-  features: ["tests/e2e/smoke/**/*.feature"],
-  steps: ["tests/e2e/smoke/**/*.steps.ts", "tests/e2e/steps/**/*.ts"],
+  features: ["tests/e2e/smoke/**/*.feature", "tests/e2e/features/folder-sharing.feature"],
+  steps: [
+    "tests/e2e/smoke/**/*.steps.ts",
+    "tests/e2e/features/**/*.steps.ts",
+    "tests/e2e/steps/**/*.ts",
+  ],
 });
 
 // @auth needs BOTH staging Clerk creds (the secret key to mint + the test
