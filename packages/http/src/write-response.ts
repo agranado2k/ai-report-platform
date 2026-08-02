@@ -2,7 +2,7 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { WriteGrant } from "arp-application";
+import type { FolderShare, WriteGrant } from "arp-application";
 import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
@@ -14,7 +14,13 @@ import {
   type WireAuthor,
   type WireContext,
 } from "./resource";
-import type { AclShareWire, AclWire, ReportDetailWire, WriteGrantWire } from "./wire";
+import type {
+  AclShareWire,
+  AclWire,
+  FolderShareWire,
+  ReportDetailWire,
+  WriteGrantWire,
+} from "./wire";
 
 /** The `Acl` on the wire (ADR-0056). Surfaces the mode + (for allowlist) the
  *  allowed emails + owner access TTL; the argon2id password hash is NEVER serialized. */
@@ -157,6 +163,52 @@ export function renameFolderToHttp(
 export function deleteFolderToHttp(result: Result<void, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   return { status: 204, contentType: "application/json", body: undefined };
+}
+
+/** POST /api/v1/folders/{id}/visibility — 200 with the updated folder resource
+ *  (ADR-0076; a legacy folder comes back ADOPTED — `owner` now set). */
+export function setFolderVisibilityToHttp(
+  result: Result<Folder, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 200, contentType: "application/json", body: folderBody(result.value, ctx) };
+}
+
+/** A `FolderShare` → the `folder_share` resource body (ADR-0076). Mirrors
+ *  `writeGrantBody`: no surrogate id, wire-addressed by `(folder id, email)`. */
+function folderShareBody(s: FolderShare): FolderShareWire {
+  return {
+    object: "folder_share" as const,
+    email: s.granteeEmail,
+    granted_by: userIdToWire(s.grantedBy),
+    granted_at: new Date(s.grantedAt).toISOString(),
+  };
+}
+
+/** POST /api/v1/folders/{id}/shares — 201 with the new/refreshed share. */
+export function shareFolderToHttp(result: Result<FolderShare, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 201, contentType: "application/json", body: folderShareBody(result.value) };
+}
+
+/** DELETE /api/v1/folders/{id}/shares/{email} — 204 No Content on success
+ *  (idempotent — unsharing a non-existent share still succeeds). */
+export function unshareFolderToHttp(result: Result<void, AppError>): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return { status: 204, contentType: "application/json", body: undefined };
+}
+
+/** GET /api/v1/folders/{id}/shares — 200 list envelope (owner-or-legacy only). */
+export function listFolderSharesToHttp(
+  result: Result<readonly FolderShare[], AppError>,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: listBody(result.value.map(folderShareBody), false),
+  };
 }
 
 /** A `WriteGrant` → the `write_grant` resource body (ADR-0060). No surrogate

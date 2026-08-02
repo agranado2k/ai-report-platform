@@ -60,7 +60,8 @@ export function reportBody(
   };
 }
 
-/** A `folder` resource. */
+/** A `folder` resource. `visibility`/`owner` carry the ADR-0076 model (owner
+ *  is a `user_…` External Id, null for a legacy pre-ADR-0076 folder). */
 export function folderBody(f: Folder, ctx: WireContext): FolderWire {
   return {
     object: "folder" as const,
@@ -68,6 +69,8 @@ export function folderBody(f: Folder, ctx: WireContext): FolderWire {
     name: f.name,
     slug: f.slug,
     parent_id: f.parentId ? folderIdToWire(f.parentId) : null,
+    visibility: f.visibility,
+    owner: f.ownerId ? userIdToWire(f.ownerId) : null,
     mode: ctx.mode,
   };
 }
