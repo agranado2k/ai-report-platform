@@ -58,9 +58,11 @@ export async function deleteFolder(
   if (folders.value.some((f) => f.parentId === input.folderId)) {
     return err(validationError("folder is not empty: it has subfolders", "folderId"));
   }
-  const reports = await deps.reports.listByOrg(actor.orgId);
-  if (!reports.ok) return reports;
-  if (reports.value.some((r) => r.folderId === input.folderId)) {
+  // Deliberately NOT visibility-scoped (ADR-0075): a report the deleter can't
+  // see must still block the delete — the boolean leaks no metadata.
+  const hasReports = await deps.reports.hasReportsInFolder(actor.orgId, input.folderId);
+  if (!hasReports.ok) return hasReports;
+  if (hasReports.value) {
     return err(
       validationError("folder is not empty: move or delete its reports first", "folderId"),
     );

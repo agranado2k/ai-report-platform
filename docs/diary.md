@@ -3311,3 +3311,31 @@ unusable. Fixed in worktree `worktree/unmirrored-reader-grantee-edit`
   its org dashboard listing after provision-on-read.
 - Follow-ups filed, not in this PR: #226 ("Shared with you" dashboard section for cross-org
   grantees), #227 (optional grant-notification email — entry-URL-in-response reduces urgency).
+
+## 2026-08-01 — Visibility-scoped report listing (ADR-0075)
+
+**Operator product decision, amending ADR-0059 §3's listing semantics:** the report list must show
+a user only (a) reports they own, (b) org reports whose acl mode shares them broadly — `org` and
+`public` (`public` deliberately included: it's maximally shared, so listing it to colleagues is
+consistent), and (c) reports they hold a write grant on. Other owners' private/password/allowlist
+reports must not appear — not even metadata; existence is private. Recorded as **ADR-0075**
+(`docs/adr/0075-visibility-scoped-report-listing.md`); worktree `visibility-scoped-listing`,
+branch `fix/visibility-scoped-listing`.
+
+- `ReportRepository.searchByOrg(orgId, viewer, q)`: LEFT JOIN `acls` (COALESCE mode `'private'`)
+  + EXISTS over `report_write_grants` (userId-or-normalized-email, mirroring `hasWriteGrant`,
+  ADR-0060 §2). Keyset pagination + literal ILIKE search unchanged; same wire envelope.
+- `searchReports` actor gains `userId`; the mirrored email resolves once via the identities port.
+  Wired through the dashboard loader and `GET /api/v1/reports`; MCP rides the API unchanged.
+- Report `listByOrg` removed from the port (no production caller; an unscoped list surface is a
+  leak waiting for a caller). `deleteFolder`'s emptiness guard moved to the purpose-built,
+  deliberately NOT visibility-scoped `hasReportsInFolder` boolean.
+- Contract suite carries the executable visibility matrix on BOTH runners (in-memory +
+  drizzle+pglite, ADR-0046).
+- The #228 team-org e2e scenario reworked BY DESIGN: uploads are default-private, so the
+  never-written third identity now proves the sharper claim — sees exactly the org-shared
+  report, not the colleague's private one.
+- #226 stays open for the cross-org "shared with me" dashboard section (a cross-org grantee's
+  dashboard queries their own org; this change only affects the org-scoped list). UX follow-up
+  noted in the ADR: a listed view-only row still links to owner-gated `/open`, which bounces
+  non-owners home.

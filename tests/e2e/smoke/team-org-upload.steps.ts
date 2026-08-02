@@ -187,6 +187,24 @@ When(
   },
 );
 
+When(
+  "the first run-scoped identity shares its report org-wide via the ACL API",
+  async ({ request }) => {
+    // ADR-0075 setup: uploads are default-PRIVATE, so colleagues won't list
+    // them. The OWNER (first identity) flips its report to `org` mode — the
+    // mode built for the team-org listing surface. setAcl is owner-gated by
+    // userId (ADR-0059 §2), so the decoy-carrying session still authorizes.
+    const res = await request.post(`/api/v1/reports/${firstBody.slug}/acl`, {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { mode: "org" },
+    });
+    await expectJson(res, 200, "first run-scoped identity's org-share setAcl");
+  },
+);
+
 Then(
   "the second run-scoped identity's report listing includes both run-scoped uploads",
   async ({ request }) => {
@@ -225,21 +243,22 @@ Then(
     };
     const slugs = (listing.data ?? []).map((r) => r.slug);
     // Its own upload proves the session org is the org the write path mirrored
-    // into; the FIRST identity's slug being visible proves both identities
-    // share one org row — the ADR-0074 invariant.
+    // into (listed via OWNERSHIP under ADR-0075); the FIRST identity's slug is
+    // visible because its owner org-shared it — together they prove both
+    // identities share one org row (ADR-0074) under visibility-scoped listing.
     expect(slugs, "second run-scoped identity's own upload must be listed").toContain(
       secondBody.slug,
     );
     expect(
       slugs,
-      "the FIRST run-scoped identity's upload must be visible to the second — same-domain " +
-        "identities share one org (ADR-0074)",
+      "the FIRST run-scoped identity's org-shared upload must be visible to the second — " +
+        "same-domain identities share one org (ADR-0074) and `org` mode lists it (ADR-0075)",
     ).toContain(firstBody.slug);
   },
 );
 
 Then(
-  "the third run-scoped identity's first-ever session read lists both run-scoped uploads",
+  "the third run-scoped identity's first-ever session read lists exactly the org-shared upload",
   async ({ request }) => {
     // Provision-on-read (ADR-0048 amendment 2026-08-01): the third identity has
     // NEVER written — before the amendment this bare session GET resolved a
@@ -247,10 +266,15 @@ Then(
     // through the SAME canonical chain as the write door: the session actively
     // carries the identity's DECOY org (Clerk auto-activates the sole
     // membership), which the mirror-miss branch must IGNORE in favor of the
-    // anchored domain org — so the very first read lands in the shared org and
-    // sees BOTH colleagues' uploads. No org re-mint here on purpose: the bare
+    // anchored domain org. No org re-mint here on purpose: the bare
     // decoy-carrying session IS the prod shape (a member who signed in but
     // never uploaded).
+    //
+    // VISIBILITY (ADR-0075): the third identity owns nothing, so its listing
+    // is the pure colleague view — it must contain the FIRST identity's
+    // org-shared report (proving all three resolved to ONE org row) and must
+    // NOT contain the SECOND identity's still-default-private one (proving
+    // private reports don't even surface as metadata inside the shared org).
     const res = await request.get("/api/v1/reports?limit=100", {
       headers: { Authorization: `Bearer ${thirdSession.jwt}` },
     });
@@ -262,9 +286,13 @@ Then(
     const slugs = (listing.data ?? []).map((r) => r.slug);
     expect(
       slugs,
-      "a never-written org member's first read must see the org's reports (provision-on-read)",
+      "a never-written org member's first read must see the org-SHARED report " +
+        "(provision-on-read + ADR-0075 org-mode listing)",
     ).toContain(firstBody.slug);
-    expect(slugs).toContain(secondBody.slug);
+    expect(
+      slugs,
+      "a colleague's default-PRIVATE report must NOT be listed — existence is private (ADR-0075)",
+    ).not.toContain(secondBody.slug);
 
     // Belt-and-braces: the read really did provision — the identity is now a
     // member of the ANCHORED domain org on the Clerk side too.

@@ -368,7 +368,9 @@ export function ops() {
   const writeCommon = { idempotency: d.idempotency, keyHasher: d.hasher };
   return {
     // ── Reports & Folders ──────────────────────────────────────────────────
-    searchReports: bind2(searchReports, { reports: d.reports }),
+    // identities backs the ADR-0075 visibility predicate's email-grant match
+    // (the same findEmailByUserId seam hasWriteGrant uses).
+    searchReports: bind2(searchReports, { reports: d.reports, identities: identityStore() }),
     uploadReport: (cmd: Parameters<typeof uploadReport>[1]) => uploadReport(d, cmd),
     getReport: bind2(getReport, {
       reports: d.reports,

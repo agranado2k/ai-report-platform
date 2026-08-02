@@ -7,6 +7,12 @@
 // instead of relying on comments. Whoever passes `setup()` owns the
 // implementation-specific wiring (an in-memory Map vs a real migrated
 // Postgres); this file only knows the ReportRepository port.
+//
+// Since ADR-0075, `searchByOrg` is visibility-scoped: every call carries the
+// viewing user, and the suite's visibility-matrix block below is the canonical
+// executable form of that decision (owned / org / public / write-granted are
+// listed; other owners' private / password / allowlist rows do not exist for
+// the viewer — not even as metadata).
 import {
   addVersion,
   applyScanResult,
@@ -15,10 +21,11 @@ import {
   type Report,
   type ReportId,
   reportId,
+  type UserId,
   type VersionId,
 } from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ReportRepository } from "../../ports";
+import type { ReportRepository, ReportViewer } from "../../ports";
 
 function slugOf(s: string) {
   const r = makeSlug(s);
@@ -36,6 +43,16 @@ export interface ReportRepositoryContractHarness {
   readonly repo: ReportRepository;
   /** The org every `makeReport()` fixture belongs to. */
   readonly orgId: OrgId;
+  /** The user who OWNS every `makeReport()` fixture, as a search viewer. */
+  readonly owner: ReportViewer;
+  /** A second user in the SAME org who owns nothing — the "colleague" leg of
+   *  the ADR-0075 visibility matrix. `email` is always known (for email-grant
+   *  tests) and must be a real, seeded identity in the implementation (the
+   *  real adapter needs a `users` row to hang a userId grant on). */
+  readonly colleague: ReportViewer & { readonly email: string };
+  /** Record a write grant (ADR-0060) visible to the repo's search predicate —
+   *  same semantics as `WriteGrantStore.grant`. */
+  grantWrite(reportId: ReportId, granteeEmail: string, granteeUserId: UserId | null): Promise<void>;
   /** A fresh Report aggregate (one pending version) bound to the harness's
    *  seeded org/folder/user — id/slug/title default to a unique auto-generated
    *  value each call, and are overridable so a test can build several
@@ -87,62 +104,32 @@ export function describeReportRepositoryContract(
       expect(bySlug.ok && bySlug.value).toBeNull();
     });
 
-    it("listByOrg excludes soft-deleted reports", async () => {
-      const live = h.makeReport({ slug: "abcde22222", title: "Live" });
-      const doomed = h.makeReport({ slug: "abcde33333", title: "Doomed" });
-      await h.repo.save(live);
-      await h.repo.save({ ...doomed, deletedAt: Date.now() });
-
-      const listed = await h.repo.listByOrg(h.orgId);
-      expect(listed.ok).toBe(true);
-      if (!listed.ok) return;
-      expect(listed.value.some((s) => s.title === "Doomed")).toBe(false);
-      expect(listed.value.some((s) => s.title === "Live")).toBe(true);
-    });
-
-    it("listByOrg orders newest-write-first, and a re-save (rename) moves a report to the front", async () => {
-      const a = h.makeReport({ slug: "abcde44444", title: "A" });
-      const b = h.makeReport({ slug: "abcde55555", title: "B" });
-      await h.repo.save(a);
-      await h.repo.save(b);
-
-      const initial = await h.repo.listByOrg(h.orgId);
-      expect(initial.ok && initial.value.map((s) => s.title)).toEqual(["B", "A"]);
-
-      // Re-saving `a` (e.g. a rename) must bump it back to the front — the real
-      // adapter does this via `updated_at`; the fake must agree (this is the
-      // divergence the ADR-0046 contract suite exists to catch).
-      await h.repo.save({ ...a, title: "A renamed" });
-      const afterResave = await h.repo.listByOrg(h.orgId);
-      expect(afterResave.ok && afterResave.value.map((s) => s.title)).toEqual(["A renamed", "B"]);
-    });
-
-    it("listByOrg's isPublished reflects a promoted (clean) live version", async () => {
+    it("searchByOrg's isPublished reflects a promoted (clean) live version", async () => {
       const report = h.makeReport({ slug: "abcde66666", title: "Publishable" });
       await h.repo.save(report);
-      const before = await h.repo.listByOrg(h.orgId);
-      expect(before.ok && before.value.find((s) => s.title === "Publishable")?.isPublished).toBe(
-        false,
-      );
+      const before = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 10 });
+      expect(
+        before.ok && before.value.items.find((s) => s.title === "Publishable")?.isPublished,
+      ).toBe(false);
 
       const version = report.versions[0];
       if (!version) throw new Error("fixture has no version");
       const promoted = applyScanResult(report, version.id, "clean").report;
       await h.repo.save(promoted);
 
-      const after = await h.repo.listByOrg(h.orgId);
-      expect(after.ok && after.value.find((s) => s.title === "Publishable")?.isPublished).toBe(
-        true,
-      );
+      const after = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 10 });
+      expect(
+        after.ok && after.value.items.find((s) => s.title === "Publishable")?.isPublished,
+      ).toBe(true);
     });
 
-    it("softDelete excludes from listByOrg but findBySlug still resolves it (viewer 410, ADR-0038)", async () => {
+    it("softDelete excludes from searchByOrg but findBySlug still resolves it (viewer 410, ADR-0038)", async () => {
       const report = h.makeReport({ slug: "abcde77777", title: "Doomed" });
       await h.repo.save(report);
       expect((await h.repo.softDelete(report.id)).ok).toBe(true);
 
-      const listed = await h.repo.listByOrg(h.orgId);
-      expect(listed.ok && listed.value.some((s) => s.id === report.id)).toBe(false);
+      const listed = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 10 });
+      expect(listed.ok && listed.value.items.some((s) => s.id === report.id)).toBe(false);
 
       const found = await h.repo.findBySlug(slugOf("abcde77777"));
       expect(found.ok && found.value?.deletedAt).not.toBeNull();
@@ -156,12 +143,12 @@ export function describeReportRepositoryContract(
       await h.repo.save(r2);
       await h.repo.save(r3);
 
-      const page1 = await h.repo.searchByOrg(h.orgId, { limit: 2 });
+      const page1 = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 2 });
       expect(page1.ok && page1.value.items).toHaveLength(2);
       expect(page1.ok && page1.value.hasMore).toBe(true);
 
       const cursor = page1.ok ? page1.value.items[page1.value.items.length - 1]?.id : undefined;
-      const page2 = await h.repo.searchByOrg(h.orgId, { limit: 2, startingAfter: cursor });
+      const page2 = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 2, startingAfter: cursor });
       expect(page2.ok && page2.value.items).toHaveLength(1);
       expect(page2.ok && page2.value.hasMore).toBe(false);
       // No overlap between the pages.
@@ -181,7 +168,7 @@ export function describeReportRepositoryContract(
       // Newest-first order is [r3, r2, r1] (id DESC). "endingBefore: r1.id"
       // asks for the page immediately BEFORE the oldest item in that
       // newest-first list — i.e. the two newer ones, still newest-first.
-      const page = await h.repo.searchByOrg(h.orgId, { limit: 2, endingBefore: r1.id });
+      const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 2, endingBefore: r1.id });
       expect(page.ok && page.value.items.map((i) => i.title)).toEqual(["Thirteen", "Twelve"]);
     });
 
@@ -190,7 +177,7 @@ export function describeReportRepositoryContract(
       await h.repo.save(h.makeReport({ slug: "rpt0000022", title: "Annual summary" }));
       await h.repo.save(h.makeReport({ slug: "rpt0000023", title: "QUARTERLY costs" }));
 
-      const res = await h.repo.searchByOrg(h.orgId, { query: "quarter", limit: 10 });
+      const res = await h.repo.searchByOrg(h.orgId, h.owner, { query: "quarter", limit: 10 });
       expect(res.ok && res.value.items).toHaveLength(2);
     });
 
@@ -198,7 +185,7 @@ export function describeReportRepositoryContract(
       await h.repo.save(h.makeReport({ slug: "rpt0000031", title: "100% complete" }));
       await h.repo.save(h.makeReport({ slug: "rpt0000032", title: "1000 reports" }));
 
-      const res = await h.repo.searchByOrg(h.orgId, { query: "100%", limit: 10 });
+      const res = await h.repo.searchByOrg(h.orgId, h.owner, { query: "100%", limit: 10 });
       expect(res.ok && res.value.items).toHaveLength(1);
       expect(res.ok && res.value.items[0]?.title).toBe("100% complete");
     });
@@ -207,8 +194,112 @@ export function describeReportRepositoryContract(
       const r = h.makeReport({ slug: "rpt0000041", title: "Doomed search" });
       await h.repo.save(r);
       await h.repo.softDelete(r.id);
-      const res = await h.repo.searchByOrg(h.orgId, { query: "Doomed search", limit: 10 });
+      const res = await h.repo.searchByOrg(h.orgId, h.owner, {
+        query: "Doomed search",
+        limit: 10,
+      });
       expect(res.ok && res.value.items).toHaveLength(0);
+    });
+
+    // ── The ADR-0075 visibility matrix ─────────────────────────────────────
+    // Fixture owner = h.owner; viewer under test = h.colleague (same org,
+    // owns nothing). "Visible" = the row is in the page; "invisible" = the
+    // row is absent entirely (existence is private).
+
+    async function titlesFor(viewer: ReportViewer): Promise<readonly string[]> {
+      const res = await h.repo.searchByOrg(h.orgId, viewer, { limit: 50 });
+      if (!res.ok) throw new Error(`searchByOrg failed: ${res.error.message}`);
+      return res.value.items.map((i) => i.title);
+    }
+
+    it("visibility: the owner sees their own report in every acl mode (incl. default private)", async () => {
+      const priv = h.makeReport({ slug: "vis0000001", title: "Own private" });
+      await h.repo.save(priv); // no acls row = private by default
+      const pw = h.makeReport({ slug: "vis0000002", title: "Own password" });
+      await h.repo.save(pw);
+      await h.repo.setAcl(pw.id, { mode: "password", passwordHash: "$argon2id$x" });
+
+      const titles = await titlesFor(h.owner);
+      expect(titles).toContain("Own private");
+      expect(titles).toContain("Own password");
+    });
+
+    it("visibility: another owner's default-private report is invisible to a same-org colleague", async () => {
+      await h.repo.save(h.makeReport({ slug: "vis0000011", title: "Colleague-invisible" }));
+      expect(await titlesFor(h.colleague)).not.toContain("Colleague-invisible");
+    });
+
+    it("visibility: org-mode and public-mode reports are listed for a same-org colleague", async () => {
+      const orgShared = h.makeReport({ slug: "vis0000021", title: "Org shared" });
+      await h.repo.save(orgShared);
+      await h.repo.setAcl(orgShared.id, { mode: "org" });
+      const pub = h.makeReport({ slug: "vis0000022", title: "Public shared" });
+      await h.repo.save(pub);
+      await h.repo.setAcl(pub.id, { mode: "public" });
+
+      const titles = await titlesFor(h.colleague);
+      expect(titles).toContain("Org shared");
+      expect(titles).toContain("Public shared");
+    });
+
+    it("visibility: password and allowlist reports are invisible to a non-owner (existence is private)", async () => {
+      const pw = h.makeReport({ slug: "vis0000031", title: "Password gated" });
+      await h.repo.save(pw);
+      await h.repo.setAcl(pw.id, { mode: "password", passwordHash: "$argon2id$x" });
+      const al = h.makeReport({ slug: "vis0000032", title: "Allowlist gated" });
+      await h.repo.save(al);
+      // Even the colleague's OWN email on the allowlist does not list the
+      // report — allowlist grants viewer access via the magic link, not a
+      // listing presence (ADR-0075's deliberate exclusion).
+      await h.repo.setAcl(al.id, {
+        mode: "allowlist",
+        allowedEmails: [h.colleague.email],
+        accessTtlSeconds: 3600,
+      });
+
+      const titles = await titlesFor(h.colleague);
+      expect(titles).not.toContain("Password gated");
+      expect(titles).not.toContain("Allowlist gated");
+    });
+
+    it("visibility: a userId write grant lists an otherwise-private report for the grantee", async () => {
+      const r = h.makeReport({ slug: "vis0000041", title: "Granted by userId" });
+      await h.repo.save(r);
+      await h.grantWrite(r.id, h.colleague.email, h.colleague.userId);
+      expect(await titlesFor(h.colleague)).toContain("Granted by userId");
+    });
+
+    it("visibility: an email-only write grant (granteeUserId null) matches the viewer's email case-insensitively", async () => {
+      const r = h.makeReport({ slug: "vis0000042", title: "Granted by email" });
+      await h.repo.save(r);
+      await h.grantWrite(r.id, h.colleague.email, null);
+      const upper = { userId: h.colleague.userId, email: h.colleague.email.toUpperCase() };
+      expect(await titlesFor(upper)).toContain("Granted by email");
+    });
+
+    it("visibility: a write grant for someone ELSE does not list the report for the colleague", async () => {
+      const r = h.makeReport({ slug: "vis0000043", title: "Granted elsewhere" });
+      await h.repo.save(r);
+      await h.grantWrite(r.id, "unrelated@example.test", null);
+      expect(await titlesFor(h.colleague)).not.toContain("Granted elsewhere");
+    });
+
+    it("hasReportsInFolder reflects live reports only — org-scoped, not visibility-scoped", async () => {
+      const r = h.makeReport({ slug: "vis0000051", title: "Occupant" });
+      // Empty before any save.
+      const before = await h.repo.hasReportsInFolder(h.orgId, r.folderId);
+      expect(before.ok && before.value).toBe(false);
+
+      // A default-private report the colleague can't SEE still occupies the
+      // folder (the deleteFolder guard must not be fooled by invisibility).
+      await h.repo.save(r);
+      const occupied = await h.repo.hasReportsInFolder(h.orgId, r.folderId);
+      expect(occupied.ok && occupied.value).toBe(true);
+
+      // Soft-deleting the report frees the folder again.
+      await h.repo.softDelete(r.id);
+      const after = await h.repo.hasReportsInFolder(h.orgId, r.folderId);
+      expect(after.ok && after.value).toBe(false);
     });
 
     it("listVersions returns the report's versions newest-created first (ADR-0065)", async () => {

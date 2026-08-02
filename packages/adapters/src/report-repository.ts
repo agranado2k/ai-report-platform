@@ -7,17 +7,19 @@ import type {
   ReportPage,
   ReportRepository,
   ReportSearchQuery,
-  ReportSummary,
   ReportVersionSummary,
+  ReportViewer,
   VersionPage,
 } from "arp-application";
-import { acls, reports, reportVersions } from "arp-db/schema";
+import { acls, reports, reportVersions, reportWriteGrants } from "arp-db/schema";
 import {
   type Acl,
   type AppError,
   DEFAULT_ACCESS_TTL_SECONDS,
   DEFAULT_ACL,
+  type FolderId,
   folderId,
+  normalizeEmailAddress,
   type OrgId,
   ok,
   orgId,
@@ -34,7 +36,7 @@ import {
   type VersionOrigin,
   versionId,
 } from "arp-domain";
-import { and, asc, desc, eq, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db, DbContext } from "./client";
 
 type ReportRow = typeof reports.$inferSelect;
@@ -166,44 +168,42 @@ export class DrizzleReportRepository implements ReportRepository {
     return this.loadWhere(eq(reports.id, id));
   }
 
-  async listByOrg(org: OrgId): Promise<Result<readonly ReportSummary[], AppError>> {
-    // Lean projection — no version rows/manifests loaded; newest reports first.
-    // `isPublished` is derived from the live (clean) version pointer.
-    try {
-      const db = this.ctx.current();
-      const rows = await db
-        .select({
-          id: reports.id,
-          slug: reports.slug,
-          title: reports.title,
-          liveVersionId: reports.liveVersionId,
-          folderId: reports.folderId,
-        })
-        .from(reports)
-        .where(and(eq(reports.orgId, org), isNull(reports.deletedAt)))
-        .orderBy(desc(reports.updatedAt));
-      return ok(
-        rows.map((r) => ({
-          id: reportId(r.id),
-          slug: r.slug as Slug,
-          title: r.title,
-          isPublished: r.liveVersionId !== null,
-          folderId: folderId(r.folderId),
-        })),
-      );
-    } catch (e) {
-      return err2("listReportsByOrg", e);
-    }
-  }
-
-  async searchByOrg(org: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>> {
+  async searchByOrg(
+    org: OrgId,
+    viewer: ReportViewer,
+    q: ReportSearchQuery,
+  ): Promise<Result<ReportPage, AppError>> {
     // Org-scoped cursor pagination (ADR-0053): keyset on the report id (UUIDv7),
     // DESC = newest-created first. `starting_after` pages forward (id < cursor);
     // `ending_before` pages back (id > cursor, fetched ASC then reversed). Optional
     // folder filter + literal title/slug substring search.
+    //
+    // Visibility (ADR-0075): within the org scope, a row is listed ONLY when
+    // the viewer owns it, its acl mode shares it broadly (`org`/`public` — no
+    // acls row = `private`, the private-by-default), or the viewer holds a
+    // write grant on it (userId-or-normalized-email match, the same semantics
+    // as `hasWriteGrant`/`WriteGrantStore.findFor`, ADR-0060 §2). Other
+    // owners' private/password/allowlist reports are absent entirely —
+    // existence is private, not just content.
     try {
       const db = this.ctx.current();
+      const normalizedEmail = viewer.email ? normalizeEmailAddress(viewer.email) : undefined;
+      const grantUserMatch = eq(reportWriteGrants.granteeUserId, viewer.userId);
+      const grantMatch = normalizedEmail
+        ? or(grantUserMatch, eq(reportWriteGrants.granteeEmail, normalizedEmail))
+        : grantUserMatch;
+      const visibility = or(
+        eq(reports.ownerId, viewer.userId),
+        sql`COALESCE(${acls.mode}, 'private') IN ('org', 'public')`,
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(reportWriteGrants)
+            .where(and(eq(reportWriteGrants.reportId, reports.id), grantMatch)),
+        ),
+      );
       const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];
+      if (visibility) filters.push(visibility);
       if (q.folderId) filters.push(eq(reports.folderId, q.folderId));
       const needle = q.query?.trim();
       if (needle) {
@@ -229,6 +229,8 @@ export class DrizzleReportRepository implements ReportRepository {
           folderId: reports.folderId,
         })
         .from(reports)
+        // acls is 1:1 with reports (PK report_id), so this join never fans out.
+        .leftJoin(acls, eq(acls.reportId, reports.id))
         .where(and(...filters))
         .orderBy(back ? asc(reports.id) : desc(reports.id))
         .limit(q.limit + 1); // +1 to detect has_more
@@ -248,6 +250,23 @@ export class DrizzleReportRepository implements ReportRepository {
       });
     } catch (e) {
       return err2("searchReportsByOrg", e);
+    }
+  }
+
+  async hasReportsInFolder(org: OrgId, folder: FolderId): Promise<Result<boolean, AppError>> {
+    // The deleteFolder emptiness guard — org-scoped, NOT visibility-scoped
+    // (ADR-0075): a report the deleter cannot see must still block the delete,
+    // and a bare boolean surfaces no report metadata.
+    try {
+      const db = this.ctx.current();
+      const [row] = await db
+        .select({ one: sql`1` })
+        .from(reports)
+        .where(and(eq(reports.orgId, org), eq(reports.folderId, folder), isNull(reports.deletedAt)))
+        .limit(1);
+      return ok(row !== undefined);
+    } catch (e) {
+      return err2("hasReportsInFolder", e);
     }
   }
 

@@ -27,7 +27,12 @@ export const loader = handle({
       folderId = parsed.value;
     }
 
-    return ops().searchReports({ orgId: actor.orgId }, { query, folderId, ...cursor.value });
+    // Visibility-scoped listing (ADR-0075): the acting user decides which of
+    // the org's reports appear (owned / org- or public-shared / write-granted).
+    return ops().searchReports(
+      { orgId: actor.orgId, userId: actor.userId },
+      { query, folderId, ...cursor.value },
+    );
   },
   toHttp: (result) => searchReportsToHttp(result, wireContext()),
 });

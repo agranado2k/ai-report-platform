@@ -18,13 +18,13 @@ import { type DeleteReportDeps, deleteReport } from "./delete-report";
 const { orgA, owner, otherUser } = ACTORS;
 
 describe("deleteReport use case", () => {
-  it("soft-deletes a report (excluded from listByOrg)", async () => {
+  it("soft-deletes a report (excluded from the owner's searchByOrg)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report(orgA, "aaaaaaaaaa"));
     const r = await deleteReport(deps, ownerActor, { slug: slug("aaaaaaaaaa") });
     expect(r.ok).toBe(true);
-    const list = await deps.reports.listByOrg(orgA);
-    expect(list.ok && list.value.some((s) => s.slug === "aaaaaaaaaa")).toBe(false);
+    const list = await deps.reports.searchByOrg(orgA, { userId: owner }, { limit: 10 });
+    expect(list.ok && list.value.items.some((s) => s.slug === "aaaaaaaaaa")).toBe(false);
   });
 
   it("rejects a non-owner (even same-org) with NotAllowed (ADR-0059: delete is owner-only)", async () => {

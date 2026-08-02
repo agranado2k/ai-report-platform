@@ -40,8 +40,17 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # bare session GET /api/v1/reports. Pre-amendment that read resolved to a
   # null actor (unmirrored → 401/empty); now the read door lazily provisions
   # through the same canonical chain (its session actively carries its DECOY
-  # org, which the mirror-miss branch must ignore), so a genuine org member
-  # who has only ever viewed sees the org's reports.
+  # org, which the mirror-miss branch must ignore).
+  # VISIBILITY (ADR-0075, amends the original #228 assertion BY DESIGN): the
+  # two uploads are default-PRIVATE, so a colleague no longer sees them just
+  # by sharing the org. The first identity org-shares ITS report via the ACL
+  # API; the third (never-written, owns nothing) must then list EXACTLY the
+  # org-shared report and NOT the second identity's still-private one — the
+  # sharper form of the same shared-org proof: the org-shared report could
+  # only appear if all three identities resolved to ONE org row, and the
+  # private one's absence proves existence stays private inside that org.
+  # The second identity still lists both: its own by ownership, the first's
+  # by the org share.
   @run-scoped
   Scenario: Two same-domain identities share one team org
     Given a first run-scoped team-domain identity is signed in
@@ -49,5 +58,6 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
     And a third run-scoped team-domain identity is signed in and never uploads
     When the first run-scoped identity uploads an HTML report file to "/api/v1/reports"
     And the second run-scoped identity uploads its own HTML report file to "/api/v1/reports"
+    And the first run-scoped identity shares its report org-wide via the ACL API
     Then the second run-scoped identity's report listing includes both run-scoped uploads
-    And the third run-scoped identity's first-ever session read lists both run-scoped uploads
+    And the third run-scoped identity's first-ever session read lists exactly the org-shared upload

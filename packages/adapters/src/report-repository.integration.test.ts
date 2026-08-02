@@ -100,7 +100,7 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     expect(found.ok && found.value).toBeNull();
   });
 
-  it("listByOrg projects summaries — published flag + soft-deleted excluded", async () => {
+  it("searchByOrg projects summaries — published flag + soft-deleted excluded", async () => {
     // r1: pending, not published.
     await repo.save(newReport());
     // r2: promoted to clean → published.
@@ -121,11 +121,11 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
     await repo.save({ ...r3, deletedAt: Date.now() });
 
-    const listed = await repo.listByOrg(ids.orgId);
+    const listed = await repo.searchByOrg(ids.orgId, { userId: ids.userId }, { limit: 10 });
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
 
-    const byTitle = new Map(listed.value.map((s) => [s.title, s]));
+    const byTitle = new Map(listed.value.items.map((s) => [s.title, s]));
     expect(byTitle.has("Deleted")).toBe(false); // soft-deleted excluded
     expect(byTitle.get("Q3 metrics")).toMatchObject({ slug: SLUG, isPublished: false });
     expect(byTitle.get("Second")).toMatchObject({ isPublished: true });
@@ -170,14 +170,14 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     }
   });
 
-  it("softDelete sets deleted_at and excludes the report from listByOrg", async () => {
+  it("softDelete sets deleted_at and excludes the report from searchByOrg", async () => {
     const created = newReport();
     await repo.save(created);
     const del = await repo.softDelete(created.id);
     expect(del.ok).toBe(true);
 
-    const list = await repo.listByOrg(ids.orgId);
-    expect(list.ok && list.value.some((s) => s.slug === SLUG)).toBe(false);
+    const list = await repo.searchByOrg(ids.orgId, { userId: ids.userId }, { limit: 10 });
+    expect(list.ok && list.value.items.some((s) => s.slug === SLUG)).toBe(false);
     // findBySlug still resolves it (no deleted_at filter) with deletedAt set — the
     // viewer reads this to return 410 (ADR-0038).
     const found = await repo.findBySlug(makeSlugOrThrow(SLUG));
@@ -211,18 +211,26 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
 
     // page 1 of size 2 → 2 items, has_more (cursor pagination, ADR-0053)
-    const page1 = await repo.searchByOrg(ids.orgId, { limit: 2 });
+    const page1 = await repo.searchByOrg(ids.orgId, { userId: ids.userId }, { limit: 2 });
     expect(page1.ok && page1.value.items.length).toBe(2);
     expect(page1.ok && page1.value.hasMore).toBe(true);
 
     // page 2 via starting_after the last id → the remaining 1, no more
     const cursor = page1.ok ? page1.value.items[1]?.id : undefined;
-    const page2 = await repo.searchByOrg(ids.orgId, { limit: 2, startingAfter: cursor });
+    const page2 = await repo.searchByOrg(
+      ids.orgId,
+      { userId: ids.userId },
+      { limit: 2, startingAfter: cursor },
+    );
     expect(page2.ok && page2.value.items.length).toBe(1);
     expect(page2.ok && page2.value.hasMore).toBe(false);
 
     // title substring (case-insensitive) → 2 "Quarterly" matches
-    const q = await repo.searchByOrg(ids.orgId, { query: "quarter", limit: 10 });
+    const q = await repo.searchByOrg(
+      ids.orgId,
+      { userId: ids.userId },
+      { query: "quarter", limit: 10 },
+    );
     expect(q.ok && q.value.items.length).toBe(2);
   });
 
@@ -235,7 +243,11 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
     await repo.save(r);
     await repo.softDelete(r.id);
-    const res = await repo.searchByOrg(ids.orgId, { query: "Doomed", limit: 10 });
+    const res = await repo.searchByOrg(
+      ids.orgId,
+      { userId: ids.userId },
+      { query: "Doomed", limit: 10 },
+    );
     expect(res.ok && res.value.items.length).toBe(0);
   });
 
@@ -258,7 +270,11 @@ describe("DrizzleReportRepository (pglite integration)", () => {
     );
 
     // "100%" must match only the literal "100% complete", not "1000 reports".
-    const res = await repo.searchByOrg(ids.orgId, { query: "100%", limit: 10 });
+    const res = await repo.searchByOrg(
+      ids.orgId,
+      { userId: ids.userId },
+      { query: "100%", limit: 10 },
+    );
     expect(res.ok && res.value.items.length).toBe(1);
     expect(res.ok && res.value.items[0]?.title).toBe("100% complete");
   });

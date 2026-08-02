@@ -61,6 +61,21 @@ export interface ReportSearchQuery extends CursorParams<ReportId> {
   readonly folderId?: FolderId;
 }
 
+/**
+ * The viewing user a report listing is scoped to (ADR-0075). A report appears
+ * in the list ONLY when the viewer owns it, its `Acl` mode shares it broadly
+ * (`org` / `public`), or the viewer holds a write grant on it — matched by
+ * `granteeUserId` OR normalized email, mirroring `hasWriteGrant` (ADR-0060 §2).
+ * Other owners' `private`/`password`/`allowlist` reports must not appear at
+ * all: their existence is private, not just their content.
+ */
+export interface ReportViewer {
+  readonly userId: UserId;
+  /** The viewer's mirrored email (for email-only write grants, ADR-0060 §2).
+   *  Omitted when unresolvable; implementations normalize defensively. */
+  readonly email?: string;
+}
+
 /** Cursor-paginated query over an org's folder tree (ADR-0053). */
 export type FolderListQuery = CursorParams<FolderId>;
 
@@ -94,11 +109,22 @@ export type VersionPage = CursorPage<ReportVersionSummary>;
 export interface ReportRepository {
   findBySlug(slug: Slug): Promise<Result<Report | null, AppError>>;
   findById(id: ReportId): Promise<Result<Report | null, AppError>>;
-  /** The org's non-deleted reports as summaries, newest first (dashboard list). */
-  listByOrg(orgId: OrgId): Promise<Result<readonly ReportSummary[], AppError>>;
-  /** Cursor-paginated + filtered org-wide search (newest-created first), keyset on
-   *  the report id (ADR-0053). */
-  searchByOrg(orgId: OrgId, q: ReportSearchQuery): Promise<Result<ReportPage, AppError>>;
+  /** Cursor-paginated + filtered org-wide search (newest-created first), keyset
+   *  on the report id (ADR-0053), restricted to what `viewer` may see
+   *  (ADR-0075): owned OR org/public-shared OR write-granted. (The old
+   *  unscoped `listByOrg` was consolidated into this — it had no production
+   *  caller and an unscoped listing surface would be a metadata leak.) */
+  searchByOrg(
+    orgId: OrgId,
+    viewer: ReportViewer,
+    q: ReportSearchQuery,
+  ): Promise<Result<ReportPage, AppError>>;
+  /** Whether any NON-DELETED report is placed in `folderId` (org-scoped) — the
+   *  deleteFolder emptiness guard (ADR-0036). Deliberately NOT
+   *  visibility-scoped (ADR-0075): a folder holding a report the deleter
+   *  cannot see must still refuse deletion, and a bare boolean surfaces no
+   *  report metadata. */
+  hasReportsInFolder(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>>;
   /** Persist the aggregate + any new versions (called inside a UnitOfWork). */
   save(report: Report): Promise<Result<void, AppError>>;
   /** Soft-delete a report (sets deleted_at → the viewer returns 410, ADR-0038).
