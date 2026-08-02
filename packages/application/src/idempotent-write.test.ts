@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   beginIdempotentWrite,
   reportReplayBody,
+  reviveFolderReplay,
   reviveReplay,
   reviveReportReplay,
 } from "./idempotent-write";
@@ -146,6 +147,38 @@ describe("report replay snapshot", () => {
 
   it("rejects a foreign body shape with Unexpected", () => {
     const r = reviveReportReplay({ responseStatus: 200, responseBody: { nope: true } });
+    expect(!r.ok && r.error.kind).toBe("Unexpected");
+  });
+});
+
+describe("folder replay revival (ADR-0076)", () => {
+  const aFolder = {
+    id: "00000000-0000-7000-8000-0000000000f1",
+    orgId: "00000000-0000-7000-8000-0000000000a1",
+    parentId: null,
+    ownerId: null,
+    visibility: "org",
+    name: "Root",
+    slug: "root",
+    deletedAt: null,
+  };
+
+  it("revives a folder body carrying the ADR-0076 visibility field", () => {
+    const r = reviveFolderReplay({ responseStatus: 200, responseBody: aFolder });
+    expect(r.ok && r.value.visibility).toBe("org");
+  });
+
+  it("rejects a STALE pre-ADR-0076 body with no visibility — a spec-required field", () => {
+    const { visibility: _dropped, ...stale } = aFolder;
+    const r = reviveFolderReplay({ responseStatus: 200, responseBody: stale });
+    expect(!r.ok && r.error.kind).toBe("Unexpected");
+  });
+
+  it("rejects a body whose visibility is not one of the closed vocabulary", () => {
+    const r = reviveFolderReplay({
+      responseStatus: 200,
+      responseBody: { ...aFolder, visibility: "public" },
+    });
     expect(!r.ok && r.error.kind).toBe("Unexpected");
   });
 });

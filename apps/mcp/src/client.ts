@@ -10,6 +10,7 @@
 import type {
   AclWire,
   CommentWire,
+  FolderShareWire,
   FolderWire,
   ListEnvelope,
   ReportDetailWire,
@@ -301,6 +302,42 @@ export class ApiClient {
 
   deleteFolder(id: string): Promise<ApiResult<unknown>> {
     return this.request<unknown>("DELETE", `/api/v1/folders/${encodeURIComponent(id)}`);
+  }
+
+  /** Set a folder's visibility (ADR-0076): `private` (owner + shares) or `org`
+   *  (every member). Owner-or-legacy only; requires the `acl:write` scope. A
+   *  legacy (owner-less) folder is ADOPTED by the caller. */
+  setFolderVisibility(id: string, visibility: string): Promise<ApiResult<FolderWire>> {
+    return this.request<FolderWire>(
+      "POST",
+      `/api/v1/folders/${encodeURIComponent(id)}/visibility`,
+      { json: { visibility } },
+    );
+  }
+
+  /** Share a folder's VISIBILITY with someone by email (ADR-0076 — never write).
+   *  Owner-or-legacy only; requires the `acl:write` scope. */
+  shareFolder(id: string, email: string): Promise<ApiResult<FolderShareWire>> {
+    return this.request<FolderShareWire>(
+      "POST",
+      `/api/v1/folders/${encodeURIComponent(id)}/shares`,
+      { json: { email } },
+    );
+  }
+
+  /** Revoke a folder share (idempotent — succeeds even if none existed). */
+  unshareFolder(id: string, email: string): Promise<ApiResult<unknown>> {
+    return this.request<unknown>(
+      "DELETE",
+      `/api/v1/folders/${encodeURIComponent(id)}/shares/${encodeURIComponent(email)}`,
+    );
+  }
+
+  /** List everyone a folder is shared with (owner-or-legacy only). */
+  listFolderShares(id: string): Promise<ApiResult<ListEnvelope<FolderShareWire>>> {
+    return this.get<ListEnvelope<FolderShareWire>>(
+      `/api/v1/folders/${encodeURIComponent(id)}/shares`,
+    );
   }
 
   private get<T>(path: string): Promise<ApiResult<T>> {

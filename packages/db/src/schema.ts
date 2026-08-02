@@ -49,6 +49,11 @@ export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "delivered",
 export const orgKindEnum = pgEnum("org_kind", ["personal", "team"]);
 // Comment intent (ADR-0064 Decision 8): what the author wants done with a comment.
 export const commentIntentEnum = pgEnum("comment_intent", ["note", "enhancement", "add", "remove"]);
+// Folder visibility (ADR-0076): who may see a folder — `private` (its owner +
+// folder-share grantees) or `org` (every org member). A brand-new enum type,
+// so the #127 drizzle-kit ADD-VALUE one-transaction gotcha does not apply
+// (same precedent as org_kind, migration 0014).
+export const folderVisibilityEnum = pgEnum("folder_visibility", ["private", "org"]);
 
 // timestamptz at millisecond precision (db-design.md → Conventions).
 const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
@@ -148,6 +153,19 @@ export const folders = pgTable(
       .notNull()
       .references(() => orgs.id, { onDelete: "restrict" }),
     parentId: uuid("parent_id").references((): AnyPgColumn => folders.id, { onDelete: "restrict" }),
+    // Creator-owned folders (ADR-0076, reverses ADR-0059 §5). NULL = legacy
+    // (pre-ADR-0076) — such folders stay visible + writable to the whole org.
+    // Migration 0019 adds the column and leaves it NULL on every pre-existing
+    // row (only `visibility` is backfilled, to 'org') — legacy semantics ARE
+    // the behavior we're preserving, so there is nothing to backfill here.
+    ownerId: uuid("owner_id").references(() => users.id, { onDelete: "restrict" }),
+    // Who may see the folder (ADR-0076). Migration 0019 backfills existing
+    // rows to 'org' (no surprise disappearances), then sets the column
+    // default to 'private' as the fail-safe for any raw insert; app code
+    // always writes an explicit value (new folders: private, or the parent's
+    // visibility; Root: always 'org' — enforced in code, root must stay
+    // usable by every member for default uploads).
+    visibility: folderVisibilityEnum("visibility").notNull().default("private"),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     createdAt: createdAt(),
@@ -156,6 +174,7 @@ export const folders = pgTable(
   },
   (t) => [
     index("folders_org_id_idx").on(t.orgId),
+    index("folders_owner_id_idx").on(t.ownerId),
     // Serves the cursor-paginated folder list (searchByOrg, ADR-0053): keyset on
     // (org_id, id DESC) over live folders.
     index("folders_org_id_keyset_idx").on(t.orgId, t.id.desc()).where(sql`${t.deletedAt} is null`),
@@ -334,6 +353,35 @@ export const reportWriteGrants = pgTable(
     // reserved for the signup-time grantee_user_id backfill sweep (ADR-0060 §2,
     // "grants for this email" lookup). Don't drop as dead.
     index("report_write_grants_grantee_email_idx").on(t.granteeEmail),
+  ],
+);
+
+// Per-folder visibility shares (ADR-0076) — the folder's owner grants another
+// person VISIBILITY of a private folder (never write; folder writes stay
+// owner-or-org per ADR-0076). Mirrors report_write_grants' shape exactly:
+// email-keyed PK, lazily-resolved grantee_user_id, no expiry, no level.
+// Deliberately NOT the ADR-009 `folder_collaborators` corpse above — that
+// superseded table carries different semantics (inherited WRITE grants) and
+// still awaits its cleanup migration (ADR-0060 trade-offs); reusing it would
+// resurrect a superseded design.
+export const folderShares = pgTable(
+  "folder_shares",
+  {
+    folderId: uuid("folder_id")
+      .notNull()
+      .references(() => folders.id, { onDelete: "cascade" }),
+    granteeEmail: text("grantee_email").notNull(),
+    granteeUserId: uuid("grantee_user_id").references(() => users.id, { onDelete: "restrict" }),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    grantedAt: tstz("granted_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.folderId, t.granteeEmail] }),
+    // Mirrors report_write_grants_grantee_email_idx: reserved for a
+    // signup-time grantee_user_id backfill sweep ("shares for this email").
+    index("folder_shares_grantee_email_idx").on(t.granteeEmail),
   ],
 );
 

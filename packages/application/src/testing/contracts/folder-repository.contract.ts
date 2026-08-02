@@ -1,24 +1,44 @@
 // Shared FolderRepository contract (ADR-0020 port, ADR-0036 sibling-slug
 // uniqueness, ADR-0046 two-tier testing). Run against both
 // InMemoryFolderRepository and DrizzleFolderRepository-on-pglite so the fake's
-// clash-detection and soft-delete semantics stay honest against the real DB's
-// partial unique index.
-import type { AppError, Folder, FolderId, OrgId, Result } from "arp-domain";
+// clash-detection, soft-delete, and ADR-0076 visibility-predicate semantics
+// stay honest against the real DB's partial unique index + SQL predicate.
+import type {
+  AppError,
+  Folder,
+  FolderId,
+  FolderVisibility,
+  OrgId,
+  Result,
+  UserId,
+} from "arp-domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { FolderRepository } from "../../ports";
+import type { FolderRepository, FolderShareStore } from "../../ports";
 
 export interface FolderRepositoryContractHarness {
   readonly repo: FolderRepository;
   readonly orgId: OrgId;
   /** A parent folder already persisted in the harness (Root, or equivalent) —
-   *  new fixtures nest under it unless a test overrides `parentId`. */
+   *  new fixtures nest under it unless a test overrides `parentId`. Persisted
+   *  in the legacy Root shape: ownerId NULL, visibility `org` (ADR-0076). */
   readonly rootFolderId: FolderId;
+  /** A user that exists (a real FK on the Drizzle harness) — the default
+   *  "owner" identity of the visibility matrix. */
+  readonly ownerUserId: UserId;
+  /** A second existing user — the "colleague" viewer who owns nothing. */
+  readonly colleagueUserId: UserId;
+  /** The share store the repo's ADR-0076 predicate reads — the SAME instance
+   *  (in-memory) or the same database (Drizzle). */
+  readonly shares: FolderShareStore;
   /** A fresh, valid Folder under the harness's org — id/name auto-generated
-   *  and overridable. Does NOT save it; the test calls `repo.save()`. */
+   *  and overridable. Legacy shape by default (ownerId null, `org`). Does NOT
+   *  save it; the test calls `repo.save()`. */
   makeFolder(overrides?: {
     readonly id?: FolderId;
     readonly name?: string;
     readonly parentId?: FolderId | null;
+    readonly ownerId?: UserId | null;
+    readonly visibility?: FolderVisibility;
   }): Folder;
   teardown(): Promise<void>;
 }
@@ -49,7 +69,7 @@ export function describeFolderRepositoryContract(
     it("listByOrg returns saved, non-deleted folders for the org", async () => {
       const folder = h.makeFolder({ name: "Docs" });
       await h.repo.save(folder);
-      const listed = await h.repo.listByOrg(h.orgId);
+      const listed = await h.repo.listByOrg(h.orgId, { userId: h.ownerUserId });
       expect(listed.ok && listed.value.some((f) => f.id === folder.id)).toBe(true);
     });
 
@@ -77,7 +97,7 @@ export function describeFolderRepositoryContract(
       await h.repo.save(folder);
       expect((await h.repo.softDelete(folder.id)).ok).toBe(true);
 
-      const listed = await h.repo.listByOrg(h.orgId);
+      const listed = await h.repo.listByOrg(h.orgId, { userId: h.ownerUserId });
       expect(listed.ok && listed.value.some((f) => f.id === folder.id)).toBe(false);
 
       const found = await h.repo.findById(folder.id);
@@ -96,7 +116,7 @@ export function describeFolderRepositoryContract(
       const result = await h.repo.save(recreated);
       expect(result.ok).toBe(true);
 
-      const listed = await h.repo.listByOrg(h.orgId);
+      const listed = await h.repo.listByOrg(h.orgId, { userId: h.ownerUserId });
       expect(listed.ok && listed.value.filter((f) => f.slug === "quarterly")).toHaveLength(1);
     });
 
@@ -109,14 +129,181 @@ export function describeFolderRepositoryContract(
       await h.repo.save(h.makeFolder({ name: "Bravo" }));
       await h.repo.save(h.makeFolder({ name: "Charlie" }));
 
-      const page1 = await h.repo.searchByOrg(h.orgId, { limit: 2 });
+      const page1 = await h.repo.searchByOrg(h.orgId, { userId: h.ownerUserId }, { limit: 2 });
       expect(page1.ok && page1.value.items.map((f) => f.name)).toEqual(["Charlie", "Bravo"]);
       expect(page1.ok && page1.value.hasMore).toBe(true);
 
       const cursor = page1.ok ? page1.value.items[1]?.id : undefined;
-      const page2 = await h.repo.searchByOrg(h.orgId, { limit: 2, startingAfter: cursor });
+      const page2 = await h.repo.searchByOrg(
+        h.orgId,
+        { userId: h.ownerUserId },
+        { limit: 2, startingAfter: cursor },
+      );
       expect(page2.ok && page2.value.items.map((f) => f.name)).toEqual(["Alpha", "Root"]);
       expect(page2.ok && page2.value.hasMore).toBe(false);
+    });
+
+    // ── ADR-0076 visibility matrix ────────────────────────────────────────
+    describe("visibility predicate (ADR-0076)", () => {
+      const names = (r: Awaited<ReturnType<FolderRepository["listByOrg"]>>) =>
+        r.ok ? r.value.map((f) => f.name).sort() : [];
+
+      it("the OWNER sees their private folder; a colleague does not (existence is private)", async () => {
+        await h.repo.save(
+          h.makeFolder({ name: "Secret", ownerId: h.ownerUserId, visibility: "private" }),
+        );
+        const mine = await h.repo.listByOrg(h.orgId, { userId: h.ownerUserId });
+        expect(names(mine)).toContain("Secret");
+        const theirs = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
+        expect(names(theirs)).not.toContain("Secret");
+      });
+
+      it("a LEGACY folder (ownerId null) is visible to everyone", async () => {
+        await h.repo.save(h.makeFolder({ name: "Legacy" }));
+        const listed = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
+        expect(names(listed)).toContain("Legacy");
+      });
+
+      it("an ORG-visible owned folder is visible to any member", async () => {
+        await h.repo.save(
+          h.makeFolder({ name: "Team", ownerId: h.ownerUserId, visibility: "org" }),
+        );
+        const listed = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
+        expect(names(listed)).toContain("Team");
+      });
+
+      it("a folder SHARE by resolved user id makes a private folder visible", async () => {
+        const secret = h.makeFolder({
+          name: "Shared by id",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(secret);
+        await h.shares.grant(secret.id, "colleague@test.local", h.ownerUserId, h.colleagueUserId);
+        const listed = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
+        expect(names(listed)).toContain("Shared by id");
+      });
+
+      it("a folder SHARE by email matches normalized, without a resolved user id", async () => {
+        const secret = h.makeFolder({
+          name: "Shared by email",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(secret);
+        await h.shares.grant(secret.id, "Pal@Test.Local", h.ownerUserId, null);
+        const listed = await h.repo.listByOrg(h.orgId, {
+          userId: h.colleagueUserId,
+          email: "  pal@test.LOCAL ",
+        });
+        expect(names(listed)).toContain("Shared by email");
+      });
+
+      it("a share on ONE folder does NOT reveal a colleague's OTHER private folders", async () => {
+        // Without a second folder every share assertion above would still pass
+        // for a predicate that dropped the folder correlation from its EXISTS
+        // probe — i.e. one share would unlock every private folder in the org.
+        const shared = h.makeFolder({
+          name: "Shared one",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        const unshared = h.makeFolder({
+          name: "Still secret",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(shared);
+        await h.repo.save(unshared);
+        await h.shares.grant(shared.id, "colleague@test.local", h.ownerUserId, h.colleagueUserId);
+
+        const listed = await h.repo.listByOrg(h.orgId, {
+          userId: h.colleagueUserId,
+          email: "colleague@test.local",
+        });
+        expect(names(listed)).toContain("Shared one");
+        expect(names(listed)).not.toContain("Still secret");
+      });
+
+      it("searchByOrg keeps the same correlation on the paginated surface", async () => {
+        const shared = h.makeFolder({
+          name: "Search shared",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        const unshared = h.makeFolder({
+          name: "Search secret",
+          ownerId: h.ownerUserId,
+          visibility: "private",
+        });
+        await h.repo.save(shared);
+        await h.repo.save(unshared);
+        await h.shares.grant(shared.id, "colleague@test.local", h.ownerUserId, h.colleagueUserId);
+
+        const page = await h.repo.searchByOrg(
+          h.orgId,
+          { userId: h.colleagueUserId, email: "colleague@test.local" },
+          { limit: 100 },
+        );
+        const found = page.ok ? page.value.items.map((f) => f.name) : [];
+        expect(found).toContain("Search shared");
+        expect(found).not.toContain("Search secret");
+      });
+
+      it("the Root is ALWAYS visible (legacy + org shape)", async () => {
+        const listed = await h.repo.listByOrg(h.orgId, { userId: h.colleagueUserId });
+        expect(listed.ok && listed.value.some((f) => f.id === h.rootFolderId)).toBe(true);
+      });
+
+      it("searchByOrg applies the same predicate (paginated surface)", async () => {
+        await h.repo.save(
+          h.makeFolder({ name: "Hidden", ownerId: h.ownerUserId, visibility: "private" }),
+        );
+        const page = await h.repo.searchByOrg(
+          h.orgId,
+          { userId: h.colleagueUserId },
+          { limit: 100 },
+        );
+        expect(page.ok && page.value.items.map((f) => f.name)).not.toContain("Hidden");
+      });
+
+      it("round-trips ownerId + visibility through save/findById", async () => {
+        const f = h.makeFolder({ name: "Owned", ownerId: h.ownerUserId, visibility: "private" });
+        await h.repo.save(f);
+        const found = await h.repo.findById(f.id);
+        expect(found.ok && found.value?.ownerId).toBe(h.ownerUserId);
+        expect(found.ok && found.value?.visibility).toBe("private");
+      });
+    });
+
+    describe("hasChildFolders (the deleteFolder emptiness guard)", () => {
+      it("is false for a leaf, true once ANY child exists — even an invisible private one", async () => {
+        const parent = h.makeFolder({ name: "Parent" });
+        await h.repo.save(parent);
+        const empty = await h.repo.hasChildFolders(h.orgId, parent.id);
+        expect(empty.ok && empty.value).toBe(false);
+
+        await h.repo.save(
+          h.makeFolder({
+            name: "Hidden child",
+            parentId: parent.id,
+            ownerId: h.ownerUserId,
+            visibility: "private",
+          }),
+        );
+        const withChild = await h.repo.hasChildFolders(h.orgId, parent.id);
+        expect(withChild.ok && withChild.value).toBe(true);
+      });
+
+      it("ignores soft-deleted children", async () => {
+        const parent = h.makeFolder({ name: "Parent2" });
+        await h.repo.save(parent);
+        const child = h.makeFolder({ name: "Child2", parentId: parent.id });
+        await h.repo.save(child);
+        await h.repo.softDelete(child.id);
+        const after = await h.repo.hasChildFolders(h.orgId, parent.id);
+        expect(after.ok && after.value).toBe(false);
+      });
     });
   });
 }

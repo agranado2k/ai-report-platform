@@ -20,6 +20,21 @@ describe("instructions constant (ADR-0072, Layer 0)", () => {
     expect(INSTRUCTIONS).toMatch(/comment/i);
   });
 
+  it("lists every acl:write-scoped tool, folder sharing included (ADR-0076)", () => {
+    const aclWriteSentence = INSTRUCTIONS.slice(INSTRUCTIONS.indexOf("acl:write scope") - 400);
+    for (const tool of [
+      "reports_set_acl",
+      "reports_grant_write",
+      "reports_revoke_write",
+      "folders_set_visibility",
+      "folders_share",
+      "folders_unshare",
+      "folders_list_shares",
+    ]) {
+      expect(aclWriteSentence).toContain(tool);
+    }
+  });
+
   it("does NOT over-claim access beyond the caller's own grants (ADR-0069)", () => {
     // Must not read as "this server can reach other users'/orgs' data".
     for (const pattern of OVERCLAIM_PATTERNS) expect(INSTRUCTIONS).not.toMatch(pattern);

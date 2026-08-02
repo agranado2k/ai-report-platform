@@ -13,6 +13,7 @@ export * from "./comment-repository";
 export * from "./email-sender";
 export * from "./event-outbox";
 export * from "./folder-repository";
+export * from "./folder-share-store";
 export * from "./grant-store";
 export * from "./idempotency-store";
 export * from "./identity-store";

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -275,6 +275,19 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });
 
+  it("folders_create states the ADR-0076 private-by-default rule and how to widen it", () => {
+    const d = descriptionOf("folders_create");
+    expect(d).toMatch(/private/i);
+    expect(d).toMatch(/folders_share/);
+    expect(d).toMatch(/folders_set_visibility/);
+  });
+
+  it("reports_move warns that an invisible destination folder reads as not-found", () => {
+    const d = descriptionOf("reports_move");
+    expect(d).toMatch(/visible/i);
+    expect(d).toMatch(/not found|404/i);
+  });
+
   it("reports_grant_write tells the caller to share the returned open_url with the grantee", () => {
     const d = descriptionOf("reports_grant_write");
     expect(d).toMatch(/open_url/);
@@ -365,5 +378,76 @@ describe("shared schema vocabulary + cursor/slug helpers (wire-catalog refactor)
         "The report's slug or its report_ id.",
       );
     }
+  });
+});
+
+describe("folder sharing tools (ADR-0076)", () => {
+  it("folders_set_visibility calls setFolderVisibility with (id, visibility)", async () => {
+    const { client, calls } = recordingClient();
+    const tools = collectTools(registerWriteTools, client);
+    await tools.get("folders_set_visibility")?.handler({ id: "folder_abc", visibility: "private" });
+    expect(calls).toEqual([{ method: "setFolderVisibility", args: ["folder_abc", "private"] }]);
+  });
+
+  it("folders_set_visibility only offers the private|org enum", () => {
+    const { client } = recordingClient();
+    const tools = collectTools(registerWriteTools, client);
+    const schema = tools.get("folders_set_visibility")?.config.inputSchema as {
+      visibility: { options?: readonly string[] };
+    };
+    expect(schema.visibility.options).toEqual(["private", "org"]);
+  });
+
+  it("folders_share / folders_unshare call shareFolder / unshareFolder with (id, email)", async () => {
+    const { client, calls } = recordingClient();
+    const tools = collectTools(registerWriteTools, client);
+    await tools.get("folders_share")?.handler({ id: "folder_abc", email: "pal@x.com" });
+    await tools.get("folders_unshare")?.handler({ id: "folder_abc", email: "pal@x.com" });
+    expect(calls).toEqual([
+      { method: "shareFolder", args: ["folder_abc", "pal@x.com"] },
+      { method: "unshareFolder", args: ["folder_abc", "pal@x.com"] },
+    ]);
+  });
+
+  it("folders_list_shares is read-only and calls listFolderShares with the id", async () => {
+    const { client, calls } = recordingClient();
+    const tools = collectTools(registerReadTools, client);
+    const tool = tools.get("folders_list_shares");
+    expect(tool?.config.annotations).toMatchObject({ readOnlyHint: true });
+    await tool?.handler({ id: "folder_abc" });
+    expect(calls).toEqual([{ method: "listFolderShares", args: ["folder_abc"] }]);
+  });
+
+  it("descriptions spell out visibility-only semantics and the legacy-adoption story", () => {
+    const writeDesc = (name: string) =>
+      (
+        collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+          description?: string;
+        }
+      )?.description ?? "";
+    expect(writeDesc("folders_set_visibility")).toMatch(/ADOPTED|adopts/i);
+    expect(writeDesc("folders_set_visibility")).toMatch(/acl:write/);
+    expect(writeDesc("folders_share")).toMatch(/NO rename|visibility/i);
+    expect(writeDesc("folders_share")).toMatch(/acl:write/);
+  });
+
+  it("folders_share says a share is only effective for someone in the same org", () => {
+    const d =
+      (
+        collectTools(registerWriteTools, {} as ApiClient).get("folders_share")?.config as {
+          description?: string;
+        }
+      )?.description ?? "";
+    expect(d).toMatch(/same org|their own org/i);
+  });
+
+  it("folders_set_visibility takes its enum from the domain vocabulary, not a hand-written list", () => {
+    const tools = collectTools(registerWriteTools, {} as ApiClient);
+    const schema = (
+      tools.get("folders_set_visibility")?.config as {
+        inputSchema?: Record<string, { options?: readonly string[] }>;
+      }
+    )?.inputSchema?.visibility;
+    expect(schema?.options).toEqual([...FOLDER_VISIBILITIES]);
   });
 });

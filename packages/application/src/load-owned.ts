@@ -16,7 +16,15 @@
 //   the grantee may not have had a `grantee_user_id` at grant time). This is
 //   a distinct seam from `loadOwnedReport` — delete/setAcl stay owner-only
 //   permanently.
-// - `loadOwnedFolder` — folders stay org-scoped (ADR-0059 §5).
+// - `loadVisibleFolder` + `loadWritableFolder` — the ADR-0076 folder seams
+//   (replacing the old org-only `loadOwnedFolder`; ADR-0059 §5 is reversed):
+//   a folder is VISIBLE to its owner, to everyone when legacy (ownerId null)
+//   or org-visible, and to folder-share grantees (userId-or-email match,
+//   ADR-0060 §2 pattern); it is WRITABLE (rename / delete / create children)
+//   by its owner or by anyone for legacy/org-visible folders — shares grant
+//   visibility ONLY. A same-org folder the actor cannot SEE reads as NotFound
+//   (existence is private, ADR-0075 spirit); a visible-but-not-writable one
+//   reads as NotAllowed; a cross-org folder keeps the old NotAllowed contract.
 //
 // Denials are NotAllowed (→ 403, same status as the old cross-org denial —
 // never 404; only missing/soft-deleted rows read as NotFound). Repo errors
@@ -26,9 +34,11 @@
 // everywhere.
 import {
   type AppError,
+  canWriteFolder,
   err,
   type Folder,
   type FolderId,
+  isFolderBroadlyVisibleTo,
   notAllowed,
   notFound,
   type OrgId,
@@ -39,7 +49,13 @@ import {
   type Slug,
   type UserId,
 } from "arp-domain";
-import type { FolderRepository, IdentityStore, ReportRepository, WriteGrantStore } from "./ports";
+import type {
+  FolderRepository,
+  FolderShareStore,
+  IdentityStore,
+  ReportRepository,
+  WriteGrantStore,
+} from "./ports";
 
 /** The acting principal every report use case authorizes against (ADR-0059):
  *  the org scopes tenancy (reads, quota, listing); the user decides ownership. */
@@ -125,23 +141,44 @@ export async function loadOwnedReport(
   return ok(found.value);
 }
 
-/** Does `actor` hold a write grant on `reportId` (ADR-0060 §2)? Resolves the
- *  actor's mirrored email (a grant's `granteeUserId` may still be null if the
- *  grantee hadn't signed up at grant time) and asks the WriteGrantStore for a
- *  match by userId OR normalized email. */
-export async function hasWriteGrant(
-  reportId: ReportId,
+/** An email-keyed grant store, as the shared probe below sees it: both
+ *  `WriteGrantStore` (ADR-0060, keyed by ReportId) and `FolderShareStore`
+ *  (ADR-0076, keyed by FolderId) expose exactly this `findFor`. */
+interface EmailKeyedGrantStore<Id, Grant> {
+  findFor(
+    id: Id,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<Grant | null, AppError>>;
+}
+
+/** Does `actor` hold an email-keyed grant on `id`? The one piece of real work
+ *  is resolving the actor's MIRRORED EMAIL: a grant's `granteeUserId` may
+ *  still be null (the grantee hadn't signed up when it was issued), so email is
+ *  the durable match key (ADR-0060 §2). Write grants and folder shares differ
+ *  only in which store they ask, so they share this. */
+async function hasEmailKeyedGrant<Id, Grant>(
+  id: Id,
   actor: Pick<TenancyActor, "userId">,
-  deps: WriteGrantCheckDeps,
+  store: EmailKeyedGrantStore<Id, Grant>,
+  identities: Pick<IdentityStore, "findEmailByUserId">,
 ): Promise<Result<boolean, AppError>> {
-  const email = await deps.identities.findEmailByUserId(actor.userId);
+  const email = await identities.findEmailByUserId(actor.userId);
   if (!email.ok) return email;
-  const found = await deps.grants.findFor(reportId, {
+  const found = await store.findFor(id, {
     userId: actor.userId,
     email: email.value ?? undefined,
   });
   if (!found.ok) return found;
   return ok(found.value !== null);
+}
+
+/** Does `actor` hold a write grant on `reportId` (ADR-0060 §2)? */
+export async function hasWriteGrant(
+  reportId: ReportId,
+  actor: Pick<TenancyActor, "userId">,
+  deps: WriteGrantCheckDeps,
+): Promise<Result<boolean, AppError>> {
+  return hasEmailKeyedGrant(reportId, actor, deps.grants, deps.identities);
 }
 
 /** May `actor` modify this report (rename / re-upload / move)? `isOwner OR
@@ -199,18 +236,111 @@ export async function loadReadableReport(
   return ok(found.value);
 }
 
-/** Load a Folder by id: must exist, not be soft-deleted, and belong to the
- *  actor's org — else NotFound / NotAllowed (ADR-0036; folders stay org-scoped
- *  under ADR-0059 §5). */
-export async function loadOwnedFolder(
-  folders: FolderRepository,
-  actor: Pick<TenancyActor, "orgId">,
+/** Deps the folder visibility/write checks need (ADR-0076): the share store
+ *  plus the actor's mirrored email (for the email-match fallback when a
+ *  share's `granteeUserId` is still null) — the exact `WriteGrantCheckDeps`
+ *  shape, keyed to folder shares. */
+export interface FolderAccessDeps {
+  readonly folderShares: FolderShareStore;
+  readonly identities: Pick<IdentityStore, "findEmailByUserId">;
+}
+
+/** Message overrides for the folder guards (ADR-0076): the three distinct
+ *  denials a call site may want to rephrase. */
+export interface FolderGuardMessages {
+  readonly notFound: string;
+  readonly notInOrg: string;
+  /** Only surfaced by `loadWritableFolder` (visible but not writable). */
+  readonly notWritable: string;
+}
+
+const FOLDER_GUARD_MESSAGES: FolderGuardMessages = {
+  notFound: FOLDER_MESSAGES.notFound,
+  notInOrg: FOLDER_MESSAGES.notAllowed,
+  notWritable: "you do not have write access to this folder",
+};
+
+/** Does `actor` hold a folder share on `folderId` (ADR-0076)? The exact
+ *  `hasWriteGrant` probe, pointed at the FolderShareStore. */
+export async function hasFolderShare(
   folderId: FolderId,
-  messages: OwnedGuardMessages = FOLDER_MESSAGES,
+  actor: Pick<TenancyActor, "userId">,
+  deps: FolderAccessDeps,
+): Promise<Result<boolean, AppError>> {
+  return hasEmailKeyedGrant(folderId, actor, deps.folderShares, deps.identities);
+}
+
+/** The full folder visibility predicate (ADR-0076): the pure broad legs
+ *  (owner / legacy / org-visible) plus the share leg. Org scoping is the
+ *  caller's business. */
+export async function isFolderVisibleTo(
+  folder: Folder,
+  actor: Pick<TenancyActor, "userId">,
+  deps: FolderAccessDeps,
+): Promise<Result<boolean, AppError>> {
+  if (isFolderBroadlyVisibleTo(folder, actor.userId)) return ok(true);
+  return hasFolderShare(folder.id, actor, deps);
+}
+
+/** Load a Folder by id for a VISIBILITY-GATED use (the move-report target,
+ *  ADR-0076): must exist, not be soft-deleted, be in `actor.orgId` (the
+ *  caller decides WHICH org — moveReport passes the report's), and be visible
+ *  to the acting user. An invisible same-org folder reads as NotFound —
+ *  existence is private. */
+export async function loadVisibleFolder(
+  folders: FolderRepository,
+  actor: TenancyActor,
+  folderId: FolderId,
+  deps: FolderAccessDeps,
+  messages: FolderGuardMessages = FOLDER_GUARD_MESSAGES,
 ): Promise<Result<Folder, AppError>> {
   const found = await folders.findById(folderId);
   if (!found.ok) return found;
   if (!found.value || found.value.deletedAt !== null) return err(notFound(messages.notFound));
-  if (found.value.orgId !== actor.orgId) return err(notAllowed(messages.notAllowed));
+  if (found.value.orgId !== actor.orgId) return err(notAllowed(messages.notInOrg));
+  const visible = await isFolderVisibleTo(found.value, actor, deps);
+  if (!visible.ok) return visible;
+  if (!visible.value) return err(notFound(messages.notFound));
+  return ok(found.value);
+}
+
+/** Load a Folder by id for SHARING MANAGEMENT (set visibility / share /
+ *  unshare / list shares — ADR-0076): owner-or-legacy ONLY. A legacy folder
+ *  (ownerId null) is manageable by any org member — that's the adoption/repair
+ *  path for pre-ADR-0076 rows; an owned folder is manageable only by its
+ *  owner. A visible-but-not-owned folder reads NotAllowed; an invisible one
+ *  reads NotFound (existence is private). */
+export async function loadManagedFolder(
+  folders: FolderRepository,
+  actor: TenancyActor,
+  folderId: FolderId,
+  deps: FolderAccessDeps,
+): Promise<Result<Folder, AppError>> {
+  // The visibility ladder is exactly `loadVisibleFolder`'s — an owner or a
+  // legacy row always passes its broad legs, so there is nothing to hoist.
+  const found = await loadVisibleFolder(folders, actor, folderId, deps);
+  if (!found.ok) return found;
+  // Narrow to owner-or-legacy. Anyone who reaches here CAN see the folder
+  // (org-visible, or a share grantee), so NotFound would be a lie: 403.
+  if (found.value.ownerId !== null && found.value.ownerId !== actor.userId) {
+    return err(notAllowed("only the folder's owner can manage its sharing"));
+  }
+  return ok(found.value);
+}
+
+/** Load a Folder by id for a WRITE (rename / delete / create children —
+ *  ADR-0076): `loadVisibleFolder` plus `canWriteFolder` (owner, or anyone for
+ *  legacy/org-visible folders). A share-visible folder the actor doesn't own
+ *  is NotAllowed — shares grant visibility only. */
+export async function loadWritableFolder(
+  folders: FolderRepository,
+  actor: TenancyActor,
+  folderId: FolderId,
+  deps: FolderAccessDeps,
+  messages: FolderGuardMessages = FOLDER_GUARD_MESSAGES,
+): Promise<Result<Folder, AppError>> {
+  const found = await loadVisibleFolder(folders, actor, folderId, deps, messages);
+  if (!found.ok) return found;
+  if (!canWriteFolder(found.value, actor.userId)) return err(notAllowed(messages.notWritable));
   return ok(found.value);
 }

@@ -2,6 +2,7 @@ import {
   createFolder,
   createReport,
   type Folder,
+  type FolderVisibility,
   folderId,
   makeSlug,
   orgId,
@@ -12,6 +13,7 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
+import { makeFolderAccessDeps } from "../testing/fixtures";
 import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
@@ -32,11 +34,20 @@ function slug(s: string): Slug {
   if (!r.ok) throw new Error("bad slug");
   return r.value;
 }
-function folder(id: string, org: typeof orgA, parentId: string | null, name: string): Folder {
+function folder(
+  id: string,
+  org: typeof orgA,
+  parentId: string | null,
+  name: string,
+  ownerId: ReturnType<typeof userId> | null = null,
+  visibility: FolderVisibility = "org",
+): Folder {
   const r = createFolder({
     id: folderId(id),
     orgId: org,
     parentId: parentId ? folderId(parentId) : null,
+    ownerId,
+    visibility,
     name,
   });
   if (!r.ok) throw new Error("bad folder");
@@ -58,7 +69,8 @@ function reportIn(org: typeof orgA, fId: string, slugStr: string): Report {
 }
 
 async function setup() {
-  const folders = new InMemoryFolderRepository();
+  const access = makeFolderAccessDeps();
+  const folders = new InMemoryFolderRepository(access.folderShares);
   const reports = new InMemoryReportRepository();
   await folders.save(folder(ROOT, orgA, null, "Root"));
   await folders.save(folder(SUB, orgA, ROOT, "Sub"));
@@ -67,27 +79,28 @@ async function setup() {
     reports,
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...access,
     ...idempotencyTestDeps(),
   };
 }
 
 describe("deleteFolder use case", () => {
   it("soft-deletes an empty folder (excluded from listByOrg)", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
     expect(r.ok).toBe(true);
-    const list = await folders.listByOrg(orgA);
+    const list = await folders.listByOrg(orgA, { userId: actorA });
     expect(list.ok && list.value.some((f) => f.id === SUB)).toBe(false);
   });
 
   it("refuses to delete the Root folder", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(ROOT) },
     );
@@ -95,10 +108,10 @@ describe("deleteFolder use case", () => {
   });
 
   it("refuses a folder that contains a report", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     await reports.save(reportIn(orgA, SUB, "aaaaaaaaaa"));
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -106,10 +119,10 @@ describe("deleteFolder use case", () => {
   });
 
   it("refuses a folder that contains a subfolder", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     await folders.save(folder("00000000-0000-7000-8000-0000000000a3", orgA, SUB, "Nested"));
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -117,9 +130,9 @@ describe("deleteFolder use case", () => {
   });
 
   it("rejects a cross-org folder with NotAllowed", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgB, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -127,9 +140,9 @@ describe("deleteFolder use case", () => {
   });
 
   it("rejects an unknown folder with NotFound", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId("00000000-0000-7000-8000-00000000dead") },
     );
@@ -137,9 +150,9 @@ describe("deleteFolder use case", () => {
   });
 
   it("records a folder.deleted audit entry alongside the soft-delete (ADR-0070)", async () => {
-    const { folders, reports, audit, uow } = await setup();
+    const { folders, reports, audit, uow, folderShares, identities } = await setup();
     const r = await deleteFolder(
-      { folders, reports, audit, uow, ...idempotencyTestDeps() },
+      { folders, reports, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(SUB) },
     );
@@ -151,6 +164,28 @@ describe("deleteFolder use case", () => {
       targetType: "folder",
       targetId: folderId(SUB),
     });
+  });
+});
+
+describe("deleteFolder visibility scoping (ADR-0076)", () => {
+  const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
+  const PRIV = "00000000-0000-7000-8000-0000000000a4";
+
+  it("another user's PRIVATE folder reads NotFound — existence is private", async () => {
+    const d = await setup();
+    await d.folders.save(folder(PRIV, orgA, ROOT, "Theirs", otherUser, "private"));
+    const r = await deleteFolder(d, { orgId: orgA, userId: actorA }, { folderId: folderId(PRIV) });
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("an INVISIBLE private subfolder still blocks the delete (guard not visibility-scoped)", async () => {
+    const d = await setup();
+    // Someone else's private subfolder inside SUB — actorA can't see it, but
+    // the emptiness guard must still refuse.
+    await d.folders.save(folder(PRIV, orgA, SUB, "Hidden sub", otherUser, "private"));
+    const r = await deleteFolder(d, { orgId: orgA, userId: actorA }, { folderId: folderId(SUB) });
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+    expect(!r.ok && r.error.message).toContain("subfolders");
   });
 });
 

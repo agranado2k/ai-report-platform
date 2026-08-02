@@ -306,6 +306,125 @@ Then(
   },
 );
 
+// ── ADR-0076: folder visibility inside the shared team org ─────────────────
+
+/** The run-scoped folder the FIRST identity creates (private by default) and
+ *  later org-shares. Named uniquely per run so a leaked folder from an
+ *  earlier run can't satisfy (or break) this run's assertions. */
+const FOLDER_NAME = `arp-fv-${RUN_ID}`;
+let folderId: string | undefined;
+
+When(
+  "the first run-scoped identity creates a private folder and moves its org-shared report into it",
+  async ({ request }) => {
+    // Root id first: the folder list is visibility-scoped (ADR-0076), but the
+    // Root is always org-visible, so any member resolves it.
+    const foldersRes = await request.get("/api/v1/folders?limit=100", {
+      headers: { Authorization: `Bearer ${firstSession.jwt}` },
+    });
+    const folderList = (await expectJson(foldersRes, 200, "first identity's folder list")) as {
+      data?: ReadonlyArray<{ id?: string; parent_id?: string | null }>;
+    };
+    const root = (folderList.data ?? []).find((f) => f.parent_id === null);
+    expect(root?.id, "the org Root folder must be listed (root-always-org, ADR-0076)").toBeTruthy();
+
+    // Create under Root → private by default, owned by the creator (ADR-0076).
+    const created = await request.post("/api/v1/folders", {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { name: FOLDER_NAME, parent_id: root?.id },
+    });
+    const folder = (await expectJson(created, 201, "run-scoped folder create")) as {
+      id?: string;
+      visibility?: string;
+      owner?: string | null;
+    };
+    expect(folder.visibility, "a folder created under Root defaults PRIVATE (ADR-0076)").toBe(
+      "private",
+    );
+    expect(folder.owner, "the creator owns the new folder (ADR-0076)").toBeTruthy();
+    folderId = folder.id;
+
+    // Move the (org-shared) report into it — the owner sees their own folder.
+    const moved = await request.post(`/api/v1/reports/${firstBody.slug}/move`, {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { folder_id: folderId },
+    });
+    await expectJson(moved, 200, "move org-shared report into the private folder");
+  },
+);
+
+Then(
+  "the third run-scoped identity lists the org-shared report but NOT the private folder",
+  async ({ request }) => {
+    // The REPORT stays listed (org-shared, ADR-0075) even though it now lives
+    // in a folder the third identity cannot see…
+    const reportsRes = await request.get("/api/v1/reports?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const reports = (await expectJson(reportsRes, 200, "third identity's report list")) as {
+      data?: ReadonlyArray<{ slug?: string }>;
+    };
+    expect(
+      (reports.data ?? []).map((r) => r.slug),
+      "an org-shared report in an invisible folder must STAY listed (ADR-0075/0076)",
+    ).toContain(firstBody.slug);
+
+    // …while the FOLDER itself is absent — folder existence is private
+    // (ADR-0076). The dashboard groups such reports under Root.
+    const foldersRes = await request.get("/api/v1/folders?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const folderList = (await expectJson(foldersRes, 200, "third identity's folder list")) as {
+      data?: ReadonlyArray<{ id?: string }>;
+    };
+    expect(
+      (folderList.data ?? []).map((f) => f.id),
+      "a colleague's PRIVATE folder must NOT be listed — existence is private (ADR-0076)",
+    ).not.toContain(folderId);
+  },
+);
+
+When("the first run-scoped identity sets the folder's visibility to org", async ({ request }) => {
+  // Owner-gated; the Clerk session carries acl:write (same gate setAcl passed).
+  const res = await request.post(`/api/v1/folders/${folderId}/visibility`, {
+    headers: {
+      Authorization: `Bearer ${firstSession.jwt}`,
+      "Content-Type": "application/json",
+    },
+    data: { visibility: "org" },
+  });
+  const body = (await expectJson(res, 200, "owner sets folder visibility to org")) as {
+    visibility?: string;
+  };
+  expect(body.visibility).toBe("org");
+});
+
+Then(
+  "the third run-scoped identity's folder list now includes the run-scoped folder",
+  async ({ request }) => {
+    const res = await request.get("/api/v1/folders?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const folderList = (await expectJson(
+      res,
+      200,
+      "third identity's folder list (after share)",
+    )) as {
+      data?: ReadonlyArray<{ id?: string }>;
+    };
+    expect(
+      (folderList.data ?? []).map((f) => f.id),
+      "an org-shared folder must appear in every member's tree (ADR-0076)",
+    ).toContain(folderId);
+  },
+);
+
 // Best-effort accumulation bound: delete the run-scoped users (+ their decoy
 // orgs) after every attempt of the @run-scoped scenario, pass or fail. Deleting
 // the users also removes their canonical-org memberships, keeping the shared

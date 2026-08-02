@@ -1,4 +1,4 @@
-import type { WriteGrant } from "arp-application";
+import type { FolderShare, WriteGrant } from "arp-application";
 import type { Folder, Report, Slug } from "arp-domain";
 import {
   err,
@@ -21,12 +21,16 @@ import {
   getAclToHttp,
   getReportToHttp,
   grantWriteToHttp,
+  listFolderSharesToHttp,
   listWriteGrantsToHttp,
   moveReportToHttp,
   renameFolderToHttp,
   renameReportToHttp,
   revokeWriteToHttp,
   setAclToHttp,
+  setFolderVisibilityToHttp,
+  shareFolderToHttp,
+  unshareFolderToHttp,
 } from "./write-response";
 
 const CTX = { mode: "prod" as const };
@@ -70,6 +74,8 @@ const folder = (name: string): Folder => ({
   id: folderId(F2),
   orgId: orgId(O1),
   parentId: folderId(F1),
+  ownerId: userId(U1),
+  visibility: "private",
   name,
   slug: "q1",
   deletedAt: null,
@@ -80,6 +86,8 @@ const folderResource = (name: string) => ({
   name,
   slug: "q1",
   parent_id: folderIdToWire(folderId(F1)),
+  visibility: "private",
+  owner: userIdToWire(userId(U1)),
   mode: "prod",
 });
 
@@ -294,6 +302,73 @@ describe("write-grant resource mappers (ADR-0060)", () => {
 
   it("listWriteGrantsToHttp InsufficientScope → 403 problem", () => {
     const res = listWriteGrantsToHttp(err(insufficientScope("acl:write")));
+    expect(res.status).toBe(403);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("folder share mappers (ADR-0076)", () => {
+  const share: FolderShare = {
+    folderId: folderId(F2),
+    granteeEmail: "pal@x.com",
+    granteeUserId: null,
+    grantedBy: userId(U1),
+    grantedAt: 1_700_000_000_000,
+  };
+
+  it("setFolderVisibilityToHttp → 200 with the folder resource (visibility + owner on the wire)", () => {
+    const res = setFolderVisibilityToHttp(ok(folder("Q1")), CTX);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(folderResource("Q1"));
+  });
+
+  it("setFolderVisibilityToHttp ValidationError (Root → private) → 422 problem", () => {
+    const res = setFolderVisibilityToHttp(
+      err({ kind: "ValidationError", message: "the Root folder is always org-visible" }),
+      CTX,
+    );
+    expect(res.status).toBe(422);
+    expect(res.contentType).toBe("application/problem+json");
+  });
+
+  it("shareFolderToHttp → 201 with the folder_share resource, no surrogate id", () => {
+    const res = shareFolderToHttp(ok(share));
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      object: "folder_share",
+      email: "pal@x.com",
+      granted_by: userIdToWire(userId(U1)),
+      granted_at: new Date(1_700_000_000_000).toISOString(),
+    });
+  });
+
+  it("unshareFolderToHttp → 204 No Content", () => {
+    const res = unshareFolderToHttp(ok(undefined));
+    expect(res.status).toBe(204);
+    expect(res.body).toBeUndefined();
+  });
+
+  it("listFolderSharesToHttp → 200 list envelope of folder_share resources", () => {
+    const res = listFolderSharesToHttp(ok([share]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      object: "list",
+      has_more: false,
+      data: [
+        {
+          object: "folder_share",
+          email: "pal@x.com",
+          granted_by: userIdToWire(userId(U1)),
+          granted_at: new Date(1_700_000_000_000).toISOString(),
+        },
+      ],
+    });
+  });
+
+  it("shareFolderToHttp NotAllowed (non-owner) → 403 problem", () => {
+    const res = shareFolderToHttp(
+      err({ kind: "NotAllowed", message: "only the folder's owner can manage its sharing" }),
+    );
     expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
   });

@@ -275,19 +275,88 @@ export interface WriteGrantStore {
   ): Promise<Result<WriteGrant | null, AppError>>;
 }
 
+/**
+ * The viewing user a folder listing is scoped to (ADR-0076) — same shape and
+ * semantics as `ReportViewer` (ADR-0075): a folder is listed ONLY when the
+ * viewer owns it, it's a legacy row (ownerId null), its visibility is `org`,
+ * or the viewer holds a folder share on it (matched by `granteeUserId` OR
+ * normalized email, mirroring `hasWriteGrant`, ADR-0060 §2).
+ */
+export type FolderViewer = ReportViewer;
+
 // The folder tree inside an Org (ADR-0036). Sibling-slug uniqueness is enforced
 // by the DB (folders_org_parent_slug_uniq), so save() can surface a conflict.
+// Listing is visibility-scoped to the viewer (ADR-0076, mirroring ADR-0075).
 export interface FolderRepository {
-  /** All non-deleted folders for the org — the caller builds the tree. */
-  listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>>;
-  /** Cursor-paginated non-deleted folders (ADR-0053), keyset on id DESC. */
-  searchByOrg(orgId: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>>;
+  /** All non-deleted folders for the org that `viewer` may see (ADR-0076) —
+   *  the caller builds the tree (grafting orphans under Root). */
+  listByOrg(orgId: OrgId, viewer: FolderViewer): Promise<Result<readonly Folder[], AppError>>;
+  /** Cursor-paginated non-deleted, viewer-visible folders (ADR-0053/0076),
+   *  keyset on id DESC. */
+  searchByOrg(
+    orgId: OrgId,
+    viewer: FolderViewer,
+    q: FolderListQuery,
+  ): Promise<Result<FolderPage, AppError>>;
   findById(id: FolderId): Promise<Result<Folder | null, AppError>>;
-  /** Upsert by id — creates a folder, or updates name/slug/parent/deletedAt. */
+  /** Whether any NON-DELETED folder has `folderId` as its parent (org-scoped) —
+   *  the deleteFolder emptiness guard. Deliberately NOT visibility-scoped
+   *  (ADR-0076, mirroring `hasReportsInFolder`): an invisible subfolder must
+   *  still block the delete, and a bare boolean surfaces no metadata. */
+  hasChildFolders(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>>;
+  /** Upsert by id — creates a folder, or updates name/slug/parent/owner/
+   *  visibility/deletedAt. */
   save(folder: Folder): Promise<Result<void, AppError>>;
   /** Soft-delete a folder (sets deleted_at). The caller has already validated the
    * folder exists, is in the actor's org, is not Root, and is empty (ADR-0036). */
   softDelete(id: FolderId): Promise<Result<void, AppError>>;
+}
+
+/**
+ * One person's visibility grant on a Folder (ADR-0076) — the row shape of
+ * `folder_shares`. Mirrors `WriteGrant` (no surrogate id, no expiry, no
+ * level), but confers VISIBILITY only — folder writes stay owner-or-org.
+ */
+export interface FolderShare {
+  readonly folderId: FolderId;
+  /** Normalized (`EmailAddress`) — the canonical key alongside `folderId`. */
+  readonly granteeEmail: string;
+  /** Resolved lazily: set opportunistically at share time when the user already
+   *  exists, else null and matched by email at check time. */
+  readonly granteeUserId: UserId | null;
+  readonly grantedBy: UserId;
+  /** Epoch ms. */
+  readonly grantedAt: number;
+}
+
+/**
+ * Durable per-folder visibility shares (ADR-0076) over `folder_shares`.
+ * Modeled on `WriteGrantStore` — email-keyed, upsert-in-place,
+ * revoke-by-row-delete, normalized-email matching done defensively by the
+ * store. Backs the folder visibility predicate's share leg (ADR-0076) the way
+ * `WriteGrantStore` backs `hasWriteGrant`.
+ */
+export interface FolderShareStore {
+  /** Create or refresh a share for (folder, email). `granteeUserId` is the
+   *  opportunistic resolution at share time (null when the grantee hasn't
+   *  signed up yet). */
+  grant(
+    folderId: FolderId,
+    email: string,
+    grantedBy: UserId,
+    granteeUserId: UserId | null,
+  ): Promise<Result<void, AppError>>;
+  /** Revoke a single grantee's visibility. */
+  revoke(folderId: FolderId, email: string): Promise<Result<void, AppError>>;
+  /** Every share on a folder (owner-facing listing). */
+  listByFolder(folderId: FolderId): Promise<Result<readonly FolderShare[], AppError>>;
+  /** Whether `actor` holds a share on `folderId` — matched by
+   *  `granteeUserId = actor.userId` OR normalized-email equality (the
+   *  ADR-0060 §2 dual match). */
+  findFor(
+    folderId: FolderId,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<FolderShare | null, AppError>>;
 }
 
 // ── R2 blob storage (keys: reports/<reportId>/<versionId>/<path>, ADR-0037) ──

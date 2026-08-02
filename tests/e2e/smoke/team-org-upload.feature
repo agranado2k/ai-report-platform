@@ -51,6 +51,16 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # private one's absence proves existence stays private inside that org.
   # The second identity still lists both: its own by ownership, the first's
   # by the org share.
+  # FOLDER VISIBILITY (ADR-0076, extends the same fixture set): the first
+  # identity creates a folder under Root — private by default, owned by its
+  # creator — and moves its ORG-SHARED report into it. The third identity must
+  # then still LIST the report (org-shared, ADR-0075) while its containing
+  # folder stays absent from the folder list (folder existence is private,
+  # ADR-0076) — the report's folder_id dangles by design; the dashboard groups
+  # such reports under Root. Setting the folder's visibility to `org` (the
+  # owner's call, acl:write rides the session) must then surface the folder in
+  # the third identity's tree. Folded into this scenario (not a sibling) so it
+  # reuses the run-scoped fixtures the @run-scoped cleanup hook deletes.
   @run-scoped
   Scenario: Two same-domain identities share one team org
     Given a first run-scoped team-domain identity is signed in
@@ -61,3 +71,7 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
     And the first run-scoped identity shares its report org-wide via the ACL API
     Then the second run-scoped identity's report listing includes both run-scoped uploads
     And the third run-scoped identity's first-ever session read lists exactly the org-shared upload
+    When the first run-scoped identity creates a private folder and moves its org-shared report into it
+    Then the third run-scoped identity lists the org-shared report but NOT the private folder
+    When the first run-scoped identity sets the folder's visibility to org
+    Then the third run-scoped identity's folder list now includes the run-scoped folder

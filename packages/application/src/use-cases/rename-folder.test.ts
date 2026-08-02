@@ -1,5 +1,13 @@
-import { createFolder, type Folder, folderId, orgId, userId } from "arp-domain";
+import {
+  createFolder,
+  type Folder,
+  type FolderVisibility,
+  folderId,
+  orgId,
+  userId,
+} from "arp-domain";
 import { describe, expect, it } from "vitest";
+import { makeFolderAccessDeps } from "../testing/fixtures";
 import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
@@ -12,8 +20,21 @@ const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
 const actorA = userId("00000000-0000-7000-8000-0000000000d1");
 
-function folder(id: string, org: typeof orgA, name: string): Folder {
-  const r = createFolder({ id: folderId(id), orgId: org, parentId: null, name });
+function folder(
+  id: string,
+  org: typeof orgA,
+  name: string,
+  ownerId: ReturnType<typeof userId> | null = null,
+  visibility: FolderVisibility = "org",
+): Folder {
+  const r = createFolder({
+    id: folderId(id),
+    orgId: org,
+    parentId: null,
+    ownerId,
+    visibility,
+    name,
+  });
   if (!r.ok) throw new Error("bad folder");
   return r.value;
 }
@@ -21,12 +42,14 @@ function folder(id: string, org: typeof orgA, name: string): Folder {
 const F1 = "00000000-0000-7000-8000-0000000000f1";
 
 async function setup() {
-  const folders = new InMemoryFolderRepository();
+  const access = makeFolderAccessDeps();
+  const folders = new InMemoryFolderRepository(access.folderShares);
   await folders.save(folder(F1, orgA, "Old Name"));
   return {
     folders,
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...access,
     ...idempotencyTestDeps(),
   };
 }
@@ -75,9 +98,9 @@ describe("renameFolder use case", () => {
   });
 
   it("records a folder.renamed audit entry alongside the rename (ADR-0070)", async () => {
-    const { folders, audit, uow } = await setup();
+    const { folders, audit, uow, folderShares, identities } = await setup();
     const r = await renameFolder(
-      { folders, audit, uow, ...idempotencyTestDeps() },
+      { folders, audit, uow, folderShares, identities, ...idempotencyTestDeps() },
       { orgId: orgA, userId: actorA },
       { folderId: folderId(F1), name: "New Name" },
     );
@@ -90,6 +113,57 @@ describe("renameFolder use case", () => {
       targetId: folderId(F1),
       meta: { from: "Old Name", to: "New Name" },
     });
+  });
+});
+
+describe("renameFolder visibility scoping (ADR-0076)", () => {
+  const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
+  const F2 = "00000000-0000-7000-8000-0000000000f2";
+
+  it("the owner renames their own private folder", async () => {
+    const d = await setup();
+    await d.folders.save(folder(F2, orgA, "Mine", actorA, "private"));
+    const r = await renameFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { folderId: folderId(F2), name: "Still mine" },
+    );
+    expect(r.ok && r.value.name).toBe("Still mine");
+  });
+
+  it("another user's PRIVATE folder reads NotFound — existence is private", async () => {
+    const d = await setup();
+    await d.folders.save(folder(F2, orgA, "Theirs", otherUser, "private"));
+    const r = await renameFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { folderId: folderId(F2), name: "X" },
+    );
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("a share-visible private folder is NOT renameable — shares grant visibility only", async () => {
+    const d = await setup();
+    await d.folders.save(folder(F2, orgA, "Theirs", otherUser, "private"));
+    await d.folderShares.grant(folderId(F2), "viewer@test.local", otherUser, actorA);
+    const r = await renameFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { folderId: folderId(F2), name: "X" },
+    );
+    expect(!r.ok && r.error.kind).toBe("NotAllowed");
+    expect(!r.ok && r.error.message).toBe("you do not have write access to this folder");
+  });
+
+  it("an org-visible folder owned by someone else stays renameable (today's behavior)", async () => {
+    const d = await setup();
+    await d.folders.save(folder(F2, orgA, "Team space", otherUser, "org"));
+    const r = await renameFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { folderId: folderId(F2), name: "Renamed by colleague" },
+    );
+    expect(r.ok).toBe(true);
   });
 });
 

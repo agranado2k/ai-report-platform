@@ -1,5 +1,6 @@
 import { createFolder as buildFolder, folderId, orgId, userId } from "arp-domain";
 import { describe, expect, it } from "vitest";
+import { makeFolderAccessDeps } from "../testing/fixtures";
 import {
   InMemoryAuditLogger,
   InMemoryFolderRepository,
@@ -14,15 +15,37 @@ const orgB = orgId("00000000-0000-7000-8000-0000000000b1");
 const rootA = folderId("00000000-0000-7000-8000-0000000000a0");
 const rootB = folderId("00000000-0000-7000-8000-0000000000b0");
 const actorA = userId("00000000-0000-7000-8000-0000000000d1");
+const otherUser = userId("00000000-0000-7000-8000-0000000000d2");
+
+/** A folder one level under org A's Root — `private` by the ADR-0076 default,
+ *  so inheritance tests can start from either visibility. */
+async function makeParent(d: Awaited<ReturnType<typeof setup>>) {
+  const parent = await createFolder(
+    d,
+    { orgId: orgA, userId: actorA },
+    { parentId: rootA, name: "Parent" },
+  );
+  if (!parent.ok) throw new Error("setup failed");
+  return parent.value;
+}
 
 /** A fresh fake with each org's Root seeded (as identity provisioning would). */
 async function setup() {
-  const folders = new InMemoryFolderRepository();
+  const access = makeFolderAccessDeps();
+  const folders = new InMemoryFolderRepository(access.folderShares);
   for (const [org, id] of [
     [orgA, rootA],
     [orgB, rootB],
   ] as const) {
-    const root = buildFolder({ id, orgId: org, parentId: null, name: "Root" });
+    // Roots as identity provisioning creates them: legacy owner, org-visible.
+    const root = buildFolder({
+      id,
+      orgId: org,
+      parentId: null,
+      ownerId: null,
+      visibility: "org",
+      name: "Root",
+    });
     if (!root.ok) throw new Error("seed failed");
     await folders.save(root.value);
   }
@@ -31,6 +54,7 @@ async function setup() {
     ids: new SequentialIdGenerator(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
+    ...access,
     ...idempotencyTestDeps(),
   };
 }
@@ -53,7 +77,7 @@ describe("createFolder use case", () => {
       slug: "archive",
     });
 
-    const list = await d.folders.listByOrg(orgA);
+    const list = await d.folders.listByOrg(orgA, { userId: actorA });
     expect(list.ok && list.value.map((f) => f.slug)).toContain("archive");
   });
 
@@ -71,6 +95,91 @@ describe("createFolder use case", () => {
       { parentId: y.value.id, name: "Q1" },
     );
     expect(q.ok && q.value.parentId).toBe(y.value.id);
+  });
+
+  it("owns the new folder by its creator and defaults PRIVATE under the Root (ADR-0076)", async () => {
+    const d = await setup();
+    const r = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: rootA, name: "Mine" },
+    );
+    expect(r.ok && r.value.ownerId).toBe(actorA);
+    expect(r.ok && r.value.visibility).toBe("private");
+  });
+
+  it("a child of a PRIVATE non-root folder inherits private (ADR-0076)", async () => {
+    const d = await setup();
+    const parent = await makeParent(d); // private — it is a child of the Root
+    const child = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: parent.id, name: "Child" },
+    );
+    expect(child.ok && child.value.visibility).toBe("private");
+  });
+
+  it("a child of an ORG-VISIBLE non-root folder inherits org (ADR-0076)", async () => {
+    const d = await setup();
+    const parent = await makeParent(d);
+    await d.folders.save({ ...parent, visibility: "org" });
+    const child = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: parent.id, name: "Child" },
+    );
+    expect(child.ok && child.value.visibility).toBe("org");
+  });
+
+  it("rejects creating inside another user's PRIVATE folder as NotFound — not resolvable (ADR-0076)", async () => {
+    const d = await setup();
+    const theirs = await createFolder(
+      d,
+      { orgId: orgA, userId: otherUser },
+      { parentId: rootA, name: "Theirs" },
+    );
+    if (!theirs.ok) throw new Error("setup failed");
+    const r = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: theirs.value.id, name: "Sneaky" },
+    );
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("allows creating inside another user's ORG-VISIBLE folder (today's behavior kept)", async () => {
+    const d = await setup();
+    const theirs = await createFolder(
+      d,
+      { orgId: orgA, userId: otherUser },
+      { parentId: rootA, name: "Shared space" },
+    );
+    if (!theirs.ok) throw new Error("setup failed");
+    await d.folders.save({ ...theirs.value, visibility: "org" });
+    const r = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: theirs.value.id, name: "Sub" },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("a share-visible private parent is still NOT writable — shares grant visibility only (ADR-0076)", async () => {
+    const d = await setup();
+    const theirs = await createFolder(
+      d,
+      { orgId: orgA, userId: otherUser },
+      { parentId: rootA, name: "Peek only" },
+    );
+    if (!theirs.ok) throw new Error("setup failed");
+    await d.folderShares.grant(theirs.value.id, "a@test.local", otherUser, actorA);
+    const r = await createFolder(
+      d,
+      { orgId: orgA, userId: actorA },
+      { parentId: theirs.value.id, name: "Nope" },
+    );
+    expect(!r.ok && r.error.kind).toBe("NotAllowed");
+    expect(!r.ok && r.error.message).toBe("you do not have write access to the parent folder");
   });
 
   it("rejects nesting under another org's folder (NotAllowed)", async () => {
@@ -186,7 +295,7 @@ describe("createFolder idempotency (ADR-0039)", () => {
     expect(first.ok).toBe(true);
     if (!first.ok || !second.ok) throw new Error("expected ok");
     expect(second.value.id).toBe(first.value.id); // same folder, not a sibling clash
-    const list = await d.folders.listByOrg(orgA);
+    const list = await d.folders.listByOrg(orgA, { userId: actorA });
     expect(list.ok && list.value.filter((f) => f.name === "Quarterly").length).toBe(1);
   });
 

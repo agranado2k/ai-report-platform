@@ -23,9 +23,18 @@
 // that will never complete would otherwise 409 identical retries until the 24h
 // sweep. Replay is keyed per acting user, so re-running the (read-only) authz
 // before serving a replay only ever narrows access, never widens it.
-import type { AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
-import { err, ok } from "arp-domain";
 import type {
+  AppError,
+  Comment,
+  Folder,
+  FolderVisibility,
+  Report,
+  Result,
+  UserId,
+} from "arp-domain";
+import { err, FOLDER_VISIBILITIES, ok } from "arp-domain";
+import type {
+  FolderShare,
   Hasher,
   IdempotencyKeyRef,
   IdempotencyRecord,
@@ -150,15 +159,20 @@ function isReportReplay(body: unknown): body is Report {
 // light structural guard style as `reviveReportReplay`.
 
 export function reviveFolderReplay(record: IdempotencyRecord): Result<Folder, AppError> {
-  return reviveReplay(
-    record,
-    (body): body is Folder =>
-      typeof body === "object" &&
-      body !== null &&
-      typeof (body as Record<string, unknown>).id === "string" &&
-      typeof (body as Record<string, unknown>).name === "string" &&
-      typeof (body as Record<string, unknown>).slug === "string",
-  );
+  return reviveReplay(record, (body): body is Folder => {
+    if (typeof body !== "object" || body === null) return false;
+    const b = body as Record<string, unknown>;
+    return (
+      typeof b.id === "string" &&
+      typeof b.name === "string" &&
+      typeof b.slug === "string" &&
+      // ADR-0076 made `visibility` a required field of every folder resource.
+      // A record written before that migration lacks it, and reviving it would
+      // emit a wire folder missing a spec-required field — reject as Unexpected
+      // so the caller 500s loudly instead of serving a malformed replay.
+      FOLDER_VISIBILITIES.includes(b.visibility as FolderVisibility)
+    );
+  });
 }
 
 export function reviveCommentReplay(record: IdempotencyRecord): Result<Comment, AppError> {
@@ -181,6 +195,18 @@ export function reviveWriteGrantReplay(record: IdempotencyRecord): Result<WriteG
       typeof body === "object" &&
       body !== null &&
       typeof (body as Record<string, unknown>).reportId === "string" &&
+      typeof (body as Record<string, unknown>).granteeEmail === "string" &&
+      typeof (body as Record<string, unknown>).grantedAt === "number",
+  );
+}
+
+export function reviveFolderShareReplay(record: IdempotencyRecord): Result<FolderShare, AppError> {
+  return reviveReplay(
+    record,
+    (body): body is FolderShare =>
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).folderId === "string" &&
       typeof (body as Record<string, unknown>).granteeEmail === "string" &&
       typeof (body as Record<string, unknown>).grantedAt === "number",
   );

@@ -22,9 +22,10 @@ import {
   reviveReportReplay,
 } from "../idempotent-write";
 import {
-  loadOwnedFolder,
+  type FolderAccessDeps,
+  type FolderGuardMessages,
+  loadVisibleFolder,
   loadWritableReport,
-  type OwnedGuardMessages,
   type TenancyActor,
   type WriteGrantCheckDeps,
 } from "../load-owned";
@@ -32,12 +33,13 @@ import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from
 
 const ROUTE = "POST /api/v1/reports/{slug}/move";
 
-const TARGET_FOLDER_MESSAGES: OwnedGuardMessages = {
+const TARGET_FOLDER_MESSAGES: FolderGuardMessages = {
   notFound: "target folder not found",
-  notAllowed: "target folder is not in the report's org",
+  notInOrg: "target folder is not in the report's org",
+  notWritable: "you do not have write access to the target folder", // unused (visibility-gated)
 };
 
-export interface MoveReportDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
+export interface MoveReportDeps extends WriteGrantCheckDeps, FolderAccessDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly folders: FolderRepository;
   /** Audit log (ADR-0070) — one `report.moved` row per move. */
@@ -63,13 +65,17 @@ export async function moveReport(
   if (!found.ok) return found;
   const fromFolderId = found.value.folderId;
 
-  // The target folder is checked against the REPORT's org (ADR-0059 §2) —
-  // behavior-neutral today (the owner is same-org by construction), but the
-  // correct rule once cross-org write grants exist.
-  const target = await loadOwnedFolder(
+  // The target folder is checked against the REPORT's org (ADR-0059 §2 — a
+  // cross-org grantee moves a report within the org that hosts it) AND must be
+  // VISIBLE to the acting user (ADR-0076): someone else's private folder is
+  // not a valid target (it reads as NotFound — existence is private). The
+  // org-visibility leg is org-context-relative, so a cross-org grantee can
+  // still target the report org's org-visible folders (today's behavior).
+  const target = await loadVisibleFolder(
     deps.folders,
-    { orgId: found.value.orgId },
+    { orgId: found.value.orgId, userId: actor.userId },
     input.toFolderId,
+    deps,
     TARGET_FOLDER_MESSAGES,
   );
   if (!target.ok) return target;

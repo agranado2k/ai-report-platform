@@ -134,6 +134,13 @@
       "when": 1785600838257,
       "tag": "0018_orgs_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785672108947,
+      "tag": "0019_folder_visibility",
+      "breakpoints": true
     }
   ]
 }

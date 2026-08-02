@@ -36,6 +36,7 @@ import {
   InMemoryAuditLogger,
   InMemoryCommentRepository,
   InMemoryEventOutbox,
+  InMemoryFolderShareStore,
   InMemoryIdentityStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
@@ -97,9 +98,24 @@ export function report(org: OrgId, slugStr: string, overrides: ReportOverrides =
   }).report;
 }
 
-/** A root-level Folder fixture (unwraps createFolder; throws only on a bad fixture). */
-export function folder(id: string, org: OrgId, name: string): Folder {
-  const r = createFolder({ id: folderId(id), orgId: org, parentId: null, name });
+/** A root-level Folder fixture (unwraps createFolder; throws only on a bad
+ *  fixture). Legacy shape by default (ownerId null, org-visible) — the
+ *  pre-ADR-0076 semantics most existing tests assume; override where a test
+ *  asserts on ownership/visibility. */
+export function folder(
+  id: string,
+  org: OrgId,
+  name: string,
+  overrides: Partial<Pick<Folder, "parentId" | "ownerId" | "visibility">> = {},
+): Folder {
+  const r = createFolder({
+    id: folderId(id),
+    orgId: org,
+    parentId: overrides.parentId ?? null,
+    ownerId: overrides.ownerId ?? null,
+    visibility: overrides.visibility ?? "org",
+    name,
+  });
   if (!r.ok) throw new Error(`bad fixture folder: ${name}`);
   return r.value;
 }
@@ -109,12 +125,20 @@ export function makeGrantCheckDeps() {
   return { grants: new InMemoryWriteGrantStore(), identities: new InMemoryIdentityStore() };
 }
 
+/** The `FolderAccessDeps` pair (folder visibility / write guards, ADR-0076). */
+export function makeFolderAccessDeps() {
+  return { folderShares: new InMemoryFolderShareStore(), identities: new InMemoryIdentityStore() };
+}
+
 /** The write-seam quartet shared by rename/move/re-upload-shaped use cases:
  *  grant check + audit + uow + idempotency (ADR-0039) — each test supplies its
  *  own repositories. */
 export function makeWriteSeamDeps() {
   return {
     ...makeGrantCheckDeps(),
+    // The ADR-0076 folder-share store (moveReport's target-visibility check);
+    // inert for use cases that don't touch folders.
+    folderShares: new InMemoryFolderShareStore(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
     ...idempotencyTestDeps(),

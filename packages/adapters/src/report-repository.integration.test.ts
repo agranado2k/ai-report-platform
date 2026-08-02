@@ -139,6 +139,8 @@ describe("DrizzleReportRepository (pglite integration)", () => {
       id: folderId("00000000-0000-4000-8000-0000000000d1"),
       orgId: ids.orgId,
       parentId: ids.folderId,
+      ownerId: null, // legacy shape (ADR-0076)
+      visibility: "org",
       name: "Target",
     });
     if (!target.ok) throw new Error("bad folder");

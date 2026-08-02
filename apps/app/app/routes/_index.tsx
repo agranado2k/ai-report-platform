@@ -6,7 +6,15 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { folderIdToWire, makeFolderId, makeReportId, makeSlug, reportIdToWire } from "arp-domain";
+import {
+  folderIdToWire,
+  graftOrphansToRoot,
+  makeFolderId,
+  makeReportId,
+  makeSlug,
+  reportIdToWire,
+  visibleFolderOrRoot,
+} from "arp-domain";
 import {
   AppHeader,
   Button,
@@ -72,16 +80,24 @@ export async function loader(args: LoaderFunctionArgs) {
   };
   if (!actor) return json(empty);
 
-  // No pagination params → listFolders returns the WHOLE org folder tree in
-  // one unpaginated page (the sidebar needs every folder to build it).
-  const foldersR = await ops().listFolders({ orgId: actor.orgId }, {});
+  // No pagination params → listFolders returns the whole VISIBLE folder tree
+  // (ADR-0076: this user's owned + legacy + org-visible + shared-with-them
+  // folders) in one unpaginated page (the sidebar needs every visible folder
+  // to build it).
+  const foldersR = await ops().listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  const folders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
+  const visibleFolders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
     id: folderIdToWire(f.id),
     parentId: f.parentId ? folderIdToWire(f.parentId) : null,
     name: f.name,
   }));
-  const root = folders.find((f) => f.parentId === null) ?? null;
+  const rootNode = visibleFolders.find((f) => f.parentId === null) ?? null;
+  // Partial-visibility grafting (ADR-0076): a visible folder whose ancestor
+  // chain contains invisible folders is re-parented under Root for THIS
+  // viewer's tree — it stays reachable without leaking any invisible
+  // ancestor's name. Pure helper, unit-tested in arp-domain.
+  const folders = rootNode ? graftOrphansToRoot(visibleFolders, rootNode.id) : visibleFolders;
+  const root = rootNode;
   // Only honor a folder filter that exists in the org (this existence check also
   // guards against a garbage `?folder=` value — it simply won't match).
   const selectedFolderId =
@@ -124,11 +140,21 @@ export async function loader(args: LoaderFunctionArgs) {
 
   return json({
     folders,
-    items: result.items.map((r) => ({
-      ...r,
-      id: reportIdToWire(r.id),
-      folderId: folderIdToWire(r.folderId),
-    })),
+    items: result.items.map((r) => {
+      const folderId = folderIdToWire(r.folderId);
+      return {
+        ...r,
+        id: reportIdToWire(r.id),
+        folderId,
+        // A visible report can live in an INVISIBLE folder (ADR-0075/0076), so
+        // its folderId resolves to nothing in `folders`. Resolve the id the UI
+        // should BIND to here, on the server, where arp-domain is already
+        // loaded: the label groups it under Root's name rather than leaking
+        // anything, and the Move control preselects Root rather than whatever
+        // option the browser picks first for an unmatched <select> value.
+        displayFolderId: root ? visibleFolderOrRoot(folderId, folders, root.id) : folderId,
+      };
+    }),
     hasPrev,
     hasNext,
     q,
@@ -242,6 +268,8 @@ export default function Index() {
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
   const root = folders.find((f) => f.parentId === null);
+  // Plain lookup: the loader has already resolved every id the UI binds to
+  // down to a folder that is actually in `folders` (see `displayFolderId`).
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
   const createParent = selectedFolderId ?? rootId;
   const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
@@ -372,7 +400,7 @@ export default function Index() {
                       <code className="font-mono">{r.slug}</code>
                       <span className="inline-flex items-center gap-1">
                         <FolderIcon className="h-3.5 w-3.5" />
-                        {folderName(r.folderId)}
+                        {folderName(r.displayFolderId)}
                       </span>
                     </div>
                   </div>
@@ -392,7 +420,7 @@ export default function Index() {
                         <input type="hidden" name="slug" value={r.slug} />
                         <Select
                           name="toFolderId"
-                          defaultValue={r.folderId}
+                          defaultValue={r.displayFolderId}
                           aria-label={`Move ${r.title} to folder`}
                           size="sm"
                           className="min-w-0 flex-1 text-xs"

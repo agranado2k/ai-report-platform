@@ -1,26 +1,29 @@
 // deleteFolder — soft-delete a Folder in the acting org (ADR-0036, Reports &
 // Folders). Pure orchestration over the Folder + Report repositories (ADR-0024):
-// load+authz (the shared loadOwnedFolder guard, OUTSIDE the tx) → reject the
-// Root → reject a non-empty folder (any subfolder or any report placed here)
-// → softDelete + a `folder.deleted` audit_log row (ADR-0070), committed
-// together (ADR-0037 §5). "Block if non-empty" is the chosen policy: the
-// caller empties a folder (move its contents out) before deleting.
+// load+authz (the shared loadWritableFolder guard, ADR-0076, OUTSIDE the tx)
+// → reject the Root → reject a non-empty folder (any subfolder or any report
+// placed here) → softDelete + a `folder.deleted` audit_log row (ADR-0070),
+// committed together (ADR-0037 §5). "Block if non-empty" is the chosen policy:
+// the caller empties a folder (move its contents out) before deleting. BOTH
+// emptiness guards are deliberately NOT visibility-scoped (ADR-0075/0076): a
+// subfolder or report the deleter cannot see must still block the delete, and
+// a bare boolean surfaces no metadata.
 import { type AppError, err, type FolderId, ok, type Result, validationError } from "arp-domain";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
-import { loadOwnedFolder, type TenancyActor } from "../load-owned";
+import { type FolderAccessDeps, loadWritableFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "DELETE /api/v1/folders/{id}";
 
-export interface DeleteFolderDeps extends IdempotentWriteDeps {
+export interface DeleteFolderDeps extends IdempotentWriteDeps, FolderAccessDeps {
   readonly folders: FolderRepository;
   readonly reports: ReportRepository;
   /** Audit log (ADR-0070) — one `folder.deleted` row per soft-delete. */
   readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
 }
-/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
- *  solely to attribute the audit row; it must never gate authorization. */
+/** `userId` gates authorization (ADR-0076): private folders are deletable
+ *  only by their owner. */
 export type DeleteFolderActor = TenancyActor;
 export interface DeleteFolderInput {
   readonly folderId: FolderId;
@@ -46,16 +49,18 @@ export async function deleteFolder(
   if (idem.value.outcome === "replay") return ok(undefined);
   const idemRef = idem.value.ref;
 
-  const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
+  const found = await loadWritableFolder(deps.folders, actor, input.folderId, deps);
   if (!found.ok) return found;
   if (found.value.parentId === null) {
     return err(validationError("the Root folder cannot be deleted", "folderId"));
   }
 
   // Block if non-empty (ADR-0036): any subfolder or any report placed here.
-  const folders = await deps.folders.listByOrg(actor.orgId);
-  if (!folders.ok) return folders;
-  if (folders.value.some((f) => f.parentId === input.folderId)) {
+  // Deliberately NOT visibility-scoped (ADR-0076, mirroring hasReportsInFolder):
+  // an invisible subfolder must still block the delete.
+  const hasChildren = await deps.folders.hasChildFolders(actor.orgId, input.folderId);
+  if (!hasChildren.ok) return hasChildren;
+  if (hasChildren.value) {
     return err(validationError("folder is not empty: it has subfolders", "folderId"));
   }
   // Deliberately NOT visibility-scoped (ADR-0075): a report the deleter can't

@@ -23,6 +23,7 @@ import {
   ok,
   orgId,
   type Result,
+  ROOT_FOLDER_VISIBILITY,
   type UserId,
   userId,
 } from "arp-domain";
@@ -135,7 +136,17 @@ export class DrizzleIdentityStore implements IdentityStore {
         if (!root) {
           await db
             .insert(folders)
-            .values({ id: uuidv7(), orgId: o.id, name: "Root", slug: "root", parentId: null })
+            // ADR-0076: the Root is ALWAYS org-visible (the column default is
+            // the fail-safe 'private', so set it explicitly) with a legacy
+            // NULL owner — every member must keep using it for default uploads.
+            .values({
+              id: uuidv7(),
+              orgId: o.id,
+              name: "Root",
+              slug: "root",
+              parentId: null,
+              visibility: ROOT_FOLDER_VISIBILITY,
+            })
             .onConflictDoNothing();
           root = await this.rootFolderId(o.id);
         }
@@ -249,7 +260,17 @@ export class DrizzleIdentityStore implements IdentityStore {
         if (!root) {
           await db
             .insert(folders)
-            .values({ id: uuidv7(), orgId: o.id, name: "Root", slug: "root", parentId: null })
+            // ADR-0076: the Root is ALWAYS org-visible (the column default is
+            // the fail-safe 'private', so set it explicitly) with a legacy
+            // NULL owner — every member must keep using it for default uploads.
+            .values({
+              id: uuidv7(),
+              orgId: o.id,
+              name: "Root",
+              slug: "root",
+              parentId: null,
+              visibility: ROOT_FOLDER_VISIBILITY,
+            })
             .onConflictDoNothing();
           root = await this.rootFolderId(o.id);
         }

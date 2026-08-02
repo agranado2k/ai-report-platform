@@ -15,7 +15,7 @@
 // are return-typed against these shapes, and src/wire/index.test.ts locks the
 // emitted objects to them — so the catalog cannot drift from what the server
 // actually sends.
-import type { AclMode, Intent, ScanStatus, VersionOrigin } from "arp-domain";
+import type { AclMode, FolderVisibility, Intent, ScanStatus, VersionOrigin } from "arp-domain";
 
 /** Which deployment a resource belongs to (ADR-0053): the live product vs preview/dev. */
 export type WireMode = "prod" | "dev";
@@ -84,14 +84,29 @@ export type ReportDetailWire = ReportWire & {
   readonly acl?: AclShareWire;
 };
 
-/** A `folder` resource. `parent_id` links the tree (null at the root). */
+/** A `folder` resource. `parent_id` links the tree (null at the root).
+ *  `visibility` + `owner` carry the ADR-0076 creator-owned model: `owner` is a
+ *  `user_…` External Id, or null for a legacy (pre-ADR-0076) folder — legacy
+ *  folders read as org-visible regardless of `visibility`. */
 export interface FolderWire {
   readonly object: "folder";
   readonly id: string;
   readonly name: string;
   readonly slug: string;
   readonly parent_id: string | null;
+  readonly visibility: FolderVisibility;
+  readonly owner: string | null;
   readonly mode: WireMode;
+}
+
+/** A `folder_share` resource (ADR-0076) — one person's VISIBILITY grant on a
+ *  folder. Mirrors `write_grant`: wire-addressed by `(folder id, email)`, no
+ *  surrogate id, no `mode` stamp. Confers visibility only — never write. */
+export interface FolderShareWire {
+  readonly object: "folder_share";
+  readonly email: string;
+  readonly granted_by: string;
+  readonly granted_at: string;
 }
 
 /** A `version` resource (ADR-0065) — the ReportVersion projection on the wire.

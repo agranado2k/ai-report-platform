@@ -2,6 +2,7 @@ export * from "./audit-logger.contract";
 export * from "./comment-repository.contract";
 export * from "./event-outbox.contract";
 export * from "./folder-repository.contract";
+export * from "./folder-share-store.contract";
 export * from "./grant-store.contract";
 export * from "./idempotency-store.contract";
 export * from "./identity-store.contract";

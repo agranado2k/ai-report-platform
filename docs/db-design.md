@@ -127,12 +127,28 @@ Indexes: `key_prefix`, `acting_user_id`, `last_used_at`.
 | `id` | uuid PK | |
 | `org_id` | uuid FK → orgs | |
 | `parent_id` | uuid FK → folders NULL | self-reference; `NULL` = root folder; max depth 8 (app-enforced) |
+| `owner_id` | uuid FK → users NULL **ON DELETE RESTRICT** | the creating user (ADR-0076, reverses ADR-0059 §5); `NULL` = legacy pre-ADR-0076 row — stays visible + writable to the whole org (no backfill by design) |
+| `visibility` | `folder_visibility` | `private` (owner + folder-share grantees) / `org` (every member). Migration 0019 backfills existing rows to `org`; column default `private` (fail-safe — app always writes explicitly); Root is always `org` (app-enforced invariant, ADR-0076) |
 | `name` | text | |
 | `slug` | text | |
 | `created_at` / `updated_at` | timestamptz | |
 | `deleted_at` | timestamptz NULL | |
 
-Indexes: `org_id`, `(org_id, id DESC) WHERE deleted_at IS NULL` (cursor-paginated `searchByOrg`, keyset on the folder id, ADR-0053), `(org_id, parent_id, slug) WHERE deleted_at IS NULL` unique, and `(org_id, slug) WHERE parent_id IS NULL AND deleted_at IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048). Both exclude soft-deleted rows so a deleted folder doesn't keep its sibling-slug slot (recreating a same-named folder must succeed, ADR-0036).
+Indexes: `org_id`, `owner_id` (ADR-0076), `(org_id, id DESC) WHERE deleted_at IS NULL` (cursor-paginated `searchByOrg`, keyset on the folder id, ADR-0053), `(org_id, parent_id, slug) WHERE deleted_at IS NULL` unique, and `(org_id, slug) WHERE parent_id IS NULL AND deleted_at IS NULL` unique (one Root folder per slug per org — the base index can't dedupe `parent_id = NULL` rows, ADR-0048). Both exclude soft-deleted rows so a deleted folder doesn't keep its sibling-slug slot (recreating a same-named folder must succeed, ADR-0036).
+
+#### `folder_shares` — per-folder visibility grants (ADR-0076)
+
+The folder owner grants another person VISIBILITY of a private folder — never write (folder writes stay owner-or-org, ADR-0076). Mirrors `report_write_grants`' shape: email-keyed PK, lazily-resolved `grantee_user_id`, no expiry, no level. Deliberately NOT a reuse of the superseded `folder_collaborators` corpse below (different semantics — that design carried inherited WRITE grants).
+
+| Column | Type | Notes |
+|---|---|---|
+| `folder_id` | uuid FK → folders **ON DELETE CASCADE** | |
+| `grantee_email` | text | normalized (`EmailAddress`) |
+| `grantee_user_id` | uuid FK → users NULL | resolved opportunistically at share time; else matched by email at check time (ADR-0060 §2 pattern) |
+| `granted_by` | uuid FK → users | |
+| `granted_at` | timestamptz | |
+
+PK `(folder_id, grantee_email)`; index `grantee_email` (reserved for a signup-time backfill sweep, mirroring `report_write_grants`).
 
 #### `folder_collaborators` — **superseded, unused** (ADR-0060; was ADR-009 / ADR-0056 P4)
 
@@ -329,7 +345,7 @@ app writes from the closed `AuditAction` union in
 `packages/application/src/audit.ts`. The vocabulary, grouped by resource:
 
 - **report**: `report.uploaded`, `report.renamed`, `report.moved`, `report.deleted`
-- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`
+- **folder**: `folder.created`, `folder.renamed`, `folder.deleted`, `folder.visibility_set`, `folder.shared`, `folder.unshared`
 - **acl**: `acl.set`
 - **grant**: `grant.write.granted`, `grant.write.revoked`
 - **comment**: `comment.added`, `comment.replied`, `comment.resolved`, `comment.deleted`
