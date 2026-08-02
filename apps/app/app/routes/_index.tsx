@@ -6,7 +6,14 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { folderIdToWire, makeFolderId, makeReportId, makeSlug, reportIdToWire } from "arp-domain";
+import {
+  folderIdToWire,
+  graftOrphansToRoot,
+  makeFolderId,
+  makeReportId,
+  makeSlug,
+  reportIdToWire,
+} from "arp-domain";
 import {
   AppHeader,
   Button,
@@ -72,16 +79,24 @@ export async function loader(args: LoaderFunctionArgs) {
   };
   if (!actor) return json(empty);
 
-  // No pagination params → listFolders returns the WHOLE org folder tree in
-  // one unpaginated page (the sidebar needs every folder to build it).
-  const foldersR = await ops().listFolders({ orgId: actor.orgId }, {});
+  // No pagination params → listFolders returns the whole VISIBLE folder tree
+  // (ADR-0076: this user's owned + legacy + org-visible + shared-with-them
+  // folders) in one unpaginated page (the sidebar needs every visible folder
+  // to build it).
+  const foldersR = await ops().listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  const folders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
+  const visibleFolders: FolderNode[] = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
     id: folderIdToWire(f.id),
     parentId: f.parentId ? folderIdToWire(f.parentId) : null,
     name: f.name,
   }));
-  const root = folders.find((f) => f.parentId === null) ?? null;
+  const rootNode = visibleFolders.find((f) => f.parentId === null) ?? null;
+  // Partial-visibility grafting (ADR-0076): a visible folder whose ancestor
+  // chain contains invisible folders is re-parented under Root for THIS
+  // viewer's tree — it stays reachable without leaking any invisible
+  // ancestor's name. Pure helper, unit-tested in arp-domain.
+  const folders = rootNode ? graftOrphansToRoot(visibleFolders, rootNode.id) : visibleFolders;
+  const root = rootNode;
   // Only honor a folder filter that exists in the org (this existence check also
   // guards against a garbage `?folder=` value — it simply won't match).
   const selectedFolderId =
@@ -242,7 +257,10 @@ export default function Index() {
   const actionData = useActionData<typeof action>();
   const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
   const root = folders.find((f) => f.parentId === null);
-  const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
+  // A visible report can live in an INVISIBLE folder (ADR-0075/0076) — its
+  // folder name is unresolvable for this viewer, so group it under Root's
+  // label rather than leaking anything (or rendering a dash).
+  const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? root?.name ?? "—";
   const createParent = selectedFolderId ?? rootId;
   const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
 

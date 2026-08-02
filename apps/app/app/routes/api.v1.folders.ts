@@ -17,7 +17,9 @@ export const loader = handle({
   run: ({ url, actor }) => {
     const cursor = parseCursorParams(url.searchParams, makeFolderId);
     if (!cursor.ok) return cursor; // malformed cursor → 422
-    return ops().listFolders({ orgId: actor.orgId }, cursor.value);
+    // Visibility-scoped (ADR-0076): the acting user decides which folders
+    // appear (owned / legacy / org-visible / shared-with-them).
+    return ops().listFolders({ orgId: actor.orgId, userId: actor.userId }, cursor.value);
   },
   toHttp: (result) => listFoldersToHttp(result, wireContext()),
 });

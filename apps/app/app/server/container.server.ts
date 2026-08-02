@@ -15,6 +15,7 @@ import {
   DrizzleCommentRepository,
   DrizzleEventOutbox,
   DrizzleFolderRepository,
+  DrizzleFolderShareStore,
   DrizzleGrantStore,
   DrizzleIdempotencyStore,
   DrizzleIdentityStore,
@@ -38,6 +39,7 @@ import type {
   Clock,
   DrainScansDeps,
   EmailSender,
+  FolderShareStore,
   GrantStore,
   HandleUserCreatedDeps,
   HandleUserDeletedDeps,
@@ -60,6 +62,7 @@ import {
   grantWrite,
   listApiKeys,
   listComments,
+  listFolderShares,
   listFolders,
   listReportVersions,
   listWriteGrants,
@@ -72,6 +75,9 @@ import {
   revokeWrite,
   searchReports,
   setAcl,
+  setFolderVisibility,
+  shareFolder,
+  unshareFolder,
   uploadReport,
 } from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
@@ -153,6 +159,14 @@ let _writeGrants: DrizzleWriteGrantStore | undefined;
 export function writeGrantStore(): WriteGrantStore {
   if (!_writeGrants) _writeGrants = new DrizzleWriteGrantStore(context());
   return _writeGrants;
+}
+
+let _folderShares: DrizzleFolderShareStore | undefined;
+/** The folder-share store (ADR-0076) — per-folder visibility shares; backs the
+ *  folder visibility predicate's share leg + the share/unshare/list use cases. */
+export function folderShareStore(): FolderShareStore {
+  if (!_folderShares) _folderShares = new DrizzleFolderShareStore(context());
+  return _folderShares;
 }
 
 let _audit: DrizzleAuditLogger | undefined;
@@ -395,14 +409,17 @@ export function ops() {
       reports: d.reports,
       folders: folderRepo(),
       grants: writeGrantStore(),
+      folderShares: folderShareStore(),
       identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,
     }),
-    listFolders: bind2(listFolders, { folders: folderRepo() }),
+    listFolders: bind2(listFolders, { folders: folderRepo(), identities: identityStore() }),
     createFolder: bind2(createFolder, {
       folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
       ids: d.ids,
       audit: auditLogger(),
       uow: d.uow,
@@ -410,6 +427,8 @@ export function ops() {
     }),
     renameFolder: bind2(renameFolder, {
       folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,
@@ -417,9 +436,41 @@ export function ops() {
     deleteFolder: bind2(deleteFolder, {
       folders: folderRepo(),
       reports: d.reports,
+      folderShares: folderShareStore(),
+      identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,
+    }),
+    // ── Folder sharing (ADR-0076) ──────────────────────────────────────────
+    setFolderVisibility: bind2(setFolderVisibility, {
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    shareFolder: bind2(shareFolder, {
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    unshareFolder: bind2(unshareFolder, {
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    listFolderShares: bind2(listFolderShares, {
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      identities: identityStore(),
     }),
     listReportVersions: bind2(listReportVersions, { reports: d.reports }),
     // ── Sharing (ACL + write grants) ───────────────────────────────────────
