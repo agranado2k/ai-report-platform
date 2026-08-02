@@ -26,6 +26,7 @@
 import type { AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { err, ok } from "arp-domain";
 import type {
+  FolderShare,
   Hasher,
   IdempotencyKeyRef,
   IdempotencyRecord,
@@ -181,6 +182,18 @@ export function reviveWriteGrantReplay(record: IdempotencyRecord): Result<WriteG
       typeof body === "object" &&
       body !== null &&
       typeof (body as Record<string, unknown>).reportId === "string" &&
+      typeof (body as Record<string, unknown>).granteeEmail === "string" &&
+      typeof (body as Record<string, unknown>).grantedAt === "number",
+  );
+}
+
+export function reviveFolderShareReplay(record: IdempotencyRecord): Result<FolderShare, AppError> {
+  return reviveReplay(
+    record,
+    (body): body is FolderShare =>
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).folderId === "string" &&
       typeof (body as Record<string, unknown>).granteeEmail === "string" &&
       typeof (body as Record<string, unknown>).grantedAt === "number",
   );

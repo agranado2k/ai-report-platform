@@ -1,9 +1,10 @@
 // renameFolder — change a Folder's display name in the acting org (ADR-0036,
 // Reports & Folders). Pure orchestration over FolderRepository (ADR-0024):
-// load+authz (the shared loadOwnedFolder guard, OUTSIDE the tx) → apply the
-// domain rename transition (name only; slug stays stable) → persist via save
-// + a `folder.renamed` audit_log row (ADR-0070), committed together
-// (ADR-0037 §5).
+// load+authz (the shared loadWritableFolder guard, ADR-0076: owner, or anyone
+// for legacy/org-visible folders; an invisible folder reads NotFound; OUTSIDE
+// the tx) → apply the domain rename transition (name only; slug stays stable)
+// → persist via save + a `folder.renamed` audit_log row (ADR-0070), committed
+// together (ADR-0037 §5).
 import {
   type AppError,
   renameFolder as applyRename,
@@ -17,19 +18,19 @@ import {
   type IdempotentWriteDeps,
   reviveFolderReplay,
 } from "../idempotent-write";
-import { loadOwnedFolder, type TenancyActor } from "../load-owned";
+import { type FolderAccessDeps, loadWritableFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "PATCH /api/v1/folders/{id}";
 
-export interface RenameFolderDeps extends IdempotentWriteDeps {
+export interface RenameFolderDeps extends IdempotentWriteDeps, FolderAccessDeps {
   readonly folders: FolderRepository;
   /** Audit log (ADR-0070) — one `folder.renamed` row per rename. */
   readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
 }
-/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
- *  solely to attribute the audit row; it must never gate authorization. */
+/** `userId` gates authorization (ADR-0076): private folders are renameable
+ *  only by their owner. */
 export type RenameFolderActor = TenancyActor;
 export interface RenameFolderInput {
   readonly folderId: FolderId;
@@ -43,7 +44,7 @@ export async function renameFolder(
   actor: RenameFolderActor,
   input: RenameFolderInput,
 ): Promise<Result<Folder, AppError>> {
-  const found = await loadOwnedFolder(deps.folders, actor, input.folderId);
+  const found = await loadWritableFolder(deps.folders, actor, input.folderId, deps);
   if (!found.ok) return found;
   const fromName = found.value.name;
 

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   canWrite,
   hasWriteGrant,
+  loadManagedFolder,
   loadOrgReport,
-  loadOwnedFolder,
   loadOwnedReport,
   loadReadableReport,
+  loadVisibleFolder,
+  loadWritableFolder,
   loadWritableReport,
   type TenancyActor,
   type WriteGrantCheckDeps,
@@ -16,6 +18,7 @@ import {
   ACTORS,
   colleagueActor,
   folder,
+  makeFolderAccessDeps,
   makeGrantCheckDeps,
   ownerActor,
   report,
@@ -65,6 +68,9 @@ const FAILING_FOLDERS: FolderRepository = {
     return err({ kind: "Unexpected", message: "db down" });
   },
   async findById() {
+    return err({ kind: "Unexpected", message: "db down" });
+  },
+  async hasChildFolders() {
     return err({ kind: "Unexpected", message: "db down" });
   },
   async save() {
@@ -343,52 +349,165 @@ describe("loadReadableReport (GET seam: org-visible + grantee metadata carve-out
   });
 });
 
-describe("loadOwnedFolder", () => {
+describe("folder guards (ADR-0076)", () => {
   const F1 = "00000000-0000-7000-8000-0000000000f1";
+  const actorMe: TenancyActor = { orgId: orgA, userId: owner };
+  const actorOther: TenancyActor = { orgId: orgA, userId: otherUser };
 
-  it("returns the folder when it exists, is live, and is in the actor's org", async () => {
+  it("loadVisibleFolder returns a live, same-org, legacy folder for anyone", async () => {
     const folders = new InMemoryFolderRepository();
     await folders.save(folder(F1, orgA, "Docs"));
-    const r = await loadOwnedFolder(folders, { orgId: orgA }, folderId(F1));
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
     expect(r.ok && r.value.name).toBe("Docs");
   });
 
-  it("rejects an unknown folder id with NotFound (default message)", async () => {
+  it("loadVisibleFolder rejects an unknown folder id with NotFound (default message)", async () => {
     const folders = new InMemoryFolderRepository();
-    const r = await loadOwnedFolder(
+    const r = await loadVisibleFolder(
       folders,
-      { orgId: orgA },
+      actorMe,
       folderId("00000000-0000-7000-8000-00000000dead"),
+      makeFolderAccessDeps(),
     );
     expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "folder not found" });
   });
 
-  it("rejects a soft-deleted folder with NotFound", async () => {
+  it("loadVisibleFolder rejects a soft-deleted folder with NotFound", async () => {
     const folders = new InMemoryFolderRepository();
     await folders.save(folder(F1, orgA, "Docs"));
     await folders.softDelete(folderId(F1));
-    const r = await loadOwnedFolder(folders, { orgId: orgA }, folderId(F1));
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
     expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "folder not found" });
   });
 
-  it("rejects a cross-org folder with NotAllowed (default message)", async () => {
+  it("loadVisibleFolder rejects a cross-org folder with NotAllowed (default message)", async () => {
     const folders = new InMemoryFolderRepository();
     await folders.save(folder(F1, orgA, "Docs"));
-    const r = await loadOwnedFolder(folders, { orgId: orgB }, folderId(F1));
+    const r = await loadVisibleFolder(
+      folders,
+      { orgId: orgB, userId: owner },
+      folderId(F1),
+      makeFolderAccessDeps(),
+    );
     expect(!r.ok && r.error).toEqual({ kind: "NotAllowed", message: "folder is not in your org" });
   });
 
-  it("passes through a repo-error unchanged", async () => {
-    const r = await loadOwnedFolder(FAILING_FOLDERS, { orgId: orgA }, folderId(F1));
+  it("loadVisibleFolder hides another user's PRIVATE folder as NotFound — existence is private", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: otherUser, visibility: "private" }));
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
+    expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "folder not found" });
+  });
+
+  it("loadVisibleFolder admits a folder-share grantee (userId match)", async () => {
+    const folders = new InMemoryFolderRepository();
+    const deps = makeFolderAccessDeps();
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: otherUser, visibility: "private" }));
+    await deps.folderShares.grant(folderId(F1), "me@test.local", otherUser, owner);
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), deps);
+    expect(r.ok && r.value.name).toBe("Secret");
+  });
+
+  it("loadVisibleFolder admits a folder-share grantee by NORMALIZED EMAIL", async () => {
+    const folders = new InMemoryFolderRepository();
+    const deps = makeFolderAccessDeps();
+    deps.identities.seedUser(owner, "Me@Test.Local");
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: otherUser, visibility: "private" }));
+    await deps.folderShares.grant(folderId(F1), "me@test.local", otherUser, null);
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), deps);
+    expect(r.ok && r.value.name).toBe("Secret");
+  });
+
+  it("loadVisibleFolder passes through a repo-error unchanged", async () => {
+    const r = await loadVisibleFolder(
+      FAILING_FOLDERS,
+      actorMe,
+      folderId(F1),
+      makeFolderAccessDeps(),
+    );
     expect(!r.ok && r.error).toEqual({ kind: "Unexpected", message: "db down" });
   });
 
-  it("honors caller-supplied messages (e.g. move-report's target-folder text)", async () => {
+  it("loadVisibleFolder honors caller-supplied messages (move-report's target text)", async () => {
     const folders = new InMemoryFolderRepository();
-    const r = await loadOwnedFolder(folders, { orgId: orgA }, folderId(F1), {
+    const r = await loadVisibleFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps(), {
       notFound: "target folder not found",
-      notAllowed: "target folder is not in your org",
+      notInOrg: "target folder is not in the report's org",
+      notWritable: "unused",
     });
     expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "target folder not found" });
+  });
+
+  it("loadWritableFolder admits the OWNER of a private folder", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Mine", { ownerId: owner, visibility: "private" }));
+    const r = await loadWritableFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
+    expect(r.ok).toBe(true);
+  });
+
+  it("loadWritableFolder admits anyone for a legacy or org-visible folder", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Legacy"));
+    const legacy = await loadWritableFolder(
+      folders,
+      actorOther,
+      folderId(F1),
+      makeFolderAccessDeps(),
+    );
+    expect(legacy.ok).toBe(true);
+    const F2 = "00000000-0000-7000-8000-0000000000f2";
+    await folders.save(folder(F2, orgA, "Team", { ownerId: owner, visibility: "org" }));
+    const orgVisible = await loadWritableFolder(
+      folders,
+      actorOther,
+      folderId(F2),
+      makeFolderAccessDeps(),
+    );
+    expect(orgVisible.ok).toBe(true);
+  });
+
+  it("loadWritableFolder denies a share-visible grantee with NotAllowed — visibility only", async () => {
+    const folders = new InMemoryFolderRepository();
+    const deps = makeFolderAccessDeps();
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: otherUser, visibility: "private" }));
+    await deps.folderShares.grant(folderId(F1), "me@test.local", otherUser, owner);
+    const r = await loadWritableFolder(folders, actorMe, folderId(F1), deps);
+    expect(!r.ok && r.error).toEqual({
+      kind: "NotAllowed",
+      message: "you do not have write access to this folder",
+    });
+  });
+
+  it("loadManagedFolder admits the owner and (adoption path) anyone on a legacy folder", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Mine", { ownerId: owner, visibility: "private" }));
+    const asOwner = await loadManagedFolder(folders, actorMe, folderId(F1), makeFolderAccessDeps());
+    expect(asOwner.ok).toBe(true);
+    const F2 = "00000000-0000-7000-8000-0000000000f2";
+    await folders.save(folder(F2, orgA, "Legacy"));
+    const asAnyone = await loadManagedFolder(
+      folders,
+      actorOther,
+      folderId(F2),
+      makeFolderAccessDeps(),
+    );
+    expect(asAnyone.ok).toBe(true);
+  });
+
+  it("loadManagedFolder denies a non-owner on an owned, org-visible folder with NotAllowed", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Team", { ownerId: owner, visibility: "org" }));
+    const r = await loadManagedFolder(folders, actorOther, folderId(F1), makeFolderAccessDeps());
+    expect(!r.ok && r.error).toEqual({
+      kind: "NotAllowed",
+      message: "only the folder's owner can manage its sharing",
+    });
+  });
+
+  it("loadManagedFolder hides an invisible private folder as NotFound", async () => {
+    const folders = new InMemoryFolderRepository();
+    await folders.save(folder(F1, orgA, "Secret", { ownerId: owner, visibility: "private" }));
+    const r = await loadManagedFolder(folders, actorOther, folderId(F1), makeFolderAccessDeps());
+    expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "folder not found" });
   });
 });

@@ -145,6 +145,55 @@ describe("moveReport use case", () => {
   });
 });
 
+describe("moveReport target visibility (ADR-0076)", () => {
+  it("allows moving into the actor's OWN private folder", async () => {
+    const { reports, folders } = await setup();
+    const mine = folder("00000000-0000-7000-8000-0000000000a5", orgA, "My private", {
+      ownerId: owner,
+      visibility: "private",
+    });
+    await folders.save(mine);
+    await reports.save(report(orgA, "hhhhhhhhhh"));
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
+      slug: slug("hhhhhhhhhh"),
+      toFolderId: mine.id,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects another user's PRIVATE folder as a target with NotFound — not resolvable", async () => {
+    const { reports, folders } = await setup();
+    const theirs = folder("00000000-0000-7000-8000-0000000000a6", orgA, "Their private", {
+      ownerId: otherUser,
+      visibility: "private",
+    });
+    await folders.save(theirs);
+    await reports.save(report(orgA, "jjjjjjjjjj"));
+    const r = await moveReport({ reports, folders, ...writeDeps() }, ownerActor, {
+      slug: slug("jjjjjjjjjj"),
+      toFolderId: theirs.id,
+    });
+    expect(!r.ok && r.error).toEqual({ kind: "NotFound", message: "target folder not found" });
+  });
+
+  it("allows a SHARE-VISIBLE private folder as a target (shares grant visibility)", async () => {
+    const { reports, folders } = await setup();
+    const deps = { reports, folders, ...writeDeps() };
+    const theirs = folder("00000000-0000-7000-8000-0000000000a7", orgA, "Shared private", {
+      ownerId: otherUser,
+      visibility: "private",
+    });
+    await folders.save(theirs);
+    await deps.folderShares.grant(theirs.id, "x@test.local", otherUser, owner);
+    await reports.save(report(orgA, "kkkkkkkkkk"));
+    const r = await moveReport(deps, ownerActor, {
+      slug: slug("kkkkkkkkkk"),
+      toFolderId: theirs.id,
+    });
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("moveReport idempotency (ADR-0039)", () => {
   it("replays the recorded moved-report resource on an identical retry — one audit row", async () => {
     const reports = new InMemoryReportRepository();

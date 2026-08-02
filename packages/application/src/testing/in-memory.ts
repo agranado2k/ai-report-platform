@@ -13,6 +13,7 @@ import {
   err,
   type Folder,
   type FolderId,
+  isFolderBroadlyVisibleTo,
   commentId as makeCommentId,
   folderId as makeFolderId,
   orgId as makeOrgId,
@@ -54,6 +55,9 @@ import type {
   FolderListQuery,
   FolderPage,
   FolderRepository,
+  FolderShare,
+  FolderShareStore,
+  FolderViewer,
   GrantStore,
   Hasher,
   IdempotencyBegin,
@@ -111,15 +115,57 @@ function keysetPage<T extends { readonly id: string }>(
 export class InMemoryFolderRepository implements FolderRepository, TxSnapshottable {
   private readonly byId = new Map<string, Folder>();
 
-  async listByOrg(orgId: OrgId): Promise<Result<readonly Folder[], AppError>> {
-    return ok([...this.byId.values()].filter((f) => f.orgId === orgId && f.deletedAt === null));
+  /** `shares` backs the ADR-0076 visibility predicate's share leg — share the
+   *  SAME store instance the test shares through. Omitted = the share leg
+   *  never matches (fine for tests not exercising folder shares). */
+  constructor(private readonly shares?: FolderShareStore) {}
+
+  /** The ADR-0076 folder visibility predicate — mirrors the adapter's SQL:
+   *  owner OR legacy (ownerId null) OR org-visible OR shared with the viewer
+   *  (userId-or-email match, ADR-0060 §2). Anything else is invisible —
+   *  existence is private. */
+  private async isVisibleTo(f: Folder, viewer: FolderViewer): Promise<boolean> {
+    if (isFolderBroadlyVisibleTo(f, viewer.userId)) return true;
+    if (!this.shares) return false;
+    const share = await this.shares.findFor(f.id, {
+      userId: viewer.userId,
+      email: viewer.email,
+    });
+    return share.ok && share.value !== null;
   }
 
-  async searchByOrg(orgId: OrgId, q: FolderListQuery): Promise<Result<FolderPage, AppError>> {
-    const matched = [...this.byId.values()].filter(
-      (f) => f.orgId === orgId && f.deletedAt === null,
+  private async visibleForOrg(orgId: OrgId, viewer: FolderViewer): Promise<readonly Folder[]> {
+    const live = [...this.byId.values()].filter((f) => f.orgId === orgId && f.deletedAt === null);
+    const visible: Folder[] = [];
+    for (const f of live) {
+      if (await this.isVisibleTo(f, viewer)) visible.push(f);
+    }
+    return visible;
+  }
+
+  async listByOrg(
+    orgId: OrgId,
+    viewer: FolderViewer,
+  ): Promise<Result<readonly Folder[], AppError>> {
+    return ok(await this.visibleForOrg(orgId, viewer));
+  }
+
+  async searchByOrg(
+    orgId: OrgId,
+    viewer: FolderViewer,
+    q: FolderListQuery,
+  ): Promise<Result<FolderPage, AppError>> {
+    return ok(keysetPage(await this.visibleForOrg(orgId, viewer), q));
+  }
+
+  async hasChildFolders(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>> {
+    // The deleteFolder emptiness guard — org-scoped, NOT visibility-scoped
+    // (ADR-0076): an invisible subfolder must still block the delete.
+    return ok(
+      [...this.byId.values()].some(
+        (f) => f.orgId === orgId && f.parentId === folderId && f.deletedAt === null,
+      ),
     );
-    return ok(keysetPage(matched, q));
   }
 
   async findById(id: FolderId): Promise<Result<Folder | null, AppError>> {
@@ -1016,6 +1062,56 @@ export class InMemoryWriteGrantStore implements WriteGrantStore {
     if (byEmail) return ok(byEmail);
     for (const [k, g] of this.grants) {
       if (k.startsWith(`${reportId}|`) && g.granteeUserId === actor.userId) return ok(g);
+    }
+    return ok(null);
+  }
+}
+
+/** In-memory FolderShareStore (ADR-0076) — mirrors InMemoryWriteGrantStore:
+ *  email-keyed upsert, revoke-by-delete, userId-or-normalized-email findFor. */
+export class InMemoryFolderShareStore implements FolderShareStore {
+  private readonly shares = new Map<string, FolderShare>(); // `${folderId}|${normalizedEmail}`
+
+  private key(folderId: FolderId, email: string): string {
+    return `${folderId}|${email.trim().toLowerCase()}`;
+  }
+
+  async grant(
+    folderId: FolderId,
+    email: string,
+    grantedBy: UserId,
+    granteeUserId: UserId | null,
+  ): Promise<Result<void, AppError>> {
+    const normalized = email.trim().toLowerCase();
+    this.shares.set(this.key(folderId, email), {
+      folderId,
+      granteeEmail: normalized,
+      granteeUserId,
+      grantedBy,
+      grantedAt: Date.now(),
+    });
+    return ok(undefined);
+  }
+
+  async revoke(folderId: FolderId, email: string): Promise<Result<void, AppError>> {
+    this.shares.delete(this.key(folderId, email));
+    return ok(undefined);
+  }
+
+  async listByFolder(folderId: FolderId): Promise<Result<readonly FolderShare[], AppError>> {
+    return ok(
+      [...this.shares.entries()].filter(([k]) => k.startsWith(`${folderId}|`)).map(([, v]) => v),
+    );
+  }
+
+  async findFor(
+    folderId: FolderId,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<FolderShare | null, AppError>> {
+    const byEmail = actor.email ? this.shares.get(this.key(folderId, actor.email)) : undefined;
+    if (byEmail) return ok(byEmail);
+    for (const [k, s] of this.shares) {
+      if (k.startsWith(`${folderId}|`) && s.granteeUserId === actor.userId) return ok(s);
     }
     return ok(null);
   }

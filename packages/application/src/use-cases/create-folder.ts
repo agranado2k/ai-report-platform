@@ -1,11 +1,15 @@
 // createFolder — create a Folder under a parent in the acting org (ADR-0036,
 // Reports & Folders). Pure orchestration over FolderRepository + IdGenerator
 // (ADR-0024). Invariants enforced here:
-//   - the parent must exist, not be soft-deleted, and belong to the actor's org
-//     (the shared loadOwnedFolder tenancy guard — issue #132);
+//   - the parent must exist, not be soft-deleted, belong to the actor's org
+//     (issue #132), be VISIBLE to the actor, and be writable by them
+//     (ADR-0076: owner, or anyone for legacy/org-visible parents — an
+//     invisible private parent isn't even resolvable, reading as NotFound);
 //   - a parent is REQUIRED — the single org Root (parent_id NULL) is created at
 //     provisioning, never via this use case, so we can't mint a second Root;
-//   - max nesting depth 8 (docs/db-design.md, ADR-0037), Root = depth 0.
+//   - max nesting depth 8 (docs/db-design.md, ADR-0037), Root = depth 0;
+//   - the new folder is OWNED by its creator; its visibility is inherited
+//     (ADR-0076): private under the Root, else the parent's visibility.
 // Sibling-slug uniqueness is DB-enforced; a clash surfaces as a ValidationError.
 // Load+authz stays OUTSIDE the tx; persists via save + a `folder.created`
 // audit_log row (ADR-0070), committed together (ADR-0037 §5).
@@ -15,6 +19,7 @@ import {
   err,
   type Folder,
   type FolderId,
+  inheritedVisibility,
   ok,
   type Result,
   validationError,
@@ -24,20 +29,26 @@ import {
   type IdempotentWriteDeps,
   reviveFolderReplay,
 } from "../idempotent-write";
-import { loadOwnedFolder, type OwnedGuardMessages, type TenancyActor } from "../load-owned";
+import {
+  type FolderAccessDeps,
+  type FolderGuardMessages,
+  loadWritableFolder,
+  type TenancyActor,
+} from "../load-owned";
 import type { AuditLogger, FolderRepository, IdGenerator, UnitOfWork } from "../ports";
 
 const ROUTE = "POST /api/v1/folders";
 
-const PARENT_FOLDER_MESSAGES: OwnedGuardMessages = {
+const PARENT_FOLDER_MESSAGES: FolderGuardMessages = {
   notFound: "parent folder not found",
-  notAllowed: "parent folder is not in your org",
+  notInOrg: "parent folder is not in your org",
+  notWritable: "you do not have write access to the parent folder",
 };
 
 /** Max folder nesting (Root = 0); the deepest folder is depth MAX_FOLDER_DEPTH. */
 export const MAX_FOLDER_DEPTH = 8;
 
-export interface CreateFolderDeps extends IdempotentWriteDeps {
+export interface CreateFolderDeps extends IdempotentWriteDeps, FolderAccessDeps {
   readonly folders: FolderRepository;
   readonly ids: IdGenerator;
   /** Audit log (ADR-0070) — one `folder.created` row per create. */
@@ -45,8 +56,8 @@ export interface CreateFolderDeps extends IdempotentWriteDeps {
   readonly uow: UnitOfWork;
 }
 
-/** Authz here keys ONLY on `orgId` (loadOwnedFolder) — `userId` is carried
- *  solely to attribute the audit row; it must never gate authorization. */
+/** `userId` now gates authorization too (ADR-0076): the parent must be
+ *  visible + writable for THIS user, and the new folder is owned by them. */
 export type CreateFolderActor = TenancyActor;
 
 export interface CreateFolderInput {
@@ -62,7 +73,13 @@ export async function createFolder(
   actor: CreateFolderActor,
   input: CreateFolderInput,
 ): Promise<Result<Folder, AppError>> {
-  const parent = await loadOwnedFolder(deps.folders, actor, input.parentId, PARENT_FOLDER_MESSAGES);
+  const parent = await loadWritableFolder(
+    deps.folders,
+    actor,
+    input.parentId,
+    deps,
+    PARENT_FOLDER_MESSAGES,
+  );
   if (!parent.ok) return parent;
 
   const depth = await parentDepth(deps.folders, parent.value);
@@ -77,6 +94,10 @@ export async function createFolder(
     id: deps.ids.folderId(),
     orgId: actor.orgId,
     parentId: input.parentId,
+    // ADR-0076: the creator owns the new folder; visibility is inherited —
+    // private under the Root (private-by-default), else the parent's.
+    ownerId: actor.userId,
+    visibility: inheritedVisibility(parent.value),
     name: input.name,
   });
   if (!built.ok) return built;
