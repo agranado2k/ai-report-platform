@@ -141,23 +141,44 @@ export async function loadOwnedReport(
   return ok(found.value);
 }
 
-/** Does `actor` hold a write grant on `reportId` (ADR-0060 §2)? Resolves the
- *  actor's mirrored email (a grant's `granteeUserId` may still be null if the
- *  grantee hadn't signed up at grant time) and asks the WriteGrantStore for a
- *  match by userId OR normalized email. */
-export async function hasWriteGrant(
-  reportId: ReportId,
+/** An email-keyed grant store, as the shared probe below sees it: both
+ *  `WriteGrantStore` (ADR-0060, keyed by ReportId) and `FolderShareStore`
+ *  (ADR-0076, keyed by FolderId) expose exactly this `findFor`. */
+interface EmailKeyedGrantStore<Id, Grant> {
+  findFor(
+    id: Id,
+    actor: { readonly userId: UserId; readonly email?: string },
+  ): Promise<Result<Grant | null, AppError>>;
+}
+
+/** Does `actor` hold an email-keyed grant on `id`? The one piece of real work
+ *  is resolving the actor's MIRRORED EMAIL: a grant's `granteeUserId` may
+ *  still be null (the grantee hadn't signed up when it was issued), so email is
+ *  the durable match key (ADR-0060 §2). Write grants and folder shares differ
+ *  only in which store they ask, so they share this. */
+async function hasEmailKeyedGrant<Id, Grant>(
+  id: Id,
   actor: Pick<TenancyActor, "userId">,
-  deps: WriteGrantCheckDeps,
+  store: EmailKeyedGrantStore<Id, Grant>,
+  identities: Pick<IdentityStore, "findEmailByUserId">,
 ): Promise<Result<boolean, AppError>> {
-  const email = await deps.identities.findEmailByUserId(actor.userId);
+  const email = await identities.findEmailByUserId(actor.userId);
   if (!email.ok) return email;
-  const found = await deps.grants.findFor(reportId, {
+  const found = await store.findFor(id, {
     userId: actor.userId,
     email: email.value ?? undefined,
   });
   if (!found.ok) return found;
   return ok(found.value !== null);
+}
+
+/** Does `actor` hold a write grant on `reportId` (ADR-0060 §2)? */
+export async function hasWriteGrant(
+  reportId: ReportId,
+  actor: Pick<TenancyActor, "userId">,
+  deps: WriteGrantCheckDeps,
+): Promise<Result<boolean, AppError>> {
+  return hasEmailKeyedGrant(reportId, actor, deps.grants, deps.identities);
 }
 
 /** May `actor` modify this report (rename / re-upload / move)? `isOwner OR
@@ -239,22 +260,14 @@ const FOLDER_GUARD_MESSAGES: FolderGuardMessages = {
   notWritable: "you do not have write access to this folder",
 };
 
-/** Does `actor` hold a folder share on `folderId` (ADR-0076)? Mirrors
- *  `hasWriteGrant`: resolve the actor's mirrored email, then match by userId
- *  OR normalized email. */
+/** Does `actor` hold a folder share on `folderId` (ADR-0076)? The exact
+ *  `hasWriteGrant` probe, pointed at the FolderShareStore. */
 export async function hasFolderShare(
   folderId: FolderId,
   actor: Pick<TenancyActor, "userId">,
   deps: FolderAccessDeps,
 ): Promise<Result<boolean, AppError>> {
-  const email = await deps.identities.findEmailByUserId(actor.userId);
-  if (!email.ok) return email;
-  const found = await deps.folderShares.findFor(folderId, {
-    userId: actor.userId,
-    email: email.value ?? undefined,
-  });
-  if (!found.ok) return found;
-  return ok(found.value !== null);
+  return hasEmailKeyedGrant(folderId, actor, deps.folderShares, deps.identities);
 }
 
 /** The full folder visibility predicate (ADR-0076): the pure broad legs
@@ -303,19 +316,16 @@ export async function loadManagedFolder(
   folderId: FolderId,
   deps: FolderAccessDeps,
 ): Promise<Result<Folder, AppError>> {
-  const found = await folders.findById(folderId);
+  // The visibility ladder is exactly `loadVisibleFolder`'s — an owner or a
+  // legacy row always passes its broad legs, so there is nothing to hoist.
+  const found = await loadVisibleFolder(folders, actor, folderId, deps);
   if (!found.ok) return found;
-  if (!found.value || found.value.deletedAt !== null) {
-    return err(notFound(FOLDER_GUARD_MESSAGES.notFound));
+  // Narrow to owner-or-legacy. Anyone who reaches here CAN see the folder
+  // (org-visible, or a share grantee), so NotFound would be a lie: 403.
+  if (found.value.ownerId !== null && found.value.ownerId !== actor.userId) {
+    return err(notAllowed("only the folder's owner can manage its sharing"));
   }
-  if (found.value.orgId !== actor.orgId) return err(notAllowed(FOLDER_GUARD_MESSAGES.notInOrg));
-  if (found.value.ownerId === null || found.value.ownerId === actor.userId) {
-    return ok(found.value);
-  }
-  const visible = await isFolderVisibleTo(found.value, actor, deps);
-  if (!visible.ok) return visible;
-  if (!visible.value) return err(notFound(FOLDER_GUARD_MESSAGES.notFound));
-  return err(notAllowed("only the folder's owner can manage its sharing"));
+  return ok(found.value);
 }
 
 /** Load a Folder by id for a WRITE (rename / delete / create children —
