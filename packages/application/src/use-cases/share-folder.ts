@@ -28,6 +28,7 @@ import type {
   AuditLogger,
   FolderRepository,
   FolderShare,
+  IdempotencyKeyRef,
   IdentityStore,
   UnitOfWork,
 } from "../ports";
@@ -72,16 +73,25 @@ export async function shareFolder(
   const granteeUserId = await deps.identities.findUserIdByEmail(email.value);
   if (!granteeUserId.ok) return granteeUserId;
 
-  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
-  const idem = await beginIdempotentWrite(deps, {
-    actingUserId: actor.userId,
-    route: ROUTE,
-    key: input.idempotencyKey,
-    fingerprint: [input.folderId, email.value],
-  });
-  if (!idem.ok) return idem;
-  if (idem.value.outcome === "replay") return reviveFolderShareReplay(idem.value.record);
-  const idemRef = idem.value.ref;
+  // Idempotency (ADR-0039), with the setAcl-shaped carve-out: the DERIVED-key
+  // fallback fingerprints (folder, grantee) — the state this call establishes,
+  // not a one-shot request — and a derived key is permanent (`idempotency_keys`
+  // has no TTL sweep today). So grant → revoke → RE-grant would replay the
+  // first 201 and never re-insert the share. An upsert of the same grant is
+  // naturally idempotent, so the fallback buys nothing. With an EXPLICIT
+  // `Idempotency-Key` the client owns retry identity and replay applies.
+  let idemRef: IdempotencyKeyRef | undefined;
+  if (input.idempotencyKey !== undefined) {
+    const idem = await beginIdempotentWrite(deps, {
+      actingUserId: actor.userId,
+      route: ROUTE,
+      key: input.idempotencyKey,
+      fingerprint: [input.folderId, email.value],
+    });
+    if (!idem.ok) return idem;
+    if (idem.value.outcome === "replay") return reviveFolderShareReplay(idem.value.record);
+    idemRef = idem.value.ref;
+  }
 
   return deps.uow.run(async () => {
     const shared = await deps.folderShares.grant(
@@ -116,11 +126,13 @@ export async function shareFolder(
         message: "folder share not found immediately after sharing",
       });
     }
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 201,
-      responseBody: share,
-    });
-    if (!done.ok) return done;
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 201,
+        responseBody: share,
+      });
+      if (!done.ok) return done;
+    }
     return ok(share);
   });
 }

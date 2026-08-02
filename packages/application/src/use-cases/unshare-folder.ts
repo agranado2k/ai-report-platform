@@ -16,7 +16,7 @@ import {
 } from "arp-domain";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
 
 const ROUTE = "DELETE /api/v1/folders/{id}/shares/{email}";
 
@@ -51,16 +51,27 @@ export async function unshareFolder(
   const email = makeEmailAddress(input.email);
   if (!email.ok) return email;
 
-  // Idempotency (ADR-0039): a replayed revoke returns the recorded 204.
-  const idem = await beginIdempotentWrite(deps, {
-    actingUserId: actor.userId,
-    route: ROUTE,
-    key: input.idempotencyKey,
-    fingerprint: [input.folderId, email.value],
-  });
-  if (!idem.ok) return idem;
-  if (idem.value.outcome === "replay") return ok(undefined);
-  const idemRef = idem.value.ref;
+  // Idempotency (ADR-0039), with the setAcl-shaped carve-out: the DERIVED-key
+  // fallback fingerprints (folder, grantee) — the state this call establishes,
+  // not a one-shot request — and a derived key is permanent (`idempotency_keys`
+  // has no TTL sweep today). So a PRE-EMPTIVE revoke (of an email with no
+  // share) would burn the key, and the later REAL revoke would replay its 204
+  // without deleting anything — the grantee silently keeps visibility. A delete
+  // is already naturally idempotent (revoking nothing succeeds), so the
+  // fallback buys nothing. With an EXPLICIT `Idempotency-Key` the client owns
+  // retry identity and the recorded 204 replays as usual.
+  let idemRef: IdempotencyKeyRef | undefined;
+  if (input.idempotencyKey !== undefined) {
+    const idem = await beginIdempotentWrite(deps, {
+      actingUserId: actor.userId,
+      route: ROUTE,
+      key: input.idempotencyKey,
+      fingerprint: [input.folderId, email.value],
+    });
+    if (!idem.ok) return idem;
+    if (idem.value.outcome === "replay") return ok(undefined);
+    idemRef = idem.value.ref;
+  }
 
   return deps.uow.run(async () => {
     const revoked = await deps.folderShares.revoke(found.value.id, email.value);
@@ -76,6 +87,7 @@ export async function unshareFolder(
       },
     ]);
     if (!audited.ok) return audited;
+    if (!idemRef) return ok(undefined);
     return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
   });
 }

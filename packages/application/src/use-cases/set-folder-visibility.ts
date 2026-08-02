@@ -25,7 +25,7 @@ import {
   reviveFolderReplay,
 } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
 
 const ROUTE = "POST /api/v1/folders/{id}/visibility";
 
@@ -62,16 +62,28 @@ export async function setFolderVisibility(
   const changed = applyVisibility(found.value, input.visibility, actor.userId);
   if (!changed.ok) return changed;
 
-  // Idempotency (ADR-0039): explicit key, else derived from user+route+payload.
-  const idem = await beginIdempotentWrite(deps, {
-    actingUserId: actor.userId,
-    route: ROUTE,
-    key: input.idempotencyKey,
-    fingerprint: [input.folderId, input.visibility],
-  });
-  if (!idem.ok) return idem;
-  if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
-  const idemRef = idem.value.ref;
+  // Idempotency (ADR-0039), with the same carve-out shape setAcl uses for
+  // password mode: the ADR-0039 DERIVED-key fallback is only sound for
+  // operations whose fingerprint identifies a one-shot request. This one sets
+  // STATE, so its fingerprint describes the DESIRED state — and a derived key
+  // is a permanent record (`idempotency_keys` has no TTL sweep today), so
+  // private → org → private would replay the first response and never re-save,
+  // leaving the folder `org` while the API answered `private`. Setting the same
+  // visibility twice is naturally idempotent in effect, so the fallback buys
+  // nothing here. With an EXPLICIT `Idempotency-Key` the client owns retry
+  // identity and the claim/replay machinery applies as usual.
+  let idemRef: IdempotencyKeyRef | undefined;
+  if (input.idempotencyKey !== undefined) {
+    const idem = await beginIdempotentWrite(deps, {
+      actingUserId: actor.userId,
+      route: ROUTE,
+      key: input.idempotencyKey,
+      fingerprint: [input.folderId, input.visibility],
+    });
+    if (!idem.ok) return idem;
+    if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
+    idemRef = idem.value.ref;
+  }
 
   return deps.uow.run(async () => {
     const saved = await deps.folders.save(changed.value);
@@ -92,11 +104,13 @@ export async function setFolderVisibility(
       },
     ]);
     if (!audited.ok) return audited;
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 200,
-      responseBody: changed.value,
-    });
-    if (!done.ok) return done;
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 200,
+        responseBody: changed.value,
+      });
+      if (!done.ok) return done;
+    }
     return ok(changed.value);
   });
 }

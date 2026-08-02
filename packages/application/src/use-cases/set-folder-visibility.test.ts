@@ -31,7 +31,7 @@ async function setup() {
 }
 
 describe("setFolderVisibility use case (ADR-0076)", () => {
-  it("the owner flips their folder private → org and back", async () => {
+  it("the owner flips their folder private → org", async () => {
     const d = await setup();
     await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
     const r = await setFolderVisibility(
@@ -42,6 +42,44 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
     expect(r.ok && r.value.visibility).toBe("org");
     const reloaded = await d.folders.findById(folderId(F1));
     expect(reloaded.ok && reloaded.value?.visibility).toBe("org");
+  });
+
+  it("and back: org → private actually re-persists (no derived-key replay, F1)", async () => {
+    const d = await setup();
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
+    const actor = { orgId: orgA, userId: me, scopes: SCOPED };
+    await setFolderVisibility(d, actor, { folderId: folderId(F1), visibility: "org" });
+    const back = await setFolderVisibility(d, actor, {
+      folderId: folderId(F1),
+      visibility: "private",
+    });
+    expect(back.ok && back.value.visibility).toBe("private");
+    const reloaded = await d.folders.findById(folderId(F1));
+    expect(reloaded.ok && reloaded.value?.visibility).toBe("private");
+  });
+
+  it("private → org → private round-trips: the LAST write wins, never a replayed first response", async () => {
+    const d = await setup();
+    await d.folders.save(
+      folder(F1, orgA, "Mine", {
+        parentId: folderId(ROOT),
+        ownerId: me,
+        visibility: "private",
+      }),
+    );
+    const actor = { orgId: orgA, userId: me, scopes: SCOPED };
+    for (const visibility of ["org", "private", "org"] as const) {
+      const r = await setFolderVisibility(d, actor, { folderId: folderId(F1), visibility });
+      expect(r.ok && r.value.visibility).toBe(visibility);
+      const reloaded = await d.folders.findById(folderId(F1));
+      expect(reloaded.ok && reloaded.value?.visibility).toBe(visibility);
+    }
   });
 
   it("ADOPTS a legacy folder: the caller becomes owner when setting private (the repair path)", async () => {
@@ -109,15 +147,27 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
 });
 
 describe("setFolderVisibility idempotency (ADR-0039)", () => {
-  it("replays the recorded folder resource on an identical retry — one audit row", async () => {
+  it("replays the recorded folder resource on an identical retry with an EXPLICIT key — one audit row", async () => {
     const d = await setup();
     await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
     const actor = { orgId: orgA, userId: me, scopes: SCOPED };
-    const input = { folderId: folderId(F1), visibility: "org" as const };
+    const input = { folderId: folderId(F1), visibility: "org" as const, idempotencyKey: "k1" };
     const first = await setFolderVisibility(d, actor, input);
     const second = await setFolderVisibility(d, actor, input);
     expect(first.ok && first.value.visibility).toBe("org");
     expect(second.ok && second.value.visibility).toBe("org");
     expect(d.audit.recorded().length).toBe(1);
+  });
+
+  it("WITHOUT an explicit key it never replays — setting state is naturally idempotent (F1)", async () => {
+    const d = await setup();
+    await d.folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+    const actor = { orgId: orgA, userId: me, scopes: SCOPED };
+    const input = { folderId: folderId(F1), visibility: "org" as const };
+    await setFolderVisibility(d, actor, input);
+    await setFolderVisibility(d, actor, input);
+    // Both requests executed: the state is the same either way, but the second
+    // must NOT be short-circuited by a permanent derived key.
+    expect(d.audit.recorded().length).toBe(2);
   });
 });
