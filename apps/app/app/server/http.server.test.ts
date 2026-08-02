@@ -7,7 +7,7 @@
 // `json()` response shaped `{ error: string }` — the shape the dashboard's
 // `actionData` already renders.
 import { describe, expect, it } from "vitest";
-import { errorToJson, rejectNonJsonContentType } from "./http.server";
+import { errorToJson, errorToJsonParts, rejectNonJsonContentType } from "./http.server";
 
 describe("errorToJson", () => {
   it("maps ValidationError to 422 (not a generic 400)", async () => {
@@ -37,6 +37,29 @@ describe("errorToJson", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).not.toMatch(/10\.0\.0\.1/);
+  });
+});
+
+// `errorToJsonParts` is the same authority WITHOUT the Response, for actions
+// that fold a failure into a larger action-data shape (the dashboard's
+// per-folder sharing controls tag the message with its folder id). It must
+// stay in lockstep with `errorToJson` — which now delegates to it.
+describe("errorToJsonParts", () => {
+  it("returns the same status + message errorToJson would render", async () => {
+    const error = { kind: "NotAllowed", message: "not your folder" } as const;
+    const parts = errorToJsonParts(error);
+    const res = errorToJson(error);
+    expect(parts.status).toBe(res.status);
+    expect(parts.message).toBe((await res.json()).error);
+  });
+
+  it("masks Unexpected's infra detail here too — the message is safe to render", () => {
+    const parts = errorToJsonParts({
+      kind: "Unexpected",
+      message: "pg: connection refused at 10.0.0.1",
+    });
+    expect(parts.status).toBe(500);
+    expect(parts.message).not.toMatch(/10\.0\.0\.1/);
   });
 });
 

@@ -63,12 +63,28 @@ export function unauthenticated(): HttpResponse {
  * doesn't need the full RFC 9457 problem+json body, just the right status.
  */
 export function errorToJson(error: AppError) {
+  const { message, status } = errorToJsonParts(error);
+  return json({ error: message }, { status });
+}
+
+/**
+ * The status + human message `errorToJson` would render, WITHOUT the Response —
+ * for actions that serve several targets from one route and must fold the
+ * failure into a larger action-data shape (e.g. the dashboard's per-folder
+ * sharing controls, which tag the message with the folder it belongs to so the
+ * sidebar renders it on that row). Same status authority; the caller keeps one
+ * action-data shape instead of a union the view has to discriminate.
+ */
+export function errorToJsonParts(error: AppError): {
+  readonly message: string;
+  readonly status: number;
+} {
   const http = errorToHttp(error);
   const detail = (http.body as { detail?: unknown }).detail;
-  return json(
-    { error: typeof detail === "string" ? detail : error.message },
-    { status: http.status },
-  );
+  return {
+    message: typeof detail === "string" ? detail : error.message,
+    status: http.status,
+  };
 }
 
 /**
