@@ -217,5 +217,15 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       granted_at: new Date(1_752_000_000_000).toISOString(),
     };
     expect(grantWriteToHttp(ok(grant)).body).toEqual(expected);
+    // With the entry-URL opts, the same shape gains ONLY the optional
+    // `open_url` (additive — the grantee's one-click editor entry).
+    const withEntry: WriteGrantWire = {
+      ...expected,
+      open_url: "https://app.example.test/reports/abcde12345/open",
+    };
+    expect(
+      grantWriteToHttp(ok(grant), { appOrigin: "https://app.example.test", slug: "abcde12345" })
+        .body,
+    ).toEqual(withEntry);
   });
 });

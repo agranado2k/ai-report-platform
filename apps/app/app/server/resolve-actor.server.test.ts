@@ -166,12 +166,39 @@ describe("door 2 — Clerk session", () => {
     warn.mockRestore();
   });
 
-  it("read: NEVER provisions — an unmirrored signed-in user resolves to null", async () => {
+  it("read: a mirror miss lazily provisions — ONCE, via the same door as writes (ADR-0048 amendment)", async () => {
     const provision = {
       identities: new InMemoryIdentityStore(),
       clerkOrgs: new FakeClerkOrgProvisioner(),
     };
-    provision.clerkOrgs.personalOrgId = null; // no org yet → never uploaded
+    provision.clerkOrgs.personalOrgId = null; // no org yet → never uploaded, never read
+    const r = await resolveActor(
+      args(),
+      { mode: "read" },
+      makeDeps({
+        provision,
+        session: async () => ({
+          userId: "clerk-u1",
+          orgId: null,
+          sessionClaims: { email: "ada@gmail.com", name: "Ada Lovelace" },
+        }),
+      }),
+    );
+    // A genuine member who has only ever viewed (review #150 H-1 generalized)
+    // resolves to a real actor instead of the empty dashboard.
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value?.scopes).toEqual(SELF_SCOPES);
+    expect(r.value?.folderId).toBeTruthy();
+    expect(provision.clerkOrgs.calls.length).toBe(1); // provisioned exactly once
+  });
+
+  it("read: a mirror miss with NO email claim resolves to null — never provisions, never 401s", async () => {
+    const provision = {
+      identities: new InMemoryIdentityStore(),
+      clerkOrgs: new FakeClerkOrgProvisioner(),
+    };
+    provision.clerkOrgs.personalOrgId = null;
     const r = await resolveActor(
       args(),
       { mode: "read" },
@@ -180,7 +207,7 @@ describe("door 2 — Clerk session", () => {
         session: async () => ({ userId: "clerk-u1", orgId: null, sessionClaims: {} }),
       }),
     );
-    expect(r.ok && r.value).toBeNull();
+    expect(r.ok && r.value).toBeNull(); // empty dashboard, exactly as before
     expect(provision.clerkOrgs.calls).toEqual([]); // createPersonalOrg never called
   });
 
@@ -212,6 +239,9 @@ describe("door 2 — Clerk session", () => {
       orgId: created.value.orgId,
       scopes: SELF_SCOPES,
     });
+    // Steady state: the lazy-provision fallback (ADR-0048 amendment) only fires
+    // on a mirror MISS — a mirrored read stays a pure lookup, no Clerk/DB write.
+    expect(provision.clerkOrgs.calls).toEqual([]);
   });
 });
 

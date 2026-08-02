@@ -36,8 +36,10 @@ export const meta: MetaFunction = () => [
 const PAGE_SIZE = 20;
 
 // Dashboard (ADR-0036, Reports & Folders): an org-wide, newest-first, paged +
-// searchable report list with a folder sidebar. resolveActorForRead resolves the
-// org WITHOUT provisioning (GETs stay safe). Query params: `?q=` (title/slug
+// searchable report list with a folder sidebar. resolveActorForRead resolves
+// the org — lazily provisioning the identity mirror on a first-ever read
+// (ADR-0048 amendment 2026-08-01), so a genuine org member who has only ever
+// viewed still gets their org's dashboard. Query params: `?q=` (title/slug
 // search), `?folder=<id>` (filter to one folder), `?page=` (1-based).
 export async function loader(args: LoaderFunctionArgs) {
   const url = new URL(args.request.url);

@@ -15,8 +15,12 @@
 // edit token. Mode differences, enforced here in one place:
 //   - write: doors 2+3 `provisionIdentity` (mirror on first write, ADR-0048);
 //     no door matching → err(Unauthenticated) (→ 401).
-//   - read: NEVER provisions (GETs stay safe/idempotent — no Clerk org or DB
-//     rows created); an unmirrored/absent credential resolves to ok(null).
+//   - read: door 2 looks up the mirror first and, on a miss with the email
+//     claim present, lazily provisions via the SAME provisionIdentity as the
+//     write door (ADR-0048 amendment 2026-08-01 — one-time write on first
+//     read; steady-state reads stay pure lookups). Doors 1/3/4 never
+//     provision on read; an absent credential / missing email claim still
+//     resolves to ok(null).
 //
 // Everything I/O-shaped rides `ResolveActorDeps`, so the whole cascade is
 // unit-testable without Clerk, env, or a database (resolve-actor.server.test.ts).
@@ -144,12 +148,23 @@ export async function resolveActor(
 
   // Door 2 — Clerk session (ADR-0048): a browser sign-in. TERMINAL once a
   // session subject exists. Write JIT-provisions off the email custom claim;
-  // read looks up the already-mirrored identity only.
+  // read looks up the already-mirrored identity first and, on a mirror MISS,
+  // lazily provisions through the SAME provisionIdentity the write door uses
+  // (ADR-0048 amendment 2026-08-01 — a genuine member who has only ever
+  // viewed, review #150 H-1 generalized). One-time write on first read;
+  // steady-state reads stay a pure lookup. Post-ADR-0074 provisioning
+  // converges the user onto the canonical org, so this is safe for the
+  // unmirrored-org-member shape too.
   const { userId, orgId, sessionClaims } = await deps.session(args);
   if (userId) {
-    if (!write) return lookupMirroredActor(deps.provision, userId, orgId ?? null);
     const email = readEmailClaim(sessionClaims);
-    if (!email) {
+    if (!write) {
+      const mirrored = await lookupMirroredActor(deps.provision, userId, orgId ?? null);
+      if (!mirrored.ok || mirrored.value) return mirrored;
+      // Mirror miss. Without the email claim we cannot provision — resolve to
+      // ok(null) (the empty read) exactly as before; reads never 401 here.
+      if (!email) return ok(null);
+    } else if (!email) {
       console.warn(
         `resolveActor: signed-in user ${userId} has no 'email' session claim — ` +
           "rejecting. Configure the email claim on the Clerk instance (ADR-0048).",
@@ -225,10 +240,12 @@ function apiKeyToken(args: LoaderFunctionArgs): string | null {
  * Read-only resolve of an already-mirrored actor from a Clerk user id. The
  * session/OAuth token may carry NO active org; the user still has a personal
  * org (the one the write path provisioned on first upload, ADR-0048). Resolve
- * it so reads see the same org writes attribute to, WITHOUT provisioning on a
- * GET. Null when the user has no org / mirror yet (never uploaded) → empty
- * list. Session/OAuth reads aren't API-key-scoped, so they carry the same
- * `SELF_SCOPES` the write path grants (ADR-0060 §3).
+ * it so reads see the same org writes attribute to. Null when the user has no
+ * org / mirror yet — the SESSION read door then falls through to lazy
+ * provisioning (ADR-0048 amendment 2026-08-01); the OAuth read door keeps
+ * null → empty list (no email round-trip on read). Session/OAuth reads aren't
+ * API-key-scoped, so they carry the same `SELF_SCOPES` the write path grants
+ * (ADR-0060 §3).
  */
 async function lookupMirroredActor(
   provision: ProvisionIdentityDeps,

@@ -1611,6 +1611,15 @@ components:
           type: string
           format: date-time
           description: When the grant was created (or last refreshed by a re-grant).
+        open_url:
+          type: string
+          format: uri
+          description: >
+            The grantee's one-click editor entry — the app's canWrite
+            edit-token mint (`{appOrigin}/reports/{slug}/open`, ADR-0063).
+            Present on the grant (create) response so the owner has a link to
+            send the grantee (grants send no notification, ADR-0060); absent
+            on list entries.
 
     WriteGrantList:
       description: A list of a report's write grants (ADR-0053 list envelope).

@@ -8,9 +8,9 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # E2E_CLERK_SECRET_KEY; see playwright.config.ts). Uses the ADR-0068 §6 second
   # fixture (silver+clerk_test@agranado.com — tests/e2e/README.md), whose domain
   # is deliberately NOT on the public-provider list, so this exercises the
-  # `team`-org branch of provisionIdentity. The upload (not just a GET) is
-  # required to hit the write path, since resolveActorForRead deliberately
-  # never provisions.
+  # `team`-org branch of provisionIdentity. The upload exercises the write
+  # path's JIT provisioning; the read path lazily provisions too since the
+  # ADR-0048 amendment (2026-08-01), covered by the third identity below.
   Scenario: The second identity's first authenticated upload provisions its team org
     Given I am signed in as the second (team-org) Clerk test user
     When I upload an HTML report file with my second session to "/api/v1/reports"
@@ -35,10 +35,19 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # with a session re-minted with that canonical org ACTIVE — like a browser
   # session after the forced task's org selection. Fixtures are best-effort
   # deleted after the scenario (@run-scoped cleanup hook).
+  # The THIRD identity is the ADR-0048 amendment's proof (provision-on-read,
+  # 2026-08-01): it NEVER uploads — its first authenticated request is the
+  # bare session GET /api/v1/reports. Pre-amendment that read resolved to a
+  # null actor (unmirrored → 401/empty); now the read door lazily provisions
+  # through the same canonical chain (its session actively carries its DECOY
+  # org, which the mirror-miss branch must ignore), so a genuine org member
+  # who has only ever viewed sees the org's reports.
   @run-scoped
   Scenario: Two same-domain identities share one team org
     Given a first run-scoped team-domain identity is signed in
     And a second run-scoped team-domain identity is signed in
+    And a third run-scoped team-domain identity is signed in and never uploads
     When the first run-scoped identity uploads an HTML report file to "/api/v1/reports"
     And the second run-scoped identity uploads its own HTML report file to "/api/v1/reports"
     Then the second run-scoped identity's report listing includes both run-scoped uploads
+    And the third run-scoped identity's first-ever session read lists both run-scoped uploads

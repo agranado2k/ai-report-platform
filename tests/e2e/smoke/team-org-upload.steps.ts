@@ -34,11 +34,16 @@ const HTML = `<!doctype html><html><body><h1>${MARKER}</h1></body></html>`;
 const RUN_ID = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const FIRST_EMAIL = runScopedTeamEmail("silver", RUN_ID);
 const SECOND_EMAIL = runScopedTeamEmail("gold", RUN_ID);
+// The provision-on-read identity (ADR-0048 amendment 2026-08-01): NEVER
+// uploads — its first authenticated request is a bare session GET.
+const THIRD_EMAIL = runScopedTeamEmail("bronze", RUN_ID);
 
 let firstFixture: TeamFixture | undefined;
 let secondFixture: TeamFixture | undefined;
+let thirdFixture: TeamFixture | undefined;
 let firstSession: TestSession;
 let secondSession: TestSession;
+let thirdSession: TestSession;
 let firstBody: Record<string, unknown>;
 let secondBody: Record<string, unknown>;
 
@@ -142,6 +147,12 @@ Given("a second run-scoped team-domain identity is signed in", async () => {
   secondSession = await mintTestSessionFor(secretKey, SECOND_EMAIL);
 });
 
+Given("a third run-scoped team-domain identity is signed in and never uploads", async () => {
+  const secretKey = requireSecretKey();
+  thirdFixture = await ensureTeamFixtureUser(secretKey, THIRD_EMAIL);
+  thirdSession = await mintTestSessionFor(secretKey, THIRD_EMAIL);
+});
+
 When(
   "the first run-scoped identity uploads an HTML report file to {string}",
   async ({ request }, path: string) => {
@@ -227,6 +238,46 @@ Then(
   },
 );
 
+Then(
+  "the third run-scoped identity's first-ever session read lists both run-scoped uploads",
+  async ({ request }) => {
+    // Provision-on-read (ADR-0048 amendment 2026-08-01): the third identity has
+    // NEVER written — before the amendment this bare session GET resolved a
+    // null actor (unmirrored) and 401'd. The read door now lazily provisions
+    // through the SAME canonical chain as the write door: the session actively
+    // carries the identity's DECOY org (Clerk auto-activates the sole
+    // membership), which the mirror-miss branch must IGNORE in favor of the
+    // anchored domain org — so the very first read lands in the shared org and
+    // sees BOTH colleagues' uploads. No org re-mint here on purpose: the bare
+    // decoy-carrying session IS the prod shape (a member who signed in but
+    // never uploaded).
+    const res = await request.get("/api/v1/reports?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const listing = (await expectJson(
+      res,
+      200,
+      "third run-scoped identity's provision-on-read listing",
+    )) as { data?: ReadonlyArray<{ slug?: string }> };
+    const slugs = (listing.data ?? []).map((r) => r.slug);
+    expect(
+      slugs,
+      "a never-written org member's first read must see the org's reports (provision-on-read)",
+    ).toContain(firstBody.slug);
+    expect(slugs).toContain(secondBody.slug);
+
+    // Belt-and-braces: the read really did provision — the identity is now a
+    // member of the ANCHORED domain org on the Clerk side too.
+    const secretKey = requireSecretKey();
+    const canonicalOrgId = await findAnchoredOrgMembership(secretKey, THIRD_EMAIL, TEAM_ORG_DOMAIN);
+    expect(
+      canonicalOrgId,
+      "the provision-on-read must have joined the third identity to the anchored " +
+        `"${TEAM_ORG_DOMAIN}" org in Clerk`,
+    ).toBeTruthy();
+  },
+);
+
 // Best-effort accumulation bound: delete the run-scoped users (+ their decoy
 // orgs) after every attempt of the @run-scoped scenario, pass or fail. Deleting
 // the users also removes their canonical-org memberships, keeping the shared
@@ -239,8 +290,10 @@ After({ tags: "@run-scoped" }, async () => {
   if (!secretKey) return;
   if (firstFixture) await cleanupTeamFixture(secretKey, firstFixture);
   if (secondFixture) await cleanupTeamFixture(secretKey, secondFixture);
+  if (thirdFixture) await cleanupTeamFixture(secretKey, thirdFixture);
   firstFixture = undefined;
   secondFixture = undefined;
+  thirdFixture = undefined;
 });
 
 /** Parse a response body as JSON when possible; otherwise wrap the raw text so

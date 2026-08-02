@@ -172,4 +172,10 @@ export interface WriteGrantWire {
   readonly email: string;
   readonly granted_by: string;
   readonly granted_at: string;
+  /** The grantee's one-click editor entry (`{appOrigin}/reports/{slug}/open` —
+   *  the app's canWrite edit-token mint, ADR-0063). Present on the grant
+   *  (create) response so the owner has a link to SEND the grantee — grants
+   *  themselves stay silent (ADR-0060; no notification email). Additive:
+   *  absent on list entries and older responses. */
+  readonly open_url?: string;
 }

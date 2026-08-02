@@ -245,9 +245,11 @@ async function decideView(
 // valid edit token proves the app already ran its `canWrite` check at mint
 // time (and re-runs it live on every save/API call — ADR-0063 §3/§5), so the
 // gate here never consults `report.acl` — exactly the pre-extraction route's
-// behavior. Every "can't render" case degrades to the public viewer, which
-// owns the ADR-0038 §2 state machine — this purpose never emits `interstitial`
-// or (beyond the slug guard) `error`.
+// behavior. A MISSING/INVALID capability funnels to the app's edit-token mint
+// (`deniedEdit` → /reports/{slug}/open — the grantee-discoverability fix);
+// every post-capability "can't render" case still degrades to the public
+// viewer, which owns the ADR-0038 §2 state machine — this purpose never emits
+// `interstitial` or (beyond the slug guard) `error`.
 async function decideEdit(
   request: Request,
   url: URL,
@@ -309,8 +311,25 @@ async function decideEdit(
   };
 }
 
-/** The edit purpose's denied branch: degrade to the public viewer — through the
- *  `oa=` owner flow when present (with the observability signal), bare otherwise. */
+/** The edit purpose's denied branch. With an `oa=` fallback present (an OWNER
+ *  whose round-trip failed): degrade through the viewer's `?access=` owner
+ *  flow, with the observability signal — unchanged. Otherwise (no token,
+ *  expired/invalid token or cookie): funnel to the app's ONE edit-token mint,
+ *  `GET {appOrigin}/reports/{slug}/open` — the app re-authenticates the
+ *  session and re-mints `et=` for canWrite users (owner or write-grantee),
+ *  and bounces everyone else to its home ("/" → sign-in for anonymous
+ *  visitors), so a grantee's road into /edit no longer dead-ends at the
+ *  read-only viewer.
+ *
+ *  Loop safety: /open → /edit?et=… → arp_edit cookie → served; a non-writer
+ *  exits at the app home, never bouncing back here. The funnel is guarded on
+ *  BOTH secret and appOrigin: with no secret this origin can never validate
+ *  any token /open mints (funnelling would guarantee /edit → /open → /edit),
+ *  and with no appOrigin there is nowhere to send anyone — both keep today's
+ *  degrade to the public viewer. The residual loop (both secrets SET but
+ *  misaligned, a non-owner grantee) is the PR #185 incident class — the
+ *  browser's redirect-loop breaker surfaces it instead of a silent read-only
+ *  degrade. */
 function deniedEdit(slug: string, oa: string | undefined, deps: GateDeps): Decision {
   if (oa) {
     // Observability (claude-review #187): when an OWNER's edit-token round-trip
@@ -321,6 +340,10 @@ function deniedEdit(slug: string, oa: string | undefined, deps: GateDeps): Decis
     (deps.warn ?? console.warn)(
       JSON.stringify({ event: "owner-edit-degraded-to-view", slug, reason: "edit-token-denied" }),
     );
+    return { kind: "redirect", to: degradeLocation(slug, oa) };
   }
-  return { kind: "redirect", to: degradeLocation(slug, oa) };
+  if (deps.secret && deps.appOrigin) {
+    return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
+  }
+  return { kind: "redirect", to: degradeLocation(slug, undefined) };
 }

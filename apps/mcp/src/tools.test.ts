@@ -274,6 +274,34 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
   it("folders_create points to reports_move for organizing reports", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });
+
+  it("reports_grant_write tells the caller to share the returned open_url with the grantee", () => {
+    const d = descriptionOf("reports_grant_write");
+    expect(d).toMatch(/open_url/);
+    expect(d).toMatch(/grantee/);
+  });
+});
+
+describe("reports_grant_write result pass-through", () => {
+  it("carries the API's open_url through to the tool result (the grantee's editor entry)", async () => {
+    const grantWire = {
+      object: "write_grant",
+      email: "grantee@x.com",
+      granted_by: "user_abc",
+      granted_at: "2026-08-01T00:00:00.000Z",
+      open_url: "https://app.example.test/reports/abcde12345/open",
+    };
+    const { client, calls } = recordingClient({ ok: true, data: grantWire });
+    const tools = collectTools(registerWriteTools, client);
+    const result = await tools
+      .get("reports_grant_write")
+      ?.handler({ slug: "abcde12345", email: "grantee@x.com" });
+    expect(calls).toEqual([{ method: "grantWrite", args: ["abcde12345", "grantee@x.com"] }]);
+    expect(result?.structuredContent).toEqual(grantWire);
+    expect(textOf(result as { content: readonly unknown[] })).toContain(
+      "https://app.example.test/reports/abcde12345/open",
+    );
+  });
 });
 
 describe("shared schema vocabulary + cursor/slug helpers (wire-catalog refactor)", () => {

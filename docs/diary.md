@@ -3285,3 +3285,29 @@ mutations", and `acl:write` gates five of them today. Shipped in worktree
 
 Unblocks the `yKKotLYxkE` sharing flow post-deploy: mint a fresh key with `acl:write` checked and
 the original agent flow works verbatim. Existing keys are untouched (immutable — mint a new one).
+
+### 2026-08-01 — Unmirrored readers heal + the grantee's road to /edit opens (ADR-0048 amendment)
+
+Sharing `yKKotLYxkE` (ACL `org` + a write grant for processing@housenumbers.io) surfaced one root
+cause with two faces: processing@ has no `users` mirror row — reads never provisioned (ADR-0048)
+and they'd never written — so `findByClerk` missed, the dashboard read actor was null (empty
+dashboard, "No folders yet."), and the same null actor made `GET /reports/{slug}/open` bail before
+its `canWrite` gate — the ONLY edit-token mint was unreachable, so the write grant was live but
+unusable. Fixed in worktree `worktree/unmirrored-reader-grantee-edit`
+(branch `fix/unmirrored-reader-and-grantee-edit`):
+
+- **Reads lazily provision on a mirror miss** (ADR-0048 dated amendment): the session read door
+  falls through to the SAME `provisionIdentity` as the write door when the mirror lookup misses
+  and the email claim is present (review #150 H-1 — the org-mode unlock precedent — generalized).
+  One-time write on first read; steady state stays a pure lookup; no email claim → `ok(null)` as
+  before. Post-ADR-0074 the provisioning converges onto the canonical domain org.
+- **Tokenless/invalid-token `/edit` funnels to the app's mint**: `deniedEdit` now 302s to
+  `{appOrigin}/reports/{slug}/open` instead of silently degrading to the read-only viewer
+  (loop-safe: guarded on secret+appOrigin; the `oa=` owner-degrade branch is unchanged).
+- **Write-grant responses carry `open_url`** (`{appOrigin}/reports/{slug}/open`) on the HTTP 201
+  and the MCP `reports_grant_write` result + tool description — grants stay silent (ADR-0060
+  note), but the owner now holds a link to send. Additive `WriteGrantWire.open_url`.
+- e2e: the team-org smoke gains a third run-scoped identity that NEVER writes and still resolves
+  its org dashboard listing after provision-on-read.
+- Follow-ups filed, not in this PR: #226 ("Shared with you" dashboard section for cross-org
+  grantees), #227 (optional grant-notification email — entry-URL-in-response reduces urgency).
