@@ -258,6 +258,27 @@ describe("folderShareWarning (ADR-0076 — the adoption warning arrives BEFORE t
     expect(w).not.toContain("1 folders");
   });
 
+  it("agrees with a single legacy descendant all the way to the pronoun", () => {
+    // "1 folder … other members will no longer be able to change THEIR sharing"
+    // counted correctly and then lost agreement in the tail.
+    const w = folderShareWarning({
+      legacy: false,
+      target: "private",
+      scope: { ...empty, total: 1, legacy: 1 },
+    });
+    expect(w).toContain("change its sharing");
+    expect(w).not.toContain("change their sharing");
+  });
+
+  it("keeps the plural pronoun for several legacy descendants", () => {
+    const w = folderShareWarning({
+      legacy: false,
+      target: "private",
+      scope: { ...empty, total: 3, legacy: 2 },
+    });
+    expect(w).toContain("change their sharing");
+  });
+
   it("warns about mass EXPOSURE in the org direction, and that it cannot be undone", () => {
     // The same checkbox publishes currently-private children when the toggle
     // runs the other way, and destroys the per-descendant record so
@@ -269,7 +290,23 @@ describe("folderShareWarning (ADR-0076 — the adoption warning arrives BEFORE t
     });
     expect(w).toContain("3 folders");
     expect(w).toContain("private");
+    expect(w).toContain("that are currently private");
     expect(w).toContain("won't put them back");
+  });
+
+  it("agrees in the SINGULAR when exactly one private folder would be exposed", () => {
+    // Observed in the 2026-08-03 dogfood run: "make 1 folder that ARE currently
+    // private … won't put THEM back". The count was singularised; the verb and
+    // the pronoun were not.
+    const w = folderShareWarning({
+      legacy: false,
+      target: "org",
+      scope: { ...empty, total: 1, currentlyPrivate: 1 },
+    });
+    expect(w).toContain("1 folder that is currently private");
+    expect(w).not.toContain("that are currently private");
+    expect(w).toContain("won't put it back");
+    expect(w).not.toContain("won't put them back");
   });
 
   it("does NOT warn about exposure when the cascade runs toward private", () => {

@@ -265,17 +265,22 @@ export function folderShareWarning(input: {
   }
 
   if (input.scope.legacy > 0) {
+    const n = input.scope.legacy;
     lines.push(
-      `You'll also become the owner of ${folders(input.scope.legacy)} inside this one that ` +
+      `You'll also become the owner of ${folders(n)} inside this one that ` +
         "nobody owns yet, if you apply the change to everything inside — permanently, and " +
-        "other members will no longer be able to change their sharing.",
+        `other members will no longer be able to change ${plural(n, "its", "their")} sharing.`,
     );
   }
   if (input.target === "org" && input.scope.currentlyPrivate > 0) {
+    // Every clause has to agree with the count, not just the noun: the first
+    // version singularised "1 folder" and then said "that ARE currently
+    // private … won't put THEM back" (2026-08-03 dogfood, I-3).
+    const n = input.scope.currentlyPrivate;
     lines.push(
-      `Applying to everything inside will also make ${folders(input.scope.currentlyPrivate)} ` +
-        "that are currently private visible to everyone in your org; making this folder " +
-        "private again won't put them back.",
+      `Applying to everything inside will also make ${folders(n)} ` +
+        `that ${plural(n, "is", "are")} currently private visible to everyone in your org; ` +
+        `making this folder private again won't put ${plural(n, "it", "them")} back.`,
     );
   }
   return lines.length > 0 ? lines.join(" ") : null;
