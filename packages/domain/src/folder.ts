@@ -13,12 +13,27 @@ import type { AppError } from "./errors";
 import { validationError } from "./errors";
 import type { Result } from "./result";
 import { err, ok } from "./result";
+import { ACL_WRITE_SCOPE } from "./scope";
 
 /** Who may see a Folder (ADR-0076): `private` = its owner + folder-share
  *  grantees; `org` = every member of its org. Legacy rows (ownerId null) read
  *  as visible-to-all regardless. */
 export const FOLDER_VISIBILITIES = ["private", "org"] as const;
 export type FolderVisibility = (typeof FOLDER_VISIBILITIES)[number];
+
+/** Parse a wire/form value into a `FolderVisibility` (ADR-0076). Lives beside
+ *  the enum so the JSON API route and the dashboard action share ONE validator
+ *  — they previously carried character-identical copies of this check, which
+ *  is exactly how the two doors drift apart. Refusing an empty value is the
+ *  point: neither door may default a visibility the caller didn't state. */
+export function makeFolderVisibility(raw: string): Result<FolderVisibility, AppError> {
+  if ((FOLDER_VISIBILITIES as readonly string[]).includes(raw)) {
+    return ok(raw as FolderVisibility);
+  }
+  return err(
+    validationError(`visibility must be one of: ${FOLDER_VISIBILITIES.join(", ")}`, "visibility"),
+  );
+}
 
 /** The Root folder's visibility — ALWAYS `org` (ADR-0076 §3), because every
  *  member's default uploads land there. The `folders.visibility` column
@@ -138,6 +153,45 @@ export function canWriteFolder(folder: Folder, userId: UserId): boolean {
   return isFolderBroadlyVisibleTo(folder, userId);
 }
 
+/** May `userId` MANAGE this folder's SHARING (set visibility / share /
+ *  unshare / list shares) — ADR-0076 §6: its owner, or ANY org member while it
+ *  is still legacy (ownerId null), which is the adoption/repair path for
+ *  pre-ADR-0076 rows.
+ *
+ *  Strictly narrower than `canWriteFolder`: org visibility grants writes but
+ *  never sharing control, so a colleague may rename an org-visible folder they
+ *  don't own and still not be allowed to change who can see it.
+ *
+ *  This is THE rule. `loadManagedFolder` enforces it on the server and the
+ *  dashboard loader consults the same function to decide whether to render the
+ *  controls enabled — one predicate, one compile-time link, so the UI cannot
+ *  offer an affordance the server will refuse. Callers have already
+ *  established the org scope, and the `acl:write` gate
+ *  (`hasFolderManagementScope`) is a SEPARATE, additional condition. */
+export function canManageFolder(folder: Folder, userId: UserId): boolean {
+  return folder.ownerId === null || folder.ownerId === userId;
+}
+
+/** Is this the org's Root folder (ADR-0076 §3)? The Root is not a manageable
+ *  folder in EITHER direction — it can't be owned (`setFolderVisibility`
+ *  refuses it, which would otherwise let the adoption leg seize everyone's
+ *  default upload placement) and it can't be shared (`shareFolder` refuses it;
+ *  every member can already see it, so a share would be a no-op that
+ *  nonetheless implied the Root was somebody's to give away). Named so the
+ *  guard, the use case and the sidebar all test the same thing. */
+export function isRootFolder(folder: Pick<Folder, "parentId">): boolean {
+  return folder.parentId === null;
+}
+
+/** Does this actor's scope set permit folder SHARING MANAGEMENT (ADR-0076 §6)?
+ *  The same `acl:write` report sharing gates on — sharing is sharing, no new
+ *  scope. Not every actor that reaches the dashboard carries it: an edit-token
+ *  actor holds `reports:write` only (ADR-0063), so the UI must consult this
+ *  before enabling a control whose POST would 403. */
+export function hasFolderManagementScope(scopes: readonly string[]): boolean {
+  return scopes.includes(ACL_WRITE_SCOPE);
+}
+
 /** A node in a parent-linked tree, as the graft helper sees it — works for
  *  both domain Folders (branded ids) and wire FolderNodes (string ids). */
 export interface TreeNodeRef {
@@ -199,6 +253,45 @@ function isUnrooted<T extends TreeNodeRef>(node: T, byId: ReadonlyMap<string, T>
     current = byId.get(current.parentId);
   }
   return false;
+}
+
+/** Every node BELOW `folderId` in a parent-linked tree, excluding the folder
+ *  itself (ADR-0076 §cascade). Pure + total: a breadth-first walk down the
+ *  child index, visiting each node at most once, so a corrupt parent CYCLE
+ *  terminates instead of spinning.
+ *
+ *  The caller supplies the node set, and that is the whole story about scope:
+ *  the dashboard passes the ACTOR'S VISIBLE tree, so a descendant the actor
+ *  cannot see is simply absent here and is never cascaded — the honest limit
+ *  the UI reports rather than papers over. This helper exists precisely
+ *  because ADR-0076's visibility model is PER-FOLDER: "apply to everything
+ *  inside" is a caller-side loop over these ids, calling the same
+ *  `setFolderVisibility` use case once per folder — NOT new recursive
+ *  domain or SQL semantics. */
+export function collectFolderDescendants<T extends TreeNodeRef>(
+  nodes: readonly T[],
+  folderId: string,
+): readonly string[] {
+  const childrenOf = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (n.parentId === null) continue;
+    const siblings = childrenOf.get(n.parentId);
+    if (siblings) siblings.push(n.id);
+    else childrenOf.set(n.parentId, [n.id]);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>([folderId]);
+  const queue: string[] = [folderId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const child of childrenOf.get(current) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
 }
 
 /** Rename a Folder (display name only; the slug stays stable so sibling-slug

@@ -1,11 +1,52 @@
 import { Form, Link } from "@remix-run/react";
-import { Button, cx, FolderIcon, Input } from "arp-ui";
+// TYPE-ONLY import of `arp-domain`: `verbatimModuleSyntax` is on, so this emits
+// NOTHING at runtime — the barrel (and its `node:crypto`) never reaches the
+// client bundle. Hand-copying the union here was how the wire type and the
+// domain enum were free to drift.
+import type { FolderVisibility } from "arp-domain";
+import { type BadgeTone, Button, cx, FolderIcon, Input } from "arp-ui";
+import { FolderShareMenu, type FolderShareRow, FolderVisibilityBadge } from "./FolderShareMenu";
 
-/** Client-safe folder shape for the sidebar tree (no org id / timestamps). */
+/**
+ * Client-safe folder shape for the sidebar tree (no org id / timestamps).
+ *
+ * Everything past `name` is ADR-0076 sharing state, and every field of it is
+ * DERIVED IN THE LOADER (apps/app/app/server/folder-sharing.server.ts): the
+ * dashboard components must not import `arp-domain`, whose barrel drags
+ * `node:crypto` into the client bundle. So the server sends conclusions, not
+ * inputs — no ownerId, no predicate, no re-derivation here.
+ */
 export interface FolderNode {
   readonly id: string;
   readonly parentId: string | null;
   readonly name: string;
+  /** Who can see it (ADR-0076) — drives the toggle's direction and label. */
+  readonly visibility: FolderVisibility;
+  /** Org / Shared with N / Private / Not org-visible, already resolved
+   *  server-side — including the unknown-roster case, which never renders as a
+   *  positive privacy claim. */
+  readonly badge: { readonly label: string; readonly tone: BadgeTone };
+  /** The Root (parentId null): the domain refuses ANY visibility call on it,
+   *  so the tree renders no sharing affordance for it at all. */
+  readonly isRoot: boolean;
+  /** Would `loadManagedFolder` + the `acl:write` gate let this viewer manage it? */
+  readonly manageable: boolean;
+  /** Why not, when it wouldn't. */
+  readonly blockedReason: string | null;
+  /** THE warning shown before the first action — adoption of this folder,
+   *  adoption of the legacy folders inside it, and mass exposure in the org
+   *  direction, in one amber note. Null when there is nothing to warn about. */
+  readonly shareWarning: string | null;
+  /** The cascade checkbox's direction-aware, counted label. Null means render
+   *  no checkbox: nothing inside, or too much inside to change at once. */
+  readonly cascadeLabel: string | null;
+  /** The share roster — only loaded for the folder in `?manage=<id>`; `null`
+   *  everywhere else (an unknown roster is never rendered as an empty one). */
+  readonly shares: readonly FolderShareRow[] | null;
+  /** The roster was REQUESTED for this folder and the load FAILED. Distinct
+   *  from `shares === null` (never asked for): an error must not render as
+   *  "not shared with anyone". */
+  readonly sharesUnavailable: boolean;
 }
 
 // Static indent classes per depth (CSP-safe — no inline style). Folders nest at
@@ -24,36 +65,68 @@ const INDENT = [
 const indentClass = (depth: number) => INDENT[Math.min(depth, INDENT.length - 1)];
 
 /** Recursively render a folder + children as an indented, selectable tree.
- * The selected non-Root folder reveals inline rename + delete forms. */
+ * Every non-Root row carries its visibility badge and a `<details>` sharing
+ * kebab (the same idiom the report rows use). The selected non-Root folder
+ * additionally reveals the inline rename + delete forms. */
 export function FolderTree({
   node,
   childrenOf,
   selectedId,
   depth,
+  manageHref,
+  inertShareNotice,
+  rosterUnavailableNotice,
+  openMenuId,
 }: {
   node: FolderNode;
   childrenOf: (parentId: string | null) => FolderNode[];
   selectedId: string | null;
   depth: number;
+  /** Builds the `?manage=<id>` link that makes the loader fetch a roster. */
+  manageHref: (folderId: string) => string;
+  inertShareNotice: string;
+  rosterUnavailableNotice: string;
+  /** The folder whose kebab should render already open — the one being
+   *  managed, or the one the last action reported on. */
+  openMenuId: string | null;
 }) {
   const selected = node.id === selectedId;
   const pad = indentClass(depth);
   return (
     <div>
-      <Link
-        to={`/?folder=${node.id}`}
+      <div
         className={cx(
-          "block rounded-control py-1 pr-2 text-sm no-underline transition-colors",
+          "flex items-center gap-1 rounded-control pr-1 transition-colors",
           pad,
-          selected ? "bg-brand/10 font-semibold text-brand" : "text-fg hover:bg-surface-raised",
+          selected ? "bg-brand/10" : "hover:bg-surface-raised",
         )}
       >
-        <span className="inline-flex items-center gap-1.5">
-          <FolderIcon className="h-3.5 w-3.5 shrink-0" />
-          {node.name}
-        </span>
-      </Link>
-      {selected && node.parentId !== null ? (
+        <Link
+          to={`/?folder=${node.id}`}
+          className={cx(
+            "min-w-0 flex-1 rounded-control py-1 text-sm no-underline transition-colors",
+            selected ? "font-semibold text-brand" : "text-fg hover:text-brand",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-1.5">
+            <FolderIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{node.name}</span>
+          </span>
+        </Link>
+        {node.isRoot ? null : (
+          <>
+            <FolderVisibilityBadge node={node} />
+            <FolderShareMenu
+              node={node}
+              manageHref={manageHref(node.id)}
+              inertShareNotice={inertShareNotice}
+              rosterUnavailableNotice={rosterUnavailableNotice}
+              open={openMenuId === node.id}
+            />
+          </>
+        )}
+      </div>
+      {selected && !node.isRoot ? (
         <div className={cx("my-1 flex flex-col gap-1.5", pad)}>
           <Form method="post" className="flex gap-1.5">
             <input type="hidden" name="intent" value="rename-folder" />
@@ -85,6 +158,10 @@ export function FolderTree({
           childrenOf={childrenOf}
           selectedId={selectedId}
           depth={depth + 1}
+          manageHref={manageHref}
+          inertShareNotice={inertShareNotice}
+          rosterUnavailableNotice={rosterUnavailableNotice}
+          openMenuId={openMenuId}
         />
       ))}
     </div>

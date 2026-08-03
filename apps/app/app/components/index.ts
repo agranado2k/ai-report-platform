@@ -24,6 +24,7 @@ export {
 export { AppHeader } from "./AppHeader";
 export { CopyButton } from "./CopyButton";
 export { EmptyState } from "./EmptyState";
+export type { FolderShareRow } from "./FolderShareMenu";
 export { type FolderNode, FolderTree } from "./FolderTree";
 export { Logo } from "./Logo";
 export { PageShell } from "./PageShell";

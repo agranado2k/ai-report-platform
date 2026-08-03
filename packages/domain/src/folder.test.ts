@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { folderId, orgId, userId } from "./brand";
 import {
+  canManageFolder,
   canWriteFolder,
+  collectFolderDescendants,
   createFolder,
+  FOLDER_VISIBILITIES,
   type Folder,
   folderSlug,
   graftOrphansToRoot,
+  hasFolderManagementScope,
   inheritedVisibility,
   isFolderBroadlyVisibleTo,
+  isRootFolder,
+  makeFolderVisibility,
   renameFolder,
   setFolderVisibility,
   visibleFolderOrRoot,
 } from "./folder";
+import { ACL_WRITE_SCOPE } from "./scope";
 
 const org = orgId("00000000-0000-7000-8000-0000000000a1");
 const parent = folderId("00000000-0000-7000-8000-0000000000f0");
@@ -199,6 +206,69 @@ describe("visibility + write predicates (ADR-0076)", () => {
   });
 });
 
+describe("canManageFolder (ADR-0076 §6 — the sharing-management rule)", () => {
+  it("the OWNER may manage their own folder", () => {
+    expect(canManageFolder(build({ ownerId: owner }), owner)).toBe(true);
+  });
+
+  it("a LEGACY folder is manageable by any org member — the adoption/repair path", () => {
+    expect(canManageFolder(build({ ownerId: null }), other)).toBe(true);
+  });
+
+  it("an ORG-VISIBLE folder owned by someone else is NOT manageable", () => {
+    // The one place management is strictly narrower than `canWriteFolder`:
+    // org visibility grants writes, never sharing control.
+    const f = build({ ownerId: owner, visibility: "org" });
+    expect(canWriteFolder(f, other)).toBe(true);
+    expect(canManageFolder(f, other)).toBe(false);
+  });
+
+  it("a private folder owned by someone else is NOT manageable", () => {
+    expect(canManageFolder(build({ ownerId: owner }), other)).toBe(false);
+  });
+});
+
+describe("isRootFolder (ADR-0076 §3)", () => {
+  it("is true exactly when there is no parent", () => {
+    expect(isRootFolder(build({ parentId: null }))).toBe(true);
+    expect(isRootFolder(build({ parentId: parent }))).toBe(false);
+  });
+});
+
+describe("hasFolderManagementScope (ADR-0076 §6 — the acl:write gate)", () => {
+  it("accepts a session carrying acl:write", () => {
+    expect(hasFolderManagementScope(["reports:write", ACL_WRITE_SCOPE])).toBe(true);
+  });
+
+  it("refuses an actor without it — e.g. an edit-token actor (reports:write only)", () => {
+    expect(hasFolderManagementScope(["reports:write"])).toBe(false);
+    expect(hasFolderManagementScope([])).toBe(false);
+  });
+});
+
+describe("makeFolderVisibility (ADR-0076 — one enum validator)", () => {
+  it("accepts each declared visibility", () => {
+    for (const v of FOLDER_VISIBILITIES) {
+      const r = makeFolderVisibility(v);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value).toBe(v);
+    }
+  });
+
+  it("rejects anything else with a field-tagged ValidationError naming the options", () => {
+    const r = makeFolderVisibility("public");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.kind).toBe("ValidationError");
+    expect(r.error.message).toBe("visibility must be one of: private, org");
+    expect((r.error as { field?: string }).field).toBe("visibility");
+  });
+
+  it("rejects an empty/absent value rather than defaulting", () => {
+    expect(makeFolderVisibility("").ok).toBe(false);
+  });
+});
+
 describe("graftOrphansToRoot (ADR-0076)", () => {
   const root = { id: "root", parentId: null };
 
@@ -280,5 +350,57 @@ describe("visibleFolderOrRoot (ADR-0076)", () => {
 
   it("falls back for the Root's own id when the Root itself is not rendered", () => {
     expect(visibleFolderOrRoot("hidden", [], "root")).toBe("root");
+  });
+});
+
+describe("collectFolderDescendants (ADR-0076 §cascade)", () => {
+  const tree = [
+    { id: "root", parentId: null },
+    { id: "a", parentId: "root" },
+    { id: "a1", parentId: "a" },
+    { id: "a1x", parentId: "a1" },
+    { id: "b", parentId: "root" },
+  ];
+
+  it("returns every node BELOW the given folder, deepest-first order aside", () => {
+    expect([...collectFolderDescendants(tree, "a")].sort()).toEqual(["a1", "a1x"]);
+  });
+
+  it("excludes the folder itself — the caller applies its own change separately", () => {
+    expect(collectFolderDescendants(tree, "a")).not.toContain("a");
+  });
+
+  it("returns an empty list for a leaf", () => {
+    expect(collectFolderDescendants(tree, "a1x")).toEqual([]);
+  });
+
+  it("returns an empty list for a folder that is not in the visible set", () => {
+    expect(collectFolderDescendants(tree, "nope")).toEqual([]);
+  });
+
+  it("walks the whole subtree from the Root", () => {
+    expect([...collectFolderDescendants(tree, "root")].sort()).toEqual(["a", "a1", "a1x", "b"]);
+  });
+
+  it("terminates on a parent CYCLE instead of spinning forever", () => {
+    const cyclic = [
+      { id: "x", parentId: "y" },
+      { id: "y", parentId: "x" },
+      { id: "c", parentId: "x" },
+    ];
+    // No node under "c" — and crucially, the walk returns at all.
+    expect(collectFolderDescendants(cyclic, "c")).toEqual([]);
+    expect([...collectFolderDescendants(cyclic, "x")].sort()).toEqual(["c", "y"]);
+  });
+
+  it("only sees the nodes it is given — an INVISIBLE descendant is simply absent", () => {
+    // The dashboard passes the actor's VISIBLE tree, so a colleague's private
+    // subfolder is not in `nodes` and therefore never cascaded (the honest
+    // limit the UI reports rather than hides).
+    const visibleOnly = [
+      { id: "root", parentId: null },
+      { id: "a", parentId: "root" },
+    ];
+    expect(collectFolderDescendants(visibleOnly, "a")).toEqual([]);
   });
 });

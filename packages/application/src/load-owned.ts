@@ -34,6 +34,7 @@
 // everywhere.
 import {
   type AppError,
+  canManageFolder,
   canWriteFolder,
   err,
   type Folder,
@@ -260,6 +261,11 @@ const FOLDER_GUARD_MESSAGES: FolderGuardMessages = {
   notWritable: "you do not have write access to this folder",
 };
 
+/** The 403 `loadManagedFolder` returns for a visible folder someone else owns
+ *  (ADR-0076 §6). Exported because the dashboard renders the SERVER's reason
+ *  on a disabled control rather than inventing a client-side phrasing. */
+export const FOLDER_NOT_MANAGEABLE = "only the folder's owner can manage its sharing";
+
 /** Does `actor` hold a folder share on `folderId` (ADR-0076)? The exact
  *  `hasWriteGrant` probe, pointed at the FolderShareStore. */
 export async function hasFolderShare(
@@ -320,10 +326,12 @@ export async function loadManagedFolder(
   // legacy row always passes its broad legs, so there is nothing to hoist.
   const found = await loadVisibleFolder(folders, actor, folderId, deps);
   if (!found.ok) return found;
-  // Narrow to owner-or-legacy. Anyone who reaches here CAN see the folder
-  // (org-visible, or a share grantee), so NotFound would be a lie: 403.
-  if (found.value.ownerId !== null && found.value.ownerId !== actor.userId) {
-    return err(notAllowed("only the folder's owner can manage its sharing"));
+  // Narrow to owner-or-legacy, via the DOMAIN predicate the dashboard loader
+  // also consults — one rule, one compile-time link, so the UI can never
+  // render a control this guard would refuse. Anyone who reaches here CAN see
+  // the folder (org-visible, or a share grantee), so NotFound would be a lie: 403.
+  if (!canManageFolder(found.value, actor.userId)) {
+    return err(notAllowed(FOLDER_NOT_MANAGEABLE));
   }
   return ok(found.value);
 }

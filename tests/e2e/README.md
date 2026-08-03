@@ -173,3 +173,40 @@ itself — and is out of scope for the ADR-0068 team-orgs PR. Both scenario file
 stay `@wip` with this precise blocker noted inline; un-`@wip`-ing them, widening
 `playwright.config.ts`'s `testDir`, and writing their step definitions is tracked
 as separate follow-up work.
+
+## Product-feature scenarios that RUN (`tests/e2e/features/`)
+
+The "not even collected" statement above is no longer absolute. `playwright.
+config.ts` now opts features in **by name**, one at a time, rather than by a
+directory glob — a glob over `tests/e2e/features/**` would still fail at
+collection, because playwright-bdd errors on a generated spec with undefined
+steps and most of that corpus is still a step-less `@wip` skeleton. Listing a
+feature in that array is therefore the difference between coverage and
+decoration: an unlisted `.feature` does not run, no matter how good it reads.
+
+| Feature | Tags | Covers |
+| --- | --- | --- |
+| `folder-sharing.feature` (`folder-sharing.steps.ts`) | `@phase-2 @smoke @auth` + `@run-scoped` | ADR-0076 §6 — the dashboard folder visibility + sharing UI. Two **run-scoped** identities at the same team domain (same fixture pattern as `team-org-upload.steps.ts`), driving the dashboard's OWN cookie-authenticated Remix action (a form POST to `/`) and asserting on the server-rendered sidebar markup: private-by-default on create; the Root renders no sharing kebab while a manageable folder on the same page does; the org toggle revealing a folder to a colleague; a colleague's menu refused with the server's own reason; the **nested-folder gap** (a parent going private leaves an already-org child visible) and the opt-in cascade closing it; share-by-email, the roster, the "Shared with 1" badge, and unshare. |
+
+**A Bearer session DOES reach document routes.** The `@auth` table above notes that a
+Bearer-token POST to `/settings/api-keys` "gets redirected to the sign-in HTML (the PR #222
+round-2 failure)". That symptom was the **pending session**, not the door: a zero-membership
+user's JWT carried `sts: "pending"`, which `@clerk/backend` treats as signed-out — so
+`request.auth.userId` was null and root.tsx's gate redirected. The decoy-org fixture fixed that
+by making sessions `active`. `rootAuthLoader` and `getAuth` call the SAME
+`@clerk/remix` `authenticateRequest`, which authenticates a header token without a handshake, so
+an active backend-minted session reaches the dashboard's loader and action exactly as it
+reaches `/api/v1`. `folder-sharing.steps.ts` relies on that, and asserts `200` + the page's own
+heading on the FIRST dashboard read so a regression here fails loudly and legibly instead of as
+a puzzling missing-folder assertion.
+
+Not covered by any e2e, and deliberately: **legacy-folder adoption**. A legacy
+row is `owner_id IS NULL`, which only the pre-ADR-0076 backfill produces — there
+is no supported way to mint one through the product — so the adoption warning
+and the owner-or-legacy gate are pinned by unit tests on `folderManagement`
+(`apps/app/app/server/folder-sharing.server.test.ts`) and by `load-owned.test.ts`
+on the server rule that UI mirrors.
+
+`tests/e2e/features/share-folders.feature` was **deleted** with that PR: it was a
+step-less `@wip` skeleton whose own preamble pointed at the coverage that
+actually runs, and its narrative is now carried by a feature that executes.

@@ -346,7 +346,8 @@ paths:
         OWNER-only (or any member for a legacy owner-less folder). The grantee
         needn't have signed up yet — `grantee_user_id` resolves
         opportunistically now, else the share matches by email once they do.
-        Re-sharing the same email upserts in place.
+        Re-sharing the same email upserts in place. The org ROOT folder cannot
+        be shared (422) — every member can already see it (ADR-0076 §3).
 
 
         A share is only EFFECTIVE within the folder's own org: folder listings
