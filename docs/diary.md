@@ -3513,3 +3513,34 @@ cover it), the second-user "colleague loses sight of the folder" transition (one
 session; the e2e covers it), and the >50 `MAX_CASCADE` refusal.
 
 ADR-0076 gains a third amendment recording the badge label change and the staged-action rule.
+
+### 2026-08-03 — ADR-0077: operator-side merge train + the worktree lifecycle gets an owner
+
+Prompted by reviewing [`funador/claude-code-merge-queue`](https://github.com/funador/claude-code-merge-queue)
+(a local FIFO merge queue for parallel Claude Code agents). The tool itself is rejected for this
+repo — its `land` rebases and pushes straight to the integration branch with no PR, gated by one
+local command, which collides with everything ADR-0044 stands on (`enforce_admins`, signed
+commits, PR-only quality gates). But the review surfaced two real, measurable gaps, and
+**ADR-0077** adapts the tool's `prune`/`sync`/FIFO ideas to our PR world:
+
+- **Worktree lifecycle was unowned.** Found today: 7 worktrees, ALL of whose branches were
+  already merged (#222–#237); root `main` 4 days / 7 PRs behind `origin/main`; the
+  `/worktree-cleanup` referenced in CLAUDE.md's quick-reference didn't exist; this diary's
+  "Active worktrees" row still described mid-July. Now real: `scripts/worktree-cleanup.sh` +
+  `.claude/skills/worktree-cleanup/` — fetch/prune, fast-forward root `main` (skipped if
+  dirty), remove merged+clean worktrees only (squash merges detected via the merged PR),
+  reinstall deps, refresh the diary row. Never force-removes.
+- **Landing a green batch was N manual clicks, order-blind.** Observed 2026-07-28: 6 PRs opened
+  in 42 minutes, 4 merged by hand within 39 seconds — plus the `Merge origin/main into <branch>`
+  staleness commits that cluster on exactly those days, and the standing hazard that every merge
+  applies Drizzle migrations to prod. New `.claude/skills/merge-train/`: operator-invoked,
+  serial `gh pr merge --merge` (web-flow-signed, same as the UI button), stale PRs updated via
+  GitHub's update-branch API (never a local rebase — the ADR-0044 failure mode), migration-bearing
+  PRs first with two-migration batches escalating, `migrate-db`/`release` observed between
+  merges (a failed prod migration stops the train), `/worktree-cleanup` at the end.
+  `/pr-iterate`'s "never merge" hard rule is unchanged — the train is the separate, explicitly
+  delegated merge step.
+
+Worktree for this change: `worktree/operator-merge-train` (branch `chore/operator-merge-train`).
+The stale "Active worktrees" row in the Current state block above will be refreshed by the first
+real `/worktree-cleanup` run once this merges.
