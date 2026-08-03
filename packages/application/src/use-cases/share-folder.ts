@@ -2,7 +2,8 @@
 // (ADR-0076). Shares confer visibility ONLY — never rename/delete/create
 // rights (those stay owner-or-org, `canWriteFolder`). OWNER-OR-LEGACY only
 // (loadManagedFolder) + the `acl:write` scope (ADR-0016 — the same scope
-// report sharing gates on: sharing is sharing). Mirrors grantWrite (ADR-0060):
+// report sharing gates on: sharing is sharing), and NEVER the Root (ADR-0076
+// §3 — it is a legacy row, so the guard passes it). Mirrors grantWrite (ADR-0060):
 // normalize the grantee email → resolve `granteeUserId` opportunistically
 // (IdentityStore — set now if the grantee already has an account, else left
 // null and matched by email at check time) → upsert via FolderShareStore + a
@@ -15,9 +16,11 @@ import {
   type FolderId,
   hasFolderManagementScope,
   insufficientScope,
+  isRootFolder,
   makeEmailAddress,
   ok,
   type Result,
+  validationError,
 } from "arp-domain";
 import {
   beginIdempotentWrite,
@@ -64,6 +67,15 @@ export async function shareFolder(
 
   const found = await loadManagedFolder(deps.folders, actor, input.folderId, deps);
   if (!found.ok) return found;
+  // The Root is a legacy row (ownerId null), so `loadManagedFolder` PASSES it
+  // — refuse it explicitly (ADR-0076 §3). Every member can already see the
+  // Root, so a share on it is a no-op that nonetheless implies it is somebody's
+  // to give away, and it is the one folder that must stay nobody's.
+  if (isRootFolder(found.value)) {
+    return err(
+      validationError("the Root folder is visible to every member and cannot be shared", "id"),
+    );
+  }
 
   const email = makeEmailAddress(input.email);
   if (!email.ok) return email;

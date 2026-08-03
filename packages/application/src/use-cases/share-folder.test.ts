@@ -17,6 +17,7 @@ const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
 const me = userId("00000000-0000-7000-8000-0000000000d1");
 const other = userId("00000000-0000-7000-8000-0000000000d2");
 const F1 = "00000000-0000-7000-8000-0000000000f1";
+const ROOT = "00000000-0000-7000-8000-0000000000a0";
 
 const SCOPED = [ACL_WRITE_SCOPE];
 const actorMe = { orgId: orgA, userId: me, scopes: SCOPED };
@@ -25,7 +26,13 @@ async function setup() {
   const folderShares = new InMemoryFolderShareStore();
   const identities = new InMemoryIdentityStore();
   const folders = new InMemoryFolderRepository(folderShares);
-  await folders.save(folder(F1, orgA, "Mine", { ownerId: me, visibility: "private" }));
+  // The Root is `parentId: null` — F1 must hang UNDER it, or every case below
+  // would be exercising the org Root, which is not a shareable folder at all
+  // (ADR-0076 §3).
+  await folders.save(folder(ROOT, orgA, "Root")); // legacy root: owner null, org
+  await folders.save(
+    folder(F1, orgA, "Mine", { parentId: folderId(ROOT), ownerId: me, visibility: "private" }),
+  );
   return {
     folders,
     folderShares,
@@ -81,6 +88,20 @@ describe("shareFolder use case (ADR-0076)", () => {
     const d = await setup();
     const r = await shareFolder(d, actorMe, { folderId: folderId(F1), email: "not-an-email" });
     expect(!r.ok && r.error.kind).toBe("ValidationError");
+  });
+
+  it("refuses to share the ROOT folder (ADR-0076 §3 — it is not anyone's to give)", async () => {
+    // The Root passes `loadManagedFolder` (it is a legacy row, ownerId null),
+    // so without an explicit refusal this call SUCCEEDS — and the UI's own
+    // copy ("the Root ... can't be shared or owned") would be a lie. Every
+    // member can already see the Root, so the grant is a no-op that
+    // nonetheless implies otherwise.
+    const d = await setup();
+    const r = await shareFolder(d, actorMe, { folderId: folderId(ROOT), email: "pal@test.local" });
+    expect(!r.ok && r.error.kind).toBe("ValidationError");
+    expect(!r.ok && r.error.message).toContain("Root");
+    const listed = await listFolderShares(d, actorMe, { folderId: folderId(ROOT) });
+    expect(listed.ok && listed.value).toEqual([]);
   });
 
   it("records a folder.shared audit entry (ADR-0070)", async () => {
