@@ -201,6 +201,22 @@ Then(
   },
 );
 
+Then("the owner's sidebar names the parent folder in full on hover", async ({ request }) => {
+  // The sidebar clips folder names ("Architectu…"), and the row carried no
+  // `title` and no `aria-label` — so a truncated name could not be read at all
+  // without opening the folder (2026-08-03 dogfood, I-1). The badge carries one
+  // too, because its own label is deliberately terse.
+  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
+  expect(html, "the folder link must carry its full name as a tooltip").toContain(
+    `title="${PARENT_NAME}"`,
+  );
+  // (Apostrophes are HTML-escaped by React SSR, so match a plain fragment.)
+  const at = html.indexOf(`>${PARENT_NAME}</span>`);
+  expect(html.slice(at, at + 600), "the badge must explain the state it abbreviates").toContain(
+    "Not visible to your whole org.",
+  );
+});
+
 Then("the owner's sidebar renders no sharing controls for the Root folder", async ({ request }) => {
   // ADR-0076 §3: the domain rejects ANY visibility call on the Root, in either
   // direction — so the sidebar must not offer one (render-then-error is a lie).

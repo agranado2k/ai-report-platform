@@ -126,24 +126,39 @@ describe("cascadeScope (ADR-0076 §cascade — what a cascade would actually tou
 
 describe("folderVisibilityBadge (ADR-0076 sidebar badge)", () => {
   it("labels an org-visible folder 'Org'", () => {
-    expect(folderVisibilityBadge({ visibility: "org", shareCount: 0 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "org", shareCount: 0 })).toMatchObject({
       label: "Org",
       tone: "warning",
     });
   });
 
   it("labels a private folder with a KNOWN empty roster 'Private'", () => {
-    expect(folderVisibilityBadge({ visibility: "private", shareCount: 0 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "private", shareCount: 0 })).toMatchObject({
       label: "Private",
       tone: "neutral",
     });
   });
 
   it("labels a private folder with shares 'Shared with N'", () => {
-    expect(folderVisibilityBadge({ visibility: "private", shareCount: 3 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "private", shareCount: 3 })).toMatchObject({
       label: "Shared with 3",
       tone: "brand",
     });
+  });
+
+  it("gives EVERY badge a title that spells the state out in full", () => {
+    // The label is squeezed into a 14rem sidebar next to a truncating folder
+    // name, so the sentence version lives in the tooltip rather than being cut
+    // from the label (2026-08-03 dogfood, I-1).
+    for (const input of [
+      { visibility: "org" as const, shareCount: 0 },
+      { visibility: "private" as const, shareCount: 0 },
+      { visibility: "private" as const, shareCount: 2 },
+      { visibility: "private" as const, shareCount: null },
+    ]) {
+      const badge = folderVisibilityBadge(input);
+      expect(badge.title.length, `no title for ${JSON.stringify(input)}`).toBeGreaterThan(20);
+    }
   });
 
   it("singularises the share count", () => {
@@ -158,8 +173,22 @@ describe("folderVisibilityBadge (ADR-0076 sidebar badge)", () => {
     // a folder shared with six people would read "Private" one row below a
     // folder reading "Shared with 2". Say only what is actually known.
     const badge = folderVisibilityBadge({ visibility: "private", shareCount: null });
-    expect(badge.label).toBe("Not org-visible");
+    expect(badge.label).toBe("Limited");
     expect(badge.label).not.toBe("Private");
+    // …and the unknown part is stated in the tooltip, where there is room.
+    expect(badge.title).toContain("shared with");
+  });
+
+  it("keeps the unknown-roster label as short as the ones it sits beside", () => {
+    // "Not org-visible" was honest and unreadable: three times the width of
+    // "Org", it truncated a 16-character folder name down to "dog…" in the
+    // 14rem sidebar (2026-08-03 dogfood, I-1). Whatever this label becomes, it
+    // may not be wider than the widest label it shares a column with.
+    const unknown = folderVisibilityBadge({ visibility: "private", shareCount: null }).label;
+    const known = folderVisibilityBadge({ visibility: "private", shareCount: 0 }).label;
+    expect(unknown.length).toBeLessThanOrEqual(known.length);
+    // A double negative reads worse than the claim it replaced.
+    expect(unknown.toLowerCase()).not.toContain("not ");
   });
 
   it("keeps 'Org' even when a share roster exists — org visibility dominates", () => {

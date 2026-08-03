@@ -104,6 +104,10 @@ const folders = (n: number) => `${n} ${plural(n, "folder", "folders")}`;
 export interface FolderBadge {
   readonly label: string;
   readonly tone: BadgeTone;
+  /** The whole claim, in a sentence — rendered as the badge's `title`. The
+   *  label has to survive a 14rem sidebar next to a truncating folder name, so
+   *  the nuance lives here rather than being cut out of the label. */
+  readonly title: string;
 }
 
 /** The sidebar's visibility badge. `shareCount` is `null` when the roster was
@@ -111,19 +115,51 @@ export interface FolderBadge {
  *  folder actually being managed) — and an unknown roster must never be
  *  rendered as a positive privacy claim, neither as "Shared with 0" nor as a
  *  flat "Private". A private folder MAY have individual grantees; all this row
- *  actually knows is that the whole org can't see it. */
+ *  actually knows is that the whole org can't see it.
+ *
+ *  The unknown state reads `Limited` (2026-08-03 dogfood, I-1). Its first
+ *  wording, `Not org-visible`, was honest and unreadable: a double negative,
+ *  three times the width of `Org`, which truncated a 16-character folder name
+ *  to "dog…" — and the SAME folder badged `Private` once its panel was opened,
+ *  so one folder showed two labels depending on where you looked. `Limited`
+ *  keeps the honesty (it claims only that the whole org can't see it, never
+ *  that nobody else can) at `Private`'s width, and the `title` says the rest.
+ *  The real fix is the batched share-count port method (issue #236), which
+ *  would let every row badge accurately; this is the interim. */
 export function folderVisibilityBadge(input: {
   readonly visibility: FolderVisibility;
   readonly shareCount: number | null;
 }): FolderBadge {
   // Org visibility dominates: a folder everyone can see is not meaningfully
   // "shared with 3", and the broader state is the one worth surfacing.
-  if (input.visibility === "org") return { label: "Org", tone: "warning" };
-  if (input.shareCount === null) return { label: "Not org-visible", tone: "neutral" };
-  if (input.shareCount > 0) {
-    return { label: `Shared with ${input.shareCount}`, tone: "brand" };
+  if (input.visibility === "org") {
+    return {
+      label: "Org",
+      tone: "warning",
+      title: "Everyone in your org can see this folder.",
+    };
   }
-  return { label: "Private", tone: "neutral" };
+  if (input.shareCount === null) {
+    return {
+      label: "Limited",
+      tone: "neutral",
+      title:
+        "Not visible to your whole org. Open this folder's sharing menu to see who it's " +
+        "shared with individually.",
+    };
+  }
+  if (input.shareCount > 0) {
+    return {
+      label: `Shared with ${input.shareCount}`,
+      tone: "brand",
+      title: `Not visible to your whole org — shared with ${plural(input.shareCount, "1 person", `${input.shareCount} people`)}.`,
+    };
+  }
+  return {
+    label: "Private",
+    tone: "neutral",
+    title: "Only you can see this folder — it isn't shared with anyone.",
+  };
 }
 
 /** A folder as the sidebar tree and the cascade both need it: wire ids, the

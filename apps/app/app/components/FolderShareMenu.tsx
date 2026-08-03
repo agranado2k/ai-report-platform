@@ -232,10 +232,12 @@ export interface FolderShareRow {
 }
 
 /** The sidebar badge, as a standalone export so the tree renders it inline
- *  next to the folder name. */
+ *  next to the folder name. The label is deliberately short — it shares a
+ *  14rem column with a truncating folder name — so the full claim (including
+ *  "this row's roster was never loaded") is carried in the `title`. */
 export function FolderVisibilityBadge({ node }: { node: FolderNode }) {
   return (
-    <Badge tone={node.badge.tone} className="shrink-0 text-[0.65rem]">
+    <Badge tone={node.badge.tone} title={node.badge.title} className="shrink-0 text-[0.65rem]">
       {node.badge.label}
     </Badge>
   );
