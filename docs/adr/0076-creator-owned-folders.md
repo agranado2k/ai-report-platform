@@ -75,6 +75,41 @@ ADR-0059 §5 deliberately kept folders org-scoped: "a shared org folder tree is 
 - **Scope is the actor's VISIBLE tree.** A descendant the actor cannot see is not in the tree the loop walks, so it is never silently "skipped" — it was never a candidate. This is the one limit the per-folder copy can't spell out row by row, and it is the deliberate consequence of "existence is private": the UI cannot warn about a folder it must not admit exists.
 - **It is N calls, not one.** Fine at current folder counts, and each one is the audited, authorized call it should be. If a tree ever gets deep enough for this to matter, the fix is a batched *use case* — not recursive SQL underneath the guard.
 
+## Amendment (2026-08-03) — what a production dogfood run of that UI found
+
+The shipped sidebar was exercised end to end against production with throwaway
+folders (created and deleted; no real folder touched). The model held; four
+things about the SURFACE did not.
+
+1. **An honest label still has to fit.** §5's `Not org-visible` was the right
+   claim in the wrong shape: a double negative, three times the width of `Org`,
+   which truncated a 16-character folder name to `dog…` in the 14rem sidebar —
+   and the SAME folder badged `Private` once `?manage=<id>` loaded its roster,
+   so one folder read two ways depending on where you looked. The unknown-roster
+   badge now reads **`Limited`**: the identical claim (the whole org can't see
+   it; who else can is not asserted) at `Private`'s width. §5's honesty
+   constraint is unchanged — `Private` still means a roster known to be empty.
+   Every badge additionally carries a `title` with the full sentence, and folder
+   links carry their full name as a `title`, because the row clips it and had
+   neither a `title` nor an `aria-label`. The real repair is the batched
+   share-count port method (issue #236) — with it every row could badge
+   accurately and the unknown state would disappear; `Limited` is the interim.
+2. **A staged action must not outlive the state it was staged for.** The
+   cascade checkbox came back TICKED after a cascade, under a panel that had
+   flipped to the opposite direction and was already showing the mass-exposure
+   warning — one unread click from publishing the subtree. The same reuse left
+   a just-granted address sitting in the share field. Both forms are now keyed
+   on `folderFormKey` (visibility + roster size — the two facts an action can
+   move), so a successful action remounts them empty while a refusal keeps what
+   was typed; `autoComplete="off"` covers browser restoration, which no key
+   reaches. This is a property of the SURFACE, not of the model: the server
+   renders no tick either way.
+3. **Counted copy has to agree in every clause.** The org-direction warning
+   singularised the count and not the verb: "make 1 folder that ARE currently
+   private … won't put THEM back". Both cascade sentences now agree throughout.
+
+None of this changes the decision, the predicate, or the cascade's bounds.
+
 ## More information
 
 Implementation: predicate in `DrizzleFolderRepository` (owner/legacy/org legs + EXISTS on `folder_shares`), mirrored by `InMemoryFolderRepository` (shared `FolderShareStore` instance); guards `loadVisibleFolder`/`loadWritableFolder`/`loadManagedFolder` replace `loadOwnedFolder`; matrix tests in `folder-repository.contract.ts` + `folder-share-store.contract.ts` run against both runners (ADR-0046). Glossary: **Folder** sharpened; **Folder share**, **Folder visibility** added.
