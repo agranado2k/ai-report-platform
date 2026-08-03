@@ -106,7 +106,13 @@ function ManageControls({
         </p>
       ) : null}
 
-      <Form method="post" className="flex flex-col gap-1.5 p-1">
+      {/* KEYED on the folder's sharing state: a successful toggle flips
+          `visibility`, which changes the key, which REMOUNTS this form — so the
+          cascade tick cannot survive into the opposite direction. It came back
+          ticked, under a panel that now read "Share with the whole org" and its
+          mass-exposure warning; one more click would have published the whole
+          subtree (2026-08-03 dogfood, I-2). */}
+      <Form method="post" key={node.formKey} className="flex flex-col gap-1.5 p-1">
         <input type="hidden" name="intent" value="set-folder-visibility" />
         <input type="hidden" name="folderId" value={node.id} />
         <input type="hidden" name="visibility" value={nextVisibility} />
@@ -124,7 +130,17 @@ function ManageControls({
             htmlFor={`cascade-${node.id}`}
             className="flex items-start gap-1.5 text-xs text-muted"
           >
-            <Checkbox id={`cascade-${node.id}`} name="cascade" value="on" className="mt-0.5" />
+            {/* `autoComplete="off"` is the other half of the same guarantee:
+                the remount handles React's own re-render, this stops the
+                BROWSER restoring the tick across a reload or a back-navigation,
+                which no key can reach. */}
+            <Checkbox
+              id={`cascade-${node.id}`}
+              name="cascade"
+              value="on"
+              autoComplete="off"
+              className="mt-0.5"
+            />
             <span>{node.cascadeLabel}</span>
           </label>
         ) : null}
@@ -199,13 +215,19 @@ function ShareRoster({
           ))}
         </ul>
       )}
-      <Form method="post" className="flex items-center gap-1.5">
+      {/* KEYED like the toggle above: a successful share moves the roster,
+          which remounts this form with an EMPTY field. It used to keep the
+          address that had just been granted — listed one line above it —
+          so clicking Share again simply re-submitted it (2026-08-03
+          dogfood, I-4). A refusal moves nothing, and keeps what was typed. */}
+      <Form method="post" key={node.formKey} className="flex items-center gap-1.5">
         <input type="hidden" name="intent" value="share-folder" />
         <input type="hidden" name="folderId" value={node.id} />
         <Input
           type="email"
           name="email"
           required
+          autoComplete="off"
           placeholder="teammate@example.com"
           aria-label={`Share ${node.name} with an email address`}
           size="sm"

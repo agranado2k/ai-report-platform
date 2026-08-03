@@ -42,6 +42,7 @@ import {
   cascadeScope,
   cascadeSummary,
   type FolderManagementActor,
+  folderFormKey,
   folderManagement,
   folderShareWarning,
   folderVisibilityBadge,
@@ -190,6 +191,10 @@ export async function loader(args: LoaderFunctionArgs) {
         visibility: f.visibility,
         shareCount: own?.length ?? null,
       }),
+      // Both derive from the SAME two facts — what the org can see, and how
+      // many people were added — so the badge and the forms can never disagree
+      // about whether anything moved.
+      formKey: folderFormKey({ visibility: f.visibility, shareCount: own?.length ?? null }),
     };
   });
   // Only honor a folder filter that exists in the org (this existence check also
@@ -726,7 +731,18 @@ export default function Index() {
           ) : null}
 
           {createParent ? (
-            <Form method="post" className="mt-6 flex items-center gap-2">
+            // KEYED on how many folders the sidebar is showing, for the same
+            // reason the sharing forms are keyed on their folder's state: a
+            // successful create changes the count, remounts this form, and the
+            // name that was just used stops sitting in the field waiting to be
+            // submitted a second time (2026-08-03 dogfood, I-4 — pre-existing,
+            // not from #230/#234). A REFUSED create leaves the count alone, so
+            // the rejected name stays put to be edited and retried.
+            <Form
+              method="post"
+              key={`new-folder-${folders.length}`}
+              className="mt-6 flex items-center gap-2"
+            >
               <input type="hidden" name="parentId" value={createParent} />
               <Input
                 name="name"
@@ -734,6 +750,7 @@ export default function Index() {
                   selectedFolderId ? `New folder in ${scopeLabel}` : "New folder (in Root)"
                 }
                 required
+                autoComplete="off"
                 className="w-64"
               />
               <Button type="submit" variant="secondary">

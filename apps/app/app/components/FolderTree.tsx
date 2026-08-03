@@ -52,6 +52,11 @@ export interface FolderNode {
    *  from `shares === null` (never asked for): an error must not render as
    *  "not shared with anyone". */
   readonly sharesUnavailable: boolean;
+  /** The identity of this folder's sharing forms — changes whenever an action
+   *  actually moved its visibility or its roster, which remounts the forms so
+   *  a cascade tick or a submitted address cannot survive into the next state
+   *  (`folderFormKey`). */
+  readonly formKey: string;
 }
 
 // Static indent classes per depth (CSP-safe — no inline style). Folders nest at

@@ -45,6 +45,7 @@ Feature: Manage folder visibility and sharing from the dashboard (ADR-0076 §6)
     # The org toggle — the incident's actual repair, in reverse.
     When the owner creates a run-scoped child folder inside the parent folder
     Then the owner's cascade checkbox names the direction and the count
+    And the owner's sharing fields refuse browser form restoration
     When the owner shares the parent folder with the whole org from the sidebar
     Then the owner's sidebar badges the parent folder "Org"
     And the owner's org-shared roster does NOT claim only they can see the folder

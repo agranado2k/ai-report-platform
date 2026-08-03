@@ -162,6 +162,33 @@ export function folderVisibilityBadge(input: {
   };
 }
 
+/**
+ * The identity of a folder's sharing FORMS, so their inputs cannot outlive the
+ * state they were filled in for (2026-08-03 dogfood, I-2 + I-4).
+ *
+ * Both forms are uncontrolled and both live inside a panel that re-renders in
+ * place after an action — so the browser keeps the DOM nodes, and with them the
+ * operator's last input. Observed: after a cascade to `private` the panel came
+ * back reading "Share with the whole org" with the cascade box STILL TICKED and
+ * the amber mass-exposure warning already showing; a second click would have
+ * bulk-EXPOSED the subtree. And a successful share left the submitted address
+ * sitting in the field, one click away from being re-submitted.
+ *
+ * Rendered as the React `key` on both forms: when this value changes the forms
+ * REMOUNT, and a fresh `<input>` has no tick and no text. It changes on exactly
+ * the two facts an action can move — the folder's visibility (which flips on
+ * every successful toggle, taking the checkbox's whole meaning with it) and the
+ * size of its roster (which moves on every successful share/unshare). A refused
+ * action moves neither, so a refusal keeps what the operator typed, which is
+ * what they need to retry.
+ */
+export function folderFormKey(input: {
+  readonly visibility: FolderVisibility;
+  readonly shareCount: number | null;
+}): string {
+  return `${input.visibility}:${input.shareCount ?? "unknown"}`;
+}
+
 /** A folder as the sidebar tree and the cascade both need it: wire ids, the
  *  display name, and the two domain facts every decision below turns on. */
 export interface FolderTreeNode {

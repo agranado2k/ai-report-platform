@@ -21,6 +21,7 @@ import {
   cascadeLabel,
   cascadeScope,
   cascadeSummary,
+  folderFormKey,
   folderManagement,
   folderShareWarning,
   folderVisibilityBadge,
@@ -193,6 +194,48 @@ describe("folderVisibilityBadge (ADR-0076 sidebar badge)", () => {
 
   it("keeps 'Org' even when a share roster exists — org visibility dominates", () => {
     expect(folderVisibilityBadge({ visibility: "org", shareCount: 4 }).label).toBe("Org");
+  });
+});
+
+describe("folderFormKey (2026-08-03 dogfood I-2/I-4 — the sharing forms must not survive an action)", () => {
+  it("CHANGES when the folder's visibility flips — the cascade tick must not survive", () => {
+    // The hazard, observed in production: tick "Also make the 1 folder inside
+    // this one private", submit, and the reloaded panel came back reading
+    // "Share with the whole org" with the checkbox STILL TICKED and the amber
+    // mass-exposure warning already on screen. A second click — by someone who
+    // didn't re-read — bulk-EXPOSES the subtree. A changed key remounts the
+    // form, so the tick cannot outlive the direction it was ticked for.
+    const before = folderFormKey({ visibility: "private", shareCount: null });
+    const after = folderFormKey({ visibility: "org", shareCount: null });
+    expect(after).not.toBe(before);
+  });
+
+  it("CHANGES when the roster grows — the submitted address must not stay in the field", () => {
+    expect(folderFormKey({ visibility: "private", shareCount: 1 })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 0 }),
+    );
+  });
+
+  it("CHANGES when a share is revoked", () => {
+    expect(folderFormKey({ visibility: "private", shareCount: 0 })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 1 }),
+    );
+  });
+
+  it("distinguishes an UNKNOWN roster from a known-empty one", () => {
+    // Otherwise opening `?manage=<id>` on a folder with no shares would look
+    // like "nothing changed" and leave a half-typed address in place.
+    expect(folderFormKey({ visibility: "private", shareCount: null })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 0 }),
+    );
+  });
+
+  it("is STABLE while nothing about the folder's sharing changed", () => {
+    // A key that churned on every render would throw away whatever the
+    // operator was mid-way through typing.
+    expect(folderFormKey({ visibility: "org", shareCount: 2 })).toBe(
+      folderFormKey({ visibility: "org", shareCount: 2 }),
+    );
   });
 });
 

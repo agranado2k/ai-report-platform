@@ -355,6 +355,39 @@ Then("the owner's cascade checkbox names the direction and the count", async ({ 
   expect(menu).toContain("Also share the 1 folder inside this one with the whole org");
 });
 
+Then("the owner's sharing fields refuse browser form restoration", async ({ request }) => {
+  // Half of the I-2/I-4 guarantee (2026-08-03 dogfood): the React key remounts
+  // the forms after an action, and `autocomplete="off"` stops the BROWSER
+  // restoring a cascade tick or a submitted address across a reload or a
+  // back-navigation — which no key can reach. A cascade box that comes back
+  // ticked under a panel that has flipped direction is one click from bulk
+  // EXPOSING the subtree, so both halves are pinned.
+  const html = await dashboard(
+    request,
+    ownerSession.jwt,
+    `?manage=${parentFolderId}`,
+    "owner dashboard (managing)",
+  );
+  const menu = sharingMenu(html, PARENT_NAME);
+  // Both primitives spread the caller's props AFTER their own, so the
+  // attribute lands to the right of `name` on the same tag.
+  // `type="email"` rather than `name="email"`: the roster's per-row Remove
+  // forms carry a HIDDEN `name="email"` too, and matching that one would test
+  // the wrong element the moment the folder has a grantee.
+  const attrsAfter = (marker: string): string => {
+    const at = menu.indexOf(marker);
+    expect(at, `no field matching ${marker} in the sharing menu`).toBeGreaterThan(-1);
+    const tagEnd = menu.indexOf(">", at);
+    return menu.slice(at, tagEnd === -1 ? at + 200 : tagEnd);
+  };
+  expect(attrsAfter('name="cascade"'), "the cascade checkbox must not be restorable").toContain(
+    'autocomplete="off"',
+  );
+  expect(attrsAfter('type="email"'), "the share field must not be restorable").toContain(
+    'autocomplete="off"',
+  );
+});
+
 // ── Person shares ──────────────────────────────────────────────────────────
 
 When(
