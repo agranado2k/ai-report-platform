@@ -34,15 +34,18 @@ Feature: Manage folder visibility and sharing from the dashboard (ADR-0076 §6)
     # The badge says only what the loader actually KNOWS. It pays for one share
     # roster (the folder in `?manage=`), so every other private row has an
     # unknown roster — and "Private" there would be a positive claim sitting one
-    # row below a "Shared with 2".
+    # row below a "Shared with 2". `Limited` is that claim at a width the 14rem
+    # sidebar can afford; the full sentence is in the badge's title.
     When the owner creates a run-scoped parent folder from the dashboard sidebar
-    Then the owner's sidebar badges the parent folder "Not org-visible"
+    Then the owner's sidebar badges the parent folder "Limited"
+    And the owner's sidebar names the parent folder in full on hover
     And the owner's sidebar renders no sharing controls for the Root folder
     And the colleague's sidebar does not show the parent folder
 
     # The org toggle — the incident's actual repair, in reverse.
     When the owner creates a run-scoped child folder inside the parent folder
     Then the owner's cascade checkbox names the direction and the count
+    And the owner's sharing fields refuse browser form restoration
     When the owner shares the parent folder with the whole org from the sidebar
     Then the owner's sidebar badges the parent folder "Org"
     And the owner's org-shared roster does NOT claim only they can see the folder

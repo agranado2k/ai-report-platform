@@ -104,6 +104,10 @@ const folders = (n: number) => `${n} ${plural(n, "folder", "folders")}`;
 export interface FolderBadge {
   readonly label: string;
   readonly tone: BadgeTone;
+  /** The whole claim, in a sentence — rendered as the badge's `title`. The
+   *  label has to survive a 14rem sidebar next to a truncating folder name, so
+   *  the nuance lives here rather than being cut out of the label. */
+  readonly title: string;
 }
 
 /** The sidebar's visibility badge. `shareCount` is `null` when the roster was
@@ -111,19 +115,78 @@ export interface FolderBadge {
  *  folder actually being managed) — and an unknown roster must never be
  *  rendered as a positive privacy claim, neither as "Shared with 0" nor as a
  *  flat "Private". A private folder MAY have individual grantees; all this row
- *  actually knows is that the whole org can't see it. */
+ *  actually knows is that the whole org can't see it.
+ *
+ *  The unknown state reads `Limited` (2026-08-03 dogfood, I-1). Its first
+ *  wording, `Not org-visible`, was honest and unreadable: a double negative,
+ *  three times the width of `Org`, which truncated a 16-character folder name
+ *  to "dog…" — and the SAME folder badged `Private` once its panel was opened,
+ *  so one folder showed two labels depending on where you looked. `Limited`
+ *  keeps the honesty (it claims only that the whole org can't see it, never
+ *  that nobody else can) at `Private`'s width, and the `title` says the rest.
+ *  The real fix is the batched share-count port method (issue #236), which
+ *  would let every row badge accurately; this is the interim. */
 export function folderVisibilityBadge(input: {
   readonly visibility: FolderVisibility;
   readonly shareCount: number | null;
 }): FolderBadge {
   // Org visibility dominates: a folder everyone can see is not meaningfully
   // "shared with 3", and the broader state is the one worth surfacing.
-  if (input.visibility === "org") return { label: "Org", tone: "warning" };
-  if (input.shareCount === null) return { label: "Not org-visible", tone: "neutral" };
-  if (input.shareCount > 0) {
-    return { label: `Shared with ${input.shareCount}`, tone: "brand" };
+  if (input.visibility === "org") {
+    return {
+      label: "Org",
+      tone: "warning",
+      title: "Everyone in your org can see this folder.",
+    };
   }
-  return { label: "Private", tone: "neutral" };
+  if (input.shareCount === null) {
+    return {
+      label: "Limited",
+      tone: "neutral",
+      title:
+        "Not visible to your whole org. Open this folder's sharing menu to see who it's " +
+        "shared with individually.",
+    };
+  }
+  if (input.shareCount > 0) {
+    return {
+      label: `Shared with ${input.shareCount}`,
+      tone: "brand",
+      title: `Not visible to your whole org — shared with ${plural(input.shareCount, "1 person", `${input.shareCount} people`)}.`,
+    };
+  }
+  return {
+    label: "Private",
+    tone: "neutral",
+    title: "Only you can see this folder — it isn't shared with anyone.",
+  };
+}
+
+/**
+ * The identity of a folder's sharing FORMS, so their inputs cannot outlive the
+ * state they were filled in for (2026-08-03 dogfood, I-2 + I-4).
+ *
+ * Both forms are uncontrolled and both live inside a panel that re-renders in
+ * place after an action — so the browser keeps the DOM nodes, and with them the
+ * operator's last input. Observed: after a cascade to `private` the panel came
+ * back reading "Share with the whole org" with the cascade box STILL TICKED and
+ * the amber mass-exposure warning already showing; a second click would have
+ * bulk-EXPOSED the subtree. And a successful share left the submitted address
+ * sitting in the field, one click away from being re-submitted.
+ *
+ * Rendered as the React `key` on both forms: when this value changes the forms
+ * REMOUNT, and a fresh `<input>` has no tick and no text. It changes on exactly
+ * the two facts an action can move — the folder's visibility (which flips on
+ * every successful toggle, taking the checkbox's whole meaning with it) and the
+ * size of its roster (which moves on every successful share/unshare). A refused
+ * action moves neither, so a refusal keeps what the operator typed, which is
+ * what they need to retry.
+ */
+export function folderFormKey(input: {
+  readonly visibility: FolderVisibility;
+  readonly shareCount: number | null;
+}): string {
+  return `${input.visibility}:${input.shareCount ?? "unknown"}`;
 }
 
 /** A folder as the sidebar tree and the cascade both need it: wire ids, the
@@ -265,17 +328,22 @@ export function folderShareWarning(input: {
   }
 
   if (input.scope.legacy > 0) {
+    const n = input.scope.legacy;
     lines.push(
-      `You'll also become the owner of ${folders(input.scope.legacy)} inside this one that ` +
+      `You'll also become the owner of ${folders(n)} inside this one that ` +
         "nobody owns yet, if you apply the change to everything inside — permanently, and " +
-        "other members will no longer be able to change their sharing.",
+        `other members will no longer be able to change ${plural(n, "its", "their")} sharing.`,
     );
   }
   if (input.target === "org" && input.scope.currentlyPrivate > 0) {
+    // Every clause has to agree with the count, not just the noun: the first
+    // version singularised "1 folder" and then said "that ARE currently
+    // private … won't put THEM back" (2026-08-03 dogfood, I-3).
+    const n = input.scope.currentlyPrivate;
     lines.push(
-      `Applying to everything inside will also make ${folders(input.scope.currentlyPrivate)} ` +
-        "that are currently private visible to everyone in your org; making this folder " +
-        "private again won't put them back.",
+      `Applying to everything inside will also make ${folders(n)} ` +
+        `that ${plural(n, "is", "are")} currently private visible to everyone in your org; ` +
+        `making this folder private again won't put ${plural(n, "it", "them")} back.`,
     );
   }
   return lines.length > 0 ? lines.join(" ") : null;

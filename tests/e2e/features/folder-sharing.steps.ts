@@ -201,6 +201,22 @@ Then(
   },
 );
 
+Then("the owner's sidebar names the parent folder in full on hover", async ({ request }) => {
+  // The sidebar clips folder names ("Architectu…"), and the row carried no
+  // `title` and no `aria-label` — so a truncated name could not be read at all
+  // without opening the folder (2026-08-03 dogfood, I-1). The badge carries one
+  // too, because its own label is deliberately terse.
+  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
+  expect(html, "the folder link must carry its full name as a tooltip").toContain(
+    `title="${PARENT_NAME}"`,
+  );
+  // (Apostrophes are HTML-escaped by React SSR, so match a plain fragment.)
+  const at = html.indexOf(`>${PARENT_NAME}</span>`);
+  expect(html.slice(at, at + 600), "the badge must explain the state it abbreviates").toContain(
+    "Not visible to your whole org.",
+  );
+});
+
 Then("the owner's sidebar renders no sharing controls for the Root folder", async ({ request }) => {
   // ADR-0076 §3: the domain rejects ANY visibility call on the Root, in either
   // direction — so the sidebar must not offer one (render-then-error is a lie).
@@ -337,6 +353,51 @@ Then("the owner's cascade checkbox names the direction and the count", async ({ 
   const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
   const menu = sharingMenu(html, PARENT_NAME);
   expect(menu).toContain("Also share the 1 folder inside this one with the whole org");
+});
+
+Then("the owner's sharing fields refuse browser form restoration", async ({ request }) => {
+  // Half of the I-2/I-4 guarantee (2026-08-03 dogfood): the React key remounts
+  // the forms after an action, and `autocomplete="off"` stops the BROWSER
+  // restoring a cascade tick or a submitted address across a reload or a
+  // back-navigation — which no key can reach. A cascade box that comes back
+  // ticked under a panel that has flipped direction is one click from bulk
+  // EXPOSING the subtree, so both halves are pinned.
+  const html = await dashboard(
+    request,
+    ownerSession.jwt,
+    `?manage=${parentFolderId}`,
+    "owner dashboard (managing)",
+  );
+  const menu = sharingMenu(html, PARENT_NAME);
+  // The WHOLE `<input …>` tag carrying the marker, not "the text between the
+  // marker and the next `>`": which side of `name` the attribute lands on is
+  // a React/primitive implementation detail (both primitives spread the
+  // caller's props after their own — today), and an order-sensitive slice
+  // stops proving anything the moment that order moves.
+  // `type="email"` rather than `name="email"`: the roster's per-row Remove
+  // forms carry a HIDDEN `name="email"` too, and matching that one would test
+  // the wrong element the moment the folder has a grantee.
+  const fieldTag = (marker: string): string => {
+    const at = menu.indexOf(marker);
+    expect(at, `no field matching ${marker} in the sharing menu`).toBeGreaterThan(-1);
+    const tagStart = menu.lastIndexOf("<", at);
+    const tagEnd = menu.indexOf(">", at);
+    return menu.slice(tagStart, tagEnd === -1 ? menu.length : tagEnd + 1);
+  };
+  // Case-INSENSITIVE on purpose: React DOM serialises this prop verbatim as
+  // `autoComplete="off"` (it is one of the handful — `maxLength`, `srcSet` —
+  // whose attribute name it keeps camelCased). That is valid HTML: attribute
+  // names are case-insensitive, the parser lowercases it, and the browser
+  // honours it — so the guarantee holds and the ASSERTION is what must bend.
+  // Anchored on a leading space + `="off"` so it cannot be satisfied by some
+  // other attribute (`data-autocomplete`) or by `autocomplete="on"`.
+  const refusesRestoration = /\sautocomplete\s*=\s*"off"/i;
+  expect(fieldTag('name="cascade"'), "the cascade checkbox must not be restorable").toMatch(
+    refusesRestoration,
+  );
+  expect(fieldTag('type="email"'), "the share field must not be restorable").toMatch(
+    refusesRestoration,
+  );
 });
 
 // ── Person shares ──────────────────────────────────────────────────────────

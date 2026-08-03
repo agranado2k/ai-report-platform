@@ -22,10 +22,15 @@ export interface FolderNode {
   readonly name: string;
   /** Who can see it (ADR-0076) — drives the toggle's direction and label. */
   readonly visibility: FolderVisibility;
-  /** Org / Shared with N / Private / Not org-visible, already resolved
-   *  server-side — including the unknown-roster case, which never renders as a
-   *  positive privacy claim. */
-  readonly badge: { readonly label: string; readonly tone: BadgeTone };
+  /** Org / Shared with N / Private / Limited, already resolved server-side —
+   *  including the unknown-roster case (`Limited`), which never renders as a
+   *  positive privacy claim. `title` carries the full sentence, because the
+   *  label has to fit a 14rem sidebar. */
+  readonly badge: {
+    readonly label: string;
+    readonly tone: BadgeTone;
+    readonly title: string;
+  };
   /** The Root (parentId null): the domain refuses ANY visibility call on it,
    *  so the tree renders no sharing affordance for it at all. */
   readonly isRoot: boolean;
@@ -47,6 +52,11 @@ export interface FolderNode {
    *  from `shares === null` (never asked for): an error must not render as
    *  "not shared with anyone". */
   readonly sharesUnavailable: boolean;
+  /** The identity of this folder's sharing forms — changes whenever an action
+   *  actually moved its visibility or its roster, which remounts the forms so
+   *  a cascade tick or a submitted address cannot survive into the next state
+   *  (`folderFormKey`). */
+  readonly formKey: string;
 }
 
 // Static indent classes per depth (CSP-safe — no inline style). Folders nest at
@@ -103,6 +113,12 @@ export function FolderTree({
       >
         <Link
           to={`/?folder=${node.id}`}
+          // The name is CLIPPED, not wrapped: this column is 14rem wide minus
+          // the badge and the kebab, so real folder names render as
+          // "Architectu…". The title is the only way to read the rest without
+          // opening the folder — there was no `title` and no `aria-label` on
+          // this link at all (2026-08-03 dogfood, I-1).
+          title={node.name}
           className={cx(
             "min-w-0 flex-1 rounded-control py-1 text-sm no-underline transition-colors",
             selected ? "font-semibold text-brand" : "text-fg hover:text-brand",

@@ -21,6 +21,7 @@ import {
   cascadeLabel,
   cascadeScope,
   cascadeSummary,
+  folderFormKey,
   folderManagement,
   folderShareWarning,
   folderVisibilityBadge,
@@ -126,24 +127,39 @@ describe("cascadeScope (ADR-0076 §cascade — what a cascade would actually tou
 
 describe("folderVisibilityBadge (ADR-0076 sidebar badge)", () => {
   it("labels an org-visible folder 'Org'", () => {
-    expect(folderVisibilityBadge({ visibility: "org", shareCount: 0 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "org", shareCount: 0 })).toMatchObject({
       label: "Org",
       tone: "warning",
     });
   });
 
   it("labels a private folder with a KNOWN empty roster 'Private'", () => {
-    expect(folderVisibilityBadge({ visibility: "private", shareCount: 0 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "private", shareCount: 0 })).toMatchObject({
       label: "Private",
       tone: "neutral",
     });
   });
 
   it("labels a private folder with shares 'Shared with N'", () => {
-    expect(folderVisibilityBadge({ visibility: "private", shareCount: 3 })).toEqual({
+    expect(folderVisibilityBadge({ visibility: "private", shareCount: 3 })).toMatchObject({
       label: "Shared with 3",
       tone: "brand",
     });
+  });
+
+  it("gives EVERY badge a title that spells the state out in full", () => {
+    // The label is squeezed into a 14rem sidebar next to a truncating folder
+    // name, so the sentence version lives in the tooltip rather than being cut
+    // from the label (2026-08-03 dogfood, I-1).
+    for (const input of [
+      { visibility: "org" as const, shareCount: 0 },
+      { visibility: "private" as const, shareCount: 0 },
+      { visibility: "private" as const, shareCount: 2 },
+      { visibility: "private" as const, shareCount: null },
+    ]) {
+      const badge = folderVisibilityBadge(input);
+      expect(badge.title.length, `no title for ${JSON.stringify(input)}`).toBeGreaterThan(20);
+    }
   });
 
   it("singularises the share count", () => {
@@ -158,12 +174,68 @@ describe("folderVisibilityBadge (ADR-0076 sidebar badge)", () => {
     // a folder shared with six people would read "Private" one row below a
     // folder reading "Shared with 2". Say only what is actually known.
     const badge = folderVisibilityBadge({ visibility: "private", shareCount: null });
-    expect(badge.label).toBe("Not org-visible");
+    expect(badge.label).toBe("Limited");
     expect(badge.label).not.toBe("Private");
+    // …and the unknown part is stated in the tooltip, where there is room.
+    expect(badge.title).toContain("shared with");
+  });
+
+  it("keeps the unknown-roster label as short as the ones it sits beside", () => {
+    // "Not org-visible" was honest and unreadable: three times the width of
+    // "Org", it truncated a 16-character folder name down to "dog…" in the
+    // 14rem sidebar (2026-08-03 dogfood, I-1). Whatever this label becomes, it
+    // may not be wider than the widest label it shares a column with.
+    const unknown = folderVisibilityBadge({ visibility: "private", shareCount: null }).label;
+    const known = folderVisibilityBadge({ visibility: "private", shareCount: 0 }).label;
+    expect(unknown.length).toBeLessThanOrEqual(known.length);
+    // A double negative reads worse than the claim it replaced.
+    expect(unknown.toLowerCase()).not.toContain("not ");
   });
 
   it("keeps 'Org' even when a share roster exists — org visibility dominates", () => {
     expect(folderVisibilityBadge({ visibility: "org", shareCount: 4 }).label).toBe("Org");
+  });
+});
+
+describe("folderFormKey (2026-08-03 dogfood I-2/I-4 — the sharing forms must not survive an action)", () => {
+  it("CHANGES when the folder's visibility flips — the cascade tick must not survive", () => {
+    // The hazard, observed in production: tick "Also make the 1 folder inside
+    // this one private", submit, and the reloaded panel came back reading
+    // "Share with the whole org" with the checkbox STILL TICKED and the amber
+    // mass-exposure warning already on screen. A second click — by someone who
+    // didn't re-read — bulk-EXPOSES the subtree. A changed key remounts the
+    // form, so the tick cannot outlive the direction it was ticked for.
+    const before = folderFormKey({ visibility: "private", shareCount: null });
+    const after = folderFormKey({ visibility: "org", shareCount: null });
+    expect(after).not.toBe(before);
+  });
+
+  it("CHANGES when the roster grows — the submitted address must not stay in the field", () => {
+    expect(folderFormKey({ visibility: "private", shareCount: 1 })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 0 }),
+    );
+  });
+
+  it("CHANGES when a share is revoked", () => {
+    expect(folderFormKey({ visibility: "private", shareCount: 0 })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 1 }),
+    );
+  });
+
+  it("distinguishes an UNKNOWN roster from a known-empty one", () => {
+    // Otherwise opening `?manage=<id>` on a folder with no shares would look
+    // like "nothing changed" and leave a half-typed address in place.
+    expect(folderFormKey({ visibility: "private", shareCount: null })).not.toBe(
+      folderFormKey({ visibility: "private", shareCount: 0 }),
+    );
+  });
+
+  it("is STABLE while nothing about the folder's sharing changed", () => {
+    // A key that churned on every render would throw away whatever the
+    // operator was mid-way through typing.
+    expect(folderFormKey({ visibility: "org", shareCount: 2 })).toBe(
+      folderFormKey({ visibility: "org", shareCount: 2 }),
+    );
   });
 });
 
@@ -258,6 +330,27 @@ describe("folderShareWarning (ADR-0076 — the adoption warning arrives BEFORE t
     expect(w).not.toContain("1 folders");
   });
 
+  it("agrees with a single legacy descendant all the way to the pronoun", () => {
+    // "1 folder … other members will no longer be able to change THEIR sharing"
+    // counted correctly and then lost agreement in the tail.
+    const w = folderShareWarning({
+      legacy: false,
+      target: "private",
+      scope: { ...empty, total: 1, legacy: 1 },
+    });
+    expect(w).toContain("change its sharing");
+    expect(w).not.toContain("change their sharing");
+  });
+
+  it("keeps the plural pronoun for several legacy descendants", () => {
+    const w = folderShareWarning({
+      legacy: false,
+      target: "private",
+      scope: { ...empty, total: 3, legacy: 2 },
+    });
+    expect(w).toContain("change their sharing");
+  });
+
   it("warns about mass EXPOSURE in the org direction, and that it cannot be undone", () => {
     // The same checkbox publishes currently-private children when the toggle
     // runs the other way, and destroys the per-descendant record so
@@ -269,7 +362,23 @@ describe("folderShareWarning (ADR-0076 — the adoption warning arrives BEFORE t
     });
     expect(w).toContain("3 folders");
     expect(w).toContain("private");
+    expect(w).toContain("that are currently private");
     expect(w).toContain("won't put them back");
+  });
+
+  it("agrees in the SINGULAR when exactly one private folder would be exposed", () => {
+    // Observed in the 2026-08-03 dogfood run: "make 1 folder that ARE currently
+    // private … won't put THEM back". The count was singularised; the verb and
+    // the pronoun were not.
+    const w = folderShareWarning({
+      legacy: false,
+      target: "org",
+      scope: { ...empty, total: 1, currentlyPrivate: 1 },
+    });
+    expect(w).toContain("1 folder that is currently private");
+    expect(w).not.toContain("that are currently private");
+    expect(w).toContain("won't put it back");
+    expect(w).not.toContain("won't put them back");
   });
 
   it("does NOT warn about exposure when the cascade runs toward private", () => {

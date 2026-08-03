@@ -3473,3 +3473,43 @@ same worktree; ADR-0076's amendment gains §4–§7 and two new cascade sections
 - **Follow-ups filed:** a `transferFolderOwnership` use case (adoption is permanent with no
   transfer path), and a batched share-count port method so every sidebar row could badge
   "Shared with N" without an N+1 — which is what would let the badge say `Private` honestly again.
+
+---
+
+## 2026-08-03 — Production dogfood of the folder sharing UI (post-merge, #230 + #234)
+
+The shipped sidebar was driven end to end **against production** in a real browser, with
+throwaway folders created and deleted for the run; folder state was cross-checked through the
+MCP API, and no real folder was modified. Ten behaviours were confirmed working — Root renders
+no badge and no kebab, private-by-default, child-inherits-parent at creation, share-by-email
+flipping the badge to "Shared with 1", the org toggle removing the "Only you can see this
+folder" sentence, the cascade banner naming the folder it changed, the cascade checkbox
+appearing only where there are children with a counted, direction-aware, singularised label,
+the inert-share warning, and the folder links' accessible names.
+
+Four findings, all fixed on `fix/dogfood-folder-ui` (see `docs/dogfood-reports/2026-08-03-folder-share-ui.md`):
+
+- **The `Not org-visible` badge (from the #234 review) was honest and unreadable.** A double
+  negative, three times the width of `Org`, truncating a 16-character folder name to `dog…` in
+  the 14rem sidebar — and the SAME folder badged `Private` once its panel loaded the roster, so
+  one folder read two ways depending on where you looked. The honesty constraint behind it is
+  kept (without a roster you cannot claim `Private`); only the presentation changed, to
+  **`Limited`** plus a `title` with the full sentence. Folder links now carry their full name as
+  a `title` — the row clips names and had neither a `title` nor an `aria-label`. The real fix
+  stays issue **#236** (batched share counts); this is the interim.
+- **A cascade tick outlived its action.** After cascading to private the checkbox came back
+  TICKED under a panel that had flipped to "Share with the whole org", amber mass-exposure
+  warning and all — one unread click from publishing the subtree. Both sharing forms are now
+  keyed on `folderFormKey` (visibility + roster size) so a successful action remounts them
+  empty, with `autoComplete="off"` for browser restoration.
+- **Counted copy that stopped agreeing halfway.** "make 1 folder that ARE currently private …
+  won't put THEM back". Both cascade sentences now agree in every clause.
+- **A successful share left the address in the field** (and "+ New folder" did the same,
+  pre-existing) — same keying fix.
+
+Recorded and NOT fixed: the success banner shifts sidebar layout when it appears. Not coverable
+this run: legacy-folder ADOPTION (every legacy folder in prod is real user data; unit + e2e
+cover it), the second-user "colleague loses sight of the folder" transition (one browser
+session; the e2e covers it), and the >50 `MAX_CASCADE` refusal.
+
+ADR-0076 gains a third amendment recording the badge label change and the staged-action rule.

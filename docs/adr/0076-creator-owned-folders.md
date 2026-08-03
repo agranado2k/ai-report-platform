@@ -48,7 +48,7 @@ ADR-0059 §5 deliberately kept folders org-scoped: "a shared org folder tree is 
 2. **Root renders nothing.** §3 makes the Root unmanageable in *either* direction, so the sidebar renders no affordance for it at all rather than rendering-then-erroring.
 3. **The rule is mirrored, never re-derived.** `manageable` / `blockedReason` / `adoptionNotice` are computed in the LOADER by `folderManagement` (`apps/app/app/server/folder-sharing.server.ts`), a mirror of `loadManagedFolder`, and shipped to the components as plain data. Two reasons: the dashboard components must not import `arp-domain` (its barrel pulls `node:crypto` into the client bundle), and an independently-invented client rule would drift from the server that actually decides. A folder owned by someone else renders the controls **disabled with the server's own reason**, not hidden.
 4. **The adoption warning arrives before the click, and covers the SUBTREE.** Adoption (§6) is permanent and has no transfer path, so a legacy folder's menu states it up front: "You'll become this folder's owner. Other members won't be able to change its sharing, and ownership can't be transferred." Warning about the CLICKED folder alone was not enough (see the amendment below): migration 0019 left every pre-ADR-0076 row with `owner_id` NULL, so a member cascading from a folder they own can seize every legacy folder beneath it. The loader therefore counts the legacy descendants of each manageable folder and folds that into the **same amber notice** — one warning surface, never two: "You'll also become the owner of N folders inside this one that nobody owns yet, if you apply the change to everything inside — permanently, and other members will no longer be able to change their sharing."
-5. **The share roster costs one query, for one folder.** Only `?manage=<id>` loads a roster; every other badge falls back to a claim it can actually support. A roster per sidebar row would be an N+1 on the dashboard's hot path (a batched port method is the fix if it ever matters). Consequently the badge for a private folder whose roster was NOT loaded reads **`Not org-visible`**, not `Private`: `private` permits individual grantees, so "Private" one row above "Shared with 2" would be a positive claim made from no data. `Private` is reserved for a roster known to be empty. A roster load that FAILS is likewise not an empty roster — the panel says so explicitly, and the badge stays in the unknown state.
+5. **The share roster costs one query, for one folder.** Only `?manage=<id>` loads a roster; every other badge falls back to a claim it can actually support. A roster per sidebar row would be an N+1 on the dashboard's hot path (a batched port method is the fix if it ever matters). Consequently the badge for a private folder whose roster was NOT loaded reads **`Limited`** (originally `Not org-visible` — see the 2026-08-03 amendment), not `Private`: `private` permits individual grantees, so "Private" one row above "Shared with 2" would be a positive claim made from no data. `Private` is reserved for a roster known to be empty. A roster load that FAILS is likewise not an empty roster — the panel says so explicitly, and the badge stays in the unknown state.
 6. **The management rule is the DOMAIN's, not the UI's.** `canManageFolder` / `hasFolderManagementScope` / `isRootFolder` live in `arp-domain` beside `isFolderBroadlyVisibleTo`, and are consumed by BOTH `loadManagedFolder` and the dashboard loader. The first version of this UI re-transcribed the rule and had already dropped the `acl:write` leg — harmless only because `SELF_SCOPES` always carries it, and one narrower actor path (`EDIT_TOKEN_SCOPES`, ADR-0063) away from rendering an enabled control whose POST 403s. The "no `arp-domain` in dashboard components" constraint applies to COMPONENTS; the loader is server code and consumes the domain directly.
 7. **Copy that claims privacy is gated on visibility.** "Only you can see this folder" may only be said of a `private` folder. It was branching on `shares.length === 0` alone, so an ORG-visible folder with no individual shares rendered a categorical privacy assurance two lines under its own `Org` badge.
 
@@ -74,6 +74,41 @@ ADR-0059 §5 deliberately kept folders org-scoped: "a shared org folder tree is 
 - **The loop is unit-tested, in the server module rather than the route.** It lives in `apps/app/app/server/folder-sharing.server.ts` as `applyFolderVisibility` with `ops()` injected, because no test tier collects `app/routes/**` — the riskiest code in the feature had zero unit coverage while the e2e asserted the OPPOSITE of a partial failure, so inverting the banner's warning switch would have rendered a half-done cascade GREEN with every test passing. The warning switch is now `cascadeIsPartial`, under test, and the loop is tested for actually producing a non-empty `failed`.
 - **Scope is the actor's VISIBLE tree.** A descendant the actor cannot see is not in the tree the loop walks, so it is never silently "skipped" — it was never a candidate. This is the one limit the per-folder copy can't spell out row by row, and it is the deliberate consequence of "existence is private": the UI cannot warn about a folder it must not admit exists.
 - **It is N calls, not one.** Fine at current folder counts, and each one is the audited, authorized call it should be. If a tree ever gets deep enough for this to matter, the fix is a batched *use case* — not recursive SQL underneath the guard.
+
+## Amendment (2026-08-03) — what a production dogfood run of that UI found
+
+The shipped sidebar was exercised end to end against production with throwaway
+folders (created and deleted; no real folder touched). The model held; four
+things about the SURFACE did not.
+
+1. **An honest label still has to fit.** §5's `Not org-visible` was the right
+   claim in the wrong shape: a double negative, three times the width of `Org`,
+   which truncated a 16-character folder name to `dog…` in the 14rem sidebar —
+   and the SAME folder badged `Private` once `?manage=<id>` loaded its roster,
+   so one folder read two ways depending on where you looked. The unknown-roster
+   badge now reads **`Limited`**: the identical claim (the whole org can't see
+   it; who else can is not asserted) at `Private`'s width. §5's honesty
+   constraint is unchanged — `Private` still means a roster known to be empty.
+   Every badge additionally carries a `title` with the full sentence, and folder
+   links carry their full name as a `title`, because the row clips it and had
+   neither a `title` nor an `aria-label`. The real repair is the batched
+   share-count port method (issue #236) — with it every row could badge
+   accurately and the unknown state would disappear; `Limited` is the interim.
+2. **A staged action must not outlive the state it was staged for.** The
+   cascade checkbox came back TICKED after a cascade, under a panel that had
+   flipped to the opposite direction and was already showing the mass-exposure
+   warning — one unread click from publishing the subtree. The same reuse left
+   a just-granted address sitting in the share field. Both forms are now keyed
+   on `folderFormKey` (visibility + roster size — the two facts an action can
+   move), so a successful action remounts them empty while a refusal keeps what
+   was typed; `autoComplete="off"` covers browser restoration, which no key
+   reaches. This is a property of the SURFACE, not of the model: the server
+   renders no tick either way.
+3. **Counted copy has to agree in every clause.** The org-direction warning
+   singularised the count and not the verb: "make 1 folder that ARE currently
+   private … won't put THEM back". Both cascade sentences now agree throughout.
+
+None of this changes the decision, the predicate, or the cascade's bounds.
 
 ## More information
 
