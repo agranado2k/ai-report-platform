@@ -232,8 +232,10 @@ Then(
     // `loadManagedFolder` rather than inventing a client-side rule.
     const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
     const menu = sharingMenu(html, PARENT_NAME);
-    // Apostrophes are HTML-escaped by React SSR, so match the plain tail.
-    expect(menu).toContain("owner can change its sharing");
+    // The application layer's own `FOLDER_NOT_MANAGEABLE`, not a phrasing the
+    // UI invented. Apostrophes are HTML-escaped by React SSR, so match the
+    // plain tail.
+    expect(menu).toContain("owner can manage its sharing");
     expect(menu, "a non-owner must not get a live visibility toggle").not.toContain(
       "set-folder-visibility",
     );
@@ -323,6 +325,18 @@ Then("the cascade result names the child folder as changed", async () => {
   expect(lastActionHtml, "nothing failed, so nothing may be reported as failed").not.toContain(
     "NOT changed",
   );
+  // Nothing was ADOPTED: the child has an owner (its creator), so the cascade
+  // must not claim an ownership change it did not make.
+  expect(lastActionHtml).not.toContain("You're now the owner of");
+});
+
+Then("the owner's cascade checkbox names the direction and the count", async ({ request }) => {
+  // "Also apply to everything inside this folder" said the same thing whether
+  // it was about to hide two folders or publish twenty. The label is now
+  // computed server-side from the actor's visible tree.
+  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
+  const menu = sharingMenu(html, PARENT_NAME);
+  expect(menu).toContain("Also share the 1 folder inside this one with the whole org");
 });
 
 // ── Person shares ──────────────────────────────────────────────────────────
@@ -396,8 +410,33 @@ Then("the owner's share roster for the parent folder is empty", async ({ request
   );
   const menu = sharingMenu(html, PARENT_NAME);
   expect(menu).toContain("Not shared with anyone yet.");
+  // The WHOLE sentence, not just its first half: "Only you can see this
+  // folder" is a claim about VISIBILITY, and asserting only "Not shared with
+  // anyone yet." let it render under an "Org" badge unnoticed.
+  expect(menu).toContain("Only you can see this folder.");
   expect(menu).not.toContain(COLLEAGUE_EMAIL);
 });
+
+Then(
+  "the owner's org-shared roster does NOT claim only they can see the folder",
+  async ({ request }) => {
+    // ADR-0076 exists because folder names leaked org-wide. An org-visible
+    // folder with no individual shares must never answer "Only you can see
+    // this folder" — that is the exact false assurance the model repairs.
+    const html = await dashboard(
+      request,
+      ownerSession.jwt,
+      `?manage=${parentFolderId}`,
+      "owner dashboard (managing, org-visible)",
+    );
+    const menu = sharingMenu(html, PARENT_NAME);
+    expect(badgeFor(html, PARENT_NAME)).toBe("Org");
+    expect(menu, "an org-visible folder must not assert privacy").not.toContain(
+      "Only you can see this folder",
+    );
+    expect(menu).toContain("everyone in your org can already see this folder");
+  },
+);
 
 // Best-effort accumulation bound, pass or fail: delete the folders this run
 // created (deepest first — a non-empty folder is refused), then the run-scoped
@@ -406,6 +445,13 @@ Then("the owner's share roster for the parent folder is empty", async ({ request
 After({ tags: "@run-scoped" }, async ({ request }) => {
   const secretKey = process.env.E2E_CLERK_SECRET_KEY;
   if (!secretKey) return;
+  // playwright-bdd's hook registry is GLOBAL, so this fires after EVERY
+  // @run-scoped scenario — including team-org-upload's. Without this guard it
+  // re-ran there with THIS module's stale folder ids and a deleted user's JWT,
+  // issuing a DELETE for a folder that belongs to a finished run. Our own
+  // fixtures being present is what identifies our scenario; they are cleared
+  // at the end of this hook, so a second firing is inert.
+  if (!ownerFixture && !colleagueFixture) return;
   for (const id of [childFolderId, parentFolderId]) {
     if (!id) continue;
     try {
@@ -418,4 +464,8 @@ After({ tags: "@run-scoped" }, async ({ request }) => {
   if (colleagueFixture) await cleanupTeamFixture(secretKey, colleagueFixture);
   ownerFixture = undefined;
   colleagueFixture = undefined;
+  // Reset the folder ids too, or a later firing would target folders that no
+  // longer exist with credentials that no longer work.
+  parentFolderId = undefined;
+  childFolderId = undefined;
 });

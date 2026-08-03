@@ -31,15 +31,21 @@ Feature: Manage folder visibility and sharing from the dashboard (ADR-0076 §6)
 
     # Private by default (ADR-0076 §3) — a new folder under Root is the
     # creator's alone, and the sidebar says so.
+    # The badge says only what the loader actually KNOWS. It pays for one share
+    # roster (the folder in `?manage=`), so every other private row has an
+    # unknown roster — and "Private" there would be a positive claim sitting one
+    # row below a "Shared with 2".
     When the owner creates a run-scoped parent folder from the dashboard sidebar
-    Then the owner's sidebar badges the parent folder "Private"
+    Then the owner's sidebar badges the parent folder "Not org-visible"
     And the owner's sidebar renders no sharing controls for the Root folder
     And the colleague's sidebar does not show the parent folder
 
     # The org toggle — the incident's actual repair, in reverse.
     When the owner creates a run-scoped child folder inside the parent folder
-    And the owner shares the parent folder with the whole org from the sidebar
+    Then the owner's cascade checkbox names the direction and the count
+    When the owner shares the parent folder with the whole org from the sidebar
     Then the owner's sidebar badges the parent folder "Org"
+    And the owner's org-shared roster does NOT claim only they can see the folder
     And the colleague's sidebar shows the parent folder
     And the colleague's sharing menu for the parent folder is refused with a reason
 
