@@ -1,18 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { folderId, orgId, userId } from "./brand";
 import {
+  canManageFolder,
   canWriteFolder,
   collectFolderDescendants,
   createFolder,
   type Folder,
+  FOLDER_VISIBILITIES,
   folderSlug,
   graftOrphansToRoot,
+  hasFolderManagementScope,
   inheritedVisibility,
   isFolderBroadlyVisibleTo,
+  isRootFolder,
+  makeFolderVisibility,
   renameFolder,
   setFolderVisibility,
   visibleFolderOrRoot,
 } from "./folder";
+import { ACL_WRITE_SCOPE } from "./scope";
 
 const org = orgId("00000000-0000-7000-8000-0000000000a1");
 const parent = folderId("00000000-0000-7000-8000-0000000000f0");
@@ -197,6 +203,69 @@ describe("visibility + write predicates (ADR-0076)", () => {
     const f = build({ visibility: "org" });
     expect(isFolderBroadlyVisibleTo(f, other)).toBe(true);
     expect(canWriteFolder(f, other)).toBe(true);
+  });
+});
+
+describe("canManageFolder (ADR-0076 §6 — the sharing-management rule)", () => {
+  it("the OWNER may manage their own folder", () => {
+    expect(canManageFolder(build({ ownerId: owner }), owner)).toBe(true);
+  });
+
+  it("a LEGACY folder is manageable by any org member — the adoption/repair path", () => {
+    expect(canManageFolder(build({ ownerId: null }), other)).toBe(true);
+  });
+
+  it("an ORG-VISIBLE folder owned by someone else is NOT manageable", () => {
+    // The one place management is strictly narrower than `canWriteFolder`:
+    // org visibility grants writes, never sharing control.
+    const f = build({ ownerId: owner, visibility: "org" });
+    expect(canWriteFolder(f, other)).toBe(true);
+    expect(canManageFolder(f, other)).toBe(false);
+  });
+
+  it("a private folder owned by someone else is NOT manageable", () => {
+    expect(canManageFolder(build({ ownerId: owner }), other)).toBe(false);
+  });
+});
+
+describe("isRootFolder (ADR-0076 §3)", () => {
+  it("is true exactly when there is no parent", () => {
+    expect(isRootFolder(build({ parentId: null }))).toBe(true);
+    expect(isRootFolder(build({ parentId: parent }))).toBe(false);
+  });
+});
+
+describe("hasFolderManagementScope (ADR-0076 §6 — the acl:write gate)", () => {
+  it("accepts a session carrying acl:write", () => {
+    expect(hasFolderManagementScope(["reports:write", ACL_WRITE_SCOPE])).toBe(true);
+  });
+
+  it("refuses an actor without it — e.g. an edit-token actor (reports:write only)", () => {
+    expect(hasFolderManagementScope(["reports:write"])).toBe(false);
+    expect(hasFolderManagementScope([])).toBe(false);
+  });
+});
+
+describe("makeFolderVisibility (ADR-0076 — one enum validator)", () => {
+  it("accepts each declared visibility", () => {
+    for (const v of FOLDER_VISIBILITIES) {
+      const r = makeFolderVisibility(v);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value).toBe(v);
+    }
+  });
+
+  it("rejects anything else with a field-tagged ValidationError naming the options", () => {
+    const r = makeFolderVisibility("public");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.kind).toBe("ValidationError");
+    expect(r.error.message).toBe("visibility must be one of: private, org");
+    expect((r.error as { field?: string }).field).toBe("visibility");
+  });
+
+  it("rejects an empty/absent value rather than defaulting", () => {
+    expect(makeFolderVisibility("").ok).toBe(false);
   });
 });
 

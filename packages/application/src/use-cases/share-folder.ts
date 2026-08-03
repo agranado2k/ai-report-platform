@@ -13,6 +13,7 @@ import {
   type AppError,
   err,
   type FolderId,
+  hasFolderManagementScope,
   insufficientScope,
   makeEmailAddress,
   ok,
@@ -59,7 +60,7 @@ export async function shareFolder(
   actor: ShareFolderActor,
   input: ShareFolderInput,
 ): Promise<Result<FolderShare, AppError>> {
-  if (!actor.scopes.includes(ACL_WRITE_SCOPE)) return err(insufficientScope(ACL_WRITE_SCOPE));
+  if (!hasFolderManagementScope(actor.scopes)) return err(insufficientScope(ACL_WRITE_SCOPE));
 
   const found = await loadManagedFolder(deps.folders, actor, input.folderId, deps);
   if (!found.ok) return found;

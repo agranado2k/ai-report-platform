@@ -15,6 +15,7 @@ import {
   type Folder,
   type FolderId,
   type FolderVisibility,
+  hasFolderManagementScope,
   insufficientScope,
   ok,
   type Result,
@@ -52,7 +53,7 @@ export async function setFolderVisibility(
   actor: SetFolderVisibilityActor,
   input: SetFolderVisibilityInput,
 ): Promise<Result<Folder, AppError>> {
-  if (!actor.scopes.includes(ACL_WRITE_SCOPE)) return err(insufficientScope(ACL_WRITE_SCOPE));
+  if (!hasFolderManagementScope(actor.scopes)) return err(insufficientScope(ACL_WRITE_SCOPE));
 
   const found = await loadManagedFolder(deps.folders, actor, input.folderId, deps);
   if (!found.ok) return found;
