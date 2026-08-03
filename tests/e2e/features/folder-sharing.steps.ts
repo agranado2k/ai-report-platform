@@ -369,22 +369,34 @@ Then("the owner's sharing fields refuse browser form restoration", async ({ requ
     "owner dashboard (managing)",
   );
   const menu = sharingMenu(html, PARENT_NAME);
-  // Both primitives spread the caller's props AFTER their own, so the
-  // attribute lands to the right of `name` on the same tag.
+  // The WHOLE `<input …>` tag carrying the marker, not "the text between the
+  // marker and the next `>`": which side of `name` the attribute lands on is
+  // a React/primitive implementation detail (both primitives spread the
+  // caller's props after their own — today), and an order-sensitive slice
+  // stops proving anything the moment that order moves.
   // `type="email"` rather than `name="email"`: the roster's per-row Remove
   // forms carry a HIDDEN `name="email"` too, and matching that one would test
   // the wrong element the moment the folder has a grantee.
-  const attrsAfter = (marker: string): string => {
+  const fieldTag = (marker: string): string => {
     const at = menu.indexOf(marker);
     expect(at, `no field matching ${marker} in the sharing menu`).toBeGreaterThan(-1);
+    const tagStart = menu.lastIndexOf("<", at);
     const tagEnd = menu.indexOf(">", at);
-    return menu.slice(at, tagEnd === -1 ? at + 200 : tagEnd);
+    return menu.slice(tagStart, tagEnd === -1 ? menu.length : tagEnd + 1);
   };
-  expect(attrsAfter('name="cascade"'), "the cascade checkbox must not be restorable").toContain(
-    'autocomplete="off"',
+  // Case-INSENSITIVE on purpose: React DOM serialises this prop verbatim as
+  // `autoComplete="off"` (it is one of the handful — `maxLength`, `srcSet` —
+  // whose attribute name it keeps camelCased). That is valid HTML: attribute
+  // names are case-insensitive, the parser lowercases it, and the browser
+  // honours it — so the guarantee holds and the ASSERTION is what must bend.
+  // Anchored on a leading space + `="off"` so it cannot be satisfied by some
+  // other attribute (`data-autocomplete`) or by `autocomplete="on"`.
+  const refusesRestoration = /\sautocomplete\s*=\s*"off"/i;
+  expect(fieldTag('name="cascade"'), "the cascade checkbox must not be restorable").toMatch(
+    refusesRestoration,
   );
-  expect(attrsAfter('type="email"'), "the share field must not be restorable").toContain(
-    'autocomplete="off"',
+  expect(fieldTag('type="email"'), "the share field must not be restorable").toMatch(
+    refusesRestoration,
   );
 });
 
