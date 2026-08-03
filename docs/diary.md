@@ -3421,3 +3421,55 @@ amendment recording both the UI and the cascade decision.
 - **Not e2e-covered, deliberately:** legacy adoption. `owner_id IS NULL` only comes from the
   pre-ADR-0076 backfill; there is no supported way to mint one through the product, so the
   adoption warning and the owner-or-legacy gate are pinned by unit tests instead.
+
+## 2026-08-03 — Review pass on the folder sharing UI: the cascade's silent mass-adoption (PR #234)
+
+Two independent reviews (a 6-agent code review and an alignment analysis against ADR-0076)
+agreed on one merge-blocker and a set of real defects in `feat/folder-share-ui`. Fixed in the
+same worktree; ADR-0076's amendment gains §4–§7 and two new cascade sections.
+
+- **BLOCKER — the cascade silently mass-adopted legacy descendants.** `setFolderVisibility`'s
+  domain transition is `ownerId: folder.ownerId ?? claimant`, and migration 0019 left EVERY
+  pre-ADR-0076 folder with `owner_id` NULL — legacy is the common state, not an edge case. The
+  adoption warning rendered only when the folder CLICKED was legacy, so a member acting on their
+  own folder saw nothing while permanently seizing every legacy folder inside it; colleagues then
+  403 on managing them and lose rename/delete/create-children via `canWriteFolder`. The loader
+  now counts each manageable folder's legacy descendants and folds the warning into the SAME
+  amber notice (one warning surface, not two), and `cascadeSummary` names adoptions separately
+  from ordinary changes. This is the case the operator will actually hit — "Engeneering" is a
+  legacy folder and may have legacy children.
+- **The authorization rule stopped being transcribed twice.** `canManageFolder` /
+  `hasFolderManagementScope` / `isRootFolder` now live in `arp-domain` and are consumed by BOTH
+  `loadManagedFolder` and the dashboard loader. The loader's copy had no `acl:write` leg and was
+  one narrower actor path (`EDIT_TOKEN_SCOPES`) away from rendering an enabled control whose POST
+  403s. The "no `arp-domain` in dashboard components" constraint never reached the loader.
+- **Unloaded ≠ empty ≠ private.** A failed roster load rendered as `[]` — i.e. badge "Private"
+  and "Not shared with anyone yet. Only you can see this folder." for a folder shared with five
+  people. `null` already meant unknown; the failure now says so out loud, and a private folder
+  with an UNLOADED roster badges `Not org-visible` rather than claiming `Private`.
+  Relatedly: "Only you can see this folder" is now gated on `visibility === "private"` — it was
+  rendering under an `Org` badge, the exact false assurance ADR-0076 exists to repair.
+- **The cascade got a cap and a direction.** `MAX_CASCADE = 50` with a PRE-FLIGHT refusal
+  (enumerate before touching anything, so a refusal changes nothing) instead of an unbounded
+  sequential non-transactional loop that could 504 mid-way. The checkbox label is direction-aware
+  and counted, because the same control mass-EXPOSES in the org direction with no preview and no
+  undo.
+- **The riskiest code became testable.** `cascadeVisibility` moved out of `app/routes/_index.tsx`
+  — which no test tier collects — into `folder-sharing.server.ts` as `applyFolderVisibility` with
+  `ops()` injected. The banner's warning/success switch is now `cascadeIsPartial`, under test;
+  before, inverting it rendered a half-done cascade GREEN with every test still passing.
+- **`shareFolder` now refuses the Root** (422). It gated only on `loadManagedFolder`, which
+  PASSES the Root (a legacy row), so `POST /api/v1/folders/{rootId}/shares` succeeded — while the
+  sidebar told members the Root "can't be shared or owned". Fixed the reality, not the copy.
+- Smaller: `visibleFolderTree` (one tree construction, shared by loader and cascade — the graft
+  is load-bearing for cascade SCOPE); `makeFolderVisibility` (one enum validator for both doors);
+  `FolderVisibility` imported rather than hand-copied (`import type` emits nothing under
+  `verbatimModuleSyntax`); the three sharing intents return the folder-tagged action shape on a
+  bad id; the "+ New folder" error narrowed so a sharing refusal stops rendering twice;
+  `manageHref` keeps the page cursor; the `@run-scoped` After hook no longer fires for
+  team-org-upload with stale ids and a deleted user's JWT.
+- **Not taken:** extracting a shared `KebabMenu` into `arp-ui` and splitting the e2e monolith —
+  both fair, neither now. Recorded in the PR body.
+- **Follow-ups filed:** a `transferFolderOwnership` use case (adoption is permanent with no
+  transfer path), and a batched share-count port method so every sidebar row could badge
+  "Shared with N" without an N+1 — which is what would let the badge say `Private` honestly again.
