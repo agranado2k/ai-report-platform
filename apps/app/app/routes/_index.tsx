@@ -8,18 +8,12 @@ import {
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
 import {
   type AppError,
-  collectFolderDescendants,
-  FOLDER_VISIBILITIES,
-  type FolderVisibility,
   folderIdToWire,
-  graftOrphansToRoot,
   makeFolderId,
+  makeFolderVisibility,
   makeReportId,
   makeSlug,
-  type OrgId,
   reportIdToWire,
-  type UserId,
-  validationError,
   visibleFolderOrRoot,
 } from "arp-domain";
 import {
@@ -42,11 +36,18 @@ import {
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
 import {
-  type CascadeFailure,
+  applyFolderVisibility,
+  cascadeIsPartial,
+  cascadeLabel,
+  cascadeScope,
   cascadeSummary,
+  type FolderManagementActor,
   folderManagement,
+  folderShareWarning,
   folderVisibilityBadge,
   INERT_SHARE_NOTICE,
+  ROSTER_UNAVAILABLE_NOTICE,
+  visibleFolderTree,
 } from "../server/folder-sharing.server";
 import { errorToJson, errorToJsonParts } from "../server/http.server";
 import { log } from "../server/log.server";
@@ -99,7 +100,10 @@ export async function loader(args: LoaderFunctionArgs) {
     selectedFolderId: null,
     rootId: null,
     manageFolderId: null as string | null,
+    startingAfter: afterRaw ?? null,
+    endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
+    rosterUnavailableNotice: ROSTER_UNAVAILABLE_NOTICE,
   };
   if (!actor) return json(empty);
 
@@ -109,31 +113,35 @@ export async function loader(args: LoaderFunctionArgs) {
   // to build it).
   const foldersR = await ops().listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
   if (!foldersR.ok) log.warn(`dashboard: listFolders failed — ${foldersR.error.message}`);
-  // ADR-0076 §6: `manageable` / `blockedReason` / `adoptionNotice` are decided
-  // HERE, mirroring `loadManagedFolder`, and shipped to the sidebar as plain
-  // data — dashboard components must never import `arp-domain` (its barrel
-  // pulls `node:crypto` into the client bundle), and they must never
-  // re-derive an authorization rule of their own.
-  const visibleFolders = (foldersR.ok ? foldersR.value.items : []).map((f) => ({
-    id: folderIdToWire(f.id),
-    parentId: f.parentId ? folderIdToWire(f.parentId) : null,
-    name: f.name,
-    visibility: f.visibility,
-    ...folderManagement({ parentId: f.parentId, ownerId: f.ownerId }, actor.userId),
-  }));
-  const rootNode = visibleFolders.find((f) => f.parentId === null) ?? null;
-  // Partial-visibility grafting (ADR-0076): a visible folder whose ancestor
-  // chain contains invisible folders is re-parented under Root for THIS
-  // viewer's tree — it stays reachable without leaking any invisible
-  // ancestor's name. Pure helper, unit-tested in arp-domain.
-  const grafted = rootNode ? graftOrphansToRoot(visibleFolders, rootNode.id) : visibleFolders;
-  const root = rootNode;
+  // ONE tree construction — wire ids plus the partial-visibility graft
+  // (ADR-0076 §5) — shared with the cascade, which depends on the graft for
+  // its SCOPE ("everything inside this folder" must mean what the sidebar
+  // shows inside it).
+  const domainFolders = foldersR.ok ? foldersR.value.items : [];
+  const grafted = visibleFolderTree(domainFolders);
+  const root = grafted.find((f) => f.parentId === null) ?? null;
+  // ADR-0076 §6: `manageable` / `blockedReason` / the warning are decided HERE,
+  // by the SAME domain predicates `loadManagedFolder` enforces, and shipped to
+  // the sidebar as plain data — dashboard components must never import
+  // `arp-domain` (its barrel pulls `node:crypto` into the client bundle), and
+  // they must never re-derive an authorization rule of their own.
+  const managementActor = { userId: actor.userId, scopes: actor.scopes };
+  const management = new Map(
+    domainFolders.map((f) => [folderIdToWire(f.id), folderManagement(f, managementActor)]),
+  );
 
   // The one share roster this page loads (see `manageRequested` above). Asking
   // for a folder that isn't manageable simply yields no roster — the use case
   // would 403/404 anyway, and the loader must not turn that into a page error.
-  const manageTarget = grafted.find((f) => f.id === manageRequested && f.manageable) ?? null;
+  const manageTarget =
+    grafted.find((f) => f.id === manageRequested && management.get(f.id)?.manageable) ?? null;
   let shares: readonly FolderShareRow[] | null = null;
+  // The roster load FAILED (transient DB error, or an actor the use case
+  // refuses). It must NOT collapse into an empty roster: that would render an
+  // error as the positive claim "not shared with anyone — only you can see this
+  // folder" for a folder that may be shared with five people. `null` already
+  // means "unknown" throughout this module; this flag says WHY it is unknown.
+  let sharesUnavailable = false;
   if (manageTarget) {
     const decoded = makeFolderId(manageTarget.id);
     if (decoded.ok) {
@@ -141,22 +149,43 @@ export async function loader(args: LoaderFunctionArgs) {
         { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
         { folderId: decoded.value },
       );
-      if (!sharesR.ok) log.warn(`dashboard: listFolderShares failed — ${sharesR.error.message}`);
-      shares = sharesR.ok
-        ? sharesR.value.map((s) => ({
-            email: s.granteeEmail,
-            // Formatted server-side so the markup is stable (no locale drift
-            // between the SSR pass and hydration).
-            grantedAt: new Date(s.grantedAt).toISOString().slice(0, 10),
-          }))
-        : [];
+      if (sharesR.ok) {
+        shares = sharesR.value.map((s) => ({
+          email: s.granteeEmail,
+          // Formatted server-side so the markup is stable (no locale drift
+          // between the SSR pass and hydration).
+          grantedAt: new Date(s.grantedAt).toISOString().slice(0, 10),
+        }));
+      } else {
+        log.warn(`dashboard: listFolderShares failed — ${sharesR.error.message}`);
+        sharesUnavailable = true;
+      }
     }
   }
   const folders: FolderNode[] = grafted.map((f) => {
     const own = manageTarget?.id === f.id ? shares : null;
+    const m = management.get(f.id) ?? {
+      isRoot: f.parentId === null,
+      manageable: false,
+      legacy: f.ownerId === null,
+      blockedReason: null,
+    };
+    // The direction the toggle would take this folder, which is what makes the
+    // warning and the checkbox label sayable up front.
+    const target = f.visibility === "org" ? ("private" as const) : ("org" as const);
+    const scope = m.manageable ? cascadeScope(grafted, f.id) : null;
     return {
-      ...f,
+      id: f.id,
+      parentId: f.parentId,
+      name: f.name,
+      visibility: f.visibility,
+      isRoot: m.isRoot,
+      manageable: m.manageable,
+      blockedReason: m.blockedReason,
+      shareWarning: scope ? folderShareWarning({ legacy: m.legacy, target, scope }) : null,
+      cascadeLabel: scope ? cascadeLabel({ target, scope }) : null,
       shares: own,
+      sharesUnavailable: manageTarget?.id === f.id && sharesUnavailable,
       badge: folderVisibilityBadge({
         visibility: f.visibility,
         shareCount: own?.length ?? null,
@@ -226,17 +255,13 @@ export async function loader(args: LoaderFunctionArgs) {
     selectedFolderId,
     rootId: root?.id ?? null,
     manageFolderId: manageTarget?.id ?? null,
+    // The raw cursors, so "Manage who it's shared with →" can come back to the
+    // page the operator was actually on.
+    startingAfter: afterRaw ?? null,
+    endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
+    rosterUnavailableNotice: ROSTER_UNAVAILABLE_NOTICE,
   });
-}
-
-/** The acting principal the three ADR-0076 management use cases authorize
- *  against — `TenancyActor` plus the `acl:write` scope they all gate on
- *  (which a dashboard session carries via `SELF_SCOPES`). */
-interface FolderManagementActor {
-  readonly orgId: OrgId;
-  readonly userId: UserId;
-  readonly scopes: readonly string[];
 }
 
 /** The shape EVERY ADR-0076 sharing action returns, success or failure — one
@@ -262,66 +287,6 @@ function folderError(folderId: string, error: AppError) {
 function folderOk(folderId: string, summary: string, partial = false) {
   const data: FolderActionData = { folderId, error: null, summary, partial };
   return json(data);
-}
-
-/**
- * THE CASCADE (ADR-0076 §cascade — the nested-folder gap).
- *
- * ADR-0076's repair is per-folder and NOT recursive: making a parent private
- * leaves pre-existing descendants org-visible, and `graftOrphansToRoot` then
- * re-parents them under Root in other members' sidebars — so their names still
- * leak from a folder its owner believes they just made private.
- *
- * This closes that gap WITHOUT changing the model: it is a loop, in the action
- * layer, over the actor's VISIBLE tree, calling the SAME `setFolderVisibility`
- * use case once per descendant. No recursive domain transition, no recursive
- * SQL, no new authorization path — every iteration re-runs `loadManagedFolder`,
- * so a descendant this actor doesn't own is refused by the server exactly as it
- * would be on its own.
- *
- * Partial failure is therefore normal and is reported HONESTLY: each refusal
- * carries the folder's name and the server's own message, and the caller's
- * summary never counts it as changed. A descendant the actor cannot SEE is not
- * in the visible tree at all, so it is never silently "skipped" — it was never
- * a candidate, which is the one limit the copy can't spell out per-folder.
- */
-async function cascadeVisibility(
-  actor: FolderManagementActor,
-  parentWireId: string,
-  visibility: FolderVisibility,
-): Promise<{ changed: string[]; failed: CascadeFailure[] }> {
-  const changed: string[] = [];
-  const failed: CascadeFailure[] = [];
-
-  const foldersR = await ops().listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
-  if (!foldersR.ok) {
-    log.warn(`dashboard: cascade listFolders failed — ${foldersR.error.message}`);
-    return { changed, failed: [{ name: "everything inside", reason: foldersR.error.message }] };
-  }
-  const nodes = foldersR.value.items.map((f) => ({
-    id: folderIdToWire(f.id),
-    parentId: f.parentId ? folderIdToWire(f.parentId) : null,
-    name: f.name,
-  }));
-  const rootId = nodes.find((n) => n.parentId === null)?.id;
-  // Graft first so "everything inside this folder" means exactly what the
-  // sidebar SHOWS inside it — an orphan re-parented under Root is not a
-  // descendant of some other folder in this viewer's tree.
-  const tree = rootId ? graftOrphansToRoot(nodes, rootId) : nodes;
-  const byId = new Map(tree.map((n) => [n.id, n]));
-
-  for (const descendantId of collectFolderDescendants(tree, parentWireId)) {
-    const name = byId.get(descendantId)?.name ?? descendantId;
-    const decoded = makeFolderId(descendantId);
-    if (!decoded.ok) {
-      failed.push({ name, reason: decoded.error.message });
-      continue;
-    }
-    const r = await ops().setFolderVisibility(actor, { folderId: decoded.value, visibility });
-    if (r.ok) changed.push(name);
-    else failed.push({ name, reason: r.error.message });
-  }
-  return { changed, failed };
 }
 
 // Folder writes (provisioning resolver). intent=move → reassign a report's
@@ -411,7 +376,7 @@ export async function action(args: ActionFunctionArgs) {
   // through this cookie-authenticated Remix action — the browser never touches
   // the Bearer API. `resolveUploadActor` carries `SELF_SCOPES`, which includes
   // the `acl:write` these three gate on.
-  const managementActor = {
+  const managementActor: FolderManagementActor = {
     orgId: actor.value.orgId,
     userId: actor.value.userId,
     scopes: actor.value.scopes,
@@ -419,44 +384,36 @@ export async function action(args: ActionFunctionArgs) {
 
   if (intent === "set-folder-visibility") {
     const rawId = String(form.get("folderId") ?? "").trim();
+    // Every exit from these three intents returns the FolderActionData shape —
+    // a bare `{ error }` here would be invisible to the sidebar banner, which
+    // discriminates on `folderId`, and would instead surface next to
+    // "+ New folder" as if folder creation had failed.
     const folderId = makeFolderId(rawId);
-    if (!folderId.ok) return errorToJson(folderId.error);
-    const rawVisibility = String(form.get("visibility") ?? "");
-    if (!FOLDER_VISIBILITIES.includes(rawVisibility as FolderVisibility)) {
-      return folderError(
-        rawId,
-        validationError(
-          `visibility must be one of: ${FOLDER_VISIBILITIES.join(", ")}`,
-          "visibility",
-        ),
-      );
-    }
-    const visibility = rawVisibility as FolderVisibility;
-    // The folder itself first. If IT fails there is nothing to cascade, and
-    // the operator gets the server's own reason (403 non-owner, 422 Root, …).
-    const r = await ops().setFolderVisibility(managementActor, {
-      folderId: folderId.value,
-      visibility,
-    });
-    if (!r.ok) return folderError(rawId, r.error);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
+    // The same validator the JSON API route uses (arp-domain).
+    const visibility = makeFolderVisibility(String(form.get("visibility") ?? ""));
+    if (!visibility.ok) return folderError(rawId, visibility.error);
 
-    const cascade = form.get("cascade") !== null;
-    const outcome = cascade
-      ? await cascadeVisibility(managementActor, rawId, visibility)
-      : { changed: [], failed: [] as CascadeFailure[] };
+    const outcome = await applyFolderVisibility(ops(), managementActor, {
+      folderWireId: rawId,
+      folderId: folderId.value,
+      visibility: visibility.value,
+      cascade: form.get("cascade") !== null,
+    });
+    // A refusal here is the server's own (403 non-owner, 422 Root, 422 "too
+    // many folders inside") — nothing was changed.
+    if (!outcome.ok) return folderError(rawId, outcome.error);
     // A cascade that could not touch every descendant is NOT a success — the
-    // banner renders as a warning and names each folder and why.
-    return folderOk(
-      rawId,
-      cascadeSummary({ visibility, cascaded: cascade, ...outcome }),
-      outcome.failed.length > 0,
-    );
+    // banner renders as a warning and names each folder and why. The condition
+    // lives in `cascadeIsPartial`, under test, rather than as an expression
+    // here that could be inverted without a single test noticing.
+    return folderOk(rawId, cascadeSummary(outcome.value), cascadeIsPartial(outcome.value));
   }
 
   if (intent === "share-folder") {
     const rawId = String(form.get("folderId") ?? "").trim();
     const folderId = makeFolderId(rawId);
-    if (!folderId.ok) return errorToJson(folderId.error);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
     const email = String(form.get("email") ?? "").trim();
     const r = await ops().shareFolder(managementActor, { folderId: folderId.value, email });
     if (!r.ok) return folderError(rawId, r.error);
@@ -468,7 +425,7 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "unshare-folder") {
     const rawId = String(form.get("folderId") ?? "").trim();
     const folderId = makeFolderId(rawId);
-    if (!folderId.ok) return errorToJson(folderId.error);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
     const email = String(form.get("email") ?? "").trim();
     const r = await ops().unshareFolder(managementActor, { folderId: folderId.value, email });
     if (!r.ok) return folderError(rawId, r.error);
@@ -504,7 +461,10 @@ export default function Index() {
     selectedFolderId,
     rootId,
     manageFolderId,
+    startingAfter,
+    endingBefore,
     inertShareNotice,
+    rosterUnavailableNotice,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   // A sharing action's outcome (success summary OR the server's refusal),
@@ -537,6 +497,10 @@ export default function Index() {
     const sp = new URLSearchParams();
     if (q) sp.set("q", q);
     if (selectedFolderId) sp.set("folder", selectedFolderId);
+    // The CURSOR too, or opening a folder's roster from page 3 silently resets
+    // the report list to page 1 under the operator.
+    if (startingAfter) sp.set("starting_after", startingAfter);
+    if (endingBefore) sp.set("ending_before", endingBefore);
     sp.set("manage", folderId);
     return `/?${sp.toString()}`;
   };
@@ -610,6 +574,7 @@ export default function Index() {
               depth={0}
               manageHref={manageHref}
               inertShareNotice={inertShareNotice}
+              rosterUnavailableNotice={rosterUnavailableNotice}
               openMenuId={manageFolderId ?? folderOutcome?.folderId ?? null}
             />
           ) : (
@@ -774,7 +739,12 @@ export default function Index() {
               <Button type="submit" variant="secondary">
                 + New folder
               </Button>
-              {actionData && "error" in actionData && actionData.error ? (
+              {/* NEW-FOLDER failures only. Every folder-sharing failure also
+                  carries `error`, so an unnarrowed guard rendered a refusal on
+                  a colleague's folder here too — a second time, next to
+                  "+ New folder", reading as if folder creation had failed.
+                  `folderOutcome` is the sharing channel; this is not it. */}
+              {!folderOutcome && actionData && "error" in actionData && actionData.error ? (
                 <span className="text-sm text-danger">✗ {actionData.error}</span>
               ) : null}
             </Form>

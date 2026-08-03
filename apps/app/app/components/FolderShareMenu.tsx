@@ -24,6 +24,7 @@ export function FolderShareMenu({
   node,
   manageHref,
   inertShareNotice,
+  rosterUnavailableNotice,
   open,
 }: {
   node: FolderNode;
@@ -31,6 +32,7 @@ export function FolderShareMenu({
    *  is what makes the loader pay for this folder's share roster. */
   manageHref: string;
   inertShareNotice: string;
+  rosterUnavailableNotice: string;
   open: boolean;
 }) {
   return (
@@ -52,7 +54,12 @@ export function FolderShareMenu({
         <p className="px-1 pb-1 text-xs font-semibold text-fg">{`Sharing — ${node.name}`}</p>
 
         {node.manageable ? (
-          <ManageControls node={node} manageHref={manageHref} inertShareNotice={inertShareNotice} />
+          <ManageControls
+            node={node}
+            manageHref={manageHref}
+            inertShareNotice={inertShareNotice}
+            rosterUnavailableNotice={rosterUnavailableNotice}
+          />
         ) : (
           // Non-owner: the controls are shown DISABLED with the server's own
           // reason, rather than silently vanishing — a member who can see the
@@ -73,24 +80,29 @@ function ManageControls({
   node,
   manageHref,
   inertShareNotice,
+  rosterUnavailableNotice,
 }: {
   node: FolderNode;
   manageHref: string;
   inertShareNotice: string;
+  rosterUnavailableNotice: string;
 }) {
   const nextVisibility = node.visibility === "org" ? "private" : "org";
   return (
     <>
-      {/* ADOPTION WARNING — BEFORE the action, never after (ADR-0076 §6):
-          the first management action on a legacy folder makes the caller its
-          permanent owner and 403s every other member out of managing it, and
-          there is no transfer path. */}
-      {node.adoptionNotice ? (
+      {/* THE WARNING — BEFORE the action, never after, and there is exactly ONE
+          of it (ADR-0076 §6 + §cascade). The server composes it: adopting this
+          folder if it is legacy, adopting the legacy folders INSIDE it if the
+          cascade runs (migration 0019 left every pre-ADR-0076 folder owner-less,
+          so that is the common case, not an edge one), and — in the org
+          direction — how many currently-private folders inside would be
+          published. Adoption is permanent and has no transfer path. */}
+      {node.shareWarning ? (
         <p
           role="note"
           className="mx-1 mb-1.5 rounded-control bg-warning/12 p-1.5 text-xs text-warning"
         >
-          {node.adoptionNotice}
+          {node.shareWarning}
         </p>
       ) : null}
 
@@ -101,22 +113,35 @@ function ManageControls({
         {/* THE NESTED-FOLDER GAP (ADR-0076 §cascade): the per-folder repair
             leaves pre-existing descendants as they were, and an org-visible
             descendant of a now-private parent grafts under Root in other
-            members' sidebars — so its name still leaks. Opt-in, explicit,
-            and applied in the ACTION as a loop over the same use case. */}
-        <label
-          htmlFor={`cascade-${node.id}`}
-          className="flex items-start gap-1.5 text-xs text-muted"
-        >
-          <Checkbox id={`cascade-${node.id}`} name="cascade" value="on" className="mt-0.5" />
-          <span>Also apply to everything inside this folder</span>
-        </label>
+            members' sidebars — so its name still leaks. Opt-in, explicit, and
+            applied in the ACTION as a loop over the same use case. The label is
+            DIRECTION-AWARE and counted: the same checkbox mass-EXPOSES when the
+            toggle runs the other way, and "apply to everything inside" said the
+            same thing either way. Absent entirely when there is nothing inside,
+            or more inside than one change may cover. */}
+        {node.cascadeLabel ? (
+          <label
+            htmlFor={`cascade-${node.id}`}
+            className="flex items-start gap-1.5 text-xs text-muted"
+          >
+            <Checkbox id={`cascade-${node.id}`} name="cascade" value="on" className="mt-0.5" />
+            <span>{node.cascadeLabel}</span>
+          </label>
+        ) : null}
         <Button type="submit" size="sm" className="w-full justify-center">
           {nextVisibility === "private" ? "Make private" : "Share with the whole org"}
         </Button>
       </Form>
 
       <div className="mt-1 border-t border-border pt-1">
-        {node.shares === null ? (
+        {node.sharesUnavailable ? (
+          // The roster load FAILED. Saying nothing (or rendering an empty
+          // roster) would turn an error into a positive claim about who can
+          // see this folder — the exact thing this panel must never do.
+          <p role="status" className="px-1 py-1 text-xs text-danger">
+            {rosterUnavailableNotice}
+          </p>
+        ) : node.shares === null ? (
           <Link
             to={manageHref}
             className="block px-1 py-1 text-xs text-brand no-underline hover:text-brand-hover"
@@ -144,8 +169,15 @@ function ShareRoster({
     <div className="p-1">
       <p className="mb-1 text-xs font-medium text-fg">Shared with</p>
       {shares.length === 0 ? (
+        // "Only you can see this folder" is a claim about VISIBILITY, not about
+        // the roster — so it may only be made for a `private` folder. An
+        // org-visible folder with no individual shares was rendering a
+        // categorical privacy assurance two lines under an "Org" badge, in
+        // exactly the state ADR-0076 exists to repair.
         <p className="mb-1.5 text-xs text-subtle">
-          Not shared with anyone yet. Only you can see this folder.
+          {node.visibility === "private"
+            ? "Not shared with anyone yet. Only you can see this folder."
+            : "Not shared with anyone individually — but everyone in your org can already see this folder."}
         </p>
       ) : (
         <ul className="mb-1.5 flex flex-col gap-1">
