@@ -1,0 +1,74 @@
+name: Security headers
+
+# The `security-headers` gate promised by docs/spec.html's CI table (ADR-013)
+# and, until now, the ONE row in it with no workflow behind it. Every other row
+# maps to a real file; this one was a false claim in the contract document.
+# Built rather than deleted (ADR-0062 Amendment 3).
+#
+# WHAT IT ADDS over the unit suite: `packages/headers/src/view-headers.test.ts`
+# pins what `viewHeaders()` RETURNS. Nothing verified what the edge actually
+# SERVES. A Vercel/Cloudflare layer stripping, merging or rewriting a header —
+# in particular collapsing the viewer's two deliberately-separate
+# `Content-Security-Policy` values (the enforcing policy and the `sandbox`
+# policy) into one — is invisible to a unit test and would silently dismantle
+# ADR-013's isolation model. This job asserts the served headers against the
+# SAME exported constants the app is built from (it imports `viewHeaders()`
+# rather than restating expected strings, so it cannot drift from the source).
+#
+# REUSABLE (`workflow_call`), invoked by `preview-isolation.yml` alongside the
+# e2e smoke, with that workflow's own `view_url` — the isolated view preview it
+# already redeployed and polled to `readyState: READY`. Same reasoning as the
+# e2e trigger inversion (issue #149): a `deployment_status`-triggered workflow
+# only runs from the default branch and could never self-validate on its own
+# PR, so a change to this gate would ship to main unverified.
+
+on:
+  workflow_call:
+    inputs:
+      view_base_url:
+        description: The isolated viewer preview URL to probe (https://…)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  security-headers:
+    name: Security headers (viewer preview)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Assert the served header stack matches the source constants
+        env:
+          # Consumed by packages/headers/src/view-headers.live.test.ts, which
+          # skips entirely when unset — that is what keeps `pnpm test`
+          # hermetic (ADR-019 puts live-infrastructure assertions in the
+          # preview-driven tier, not the unit tier).
+          VIEW_BASE_URL: ${{ inputs.view_base_url }}
+        run: pnpm vitest run packages/headers/src/view-headers.live.test.ts
+
+      - name: Fail if the gate silently skipped
+        env:
+          VIEW_BASE_URL: ${{ inputs.view_base_url }}
+        # Belt-and-braces: the suite above is `describe.skipIf(!VIEW_BASE_URL)`,
+        # so a missing/empty input would make it pass with ZERO assertions —
+        # a green check that proves nothing, which is worse than no check.
+        run: |
+          set -euo pipefail
+          [ -n "${VIEW_BASE_URL:-}" ] || { echo "::error::view_base_url was empty — the header gate ran no assertions"; exit 1; }
