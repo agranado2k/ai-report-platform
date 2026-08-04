@@ -16,7 +16,8 @@
 //   with the actor's mirrored email (resolved via IdentityStore — the grantee
 //   may not have had a `grantee_user_id` at grant time), and works CROSS-ORG by
 //   design. An ORG-WIDE grant is the opposite: strictly org-matched, on both
-//   the actor's org and the stored row's own `org_id`. This is a distinct seam
+//   the actor's org and the stored row's own `org_id`, and refused outright on
+//   a SOFT-DELETED report (ADR-0078 §11). This is a distinct seam
 //   from `loadOwnedReport` — delete/setAcl stay owner-only permanently.
 // - `loadVisibleFolder` + `loadWritableFolder` — the ADR-0076 folder seams
 //   (replacing the old org-only `loadOwnedFolder`; ADR-0059 §5 is reversed):
@@ -215,12 +216,23 @@ export async function hasWriteGrant(
  * Fails CLOSED on a store error (the error propagates; it never degrades to
  * "no grant, carry on" — that would be indistinguishable from a denial only
  * by luck).
+ *
+ * A SOFT-DELETED report is refused outright. The FK on
+ * `report_org_write_grants.report_id` cascades on a HARD delete only, so the
+ * row survives `deleteReport` — and the re-upload path deliberately does NOT
+ * filter `deletedAt` (whether re-upload resurrects a soft-deleted slug is an
+ * open question, see upload-report.ts's `reUpload`). Leaving that open for the
+ * OWNER and for one NAMED grantee is a deliberate person typing a slug they
+ * know; leaving it open for EVERY member of the org is a blast radius nobody
+ * chose. So this leg — and only this leg — narrows: the two pre-existing legs
+ * keep today's behavior until the open question is actually decided.
  */
 export async function hasOrgWriteGrant(
   report: Report,
   actor: TenancyActor,
   deps: Pick<CanWriteDeps, "orgWriteGrants">,
 ): Promise<Result<boolean, AppError>> {
+  if (report.deletedAt !== null) return ok(false);
   if (report.orgId !== actor.orgId) return ok(false);
   const found = await deps.orgWriteGrants.find(report.id);
   if (!found.ok) return found;

@@ -196,6 +196,24 @@ export class DrizzleReportRepository implements ReportRepository {
     // private, not just content.
     try {
       const db = this.ctx.current();
+      // ADR-0078 §8 — the org-write EXISTS, written ONCE. It is load-bearing in
+      // two opposite directions: whether a row is LISTED (the visibility
+      // predicate) and how that row is BADGED (`hasOrgWrite` in the projection).
+      // Two verbatim copies meant an edit to one alone would yield a listing
+      // that disagreed with its own badge — a report shown as `Org + edit` that
+      // the same query had decided not to show, or the reverse.
+      //
+      // The row's own `org_id` is matched against the SEARCHED org — a stale row
+      // must fail the match, never widen it, which is the same rule
+      // `hasOrgWriteGrant` applies on the authorization path.
+      const orgWriteExists = exists(
+        db
+          .select({ one: sql`1` })
+          .from(reportOrgWriteGrants)
+          .where(
+            and(eq(reportOrgWriteGrants.reportId, reports.id), eq(reportOrgWriteGrants.orgId, org)),
+          ),
+      );
       const normalizedEmail = viewer.email ? normalizeEmailAddress(viewer.email) : undefined;
       const grantUserMatch = eq(reportWriteGrants.granteeUserId, viewer.userId);
       const grantMatch = normalizedEmail
@@ -210,25 +228,12 @@ export class DrizzleReportRepository implements ReportRepository {
             .from(reportWriteGrants)
             .where(and(eq(reportWriteGrants.reportId, reports.id), grantMatch)),
         ),
-        // ADR-0078 §8 — the org-write leg. Redundant in the three states the
-        // sharing control produces (`org_edit` always implies acl=org, caught
-        // above), but the API can grant org write on a report that is NOT
-        // acl=org, and a list that hid a report the viewer can EDIT would be
-        // dishonest in exactly the way ADR-0075 exists to prevent. The row's
-        // own `org_id` is matched against the SEARCHED org — a stale row must
-        // fail the match, never widen it, which is the same rule
-        // `hasOrgWriteGrant` applies on the authorization path.
-        exists(
-          db
-            .select({ one: sql`1` })
-            .from(reportOrgWriteGrants)
-            .where(
-              and(
-                eq(reportOrgWriteGrants.reportId, reports.id),
-                eq(reportOrgWriteGrants.orgId, org),
-              ),
-            ),
-        ),
+        // The org-write leg. Redundant in the three states the sharing control
+        // produces (`org_edit` always implies acl=org, caught above), but the
+        // API can grant org write on a report that is NOT acl=org, and a list
+        // that hid a report the viewer can EDIT would be dishonest in exactly
+        // the way ADR-0075 exists to prevent.
+        orgWriteExists,
       );
       const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];
       if (visibility) filters.push(visibility);
@@ -261,17 +266,9 @@ export class DrizzleReportRepository implements ReportRepository {
           folderId: reports.folderId,
           ownerId: reports.ownerId,
           aclMode: acls.mode,
-          hasOrgWrite: exists(
-            db
-              .select({ one: sql`1` })
-              .from(reportOrgWriteGrants)
-              .where(
-                and(
-                  eq(reportOrgWriteGrants.reportId, reports.id),
-                  eq(reportOrgWriteGrants.orgId, org),
-                ),
-              ),
-          ),
+          // The SAME subquery the visibility predicate above is built from, so
+          // the badge can never disagree with the decision to list the row.
+          hasOrgWrite: orgWriteExists,
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.

@@ -278,6 +278,21 @@ describe("hasOrgWriteGrant — the third canWrite leg (ADR-0078 §1)", () => {
     expect(r.ok && r.value).toBe(false);
   });
 
+  it("REFUSES a SOFT-DELETED report — a delete must not leave the whole org writing it", async () => {
+    // `report_org_write_grants.report_id` cascades on a HARD delete only, so
+    // the row outlives `deleteReport`. The re-upload path deliberately does NOT
+    // filter `deletedAt` (whether re-upload resurrects a soft-deleted slug is
+    // an open question, upload-report.ts), which for the owner and for one
+    // NAMED grantee is a deliberate person typing a slug they know. Extending
+    // that to EVERY member of the org is not a decision anyone made, so the
+    // org-wide leg — and only it — fails closed here.
+    const deps = writeDeps();
+    const rpt = { ...report(orgA, "aaaaaaaaaa"), deletedAt: 1 };
+    await deps.orgWriteGrants.grant(rpt.id, orgA, owner);
+    const r = await canWrite(rpt, colleagueActor, deps);
+    expect(r.ok && r.value).toBe(false);
+  });
+
   it("REFUSES a row whose org no longer matches the report's — stale never widens", async () => {
     const deps = writeDeps();
     const rpt = report(orgA, "aaaaaaaaaa");

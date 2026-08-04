@@ -11,8 +11,8 @@ import {
   DEFAULT_ACL,
   err,
   type FolderId,
+  inheritedVisibility,
   insufficientScope,
-  isRootFolder,
   makeSlug,
   notAllowed,
   notFound,
@@ -376,6 +376,14 @@ async function reUpload(
  * never widen a report's reach. A folder-store ERROR propagates instead —
  * silently narrowing on infrastructure trouble is fine, but doing so without
  * anyone being able to tell the difference is not.
+ *
+ * THE CARVE-OUT IS NOT RE-IMPLEMENTED HERE. `inheritedVisibility` (ADR-0076 §3)
+ * already IS this rule — "Root inherits `private`, everything else inherits its
+ * own visibility" — for child folders, and ADR-0078 §6 chose it deliberately as
+ * the model. A second byte-for-byte copy of the one rule that keeps every
+ * upload in the product from becoming org-visible is a copy that can be edited
+ * on one side only. So this function asks the domain and translates the answer
+ * into an `Acl`; it does not decide.
  */
 async function resolveInheritedAcl(
   deps: Pick<UploadReportDeps, "folders">,
@@ -385,6 +393,5 @@ async function resolveInheritedAcl(
   if (!found.ok) return found;
   const folder = found.value;
   if (!folder || folder.deletedAt !== null) return ok(DEFAULT_ACL);
-  if (isRootFolder(folder)) return ok(DEFAULT_ACL);
-  return ok(folder.visibility === "org" ? { mode: "org" } : DEFAULT_ACL);
+  return ok(inheritedVisibility(folder) === "org" ? { mode: "org" } : DEFAULT_ACL);
 }
