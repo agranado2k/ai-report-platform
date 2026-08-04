@@ -50,6 +50,7 @@ Each ADR captures one architectural decision in [MADR format](https://adr.github
 | 0074 | [Silent domain auto-join — the app-owned domain index replaces slug keying](0074-silent-domain-auto-join.md) | Accepted (2026-08-01) — amends ADR-0068 (join key + session-org trust) and ADR-0048 (webhook writes the org row); extends the ADR-0054 webhook to `user.created` |
 | 0075 | [Visibility-scoped report listing — the list shows only what the viewer may see](0075-visibility-scoped-report-listing.md) | Accepted (2026-08-01) — amends ADR-0059 §3 (lists); extends ADR-0060's grant carve-out to lists; #226 stays open for cross-org |
 | 0076 | [Creator-owned folders — visibility-scoped folder trees](0076-creator-owned-folders.md) | Accepted (2026-08-02) — reverses ADR-0059 §5; mirrors 0075's predicate + 0060's grant shape; `folder_collaborators` corpse still awaiting cleanup, NOT reused. **Amended 2026-08-02**: the deferred §6 dashboard UI shipped (issue #231), plus an opt-in cascade for the nested-folder gap — kept as a UI-layer loop over the existing per-folder use case, not recursive domain/SQL semantics |
+| 0077 | [Operator-side merge train + worktree lifecycle cleanup](0077-operator-merge-train.md) | Accepted (2026-08-03) — complements ADR-0044/025; third merge-automation evaluation after ADR-0035's two; rejects the `claude-code-merge-queue` npm tool for this repo |
 
 ## Backlog (ADRs 1–30 from the spec)
 
