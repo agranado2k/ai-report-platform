@@ -3612,3 +3612,89 @@ its own PR; it is now the largest single security-debt item in the tree.
 
 **No ADR.** Nothing architectural was decided here — the two overrides are recorded in
 `package.json` with their drop conditions, and the deferrals are documented in the PR body.
+
+---
+
+## 2026-08-04 — ADR-0078: folder sharing that reaches the reports, with a read/write choice
+
+`worktree/report-sharing`, branch `feat/report-sharing`. One PR, ADR first.
+
+**The report.** A member shared a folder with the org. A colleague saw the
+folder and none of the reports in it. That is not a bug in ADR-0076 — it is
+ADR-0076 working exactly as written (§6: a folder share confers visibility of
+the folder's name and position; the reports inside stay governed by their own
+`Acl`s). But it is not what the operator meant, and three demands arrived
+together: folder sharing must reach the contents, sharing must offer a
+read-vs-write choice, and reports need the dashboard control folders got in
+ADR-0076's amendment.
+
+**What was decided** (full reasoning in `docs/adr/0078-folder-scoped-report-sharing.md`):
+
+- An **explicit bulk apply plus a create-time default**, both of which change
+  each report's REAL `Acl`. This deliberately does NOT reverse ADR-0076 —
+  no folder fact enters any authorization decision, here or downstream. Because
+  real `Acl`s change, the listing surface and the viewer keep working through
+  the paths they already have: no folder leg in the listing predicate, no folder
+  claim in the access token, no viewer change at all.
+- A new domain concept, the **Org write grant** — a third leg on ADR-0060's
+  `canWrite` seam, cashing in that ADR's own "folder-level can layer on the same
+  seam later" trade-off. Deliberately NOT a new `Acl` mode: the `Acl` is READ
+  authorization consumed by the viewer, and giving it a write meaning would put
+  write semantics in the one value object built to have none.
+- **Three states, read and write always paired** (`private` / `org_view` /
+  `org_edit`). `sharingStateTarget` is the single place a state becomes an `Acl`
+  mode plus an org-write decision, which makes "no write without read" one
+  testable property rather than a convention every call site remembers.
+- **Delete stays owner-only** in all three, and so does `set_acl` — which makes
+  every transition between them owner-only too.
+
+**The details that would each have been a defect on their own**, and are
+recorded because a future change could reintroduce any of them:
+
+- The **Root carve-out** on upload inheritance. Root is permanently org-visible
+  AND the default upload placement, so inheriting from it would have made every
+  upload in the product org-visible — a product-wide privacy regression shipped
+  as a convenience feature.
+- The **org match** on the write leg. A personal write grant works cross-org by
+  design (ADR-0060 §4); an org-wide one is meaningless outside the org it names.
+  `org_id` is a stored column precisely so a stale row fails the check rather
+  than silently widening it.
+- **Move stays sharing-neutral.** `moveReport` is `canWrite`-gated, not
+  owner-gated, so applying the destination folder's sharing would let a write
+  grantee — who by ADR-0060 §6 has no view access at all — publish content they
+  cannot read.
+- **The bulk apply is a loop, not recursive SQL**, for ADR-0076's stated reason:
+  re-implementing the owner gate in a recursive `UPDATE` is "the classic place an
+  authorization bypass gets introduced". It refuses over its cap PRE-FLIGHT, and
+  reports `changed` / `skipped` / `failed` in full.
+- **Advanced modes are protected, not clobbered.** `password` / `allowlist` /
+  `public` are displayed but never silently overwritten; leaving one takes an
+  explicit confirmation naming what is lost — a second server-rendered submit,
+  since the zero-JS idiom and the CSP posture both rule out `window.confirm`.
+
+**Two things this iteration got that ADR-0076's UI had to apologise for.** The
+listing projection now carries the report's owner, `Acl` mode and org-write flag
+— read from the join and the EXISTS the visibility predicate was already paying
+for — so every dashboard row badges accurately with no N+1 (the folder sidebar's
+`Limited` compromise was not repeated), and the bulk loop classifies candidates
+without a second round trip per report. Those three fields are pinned by test to
+stay OFF the wire.
+
+**The accepted trade-off, stated plainly:** org-write is COARSE. It is everyone
+in the org or nobody; there is no middle setting. Personal write grants remain
+the precise tool and are not superseded — the two compose. If role- or
+group-scoped write is ever needed, it layers onto the same seam this ADR just
+widened, exactly as this ADR layered onto ADR-0060's.
+
+**Out of v1, tracked as a follow-up issue:** person-level folder shares reaching
+reports. The report-level analogue of a person share is `allowlist` — a
+TTL-bounded, magic-link-redeemed, email-addressed read grant — which does not map
+cleanly onto a folder share. The folder panel says so out loud rather than
+letting an operator assume the reports came with the share.
+
+**Also repaired here:** `docs/context-map.md`, which was stale — it still
+described `Folder` as "Org-scoped (no per-user owner, ADR-0059)", a decision
+ADR-0076 reversed two days earlier, and omitted `folder_shares` entirely.
+
+**Migration 0020** adds `report_org_write_grants` — purely additive, no backfill,
+no behavior change until the application layer consults it.

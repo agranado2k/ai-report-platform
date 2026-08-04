@@ -51,13 +51,15 @@ Per **ADR-0036** (Domain-Driven Design). The four bounded contexts and how they 
 
 ### Reports & Folders
 
-**Owns**: `folders`, `reports`, `report_versions`, `acls`, `report_grants`, `report_write_grants` (lands with the write-grants build, ADR-0060) — and the superseded, unused `folder_collaborators` (ADR-0060), pending a cleanup migration.
+**Owns**: `folders`, `folder_shares` (ADR-0076), `reports`, `report_versions`, `acls`, `report_grants`, `report_write_grants` (ADR-0060), `report_org_write_grants` (ADR-0078) — and the superseded, unused `folder_collaborators` (ADR-0060), pending a cleanup migration.
 
 **Aggregates**:
-- `Folder` (root) — the folder tree. Org-scoped (no per-user owner, ADR-0059); the superseded `Collaborator` grant chain (ADR-009/0056 P4) never became behavioral code.
-- `Report` (root) — its `ReportVersion`s, its single `Acl`, its **`Owner`** (`owner_id`, the creating user — ADR-0059), its `Write grant`s (ADR-0060), its `live_version_id`, and the `scan_status` Value Object cached on each `ReportVersion`.
+- `Folder` (root) — the folder tree. **Creator-owned** (`owner_id`, `visibility` — ADR-0076, which REVERSES ADR-0059 §5's org-scoped folders): a folder is visible only to its owner unless it is org-visible, legacy (`owner_id IS NULL`, the pre-ADR-0076 backfill), or covered by a `Folder share` (`folder_shares`, the ADR-0060 grant shape conferring VISIBILITY only). The superseded `Collaborator` grant chain (ADR-009/0056 P4) never became behavioral code and is NOT what `folder_shares` is.
+- `Report` (root) — its `ReportVersion`s, its single `Acl`, its **`Owner`** (`owner_id`, the creating user — ADR-0059), its `Write grant`s (ADR-0060), its `Org write grant` (ADR-0078, at most one), its `live_version_id`, and the `scan_status` Value Object cached on each `ReportVersion`.
 
-**Permission resolution** (ADR-0059/0060): report writes compose as `canWrite(report, user) = IsOwner(report, user) OR HasWriteGrant(report, user)` — an Application-layer check on the `Report` aggregate; `delete`/`set_acl`/grant management are owner-only. Folder operations stay `IsOrgMember(folder.orgId)`. Org membership alone confers list-metadata visibility, never content or write access.
+**Permission resolution** (ADR-0059/0060/0078): report writes compose as `canWrite(report, user) = IsOwner(report, user) OR HasWriteGrant(report, user) OR HasOrgWriteGrant(report, user)` — an Application-layer check on the `Report` aggregate. The first two legs are org-agnostic (a `Write grant` works cross-org by design); the third is **strictly org-matched**, on both the actor's org and the stored row's own `org_id`. `delete`/`set_acl`/grant management are owner-only, permanently. Folder operations resolve against the ADR-0076 predicate (owner, legacy, org-visible, or share-granted) rather than bare org membership. Org membership alone confers neither content nor write access — and, since ADR-0075/0076, not even list metadata for what it may not reach.
+
+**Sharing crosses the two aggregates only by explicit action** (ADR-0078): a `Folder share` never enters a report's authorization. The `Sharing bulk apply` is a caller-side loop that changes each report's own `Acl`, and upload-time inheritance is a create-time default — so the listing predicate and the viewer keep deciding from the `Report` aggregate alone.
 
 **Consumes**: `UserCreated` from Identity & Access — optional optimization only (ADR-0060): backfill a pending `Write grant`'s `grantee_user_id`; grants are matched by normalized email at check time, so nothing blocks on the event.
 
