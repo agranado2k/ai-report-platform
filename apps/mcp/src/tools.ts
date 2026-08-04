@@ -6,7 +6,7 @@
 // react instead of the call throwing a protocol error.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES, REPORT_SHARING_STATES } from "arp-domain";
 import { z } from "zod";
 import type { ApiClient, ApiResult, Problem } from "./client";
 
@@ -390,6 +390,43 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
   );
 
   server.registerTool(
+    "reports_set_sharing",
+    {
+      title: "Set who in your org can view or edit a report",
+      description:
+        "Set a report's sharing in ONE step (ADR-0078): 'private' (only you), 'org_view' " +
+        "(everyone in your org can view), or 'org_edit' (everyone in your org can view AND " +
+        "edit). OWNER-ONLY; requires the `acl:write` scope. Read and write are always paired — " +
+        "'org_edit' also grants viewing, so this can never give people edit access to something " +
+        "they cannot open. DELETE stays owner-only in every option. Prefer this over " +
+        "reports_set_acl for org sharing; use reports_set_acl when you need a password, an " +
+        "invite list, or a public link, and reports_grant_write to give ONE named person edit " +
+        "access instead of the whole org. If the report currently uses password, allowlist or " +
+        "public, this REFUSES with an explanation of what would be lost — re-send with " +
+        "confirm_discard: true only if the user has agreed to lose that setting.",
+      inputSchema: {
+        slug: SLUG_INPUT,
+        sharing: z.enum(REPORT_SHARING_STATES).describe("The target sharing state."),
+        confirm_discard: z
+          .boolean()
+          .optional()
+          .describe(
+            "Only needed when the report currently uses password/allowlist/public. " +
+              "Acknowledges that the setting will be permanently discarded.",
+          ),
+      },
+      annotations: MUTATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.setReportSharing(args.slug, {
+          sharing: args.sharing,
+          confirmDiscard: args.confirm_discard,
+        }),
+      ),
+  );
+
+  server.registerTool(
     "reports_grant_write",
     {
       title: "Grant someone write access to a report",
@@ -618,6 +655,31 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       annotations: MUTATE,
     },
     async (args) => toToolResult(await client.setFolderVisibility(args.id, args.visibility)),
+  );
+
+  server.registerTool(
+    "folders_apply_sharing_to_reports",
+    {
+      title: "Share the reports inside a folder",
+      description:
+        "Apply a sharing state to the REPORTS INSIDE a folder (ADR-0078). Sharing a folder with " +
+        "folders_set_visibility shows people the folder's NAME only — this is what reaches the " +
+        "reports in it. Requires the `acl:write` scope. You must be able to see the folder; each " +
+        "report is then authorized on its own, so ONLY REPORTS YOU OWN can change. A report is " +
+        "changed only if you own it and it is currently in the state the direction starts from; " +
+        "everything else is listed back to you untouched with a reason (not owned by you, " +
+        "password-protected, allowlisted, already public, already at the destination). Always " +
+        "read `skipped` and `failed` in the result before telling the user it worked — this tool " +
+        "reports exactly what it did and did not change.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+        sharing: z
+          .enum(REPORT_SHARING_STATES)
+          .describe("The state to apply to the reports inside the folder."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.applyFolderSharingToReports(args.id, args.sharing)),
   );
 
   server.registerTool(

@@ -47,11 +47,15 @@ exact — call them as written.
    `reports_add_comment` to add a comment or reply (anchored to a `version_id` +
    `text_quote`), `reports_resolve_comment` to close one out, `reports_edit_comment` /
    `reports_delete_comment` to fix or remove one.
-6. **Share & access control** — `reports_get_acl` / `reports_set_acl` control *who can
-   view* (private/public/password/org/allowlist); `reports_grant_write` /
-   `reports_revoke_write` / `reports_list_write_grants` control *who else can rename,
-   re-upload, or move* a specific report. These are separate axes — granting write access
-   does not grant view access, and vice versa.
+6. **Share & access control** — `reports_set_sharing` is the everyday control: three
+   states (`private` / `org_view` / `org_edit`) that always pair viewing with editing, so
+   you can never give the org edit access to something it cannot open. Delete stays
+   owner-only in all three. `reports_get_acl` / `reports_set_acl` remain the way to set a
+   password, an invite list, or a public link; `reports_grant_write` /
+   `reports_revoke_write` / `reports_list_write_grants` give ONE named person (possibly
+   outside your org) edit access. Those two are separate axes — a write grant does not
+   grant view access, and vice versa. `folders_apply_sharing_to_reports` reaches the
+   reports INSIDE a folder: sharing the folder itself only shows its name.
 
 ## When to use which tool
 
@@ -69,7 +73,9 @@ exact — call them as written.
 | Leave feedback or reply to it | `reports_add_comment` |
 | Close out a comment thread | `reports_resolve_comment` |
 | Fix a comment's text or intent | `reports_edit_comment` |
-| Change who can view a report | `reports_get_acl` (check), `reports_set_acl` (change) |
+| Let your org view (or edit) a report | `reports_set_sharing` |
+| Share the reports inside a folder, not just the folder | `folders_apply_sharing_to_reports` (read its `skipped`/`failed`) |
+| Set a password, an invite list, or a public link | `reports_get_acl` (check), `reports_set_acl` (change) |
 | Let a specific outside person re-upload/rename/move a report | `reports_grant_write` |
 | Delete a report or comment | `reports_delete`, `reports_delete_comment` (destructive; confirm intent first) |
 

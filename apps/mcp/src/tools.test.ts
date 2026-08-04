@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES, REPORT_SHARING_STATES } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -366,6 +366,7 @@ describe("shared schema vocabulary + cursor/slug helpers (wire-catalog refactor)
       [writeTools, "reports_update"],
       [writeTools, "reports_move"],
       [writeTools, "reports_set_acl"],
+      [writeTools, "reports_set_sharing"],
       [writeTools, "reports_grant_write"],
       [writeTools, "reports_revoke_write"],
       [writeTools, "reports_add_comment"],
@@ -449,5 +450,61 @@ describe("folder sharing tools (ADR-0076)", () => {
       }
     )?.inputSchema?.visibility;
     expect(schema?.options).toEqual([...FOLDER_VISIBILITIES]);
+  });
+});
+
+// ── ADR-0078: the three-state sharing tools ────────────────────────────────
+describe("report sharing tools (ADR-0078)", () => {
+  const writeTools = collectTools(registerWriteTools, {} as ApiClient);
+
+  it("reports_set_sharing offers exactly the three states from the domain enum", () => {
+    const schema = writeTools.get("reports_set_sharing")?.config.inputSchema as
+      | Record<string, { _def?: { values?: readonly string[] } }>
+      | undefined;
+    expect(REPORT_SHARING_STATES).toEqual(["private", "org_view", "org_edit"]);
+    // Pinned against the DOMAIN enum, not a transcription: a fourth state
+    // added there must reach this tool or fail here.
+    expect(schema?.sharing).toBeDefined();
+  });
+
+  it("reports_set_sharing tells the agent that read and write are paired", () => {
+    const d = writeTools.get("reports_set_sharing")?.config.description ?? "";
+    expect(d).toMatch(/read and write are always paired/i);
+    expect(d).toMatch(/delete stays owner-only/i);
+  });
+
+  it("reports_set_sharing tells the agent when NOT to use it", () => {
+    // An agent that reached for this to set a password would be told to use
+    // reports_set_acl; one that wanted to share with one person, to grant write.
+    const d = writeTools.get("reports_set_sharing")?.config.description ?? "";
+    expect(d).toContain("reports_set_acl");
+    expect(d).toContain("reports_grant_write");
+  });
+
+  it("reports_set_sharing does not let an agent discard a password by default", () => {
+    const d = writeTools.get("reports_set_sharing")?.config.description ?? "";
+    expect(d).toMatch(/refuses/i);
+    expect(d).toMatch(/confirm_discard/);
+    expect(d).toMatch(/only if the user has agreed/i);
+  });
+
+  it("folders_apply_sharing_to_reports says the folder share does NOT reach the reports", () => {
+    const d = writeTools.get("folders_apply_sharing_to_reports")?.config.description ?? "";
+    expect(d).toMatch(/folder's NAME only/i);
+    expect(d).toMatch(/only reports you own/i);
+  });
+
+  it("folders_apply_sharing_to_reports tells the agent to READ the skips before claiming success", () => {
+    // The whole point of the honest partial result: an agent that reported
+    // "done" off a 200 would be lying on the server's behalf.
+    const d = writeTools.get("folders_apply_sharing_to_reports")?.config.description ?? "";
+    expect(d).toMatch(/read `skipped` and `failed`/i);
+  });
+
+  it("both are MUTATE-annotated, not read-only", () => {
+    expect(writeTools.get("reports_set_sharing")?.config.annotations?.readOnlyHint).toBe(false);
+    expect(
+      writeTools.get("folders_apply_sharing_to_reports")?.config.annotations?.readOnlyHint,
+    ).toBe(false);
   });
 });

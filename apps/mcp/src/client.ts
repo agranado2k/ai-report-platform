@@ -14,7 +14,9 @@ import type {
   FolderWire,
   ListEnvelope,
   ReportDetailWire,
+  ReportSharingWire,
   ReportWire,
+  SharingApplyWire,
   VersionWire,
   WriteGrantWire,
 } from "arp-http/wire";
@@ -169,6 +171,38 @@ export class ApiClient {
             : {}),
         },
       },
+    );
+  }
+
+  /** Set a report's three-state sharing (ADR-0078): `private` / `org_view` /
+   *  `org_edit`. Owner-only; requires the `acl:write` scope. `confirmDiscard`
+   *  is forwarded ONLY when the caller passed it — the server refuses to leave
+   *  `password`/`allowlist`/`public` without it, and defaulting it here would
+   *  quietly remove that protection for every MCP caller. */
+  setReportSharing(
+    slug: string,
+    params: { readonly sharing: string; readonly confirmDiscard?: boolean },
+  ): Promise<ApiResult<ReportSharingWire>> {
+    return this.request<ReportSharingWire>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/sharing`,
+      {
+        json: {
+          sharing: params.sharing,
+          ...(params.confirmDiscard === true ? { confirm_discard: true } : {}),
+        },
+      },
+    );
+  }
+
+  /** Apply a sharing state to the reports INSIDE a folder (ADR-0078). Returns
+   *  the per-report outcome — `changed`, `skipped` (with reasons) and
+   *  `failed` — never a bare success. */
+  applyFolderSharingToReports(id: string, sharing: string): Promise<ApiResult<SharingApplyWire>> {
+    return this.request<SharingApplyWire>(
+      "POST",
+      `/api/v1/folders/${encodeURIComponent(id)}/reports/sharing`,
+      { json: { sharing } },
     );
   }
 

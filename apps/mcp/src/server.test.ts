@@ -23,6 +23,8 @@ describe("instructions constant (ADR-0072, Layer 0)", () => {
   it("lists every acl:write-scoped tool, folder sharing included (ADR-0076)", () => {
     const aclWriteSentence = INSTRUCTIONS.slice(INSTRUCTIONS.indexOf("acl:write scope") - 400);
     for (const tool of [
+      "reports_set_sharing",
+      "folders_apply_sharing_to_reports",
       "reports_set_acl",
       "reports_grant_write",
       "reports_revoke_write",
