@@ -60,6 +60,13 @@ ${INTENT_HIGHLIGHT_RULES}
   margin: 0;
   display: contents;
 }
+/* Links are ACTIVATABLE in the editor (ADR-0062 Amendment 3, link-activation.ts),
+   but the surface is contenteditable, where browsers render the text caret over
+   anchors because they normally cannot be followed there. Without this rule a
+   working link looks inert — this is the cheapest half of the perceived fix. */
+a[href] {
+  cursor: pointer;
+}
 `.trim();
 
 /**

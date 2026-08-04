@@ -50,10 +50,23 @@
 // each seeding's RESOLVED ranges back to the caller — the panel uses it for
 // document-order sorting and the degraded-anchor badge (items C/D) without
 // re-implementing position resolution outside this package.
+//
+// Link activation (ADR-0062 Amendment 3): the editing surface is
+// `contenteditable`, where browsers never follow an anchor — a click only
+// places a caret — so links looked broken in `/edit`. The same
+// `handleDOMEvents.click` handler now also resolves the link under the
+// pointer through the ProseMirror MODEL (`posAtCoords` → `linkMarkAtPos`,
+// never `event.target.closest("a")`: the iframe is a different JS realm) and
+// applies the pure rules in `link-activation.ts`. A plain click follows the
+// link, Alt/Option+click suppresses it, and link activation WINS over comment
+// focus when both apply (`editorClickOutcome`, pinned by test). The two
+// effects are injectable props so the decision logic stays DOM-free; both
+// defaults live in the mount closure below.
 import type { PMDocJson, Shell } from "arp-report-html";
 import { EditorView } from "prosemirror-view";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { ClickPoint, CommentForHighlight, CommentRange } from "./comment-decorations";
+import type { ClickPoint } from "./click-gesture";
+import type { CommentForHighlight, CommentRange } from "./comment-decorations";
 import {
   clickedCommentId,
   commentHighlightsKey,
@@ -67,6 +80,7 @@ import {
   reportableSelection,
 } from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
+import { editorClickOutcome, linkActivation, linkMarkAtPos } from "./link-activation";
 
 // Re-exported for callers that import it from this module (the type moved to
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
@@ -114,6 +128,16 @@ export interface ReportEditorProps {
    *  report's real CSS, so there's nothing left for the parent's classes to
    *  style on the inside. */
   readonly className?: string;
+  /** Perform an external link activation (ADR-0062 Amendment 3). Injected so
+   *  the decision logic stays unit-testable; the default opens a new tab.
+   *  THE PARENT PERFORMS IT: this handler is parent-realm code, and the
+   *  editing iframe deliberately has no `allow-popups`, so the iframe itself
+   *  could not open a tab even if the click were followed there. Do NOT add
+   *  `allow-popups` to that iframe to "fix" this. */
+  readonly onOpenExternalLink?: (url: string) => void;
+  /** Scroll an in-page anchor into view (ADR-0062 Amendment 3). Injected for
+   *  the same reason; the default scrolls the iframe's own document. */
+  readonly onAnchorNavigate?: (targetId: string) => void;
 }
 
 export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(function ReportEditor(
@@ -126,6 +150,8 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
     onCommentClick,
     onCommentRangesChange,
     className,
+    onOpenExternalLink,
+    onAnchorNavigate,
   },
   ref,
 ) {
@@ -141,6 +167,10 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
   onCommentClickRef.current = onCommentClick;
   const onCommentRangesChangeRef = useRef(onCommentRangesChange);
   onCommentRangesChangeRef.current = onCommentRangesChange;
+  const onOpenExternalLinkRef = useRef(onOpenExternalLink);
+  onOpenExternalLinkRef.current = onOpenExternalLink;
+  const onAnchorNavigateRef = useRef(onAnchorNavigate);
+  onAnchorNavigateRef.current = onAnchorNavigate;
 
   // Item B's "Jump": resolve the comment against the CURRENT doc and move
   // the selection there — `scrollIntoView` on the transaction makes the
@@ -211,6 +241,49 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       // drag-vs-click discrimination (`clickedCommentId`) is ours. Both
       // handlers return false — they observe, never consume.
       let pointerDown: ClickPoint | null = null;
+
+      // The two link-activation EFFECTS (ADR-0062 Amendment 3). Both defer
+      // to an injected prop when the caller supplied one; the defaults below
+      // are what makes the feature work with no wiring at the call site.
+
+      function openExternalLink(url: string) {
+        if (onOpenExternalLinkRef.current) {
+          onOpenExternalLinkRef.current(url);
+          return;
+        }
+        // Opened from the PARENT window, not the iframe: the editing iframe
+        // is `sandbox="allow-same-origin"` with no `allow-popups`, so it
+        // cannot open a tab itself — and it must not be given that token
+        // (see the sandbox rationale on the <iframe> below). `noopener,
+        // noreferrer` regardless of what the link's own `rel` says: the
+        // schema forces those tokens too, and this is the second belt.
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+
+      function scrollToAnchor(targetId: string) {
+        if (onAnchorNavigateRef.current) {
+          onAnchorNavigateRef.current(targetId);
+          return;
+        }
+        // DEFERRED ONE ANIMATION FRAME, deliberately. ProseMirror re-syncs
+        // the selection to the DOM after a click, and that re-sync scrolls
+        // the caret back into view — doing this synchronously means the
+        // scroll visibly happens and is then immediately undone, which
+        // presents as "shipped it, still broken".
+        //
+        // Scroll only; never assign `location.hash`. The iframe is a
+        // sandboxed srcdoc document, and a hash assignment there is both
+        // meaningless for the user's URL bar and a navigation the sandbox
+        // has no reason to be asked to permit.
+        const scroll = () => {
+          const target = iframe?.contentDocument?.getElementById(targetId);
+          target?.scrollIntoView({ behavior: "smooth" });
+        };
+        const raf = iframe?.contentWindow?.requestAnimationFrame;
+        if (raf) raf.call(iframe.contentWindow, scroll);
+        else scroll();
+      }
+
       const view = new EditorView(
         // `{ mount: body }` makes the iframe's OWN <body> — carrying the
         // shell's original classes/attributes — the PM editable root
@@ -232,14 +305,46 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
               return false;
             },
             click(clickedView, event) {
-              const commentId = clickedCommentId(
-                commentHighlightsKey.getState(clickedView.state),
-                pointerDown,
-                { x: event.clientX, y: event.clientY },
-                (point) => clickedView.posAtCoords(point),
-              );
+              const down = pointerDown;
               pointerDown = null;
-              if (commentId) onCommentClickRef.current?.(commentId);
+              const up = { x: event.clientX, y: event.clientY };
+
+              // LINK ACTIVATION (ADR-0062 Amendment 3). The editing surface
+              // is `contenteditable`, so the browser never activates an
+              // anchor here on its own — a click only places a caret. That
+              // is the whole reported bug, and handling the click ourselves
+              // is the only thing that fixes it.
+              //
+              // The link under the cursor is resolved through ProseMirror's
+              // MODEL (`posAtCoords` → `linkMarkAtPos`), never
+              // `event.target.closest("a")`: this document lives in an
+              // iframe, a different JS realm, where `instanceof` checks
+              // against the parent's constructors are false.
+              const found = clickedView.posAtCoords({ left: up.x, top: up.y });
+              const outcome = editorClickOutcome(
+                linkActivation({
+                  link: found ? linkMarkAtPos(clickedView.state, found.pos) : null,
+                  down,
+                  up,
+                  altKey: event.altKey,
+                }),
+                clickedCommentId(
+                  commentHighlightsKey.getState(clickedView.state),
+                  down,
+                  up,
+                  (point) => clickedView.posAtCoords(point),
+                ),
+              );
+
+              if (outcome?.kind === "external") {
+                openExternalLink(outcome.url);
+              } else if (outcome?.kind === "anchor") {
+                scrollToAnchor(outcome.targetId);
+              } else if (outcome?.kind === "comment") {
+                onCommentClickRef.current?.(outcome.commentId);
+              }
+              // Still observational: PM keeps its own default handling
+              // (caret placement) either way, exactly as before.
               return false;
             },
           },
