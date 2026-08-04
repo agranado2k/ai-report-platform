@@ -4,6 +4,7 @@ import {
   FakePasswordHasher,
   InMemoryAuditLogger,
   InMemoryGrantStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   idempotencyTestDeps,
   PassThroughUnitOfWork,
@@ -37,6 +38,7 @@ async function seed(reportOrg = ORG) {
     reports,
     hasher: new FakePasswordHasher(),
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),
   };
@@ -44,9 +46,9 @@ async function seed(reportOrg = ORG) {
 
 describe("setAcl use case (ADR-0056)", () => {
   it("requires the acl:write scope", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       { orgId: ORG, userId: OWNER, scopes: [] },
       {
         slug: SLUG as never,
@@ -58,9 +60,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode hashes the plaintext and persists it (never stores plaintext)", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -78,9 +80,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("password mode without a password is a ValidationError", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -92,9 +94,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("allowlist normalizes emails + carries the owner access TTL; empty list is a ValidationError", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const ok = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -109,7 +111,7 @@ describe("setAcl use case (ADR-0056)", () => {
       accessTtlSeconds: 86_400,
     });
     const bad = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -121,9 +123,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("sets public / org with no extra data", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -134,9 +136,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("a revokeAll failure surfaces AND leaves the Acl unchanged (prune-before-persist)", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const allow = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -148,7 +150,7 @@ describe("setAcl use case (ADR-0056)", () => {
 
     grants.failRevokeAll = true;
     const switched = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -164,9 +166,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("a per-email revoke failure surfaces AND leaves the Acl roster unchanged", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const allow = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -178,7 +180,7 @@ describe("setAcl use case (ADR-0056)", () => {
 
     grants.failRevoke = true;
     const narrowed = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -196,9 +198,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("rejects a non-owner (NotAllowed, ADR-0059: setAcl is owner-only) and an unknown slug (NotFound)", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const notMine = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       { orgId: ORG, userId: OTHER_USER, scopes: ["acl:write"] },
       {
         slug: SLUG as never,
@@ -211,7 +213,7 @@ describe("setAcl use case (ADR-0056)", () => {
     }
 
     const missing = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: "zzzzzzzzzz" as never,
@@ -223,9 +225,9 @@ describe("setAcl use case (ADR-0056)", () => {
   });
 
   it("records an acl.set audit row (ADR-0070)", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const r = await setAcl(
-      { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() },
+      { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() },
       ACTOR,
       {
         slug: SLUG as never,
@@ -242,12 +244,44 @@ describe("setAcl use case (ADR-0056)", () => {
       meta: { mode: "public" },
     });
   });
+
+  it("narrowing with no org write grant records acl.set alone — never a phantom revocation", async () => {
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
+    const r = await setAcl(deps, ACTOR, { slug: SLUG as never, mode: "private" });
+    expect(r.ok).toBe(true);
+    expect(audit.recorded().map((e) => e.action)).toEqual(["acl.set"]);
+  });
+
+  it("records grant.org_write.revoked when the narrowing actually dropped a row (ADR-0078 §11)", async () => {
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
+    const RID = reportId("00000000-0000-7000-8000-0000000000c1");
+
+    await setAcl(deps, ACTOR, { slug: SLUG as never, mode: "org" });
+    await orgWriteGrants.grant(RID, ORG, OWNER);
+    const narrowed = await setAcl(deps, ACTOR, { slug: SLUG as never, mode: "private" });
+    expect(narrowed.ok).toBe(true);
+    expect(audit.recorded().map((e) => e.action)).toEqual([
+      "acl.set",
+      "acl.set",
+      "grant.org_write.revoked",
+    ]);
+    expect(audit.recorded()).toContainEqual({
+      action: "grant.org_write.revoked",
+      orgId: ORG,
+      actorUserId: OWNER,
+      targetType: "report",
+      targetId: RID,
+      meta: { revokedBy: "acl.set", mode: "private" },
+    });
+  });
 });
 
 describe("setAcl idempotency (ADR-0039)", () => {
   it("replays the recorded report resource on an identical retry — one acl.set audit row", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
-    const deps = { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() };
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
     const input = { slug: slugOrThrow(), mode: "public" as const };
     const first = await setAcl(deps, ACTOR, input);
     const second = await setAcl(deps, ACTOR, input);
@@ -257,8 +291,8 @@ describe("setAcl idempotency (ADR-0039)", () => {
   });
 
   it("a password-mode set WITHOUT an explicit key skips the idempotency claim — two different passwords both apply", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
-    const deps = { reports, hasher, grants, audit, uow, ...idempotencyTestDeps() };
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
     const a = await setAcl(deps, ACTOR, {
       slug: slugOrThrow(),
       mode: "password",
@@ -277,9 +311,9 @@ describe("setAcl idempotency (ADR-0039)", () => {
   });
 
   it("a password-mode set with an explicit key replays WITHOUT the plaintext ever entering the store", async () => {
-    const { reports, hasher, grants, audit, uow } = await seed();
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const idem = idempotencyTestDeps();
-    const deps = { reports, hasher, grants, audit, uow, ...idem };
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idem };
     const input = {
       slug: slugOrThrow(),
       mode: "password" as const,

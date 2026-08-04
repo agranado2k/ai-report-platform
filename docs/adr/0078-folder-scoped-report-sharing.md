@@ -295,6 +295,37 @@ serve them.
   reason ADR-0076's cascade does: one collapsed row would be a less truthful
   record.
 
+### 11. Every door onto the `Acl` prunes the org-write grant
+
+`setReportSharing` is not the only way to change a report's `Acl`. `POST
+/api/v1/reports/{slug}/acl` and MCP `reports_set_acl` (Decision 4 — the only way
+into `password` and `allowlist`) write the *same* `Acl`, and an owner can reach
+`org_edit` through the first door and then narrow through the second.
+
+**`setAcl` therefore revokes the org-write row whenever the new mode is not
+`org`**, inside the same `UnitOfWork` as the `Acl` write, mirroring the
+`pruneStaleGrants` precedent verbatim: *a durable grant must not outlive the
+`Acl` that authorized it* (ADR-0056 "5e"). `private`, `password`, `allowlist`
+and `public` all narrow READ below org, so the org-wide WRITE goes with them.
+
+**Mode `org` is deliberately left alone.** Re-asserting `org` neither grants nor
+revokes write: the pair `org_edit` is defined by (Decision 3) is still intact,
+and this is a call the owner made about *reading*. Revoking would silently
+downgrade `org_edit` to `org_view` on a call that never mentioned write, and the
+response body — which carries only the `Acl` — could not even report it.
+Granting would be worse: `setAcl` would manufacture org-wide write out of a read
+call.
+
+Without this, narrowing through the second door left the row behind, and the
+consequences were not confined to write: every org member still passed
+`canWrite` (rename / move / re-upload), the report stayed **listed** to them
+through the Decision 8 org-write leg, and — per the correction in Decision 9 —
+the edit-token door served them its **content**. Pinned on both contract runners
+(ADR-0046), for all four narrowing modes, in
+`set-acl-grant-pruning.contract.ts`. The revocation emits its own
+`grant.org_write.revoked` audit row (Decision 10), and only when a row actually
+moved.
+
 ## Consequences
 
 - **Good:** the reported bug is fixed through the paths that already exist —

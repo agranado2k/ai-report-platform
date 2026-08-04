@@ -1,9 +1,17 @@
-// Shared setAcl grant-pruning contract (ADR-0056 "5e", issue #137). The
-// `setAcl` use case must prune durable `report_grants` rows so they never
-// outlive the Acl that granted them: revoke every grant when the mode
-// switches away from `allowlist`, and revoke just the removed email(s) when
-// it stays `allowlist` but the roster narrows. Run against both
-// InMemoryGrantStore/InMemoryReportRepository
+// Shared setAcl grant-pruning contract (ADR-0056 "5e", issue #137; extended by
+// ADR-0078 §11). The `setAcl` use case must prune durable grants so they never
+// outlive the Acl that granted them, on BOTH grant families:
+//
+//  - `report_grants` (the ADR-0056 allowlist redemptions): revoke every grant
+//    when the mode switches away from `allowlist`, and revoke just the removed
+//    email(s) when it stays `allowlist` but the roster narrows.
+//  - `report_org_write_grants` (the ADR-0078 org-write leg): revoke the row
+//    whenever the new mode is not `org`. An org-write row on a report the org
+//    cannot read is the one combination ADR-0060 §6 forbids, and `setAcl` is a
+//    SECOND door onto the same Acl `setReportSharing` writes — a rule enforced
+//    at only one of two doors is not enforced.
+//
+// Run against both InMemoryGrantStore/InMemoryReportRepository
 // (packages/application/src/testing/contracts/set-acl-grant-pruning.contract.test.ts)
 // and DrizzleGrantStore/DrizzleReportRepository on pglite
 // (packages/adapters/src/set-acl-grant-pruning.contract.test.ts) — pruning is
@@ -14,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   AuditLogger,
   GrantStore,
+  OrgWriteGrantStore,
   PasswordHasher,
   ReportRepository,
   UnitOfWork,
@@ -24,6 +33,9 @@ import { idempotencyTestDeps } from "../in-memory";
 export interface SetAclGrantPruningHarness {
   readonly reports: ReportRepository;
   readonly grants: GrantStore;
+  /** The ADR-0078 org-write grant store — the second durable grant family the
+   *  Acl authorizes, and the one `setAcl` must not leave behind. */
+  readonly orgWriteGrants: OrgWriteGrantStore;
   readonly hasher: PasswordHasher;
   readonly audit: AuditLogger;
   readonly uow: UnitOfWork;
@@ -49,6 +61,26 @@ async function isLive(store: GrantStore, reportId: ReportId, email: string): Pro
   return r.value;
 }
 
+async function hasOrgWrite(store: OrgWriteGrantStore, reportId: ReportId): Promise<boolean> {
+  const r = await store.find(reportId);
+  if (!r.ok) throw new Error("orgWriteGrants.find failed");
+  return r.value !== null;
+}
+
+/** The `setAcl` deps, built once from the harness — every test drives the same
+ *  wiring, so a new dep is added in ONE place rather than four. */
+function depsFor(h: SetAclGrantPruningHarness) {
+  return {
+    reports: h.reports,
+    hasher: h.hasher,
+    grants: h.grants,
+    orgWriteGrants: h.orgWriteGrants,
+    audit: h.audit,
+    uow: h.uow,
+    ...idempotencyTestDeps(),
+  };
+}
+
 /**
  * Runs the setAcl grant-pruning contract against `setup()`'s implementation.
  * `label` distinguishes the two runs in test output (e.g. "in-memory" vs
@@ -69,14 +101,7 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("mode switch allowlist → password revokes every grant for the report", async () => {
-      const deps = {
-        reports: h.reports,
-        hasher: h.hasher,
-        grants: h.grants,
-        audit: h.audit,
-        uow: h.uow,
-        ...idempotencyTestDeps(),
-      };
+      const deps = depsFor(h);
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -101,14 +126,7 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("allowlist stays but a removed email's grant is revoked; kept emails are untouched", async () => {
-      const deps = {
-        reports: h.reports,
-        hasher: h.hasher,
-        grants: h.grants,
-        audit: h.audit,
-        uow: h.uow,
-        ...idempotencyTestDeps(),
-      };
+      const deps = depsFor(h);
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -132,14 +150,7 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("allowlist widening (additions only) leaves existing grants untouched", async () => {
-      const deps = {
-        reports: h.reports,
-        hasher: h.hasher,
-        grants: h.grants,
-        audit: h.audit,
-        uow: h.uow,
-        ...idempotencyTestDeps(),
-      };
+      const deps = depsFor(h);
       const allow = await setAcl(deps, actorFor(h.orgId, h.userId), {
         slug: h.slug,
         mode: "allowlist",
@@ -160,14 +171,7 @@ export function describeSetAclGrantPruningContract(
     });
 
     it("a non-allowlist → non-allowlist switch never touches grants", async () => {
-      const deps = {
-        reports: h.reports,
-        hasher: h.hasher,
-        grants: h.grants,
-        audit: h.audit,
-        uow: h.uow,
-        ...idempotencyTestDeps(),
-      };
+      const deps = depsFor(h);
       const pub = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "public" });
       expect(pub.ok).toBe(true);
       // A grant that (by hypothesis) shouldn't exist while public — proves the
@@ -177,6 +181,67 @@ export function describeSetAclGrantPruningContract(
       const org = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "org" });
       expect(org.ok).toBe(true);
       expect(await isLive(h.grants, h.reportId, "stray@example.com")).toBe(true); // untouched
+    });
+
+    // ── ADR-0078 §11: the org-write grant is pruned by the SAME rule ────────
+    //
+    // `setReportSharing` is not the only door onto a report's Acl. Narrowing
+    // via `POST /reports/{slug}/acl` (or MCP `reports_set_acl`) must revoke the
+    // org-write row too, or the org keeps WRITE — and, through the ADR-0078 §8
+    // listing leg and the ADR-0063 edit-token door, keeps READ — on a report
+    // the Acl says they cannot open.
+    for (const mode of ["private", "password", "allowlist", "public"] as const) {
+      it(`narrowing org → ${mode} revokes the org write grant`, async () => {
+        const deps = depsFor(h);
+        const shared = await setAcl(deps, actorFor(h.orgId, h.userId), {
+          slug: h.slug,
+          mode: "org",
+        });
+        expect(shared.ok).toBe(true);
+        await h.orgWriteGrants.grant(h.reportId, h.orgId, h.userId);
+        // Assert the pre-state so the revocation below can't pass vacuously.
+        expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(true);
+
+        const narrowed = await setAcl(deps, actorFor(h.orgId, h.userId), {
+          slug: h.slug,
+          mode,
+          ...(mode === "password" ? { password: "hunter22" } : {}),
+          ...(mode === "allowlist" ? { allowedEmails: ["a@b.com"] } : {}),
+        });
+        expect(narrowed.ok).toBe(true);
+        expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(false);
+      });
+    }
+
+    it("re-asserting org leaves an existing org write grant intact", async () => {
+      // The recorded decision (ADR-0078 §11): `setAcl` with mode `org` neither
+      // grants nor revokes org write — it is a READ authorization call, and the
+      // pair it must preserve (`org` read + org write = `org_edit`) is still
+      // intact. Revoking here would silently downgrade `org_edit` to `org_view`
+      // on a call the owner made about reading.
+      const deps = depsFor(h);
+      const shared = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "org" });
+      expect(shared.ok).toBe(true);
+      await h.orgWriteGrants.grant(h.reportId, h.orgId, h.userId);
+      expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(true);
+
+      const again = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "org" });
+      expect(again.ok).toBe(true);
+      expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(true);
+    });
+
+    it("narrowing a report that never had an org write grant is a no-op", async () => {
+      const deps = depsFor(h);
+      const shared = await setAcl(deps, actorFor(h.orgId, h.userId), { slug: h.slug, mode: "org" });
+      expect(shared.ok).toBe(true);
+      expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(false);
+
+      const narrowed = await setAcl(deps, actorFor(h.orgId, h.userId), {
+        slug: h.slug,
+        mode: "private",
+      });
+      expect(narrowed.ok).toBe(true);
+      expect(await hasOrgWrite(h.orgWriteGrants, h.reportId)).toBe(false);
     });
   });
 }

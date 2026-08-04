@@ -500,7 +500,11 @@ export function ops() {
     setAcl: bind2(setAcl, {
       reports: d.reports,
       hasher: passwordHasher(),
+      // The VIEWER-ACCESS grant store (allowlist redemptions) AND the ADR-0078
+      // org-write store: this route narrows the Acl too, so it must prune both
+      // grant families (ADR-0078 §11).
       grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,
