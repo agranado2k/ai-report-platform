@@ -68,6 +68,35 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 
 Reports are served on the separate viewer origin: `https://view.centaurspec.com/<slug>`.
 
+## Authoring the report HTML
+
+The uploaded HTML **is** the artifact (ADR-0062 §4). The platform never rewrites it — there
+is no serve-time sanitization pass and no save-time link rewriting, by design (ADR-0062
+Amendment 3: the author decides). So a generated report's links behave like links only if
+the generator emits them that way.
+
+| You want | Emit |
+|---|---|
+| An in-page anchor / table of contents | `<a href="#summary">` plus a matching `id` on the target: `<section id="summary">` |
+| An external link that opens a new tab | `<a href="https://…" target="_blank" rel="noopener noreferrer">` |
+
+`id` is retained on any element (`<section>`, `<h2>`, `<h3>`, `<p>`, `<div>`, `<li>`,
+`<td>`, `<blockquote>`, …) and survives an edit-and-save round trip. Ids must be unique —
+on a duplicate, only the first element in document order keeps it (`dedupeElementIds`).
+
+Two link attributes are **normalized** rather than preserved verbatim, both for security:
+
+- `target` is retained only when it is `_blank`. `_top` / `_parent` / a named frame are
+  frame-escape primitives and are dropped.
+- `rel` is allowlisted and `opener` is stripped unconditionally (it undoes the tabnabbing
+  mitigation). When `target="_blank"`, the emitted `rel` is always the union of your tokens
+  with `noopener noreferrer`.
+
+A `javascript:`, `vbscript:` or `data:text/html` `href` causes the entire `<a>` to be
+dropped (its text survives, unlinked). Everything else — bespoke classes, inline styles,
+document structure — round-trips verbatim under the generic attr-retention rule
+(ADR-0062 §3).
+
 ## Agent onboarding (ADR-0072)
 
 The server ships a short `instructions` string (set once, at connect, via the MCP `initialize`

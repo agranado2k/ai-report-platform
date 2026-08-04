@@ -274,6 +274,24 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
     expect(d).toMatch(/same|unchanged/i);
   });
 
+  // ADR-0062 Amendment 3: the platform RETAINS `id`/`target`/`rel` through
+  // editing but never adds them for you (the deliberate "author decides"
+  // choice — no serve-time or save-time HTML rewriting, ever). So the only
+  // thing that makes a generated report's links behave like links is the
+  // generator emitting them, and the `html` parameter's own description is
+  // the one piece of guidance that reaches EVERY client — including hosts
+  // that ignore the server `instructions` string entirely.
+  it("the html parameter teaches the anchor + new-tab link conventions", () => {
+    const html = (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description;
+    expect(html).toMatch(/target="_blank"/);
+    expect(html).toMatch(/noopener noreferrer/);
+    expect(html).toMatch(/href="#/);
+    expect(html).toMatch(/\bid\b/);
+  });
+
   it("folders_create points to reports_move for organizing reports", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });

@@ -39,6 +39,24 @@ worked examples, and `docs/mcp-usage.md` for connection details.
    person edit access. Those two are separate axes. `folders_apply_sharing_to_reports` reaches
    the reports INSIDE a folder — sharing the folder itself only shows its name.
 
+## Authoring the HTML
+
+The platform stores your HTML as the artifact and **never rewrites it** — not when serving
+it, not when someone edits the report and saves. Links only behave like links if you author
+them that way.
+
+- **In-page anchors** — give the target an `id` and point at it: `<a href="#summary">` →
+  `<section id="summary">`. `id` is retained on any element; keep ids unique (on a
+  duplicate, only the first in document order keeps it).
+- **External links** — add `target="_blank" rel="noopener noreferrer"` to every link you
+  want to open in a new tab. Nothing adds this for you.
+- **Normalized for security** — a `target` other than `_blank` is dropped and `rel="opener"`
+  is stripped; `target="_blank"` always ends up with `noopener noreferrer`. A `javascript:`,
+  `vbscript:` or `data:text/html` href drops the whole link.
+
+Everything else — bespoke classes, inline styles, structure — is preserved verbatim through
+an edit-and-save round trip.
+
 ## Quick reference
 
 | Need | Tool |

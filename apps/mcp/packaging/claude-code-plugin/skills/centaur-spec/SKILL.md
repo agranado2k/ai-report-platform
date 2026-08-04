@@ -57,6 +57,29 @@ exact — call them as written.
    grant view access, and vice versa. `folders_apply_sharing_to_reports` reaches the
    reports INSIDE a folder: sharing the folder itself only shows its name.
 
+## Authoring the HTML
+
+The platform stores your HTML as the artifact and **never rewrites it** — not when
+serving it, not when someone edits the report in the browser and saves. What you emit is
+what readers get, so links only behave like links if you author them that way.
+
+- **In-page anchors** — give every section you want to link to an `id`, and point the
+  link at it: `<a href="#summary">Summary</a>` → `<section id="summary">`. A table of
+  contents is just a list of those. `id` is retained on any element (`<section>`, `<h2>`,
+  `<p>`, `<td>`, …), so anchor whatever you need. Keep ids unique: on a duplicate, only
+  the first element in document order keeps it.
+- **External links** — add `target="_blank" rel="noopener noreferrer"` to every link you
+  want to open in a new tab. Nothing adds this for you.
+- **What gets normalized** (the two exceptions, both security): a `target` other than
+  `_blank` is dropped, and `rel="opener"` is stripped — they are frame-escape and
+  tabnabbing primitives. `target="_blank"` always ends up carrying `noopener noreferrer`
+  whether or not you wrote it.
+- **What is refused outright** — a `javascript:`, `vbscript:` or `data:text/html` `href`
+  drops the whole link (the text survives, unlinked).
+
+Everything else about your markup — bespoke classes, inline styles, structure — is
+preserved verbatim through an edit-and-save round trip.
+
 ## When to use which tool
 
 | Need | Tool |

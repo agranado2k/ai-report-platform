@@ -291,7 +291,18 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "(re-upload requires write access, ADR-0059/0060 — the report's owner or a write " +
         "grantee). To set/change the title afterwards use reports_update. Title is not set here.",
       inputSchema: {
-        html: z.string().describe("The report's full HTML document."),
+        html: z
+          .string()
+          .describe(
+            "The report's full HTML document. LINK CONVENTIONS (ADR-0062 Amendment 3 — the " +
+              "platform retains these verbatim through editing, it never rewrites them for " +
+              "you, so what you emit is what readers get): give every section you want to " +
+              'link to an `id` and point in-page links at it (`<a href="#summary">` → ' +
+              '`<section id="summary">`); put `target="_blank" rel="noopener noreferrer"` on ' +
+              "every EXTERNAL link you want to open in a new tab. A `target` other than " +
+              '`_blank`, and `rel="opener"`, are dropped as frame-escape/tabnabbing ' +
+              "primitives.",
+          ),
         update_slug: z
           .string()
           .optional()
