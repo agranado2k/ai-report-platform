@@ -524,10 +524,15 @@ paths:
           description: The report's permanent capability-URL slug (nanoid(10)).
       responses:
         '200':
-          description: The report's acl resource (`object: "acl"`).
+          description: >-
+            The report's acl resource (`object: "acl"`) plus its composed
+            three-state `sharing` (ADR-0078). Read `sharing`, not `mode`, to
+            tell whether the org can EDIT: `org_view` and `org_edit` share the
+            same `mode` and differ only in an org write grant the acl cannot
+            express.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Acl' }
+              schema: { $ref: '#/components/schemas/AclSharing' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -939,10 +944,10 @@ paths:
           description: The report's permanent capability-URL slug (nanoid(10)).
       responses:
         '200':
-          description: The report (with its acl).
+          description: The report, with its composed `sharing` state (and, for the owner, its acl).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Report' }
+              schema: { $ref: '#/components/schemas/ReportSharing' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1851,6 +1856,26 @@ components:
             discarded — the 422 you get without it names exactly what would be
             lost. Ignored by the folder bulk apply, which skips advanced modes
             outright rather than discarding them in bulk.
+
+    AclSharing:
+      description: >
+        A report's `acl` resource plus its composed three-state `sharing`
+        (ADR-0078). The two are not redundant: `acl` describes READ
+        authorization, `sharing` also accounts for the org write grant, and
+        `org_view` / `org_edit` are identical in the `acl`.
+      allOf:
+        - $ref: '#/components/schemas/Acl'
+        - type: object
+          required: [sharing]
+          properties:
+            sharing:
+              type: string
+              nullable: true
+              enum: [private, org_view, org_edit]
+              description: >
+                `null` when the report is in a state the three-state vocabulary
+                cannot express — an advanced acl mode, or an org write grant
+                without org read.
 
     ReportSharing:
       description: >

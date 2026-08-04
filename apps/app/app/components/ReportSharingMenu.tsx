@@ -2,7 +2,7 @@ import { Form } from "@remix-run/react";
 import { Badge, Button, MoreIcon } from "arp-ui";
 
 /**
- * The per-report sharing control in the dashboard list (ADR-0078 §7) — the
+ * The per-report sharing control in the dashboard list (ADR-0078 §12) — the
  * report-row counterpart to `FolderShareMenu`.
  *
  * IDIOM: the same native `<details>` kebab the report rows and the folder

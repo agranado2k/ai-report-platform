@@ -83,6 +83,16 @@ export type AclShareWire =
  *  prefixed ids and no `mode` deployment stamp. */
 export type AclWire = { readonly object: "acl" } & AclShareWire;
 
+/** The `acl` resource PLUS its composed ADR-0078 sharing state — what
+ *  `GET /reports/{slug}/acl` returns. `acl` fields describe READ authorization;
+ *  `sharing` is the three-state answer that also accounts for the Org write
+ *  grant, and is `null` when the report is in a state that vocabulary cannot
+ *  express. Without it a caller reading `mode: "org"` cannot tell `org_view`
+ *  from `org_edit` — the two are IDENTICAL in the `Acl`. */
+export type AclSharingWire = AclWire & {
+  readonly sharing: ReportSharingState | null;
+};
+
 /** A `report` resource in its SINGLE-REPORT shape (get/rename/move/set-acl):
  *  the summary plus `owner` (a `user_…` id, ADR-0059 §6) and — ONLY when the
  *  viewer is the owner — the `acl` share config (ADR-0059 §3). */

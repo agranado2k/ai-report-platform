@@ -344,8 +344,31 @@ there would 401 every in-flight editor.
   MUST NOT use the derived-key fallback — the precedent and its rationale are in
   `set-folder-visibility.ts`: a derived key is a permanent record, so
   `private → org → private` would replay the first response and never re-save,
-  leaving the report `org` while the API answered `private`. Idempotency engages
-  **only on an explicit `Idempotency-Key`**.
+  leaving the report `org` while the API answered `private`. The two endpoints
+  land in **different** places, and an earlier revision of this section wrongly
+  described them as the same:
+  - `POST /reports/{slug}/sharing` — idempotency engages **only on an explicit
+    `Idempotency-Key`**, exactly as written above. With a client-supplied key
+    the client owns retry identity and the usual claim/replay machinery applies.
+  - `POST /folders/{id}/reports/sharing` — takes **no key at all**, explicit or
+    otherwise. It is a LOOP of individually idempotent-in-effect state sets, and
+    the thing a replay would return is a *summary* — `changed` / `skipped` /
+    `failed` for N reports — whose per-report outcomes may no longer be true by
+    the time it is replayed. Handing back a stale account of what happened is
+    worse than re-running an operation that is already idempotent in effect,
+    because the whole contract of this response is that it describes reality.
+    Re-running is also safe by construction: every iteration re-enters
+    `setReportSharing`, which re-runs its own gate and skips anything already at
+    the target state.
+
+  **ADR-0039 has now accumulated three carve-outs** — `setAcl`'s password mode
+  (a derived key must never be a function of the plaintext), `setFolderVisibility`
+  (state-setting, so a permanent derived key would strand the state), and this
+  one (state-setting plus a summary that must not be replayed). They are recorded
+  only in the three use-case module docs; there is no consolidated record, and
+  the rule "state-setting operations take an explicit key or none" is now the
+  common shape rather than the exception. Consolidating it belongs in an
+  amendment to ADR-0039 itself, and is deliberately **not** done here.
 - **Audit (ADR-0070):** `grant.org_write.granted`, `grant.org_write.revoked`,
   and `report.sharing_set` — the last recording `from`/`to` sharing states, so
   the log carries the transition and not just the endpoint that was hit. The
@@ -383,6 +406,117 @@ the edit-token door served them its **content**. Pinned on both contract runners
 `set-acl-grant-pruning.contract.ts`. The revocation emits its own
 `grant.org_write.revoked` audit row (Decision 10), and only when a row actually
 moved.
+
+### 12. The dashboard sharing surface
+
+The operator's **third** explicit demand was a report-level sharing control, and
+until this section it was recorded only in Context. The choices below are
+architectural, not cosmetic, and are enforced by
+`apps/app/app/server/report-sharing.server.ts` and its tests.
+
+**The server sends CONCLUSIONS, not inputs.** `ownerId` never reaches the
+client. The loader computes `manageable` / `blockedReason` / the badge / the
+discard warning with the SAME predicates the use case enforces, in the same
+order (scope gate first, then ownership), and ships plain data. A control this
+module enables is a control the server will accept. The alternative — shipping
+the ownership fact and letting the client decide — is an independently invented
+client rule that drifts from the server that actually decides. This is the
+`folderManagement` doctrine from ADR-0076's amendment, applied verbatim.
+
+Two consequences of that doctrine, both load-bearing:
+
+- **A disabled control renders the SERVER's own reason.** `NON_OWNER_REASON` is
+  derived from the application layer's `SETTING_SHARING_NOT_OWNER` constant, so
+  the sentence a member reads is the sentence the 403 would have given them.
+- **Components must never import `arp-domain`** — its barrel pulls
+  `node:crypto` into the client bundle. Every domain-derived decision is
+  therefore computed server-side, which is *why* this module exists at all.
+
+**The badge taxonomy is honest about what it cannot express.** Six labels, not
+three: `Private`, `Org`, `Org + edit`, and the advanced modes `Password` /
+`Allowlist` / `Public` under their own names. Folding the advanced modes into a
+generic "shared" would be the first step towards overwriting one with another
+(Decision 4). The sixth is the `Edit only` **danger** badge, for the API-only
+combination of an org write grant without org read: saying `Private` there would
+be exactly the lie `reportSharingState` returns `null` to prevent — a report the
+whole org can edit, badged as nobody's but yours. The full claim lives in the
+badge's `title`, because the label shares a truncating row.
+
+**The confirmation is a second submit, keyed on the state it was staged for.**
+No `window.confirm` (Decision 4). The form's React `key` is
+`reportFormKey(aclMode, hasOrgWrite)` — both facts, so `org_view → org_edit`,
+which keeps `acl.mode = 'org'`, still remounts. This is the **#237 hazard**
+transplanted: an uncontrolled form inside a panel that re-renders in place keeps
+its DOM nodes, so a confirmation ticked for "discard the password" would still
+be ticked under a panel that had already moved on. A success remounts the form
+empty; a refusal keeps what was chosen, which is what a retry needs.
+`autoComplete="off"` covers browser restoration, which no key reaches.
+
+**The folder bulk apply is THREE buttons, not a select plus a submit.** Each
+button says what it does and carries its own target state, so nothing can sit
+staged in a form that outlives the state it was staged for — the same #237
+lesson, at folder scale. It also means the panel offers all three targets
+symmetrically, which is what Decision 5's composed-state rule needs.
+
+**The discard warning is withheld from a row the actor cannot change.** It is
+the confirmation's sentence, and a row with no confirmation has no use for it;
+computing it before the ownership gate put "shared with N addresses by
+invitation" into a non-owner's loader payload. No emails, but a fact about
+someone else's report that this surface had no reason to state.
+
+**The warning names the REAL roster size.** `ReportSummary` carries
+`allowedEmailCount` off the same free join as `aclMode` (Decision 8) — the count
+only, never the addresses. Without it the control defaulted to `1` and every
+allowlisted report warned about "1 address" while the server's own 422 named the
+true N: the operator saw a right number and a wrong one, which is worse than no
+number at all.
+
+**The panel is offered on PRIVATE folders too, and that is deliberate.** ADR-0076
+is emphatic that a folder's visibility is not its contents' reach, and this panel
+is a REPORT-sharing control that merely happens to be scoped by a folder. Gating
+it on the folder's own visibility would (a) reintroduce exactly the folder→report
+coupling Decision 2 exists to avoid, and (b) hide the `private` direction from
+the owner who needs it most — someone with org-shared reports sitting inside a
+private folder, who wants them back. The panel says what it changes, and what it
+leaves alone, in its own words.
+
+**The UI is deliberately NARROWER than the API, and the gap is recorded.** The
+dashboard renders the bulk apply only inside the folder-sharing panel, which is
+gated on folder *manageability* (owner-or-legacy, ADR-0076 §6). But the use case
+guards on `loadVisibleFolder`, deliberately — Decision 5 argues that requiring
+folder ownership "protects nothing, since the loop can only ever touch reports
+the actor already owns". So the very case that argument is built on — a member
+bulk-sharing their OWN reports inside a colleague's folder — is reachable only
+via the API and MCP, never the dashboard. That asymmetry is accepted, not
+overlooked: the permissive rule belongs in the use case (it is the correct
+authorization), and the narrower UI is a surface decision about where the
+control sensibly lives. If the case ever shows up in practice, the fix is a UI
+change, not an authorization change.
+
+### 13. The read surfaces answer with the composed sharing state
+
+Every WRITE surface returned the composed answer; the READS returned the `Acl`
+alone — `GET /api/v1/reports/{slug}`, `GET …/acl`, MCP `reports_get` and
+`reports_get_acl`. That is not enough information to answer "how is this
+shared?": `org_view` and `org_edit` are **identical** in the `Acl` and differ
+only in a row the caller cannot see, so a client reading `acl.mode === "org"`
+infers one of them and has a 50% chance of being wrong.
+
+MCP is the primary write surface (Decision 10), so an agent that reads before it
+writes is precisely the caller most likely to be misled — and the mistake it
+makes is "already shared, nothing to do" on a report the whole org can edit.
+
+So both reads now carry `sharing`, via one `withReportSharing` wrapper applied
+*after* each read's own gate has passed — it adds a single indexed lookup and no
+authorization of its own. It is `null` for a state the vocabulary cannot express,
+never rounded down to `private`. A store failure PROPAGATES rather than degrading
+to "no grant": reporting `org_view` on a report the whole org can edit is the one
+wrong answer this composition exists to prevent.
+
+`sharing` is present for every reader, not only the owner. It is strictly coarser
+than the `acl` block ADR-0059 §3 withholds — it collapses every advanced mode to
+`null` — and it is the same claim the dashboard badge already makes to every
+member for every row they can see.
 
 ## Consequences
 
@@ -424,8 +558,10 @@ Implementation: `OrgWriteGrantStore` port modeled on `WriteGrantStore`, with a
 Drizzle adapter, an in-memory fake, and a port-contract suite run on both
 runners (ADR-0046); the `canWrite` third leg in
 `packages/application/src/load-owned.ts`; `setReportSharing` and
-`applyFolderSharingToReports` use cases; the org-write leg in
-`DrizzleReportRepository.searchByOrg` and its in-memory mirror; the dashboard
+`applyFolderSharingToReports` use cases; the org-write prune in `setAcl`
+(Decision 11), pinned by `set-acl-grant-pruning.contract.ts` on both runners;
+the org-write leg in `DrizzleReportRepository.searchByOrg` and its in-memory
+mirror; `withReportSharing` for the read surfaces (Decision 13); the dashboard
 control in `apps/app` computed in the loader by `report-sharing.server.ts`
 (components must not import `arp-domain` — its barrel pulls `node:crypto` into
 the client bundle).

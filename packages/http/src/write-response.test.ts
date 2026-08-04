@@ -108,9 +108,13 @@ describe("report resource mappers (ADR-0053)", () => {
   });
 
   it("getReportToHttp → 200 with the report resource (owner sees the acl)", () => {
-    const res = getReportToHttp(ok(report("A Title")), CTX, OWNER);
+    const res = getReportToHttp(
+      ok({ report: report("A Title"), sharing: "private" as const }),
+      CTX,
+      OWNER,
+    );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual(reportResource("A Title"));
+    expect(res.body).toEqual({ ...reportResource("A Title"), sharing: "private" });
   });
 
   it("getReportToHttp for a NON-owner org member omits the acl block (ADR-0059 §3)", () => {
@@ -119,7 +123,7 @@ describe("report resource mappers (ADR-0053)", () => {
       ...r,
       acl: { mode: "allowlist", allowedEmails: ["secret@example.com"], accessTtlSeconds: 3600 },
     };
-    const res = getReportToHttp(ok(withAllowlist), CTX, COLLEAGUE);
+    const res = getReportToHttp(ok({ report: withAllowlist, sharing: null }), CTX, COLLEAGUE);
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty("acl");
     // owner stays org-visible (ADR-0059 §6) …
@@ -129,7 +133,10 @@ describe("report resource mappers (ADR-0053)", () => {
   });
 
   it("getReportToHttp with no viewer identity omits the acl block (fail closed)", () => {
-    const res = getReportToHttp(ok(report("A Title")), CTX);
+    const res = getReportToHttp(
+      ok({ report: report("A Title"), sharing: "private" as const }),
+      CTX,
+    );
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty("acl");
   });
@@ -198,10 +205,20 @@ describe("folder resource mappers (ADR-0053)", () => {
     expect(res.body).toBeUndefined();
   });
 
-  it("getAclToHttp public → 200 { object: acl, mode }", () => {
-    const res = getAclToHttp(ok(report("R")));
+  it("getAclToHttp public → 200 { object: acl, mode, sharing }", () => {
+    const res = getAclToHttp(ok({ report: report("R"), sharing: null }));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ object: "acl", mode: "public" });
+    expect(res.body).toEqual({ object: "acl", mode: "public", sharing: null });
+  });
+
+  it("getAclToHttp distinguishes org_view from org_edit, which the acl cannot", () => {
+    // The whole point of ADR-0078 §13: `mode: "org"` is IDENTICAL in both
+    // states, so a reader given only the acl infers the wrong one.
+    const orgReport: Report = { ...report("R"), acl: { mode: "org" } };
+    const view = getAclToHttp(ok({ report: orgReport, sharing: "org_view" as const }));
+    const edit = getAclToHttp(ok({ report: orgReport, sharing: "org_edit" as const }));
+    expect(view.body).toEqual({ object: "acl", mode: "org", sharing: "org_view" });
+    expect(edit.body).toEqual({ object: "acl", mode: "org", sharing: "org_edit" });
   });
 
   it("getAclToHttp allowlist → surfaces allowed_emails + access_ttl_seconds (no hash)", () => {
@@ -209,12 +226,13 @@ describe("folder resource mappers (ADR-0053)", () => {
       ...report("R"),
       acl: { mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 604800 },
     };
-    const res = getAclToHttp(ok(allowlistReport));
+    const res = getAclToHttp(ok({ report: allowlistReport, sharing: null }));
     expect(res.body).toEqual({
       object: "acl",
       mode: "allowlist",
       allowed_emails: ["a@b.com"],
       access_ttl_seconds: 604800,
+      sharing: null,
     });
   });
 

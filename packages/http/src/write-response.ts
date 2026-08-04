@@ -5,6 +5,7 @@
 import {
   type FolderShare,
   type ReportSharingResult,
+  type ReportSharingView,
   type SharingApplyOutcome,
   sharingApplyIsPartial,
   type WriteGrant,
@@ -22,6 +23,7 @@ import {
 } from "./resource";
 import type {
   AclShareWire,
+  AclSharingWire,
   AclWire,
   FolderShareWire,
   ReportDetailWire,
@@ -102,18 +104,27 @@ export function renameReportToHttp(
   };
 }
 
-/** GET /api/v1/reports/{slug} — 200 with the report resource, or a problem. */
+/** GET /api/v1/reports/{slug} — 200 with the report resource PLUS its composed
+ *  ADR-0078 `sharing` state, or a problem.
+ *
+ *  `sharing` rides alongside `acl` for the same reason it does on the write
+ *  response, and is present for EVERY reader, not only the owner: it is
+ *  strictly coarser than the `acl` block ADR-0059 §3 withholds (it collapses
+ *  every advanced mode to `null`), and it is the same claim the dashboard badge
+ *  already makes to every member for every row they can see. Withholding it
+ *  would leave the read surfaces unable to distinguish `org_view` from
+ *  `org_edit` — the gap that made an MCP agent infer the wrong one. */
 export function getReportToHttp(
-  result: Result<Report, AppError>,
+  result: Result<ReportSharingView, AppError>,
   ctx: WireContext,
   viewer?: ReportViewer,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: reportResource(result.value, ctx, viewer),
+  const body: ReportSharingWire = {
+    ...reportResource(result.value.report, ctx, viewer),
+    sharing: result.value.sharing,
   };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** POST /api/v1/reports/{slug}/acl — 200 with the report resource + its new acl
@@ -137,11 +148,20 @@ function aclResource(acl: Acl): AclWire {
   return { object: "acl", ...aclToWire(acl) };
 }
 
-/** GET /api/v1/reports/{slug}/acl — 200 with just the acl resource, or a problem.
- *  No `WireContext` needed: the acl carries no prefixed ids. */
-export function getAclToHttp(result: Result<Report, AppError>): HttpResponse {
+/** GET /api/v1/reports/{slug}/acl — 200 with the acl resource PLUS its composed
+ *  ADR-0078 `sharing` state, or a problem. No `WireContext` needed: neither
+ *  carries a prefixed id.
+ *
+ *  This route is owner-only (ADR-0059 §3), so the owner asking "how is this
+ *  shared?" is exactly the caller who must not have to infer `org_edit` from an
+ *  `Acl` that cannot express it. */
+export function getAclToHttp(result: Result<ReportSharingView, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: aclResource(result.value.acl) };
+  const body: AclSharingWire = {
+    ...aclResource(result.value.report.acl),
+    sharing: result.value.sharing,
+  };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** DELETE /api/v1/reports/{slug} — 204 No Content on success. */

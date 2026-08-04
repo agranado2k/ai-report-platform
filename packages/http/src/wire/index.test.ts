@@ -28,12 +28,14 @@ import { reportDiffToHttp } from "../diff-response";
 import { commentBody, folderBody, listBody, reportBody, versionBody } from "../resource";
 import { getAclToHttp, getReportToHttp, grantWriteToHttp } from "../write-response";
 import type {
+  AclSharingWire,
   AclWire,
   CommentWire,
   DiffWire,
   FolderWire,
   ListEnvelope,
   ReportDetailWire,
+  ReportSharingWire,
   ReportWire,
   VersionWire,
   WriteGrantWire,
@@ -177,18 +179,21 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
     acl: { mode: "allowlist", allowedEmails: ["a@example.com"], accessTtlSeconds: 604_800 },
   };
 
-  it("getAclToHttp emits exactly the AclWire resource (allowlist branch)", () => {
-    const expected: AclWire = {
+  it("getAclToHttp emits exactly the AclSharingWire resource (allowlist branch)", () => {
+    const expected: AclSharingWire = {
       object: "acl",
       mode: "allowlist",
       allowed_emails: ["a@example.com"],
       access_ttl_seconds: 604_800,
+      // An advanced mode is in NO three-state sharing state — null, never
+      // rounded down to `private` (ADR-0078 §13).
+      sharing: null,
     };
-    expect(getAclToHttp(ok(report)).body).toEqual(expected);
+    expect(getAclToHttp(ok({ report, sharing: null })).body).toEqual(expected);
   });
 
-  it("getReportToHttp (owner view) emits exactly the ReportDetailWire shape", () => {
-    const expected: ReportDetailWire = {
+  it("getReportToHttp (owner view) emits exactly the ReportSharingWire shape", () => {
+    const expected: ReportSharingWire = {
       object: "report",
       id: reportIdToWire(reportId(R1)),
       slug: "aaaaaaaaaa",
@@ -198,8 +203,11 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       mode: "prod",
       owner: userIdToWire(userId(U1)),
       acl: { mode: "allowlist", allowed_emails: ["a@example.com"], access_ttl_seconds: 604_800 },
+      sharing: null,
     };
-    expect(getReportToHttp(ok(report), CTX, { userId: userId(U1) }).body).toEqual(expected);
+    expect(
+      getReportToHttp(ok({ report, sharing: null }), CTX, { userId: userId(U1) }).body,
+    ).toEqual(expected);
   });
 
   it("grantWriteToHttp emits exactly the WriteGrantWire shape (no `mode`)", () => {

@@ -282,7 +282,7 @@ export async function loader(args: LoaderFunctionArgs) {
     folders,
     items: result.items.map((r) => {
       const folderId = folderIdToWire(r.folderId);
-      // ADR-0078 §7: `manageable` / `blockedReason` / the badge / the discard
+      // ADR-0078 §12: `manageable` / `blockedReason` / the badge / the discard
       // warning are decided HERE, by the same predicates `setReportSharing`
       // enforces, and shipped as plain data. `ownerId` is NOT among the fields
       // spread below — the server sends conclusions, never the authorization
@@ -443,7 +443,7 @@ export async function action(args: ActionFunctionArgs) {
     return redirect(folder ? `/?folder=${folder}` : "/");
   }
 
-  // ── ADR-0078 §7: report sharing, from the dashboard ─────────────────────
+  // ── ADR-0078 §12: report sharing, from the dashboard ────────────────────
   // Posts to the SAME use case the /api/v1 route calls, through this
   // cookie-authenticated Remix action — the browser never touches the Bearer
   // API. `resolveUploadActor` carries SELF_SCOPES, which includes `acl:write`.
@@ -811,7 +811,7 @@ export default function Index() {
                     </div>
                   </div>
                   <StatusBadge isPublished={r.isPublished} />
-                  {/* Sharing (ADR-0078 §7). Its own kebab, next to the actions
+                  {/* Sharing (ADR-0078 §12). Its own kebab, next to the actions
                       one, because "who can see this" is a different decision
                       from "rename / move / delete" and folding them together
                       would put a destructive action one row from a sharing

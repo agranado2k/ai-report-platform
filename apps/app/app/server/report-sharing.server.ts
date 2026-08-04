@@ -1,4 +1,4 @@
-// Report sharing, as the DASHBOARD sees it (ADR-0078 §7) — the report-row
+// Report sharing, as the DASHBOARD sees it (ADR-0078 §12) — the report-row
 // counterpart to `folder-sharing.server.ts`, and deliberately built to the same
 // doctrine.
 //
@@ -22,9 +22,9 @@ export { sharingApplyIsPartial } from "arp-application";
 
 import { SETTING_SHARING_NOT_OWNER } from "arp-application";
 import {
+  ACL_WRITE_SCOPE,
   type AclMode,
   advancedSharingDiscardWarning,
-  hasFolderManagementScope,
   type ReportSharingState,
   reportSharingState,
   type UserId,
@@ -55,7 +55,7 @@ export interface ReportBadge {
 }
 
 /**
- * The row's sharing badge (ADR-0078 §7).
+ * The row's sharing badge (ADR-0078 §12).
  *
  * Unlike the folder sidebar's, this badge is never in an "unknown" state: the
  * two facts it needs ride the listing projection, so every row can make a claim
@@ -175,7 +175,12 @@ export function reportSharingManagement(
         : { mode: report.aclMode },
   );
   if (!actor) return blockedManagement(NO_ACTOR_REASON, state);
-  if (!hasFolderManagementScope(actor.scopes)) return blockedManagement(NO_SCOPE_REASON, state);
+  // The scope constant DIRECTLY, not the folder-named predicate that happens to
+  // wrap it. `hasFolderManagementScope` is the FOLDER surface's name for this
+  // check; borrowing it on the report path was functionally identical and
+  // exactly the vocabulary drift ADR-0036 forbids — a reader of this file would
+  // have to go and learn that "folder management scope" means `acl:write`.
+  if (!actor.scopes.includes(ACL_WRITE_SCOPE)) return blockedManagement(NO_SCOPE_REASON, state);
   if (report.ownerId !== actor.userId) return blockedManagement(NON_OWNER_REASON, state);
   return { manageable: true, blockedReason: null, state, discardWarning };
 }

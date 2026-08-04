@@ -8,6 +8,7 @@
 // model. Injectable `fetch` keeps this unit-testable without a live API.
 
 import type {
+  AclSharingWire,
   AclWire,
   CommentWire,
   FolderShareWire,
@@ -78,9 +79,10 @@ export class ApiClient {
   }
 
   /** Fetch a single report by slug or report_ id — the single-report resource
-   *  (`owner` always present; `acl` only when the caller is the owner); 404 → problem. */
-  getReport(slug: string): Promise<ApiResult<ReportDetailWire>> {
-    return this.get<ReportDetailWire>(`/api/v1/reports/${encodeURIComponent(slug)}`);
+   *  (`owner` always present; `acl` only when the caller is the owner; `sharing`
+   *  always, ADR-0078 §13); 404 → problem. */
+  getReport(slug: string): Promise<ApiResult<ReportSharingWire>> {
+    return this.get<ReportSharingWire>(`/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
   listFolders(params: CursorParams = {}): Promise<ApiResult<ListEnvelope<FolderWire>>> {
@@ -141,9 +143,12 @@ export class ApiClient {
     );
   }
 
-  /** Read a report's sharing acl — `{ object: "acl", mode, allowed_emails?, access_ttl_seconds? }`. */
-  getReportAcl(slug: string): Promise<ApiResult<AclWire>> {
-    return this.get<AclWire>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
+  /** Read a report's sharing acl PLUS its composed three-state `sharing`
+   *  (ADR-0078 §13) — `{ object: "acl", mode, allowed_emails?,
+   *  access_ttl_seconds?, sharing }`. Both are needed: `mode: "org"` is
+   *  identical for `org_view` and `org_edit`. */
+  getReportAcl(slug: string): Promise<ApiResult<AclSharingWire>> {
+    return this.get<AclSharingWire>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
   }
 
   /** Set a report's sharing acl (ADR-0056). Sends only the fields relevant to `mode`. */

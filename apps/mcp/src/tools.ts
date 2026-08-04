@@ -125,12 +125,15 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Get a report",
       description:
-        "Fetch a single report by its slug — returns slug, title, is_published, folder_id, and " +
-        "owner (the owning user's user_… id, ADR-0059); the acl block is included only when " +
-        "you are the report's owner (use reports_get_acl for share config). Read-only. Use it " +
-        "to confirm a report exists / check its current title or folder before an update, " +
-        "move, or delete. A missing slug returns not-found; a report outside your org returns " +
-        "forbidden.",
+        "Fetch a single report by its slug — returns slug, title, is_published, folder_id, " +
+        "owner (the owning user's user_… id, ADR-0059), and sharing: 'private' | 'org_view' | " +
+        "'org_edit' | null (ADR-0078). Read `sharing`, NOT acl.mode, to tell how a report is " +
+        "shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an " +
+        "org write grant the acl cannot express. null means an advanced mode " +
+        "(password/allowlist/public) — use reports_get_acl for that. The acl block itself is " +
+        "included only when you are the report's owner. Read-only. Use it to confirm a report " +
+        "exists / check its title, folder or sharing before an update, move, or delete. A " +
+        "missing slug returns not-found; a report outside your org returns forbidden.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id (from reports_search)."),
       },
@@ -169,11 +172,15 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Get a report's sharing settings",
       description:
-        "Read a report's sharing acl — returns { object:'acl', mode, and for allowlist the " +
-        "allowed_emails + access_ttl_seconds }. Read-only and OWNER-ONLY (ADR-0059): only the " +
-        "user who created the report can read its share config. mode is one of private " +
-        "(owner-only, the default) | public | password | org | allowlist. Use it before " +
-        "reports_set_acl to see the current sharing state.",
+        "Read a report's sharing acl — returns { object:'acl', mode, for allowlist the " +
+        "allowed_emails + access_ttl_seconds, and sharing }. Read-only and OWNER-ONLY " +
+        "(ADR-0059): only the user who created the report can read its share config. mode is " +
+        "one of private (owner-only, the default) | public | password | org | allowlist. " +
+        "sharing is the composed three-state answer (ADR-0078): 'private' | 'org_view' | " +
+        "'org_edit' | null. READ `sharing`, NOT `mode`, to decide whether the org can EDIT: " +
+        "org_view and org_edit both have mode 'org' and differ only in an org write grant the " +
+        "acl cannot express, so inferring from mode alone gets it wrong. Use it before " +
+        "reports_set_acl or reports_set_sharing to see the current state.",
       inputSchema: {
         slug: SLUG_INPUT,
       },

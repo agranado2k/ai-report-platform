@@ -35,6 +35,7 @@ export * from "./use-cases/redeem-magic-link";
 export * from "./use-cases/rename-folder";
 export * from "./use-cases/rename-report";
 export * from "./use-cases/reply-to-comment";
+export * from "./use-cases/report-sharing-view";
 export * from "./use-cases/resolve-access";
 export * from "./use-cases/resolve-comment";
 export * from "./use-cases/resolve-team-org";

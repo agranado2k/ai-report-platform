@@ -16,7 +16,7 @@ const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
 const COLLEAGUE = userId("00000000-0000-7000-8000-0000000000d2");
 const ACL_WRITE = { userId: OWNER, scopes: ["acl:write"] };
 
-describe("reportSharingBadge (ADR-0078 §7)", () => {
+describe("reportSharingBadge (ADR-0078 §12)", () => {
   it("distinguishes the three states, and says what each one means", () => {
     expect(reportSharingBadge({ aclMode: "private", hasOrgWrite: false }).label).toBe("Private");
     expect(reportSharingBadge({ aclMode: "org", hasOrgWrite: false }).label).toBe("Org");
@@ -52,7 +52,7 @@ describe("reportSharingBadge (ADR-0078 §7)", () => {
   });
 });
 
-describe("reportSharingManagement — the server decides, the client renders (ADR-0078 §7)", () => {
+describe("reportSharingManagement — the server decides, the client renders (ADR-0078 §12)", () => {
   const own = {
     ownerId: OWNER,
     aclMode: "private" as const,

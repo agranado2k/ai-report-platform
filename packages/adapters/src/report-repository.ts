@@ -256,7 +256,7 @@ export class DrizzleReportRepository implements ReportRepository {
       // `ownerId` / `aclMode` / `hasOrgWrite` ride along at zero cost: the
       // join and the EXISTS are already there for the visibility predicate
       // above. Selecting them here is what lets the dashboard badge every row
-      // accurately instead of paying an N+1 per row (ADR-0078 §7).
+      // accurately instead of paying an N+1 per row (ADR-0078 §8).
       const rows = await db
         .select({
           id: reports.id,

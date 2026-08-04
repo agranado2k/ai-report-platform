@@ -83,6 +83,7 @@ import {
   shareFolder,
   unshareFolder,
   uploadReport,
+  withReportSharing,
 } from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
@@ -405,12 +406,22 @@ export function ops() {
     // (the same findEmailByUserId seam hasWriteGrant uses).
     searchReports: bind2(searchReports, { reports: d.reports, identities: identityStore() }),
     uploadReport: (cmd: Parameters<typeof uploadReport>[1]) => uploadReport(d, cmd),
-    getReport: bind2(getReport, {
-      reports: d.reports,
-      grants: writeGrantStore(),
-      orgWriteGrants: orgWriteGrantStore(),
-      identities: identityStore(),
-    }),
+    // Both READ surfaces answer with the COMPOSED sharing state (ADR-0078 §13),
+    // not the `Acl` alone: `org_view` and `org_edit` are identical in the `Acl`,
+    // so a reader given only the mode infers the wrong one. `withReportSharing`
+    // wraps the read AFTER its own gate has passed; it adds no authorization.
+    getReport: async (
+      actor: Parameters<typeof getReport>[1],
+      input: Parameters<typeof getReport>[2],
+    ) =>
+      withReportSharing(
+        orgWriteGrantStore(),
+        await getReport(
+          { reports: d.reports, grants: writeGrantStore(), identities: identityStore() },
+          actor,
+          input,
+        ),
+      ),
     renameReport: bind2(renameReport, {
       reports: d.reports,
       grants: writeGrantStore(),
@@ -496,7 +507,8 @@ export function ops() {
     }),
     listReportVersions: bind2(listReportVersions, { reports: d.reports }),
     // ── Sharing (ACL + write grants) ───────────────────────────────────────
-    getAcl: bind2(getAcl, { reports: d.reports }),
+    getAcl: async (actor: Parameters<typeof getAcl>[1], input: Parameters<typeof getAcl>[2]) =>
+      withReportSharing(orgWriteGrantStore(), await getAcl({ reports: d.reports }, actor, input)),
     setAcl: bind2(setAcl, {
       reports: d.reports,
       hasher: passwordHasher(),
