@@ -460,14 +460,27 @@ describe("folder sharing tools (ADR-0076)", () => {
 describe("report sharing tools (ADR-0078)", () => {
   const writeTools = collectTools(registerWriteTools, {} as ApiClient);
 
-  it("reports_set_sharing offers exactly the three states from the domain enum", () => {
-    const schema = writeTools.get("reports_set_sharing")?.config.inputSchema as
-      | Record<string, { _def?: { values?: readonly string[] } }>
-      | undefined;
-    expect(REPORT_SHARING_STATES).toEqual(["private", "org_view", "org_edit"]);
-    // Pinned against the DOMAIN enum, not a transcription: a fourth state
-    // added there must reach this tool or fail here.
-    expect(schema?.sharing).toBeDefined();
+  it("reports_set_sharing takes its enum from the domain vocabulary, not a hand-written list", () => {
+    // Inspect the TOOL's own enum — the sibling folders_set_visibility case
+    // does exactly this. Asserting the domain enum against a literal and
+    // separately that a schema key exists proves nothing about the tool: a
+    // fourth state added to the domain, or a transcription typo in the tool,
+    // would both pass.
+    const schema = (
+      writeTools.get("reports_set_sharing")?.config as {
+        inputSchema?: Record<string, { options?: readonly string[] }>;
+      }
+    )?.inputSchema?.sharing;
+    expect(schema?.options).toEqual([...REPORT_SHARING_STATES]);
+  });
+
+  it("folders_apply_sharing_to_reports takes the SAME domain enum", () => {
+    const schema = (
+      writeTools.get("folders_apply_sharing_to_reports")?.config as {
+        inputSchema?: Record<string, { options?: readonly string[] }>;
+      }
+    )?.inputSchema?.sharing;
+    expect(schema?.options).toEqual([...REPORT_SHARING_STATES]);
   });
 
   it("reports_set_sharing tells the agent that read and write are paired", () => {

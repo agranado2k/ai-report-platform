@@ -301,6 +301,79 @@ describe("ApiClient writes", () => {
     expect("password" in sent).toBe(false); // absent fields omitted
   });
 
+  // ── ADR-0078: the three-state sharing + the folder bulk apply ───────────
+  it("setReportSharing POSTs /sharing with the state", async () => {
+    const { fn, calls } = stub(json({ object: "report", sharing: "org_view" }));
+    const r = await client(fn).setReportSharing("abc12345", { sharing: "org_view" });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/abc12345/sharing");
+    expect(calls[0]?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ sharing: "org_view" });
+  });
+
+  it("setReportSharing OMITS confirm_discard when the caller did not pass it", async () => {
+    // The protection this omission IS: the server refuses to leave
+    // password/allowlist/public without an explicit `confirm_discard`, and
+    // sending `false` — let alone defaulting to it — would quietly turn that
+    // refusal into a client-side decision for every MCP caller.
+    const { fn, calls } = stub(json({ object: "report", sharing: "private" }));
+    await client(fn).setReportSharing("abc12345", { sharing: "private" });
+    const sent = JSON.parse(calls[0]?.body as string);
+    expect("confirm_discard" in sent).toBe(false);
+  });
+
+  it("setReportSharing omits confirm_discard when it is explicitly FALSE", async () => {
+    const { fn, calls } = stub(json({ object: "report", sharing: "private" }));
+    await client(fn).setReportSharing("abc12345", { sharing: "private", confirmDiscard: false });
+    expect("confirm_discard" in JSON.parse(calls[0]?.body as string)).toBe(false);
+  });
+
+  it("setReportSharing forwards confirm_discard ONLY as an explicit true", async () => {
+    const { fn, calls } = stub(json({ object: "report", sharing: "private" }));
+    await client(fn).setReportSharing("abc12345", { sharing: "private", confirmDiscard: true });
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({
+      sharing: "private",
+      confirm_discard: true,
+    });
+  });
+
+  it("setReportSharing surfaces the server's 422 refusal rather than retrying it", async () => {
+    // The refusal carries the sentence naming what would be discarded; the
+    // client must hand it back untouched, never re-send with the flag set.
+    const { fn, calls } = stub(
+      json({ error: { message: "This report is password-protected." } }, 422),
+    );
+    const r = await client(fn).setReportSharing("abc12345", { sharing: "private" });
+    expect(r.ok).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("applyFolderSharingToReports POSTs the folder's reports/sharing sub-resource", async () => {
+    const { fn, calls } = stub(
+      json({
+        object: "sharing_apply",
+        sharing: "org_view",
+        total: 2,
+        changed: [{ slug: "a", title: "A" }],
+        skipped: [{ slug: "b", title: "B", reason: "not owned by you" }],
+        failed: [],
+      }),
+    );
+    const r = await client(fn).applyFolderSharingToReports("fldr_1", "org_view");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.skipped[0]?.reason).toBe("not owned by you");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/fldr_1/reports/sharing");
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ sharing: "org_view" });
+  });
+
+  it("applyFolderSharingToReports URL-encodes the folder id", async () => {
+    const { fn, calls } = stub(json({ object: "sharing_apply", sharing: "private" }));
+    await client(fn).applyFolderSharingToReports("a/b?c", "private");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/folders/a%2Fb%3Fc/reports/sharing");
+  });
+
   it("grantWrite POSTs /write-grants with the email", async () => {
     const { fn, calls } = stub(json({ object: "write_grant", email: "grantee@x.com" }, 201));
     const r = await client(fn).grantWrite("abc12345", "grantee@x.com");
