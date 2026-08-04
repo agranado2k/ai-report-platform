@@ -15,6 +15,7 @@ import {
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  applyFolderSharingToReportsToHttp,
   createFolderToHttp,
   deleteFolderToHttp,
   deleteReportToHttp,
@@ -29,6 +30,7 @@ import {
   revokeWriteToHttp,
   setAclToHttp,
   setFolderVisibilityToHttp,
+  setReportSharingToHttp,
   shareFolderToHttp,
   unshareFolderToHttp,
 } from "./write-response";
@@ -371,5 +373,80 @@ describe("folder share mappers (ADR-0076)", () => {
     );
     expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+// ── ADR-0078: the three-state sharing surface ──────────────────────────────
+describe("setReportSharingToHttp (ADR-0078 §3)", () => {
+  it("200 with the report resource PLUS its composed sharing state", () => {
+    const r = { ...report("Shared"), acl: { mode: "org" as const } };
+    const res = setReportSharingToHttp(ok({ report: r, sharing: "org_edit" }), CTX, OWNER);
+    expect(res.status).toBe(200);
+    const body = res.body as { acl: unknown; sharing: string; owner: string };
+    // Both, never one: `acl` is the read authorization the viewer consumes;
+    // `sharing` is the answer that also accounts for the org write grant. A
+    // client shown only `acl` would render an org-editable report as "org".
+    expect(body.acl).toEqual({ mode: "org" });
+    expect(body.sharing).toBe("org_edit");
+    expect(body.owner).toBe(userIdToWire(userId(U1)));
+  });
+
+  it("never leaks a password hash on the way out of an advanced mode", () => {
+    const r = { ...report("Was locked"), acl: { mode: "private" as const } };
+    const res = setReportSharingToHttp(ok({ report: r, sharing: "private" }), CTX, OWNER);
+    expect(JSON.stringify(res.body)).not.toContain("argon2");
+  });
+
+  it("maps a refusal through the shared problem mapper", () => {
+    const res = setReportSharingToHttp(err(insufficientScope("acl:write")), CTX, OWNER);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("applyFolderSharingToReportsToHttp (ADR-0078 §5)", () => {
+  const outcome = {
+    sharing: "org_view" as const,
+    total: 3,
+    changed: [{ slug: "aaaaaaaaaa", title: "Mine" }],
+    skipped: [{ slug: "bbbbbbbbbb", title: "Theirs", reason: "not owned by you" }],
+    failed: [{ slug: "cccccccccc", title: "Broken", reason: "db down" }],
+  };
+
+  it("200 carrying changed, skipped and failed IN FULL", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      object: "sharing_apply",
+      sharing: "org_view",
+      total: 3,
+      changed: [{ slug: "aaaaaaaaaa", title: "Mine" }],
+      skipped: [{ slug: "bbbbbbbbbb", title: "Theirs", reason: "not owned by you" }],
+      failed: [{ slug: "cccccccccc", title: "Broken", reason: "db down" }],
+      mode: "prod",
+    });
+  });
+
+  it("keeps skipped and failed SEPARATE — a skip is not a server failure", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    const body = res.body as { skipped: unknown[]; failed: unknown[] };
+    expect(body.skipped).toHaveLength(1);
+    expect(body.failed).toHaveLength(1);
+  });
+
+  it("omits `reason` entirely on a changed entry rather than sending an empty one", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    expect((res.body as { changed: Record<string, unknown>[] }).changed[0]).not.toHaveProperty(
+      "reason",
+    );
+  });
+
+  it("a PRE-FLIGHT refusal is an error response, not a 200 with an empty result", () => {
+    // Nothing was changed, so answering 200-with-nothing would read as "the
+    // folder was empty" — the exact ambiguity the cap exists to avoid.
+    const res = applyFolderSharingToReportsToHttp(
+      err({ kind: "ValidationError", message: "too many", field: "folder_id" }),
+      CTX,
+    );
+    expect(res.status).toBe(422);
   });
 });

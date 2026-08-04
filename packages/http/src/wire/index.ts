@@ -15,7 +15,14 @@
 // are return-typed against these shapes, and src/wire/index.test.ts locks the
 // emitted objects to them — so the catalog cannot drift from what the server
 // actually sends.
-import type { AclMode, FolderVisibility, Intent, ScanStatus, VersionOrigin } from "arp-domain";
+import type {
+  AclMode,
+  FolderVisibility,
+  Intent,
+  ReportSharingState,
+  ScanStatus,
+  VersionOrigin,
+} from "arp-domain";
 
 /** Which deployment a resource belongs to (ADR-0053): the live product vs preview/dev. */
 export type WireMode = "prod" | "dev";
@@ -83,6 +90,44 @@ export type ReportDetailWire = ReportWire & {
   readonly owner: string;
   readonly acl?: AclShareWire;
 };
+
+/** A report resource carrying its ADR-0078 SHARING STATE alongside its `acl`.
+ *  The two are not redundant: `acl` is the read authorization the viewer
+ *  consumes, `sharing` is the composed three-state answer that also accounts
+ *  for the Org write grant. `sharing` is null when the report is in a state the
+ *  three-state control cannot express — an advanced mode (`password`/
+ *  `allowlist`/`public`), or an org write grant without org read, which only
+ *  the API can produce. Null is the honest answer there; rounding it down to
+ *  `private` would understate a report the whole org can edit. */
+export type ReportSharingWire = ReportDetailWire & {
+  readonly sharing: ReportSharingState | null;
+};
+
+/** One report a folder-scoped bulk apply touched, or declined to touch
+ *  (ADR-0078 §5). `reason` is present only on a skip or a failure, and is the
+ *  SERVER's own wording. */
+export interface SharingApplyEntryWire {
+  readonly slug: string;
+  readonly title: string;
+  readonly reason?: string;
+}
+
+/** The result of a folder-scoped bulk apply (ADR-0078 §5).
+ *
+ *  `skipped` and `failed` stay separate on the wire for the same reason they
+ *  are separate in the use case: a skip is the candidate rule working as
+ *  designed, a failure is the server refusing something the rule thought was a
+ *  candidate. A client that collapsed them would report the second as the
+ *  first — the exact rounding-up this shape exists to prevent. */
+export interface SharingApplyWire {
+  readonly object: "sharing_apply";
+  readonly sharing: ReportSharingState;
+  readonly total: number;
+  readonly changed: readonly SharingApplyEntryWire[];
+  readonly skipped: readonly SharingApplyEntryWire[];
+  readonly failed: readonly SharingApplyEntryWire[];
+  readonly mode: WireMode;
+}
 
 /** A `folder` resource. `parent_id` links the tree (null at the root).
  *  `visibility` + `owner` carry the ADR-0076 creator-owned model: `owner` is a

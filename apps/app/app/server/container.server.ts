@@ -53,6 +53,7 @@ import type {
 } from "arp-application";
 import {
   addComment,
+  applyFolderSharingToReports,
   createApiKey,
   createFolder,
   deleteComment,
@@ -78,6 +79,7 @@ import {
   searchReports,
   setAcl,
   setFolderVisibility,
+  setReportSharing,
   shareFolder,
   unshareFolder,
   uploadReport,
@@ -499,6 +501,27 @@ export function ops() {
       reports: d.reports,
       hasher: passwordHasher(),
       grants: grantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    setReportSharing: bind2(setReportSharing, {
+      reports: d.reports,
+      // The VIEWER-ACCESS grant store (allowlist redemptions), like setAcl's —
+      // NOT the write-grant store. Named wiring keeps the two apart.
+      grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    applyFolderSharingToReports: bind2(applyFolderSharingToReports, {
+      reports: d.reports,
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,

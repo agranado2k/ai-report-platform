@@ -298,6 +298,52 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/folders/{id}/reports/sharing:
+    post:
+      operationId: applyFolderSharingToReports
+      tags: [Folders]
+      summary: Apply a sharing state to the reports inside a folder
+      description: >
+        Share (or un-share) the reports INSIDE a folder (ADR-0078). Sharing a
+        folder makes the FOLDER visible and nothing in it (ADR-0076) — this is
+        the explicit action that reaches the contents, by changing each report's
+        own acl. Requires the `acl:write` scope. You must be able to SEE the
+        folder; each report is then authorized on its own, so only reports YOU
+        OWN can change. A report is a candidate only if you own it and it is
+        currently in the state the direction starts from; everything else is
+        SKIPPED and named with a reason (not owned by you / password-protected /
+        allowlisted / already public / already at the destination). Advanced
+        modes are never overwritten in either direction. Refuses PRE-FLIGHT with
+        422 if the folder holds more reports than one change may cover, in which
+        case NOTHING was changed. A 200 always reports `changed`, `skipped` and
+        `failed` in full — it never claims success for a report it did not
+        touch.
+      security:
+        - apiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
+          description: The folder id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetReportSharingRequest' }
+      responses:
+        '200':
+          description: The per-report outcome — changed, skipped (with reasons) and failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SharingApply' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/folders/{id}/shares:
     get:
       operationId: listFolderShares
@@ -517,6 +563,52 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Report' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyInFlight' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/{slug}/sharing:
+    post:
+      operationId: setReportSharing
+      tags: [Reports]
+      summary: Set a report's sharing state
+      description: >
+        Move the report between the three sharing states (ADR-0078): `private`
+        (only you), `org_view` (everyone in your org can view), `org_edit`
+        (everyone in your org can view AND edit). Requires the `acl:write`
+        scope and is OWNER-ONLY (ADR-0059) — each transition is a set_acl plus
+        an org-write decision. READ AND WRITE ARE ALWAYS PAIRED: `org_edit`
+        always implies org read, so this endpoint can never produce org-wide
+        write on a report the org cannot open. DELETE stays owner-only in every
+        state. This endpoint does NOT supersede POST …/acl, which remains the
+        only way to configure `password` and `allowlist`. A report currently in
+        `password`, `allowlist` or `public` is REFUSED with 422 unless
+        `confirm_discard` is true — those settings are deliberate owner intent
+        and are never silently overwritten.
+      security:
+        - apiKey: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetReportSharingRequest' }
+      responses:
+        '200':
+          description: The report resource with its updated acl and `sharing` state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportSharing' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1740,6 +1832,81 @@ components:
         name:
           type: string
           description: The folder's new display name.
+
+    SetReportSharingRequest:
+      type: object
+      required: [sharing]
+      properties:
+        sharing:
+          type: string
+          enum: [private, org_view, org_edit]
+          description: >
+            The target sharing state (ADR-0078). `org_edit` always implies org
+            read — write is never granted without it.
+        confirm_discard:
+          type: boolean
+          description: >
+            Required (`true`) only when the report is currently in `password`,
+            `allowlist` or `public`. Acknowledges that the setting will be
+            discarded — the 422 you get without it names exactly what would be
+            lost. Ignored by the folder bulk apply, which skips advanced modes
+            outright rather than discarding them in bulk.
+
+    ReportSharing:
+      description: >
+        A `report` resource plus its composed three-state `sharing` (ADR-0078).
+        `acl` and `sharing` are not redundant — `acl` is the read authorization
+        the viewer consumes, `sharing` also accounts for the org write grant.
+      allOf:
+        - $ref: '#/components/schemas/Report'
+        - type: object
+          required: [sharing]
+          properties:
+            sharing:
+              type: string
+              nullable: true
+              enum: [private, org_view, org_edit]
+              description: >
+                `null` when the report is in a state the three-state control
+                cannot express — an advanced acl mode, or an org write grant
+                without org read (reachable only via the API). Null is the
+                honest answer; rounding it to `private` would understate a
+                report the whole org can edit.
+
+    SharingApplyEntry:
+      type: object
+      required: [slug, title]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        reason:
+          type: string
+          description: The server's own wording. Present on skipped and failed entries only.
+
+    SharingApply:
+      description: >
+        The outcome of a folder-scoped bulk apply (ADR-0078). `skipped` and
+        `failed` are separate on purpose: a skip is the candidate rule working
+        as designed, a failure is the server refusing something the rule thought
+        was a candidate.
+      type: object
+      required: [object, sharing, total, changed, skipped, failed, mode]
+      properties:
+        object: { type: string, enum: [sharing_apply] }
+        sharing: { type: string, enum: [private, org_view, org_edit] }
+        total:
+          type: integer
+          description: How many reports in the folder were examined (what you can see).
+        changed:
+          type: array
+          items: { $ref: '#/components/schemas/SharingApplyEntry' }
+        skipped:
+          type: array
+          items: { $ref: '#/components/schemas/SharingApplyEntry' }
+        failed:
+          type: array
+          items: { $ref: '#/components/schemas/SharingApplyEntry' }
+        mode: { type: string, enum: [dev, prod] }
 
     SetFolderVisibilityRequest:
       type: object

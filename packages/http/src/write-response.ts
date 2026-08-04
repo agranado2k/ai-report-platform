@@ -2,7 +2,12 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { FolderShare, WriteGrant } from "arp-application";
+import type {
+  FolderShare,
+  ReportSharingResult,
+  SharingApplyOutcome,
+  WriteGrant,
+} from "arp-application";
 import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
@@ -19,6 +24,9 @@ import type {
   AclWire,
   FolderShareWire,
   ReportDetailWire,
+  ReportSharingWire,
+  SharingApplyEntryWire,
+  SharingApplyWire,
   WriteGrantWire,
 } from "./wire";
 
@@ -173,6 +181,61 @@ export function setFolderVisibilityToHttp(
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   return { status: 200, contentType: "application/json", body: folderBody(result.value, ctx) };
+}
+
+/** POST /api/v1/reports/{slug}/sharing — 200 with the report resource plus its
+ *  new three-state `sharing` (ADR-0078 §3).
+ *
+ *  `sharing` rides ALONGSIDE `acl` rather than replacing it: `acl` is the read
+ *  authorization the viewer consumes, `sharing` is the composed answer that
+ *  also accounts for the Org write grant. A client shown only one of the two
+ *  would be able to render a report the whole org can edit as "private".
+ *
+ *  The caller is the owner by construction (setReportSharing is owner-gated),
+ *  so the `acl` block is always serialized here. */
+export function setReportSharingToHttp(
+  result: Result<ReportSharingResult, AppError>,
+  ctx: WireContext,
+  viewer?: ReportViewer,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const body: ReportSharingWire = {
+    ...reportResource(result.value.report, ctx, viewer),
+    sharing: result.value.sharing,
+  };
+  return { status: 200, contentType: "application/json", body };
+}
+
+const sharingEntry = (e: {
+  readonly slug: string;
+  readonly title: string;
+  readonly reason?: string;
+}): SharingApplyEntryWire => (e.reason === undefined ? { slug: e.slug, title: e.title } : e);
+
+/** POST /api/v1/folders/{id}/reports/sharing — 200 with the honest partial
+ *  result (ADR-0078 §5).
+ *
+ *  Always 200, even when nothing changed: every entry in the folder was
+ *  examined and answered for, which is a successful bulk apply that happened to
+ *  find no candidates — not a client error. What must never happen is a 200
+ *  that omits the reports it did not touch, which is why `skipped` and `failed`
+ *  are serialized separately and in full. */
+export function applyFolderSharingToReportsToHttp(
+  result: Result<SharingApplyOutcome, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const o = result.value;
+  const body: SharingApplyWire = {
+    object: "sharing_apply",
+    sharing: o.sharing,
+    total: o.total,
+    changed: o.changed.map(sharingEntry),
+    skipped: o.skipped.map(sharingEntry),
+    failed: o.failed.map(sharingEntry),
+    mode: ctx.mode,
+  };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** A `FolderShare` → the `folder_share` resource body (ADR-0076). Mirrors
