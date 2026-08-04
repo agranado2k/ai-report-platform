@@ -120,10 +120,6 @@ export function advancedSharingDiscardWarning(acl: Acl): string | null {
   }
 }
 
-/** Which way a bulk apply is going (ADR-0078 §5). `org` shares the reports
- *  inside a folder; `private` takes them back. */
-export type SharingDirection = "org" | "private";
-
 /** Whether one report inside a folder is a candidate for the bulk apply, and
  *  when it isn't, WHY — in the words the operator will read. */
 export type SharingCandidacy =
@@ -133,44 +129,73 @@ export type SharingCandidacy =
 const CANDIDATE: SharingCandidacy = { kind: "candidate" };
 const skip = (reason: string): SharingCandidacy => ({ kind: "skip", reason });
 
+/** What a report already AT the target state is skipped with — one sentence per
+ *  state, and `org_view`/`org_edit` say which one they are.
+ *
+ *  A single "already shared with your org" covering both was the whole of the
+ *  `org_edit → org_view` bug: the reduction skipped every report, reported
+ *  success, and revoked nothing, while the operator read a refusal as a done
+ *  job. A skip reason that cannot distinguish the two states cannot tell the
+ *  truth about either. */
+const ALREADY_AT: Record<ReportSharingState, string> = {
+  private: "already private",
+  org_view: "already shared with your org to view",
+  org_edit: "already shared with your org to view and edit",
+};
+
 /**
  * THE CANDIDATE RULE (ADR-0078 §5), chosen for least surprise.
  *
  * A report inside the folder is a candidate only if the actor OWNS it and its
- * mode is the one the direction starts from. Everything else is skipped and
- * NAMED — the folder cascade's honest partial-reporting shape, which never
- * counts an untouched report as a success.
+ * COMPOSED SHARING STATE is not already the one being applied. Everything else
+ * is skipped and NAMED — the folder cascade's honest partial-reporting shape,
+ * which never counts an untouched report as a success.
+ *
+ * THE COMPOSED STATE, NOT THE ACL MODE. `org_view` and `org_edit` share an
+ * `Acl` mode and differ only in the org-write row, so a rule that read the mode
+ * alone could not tell them apart — and every transition between them (in both
+ * directions, one of them an access REDUCTION) silently no-opped while the
+ * summary reported success. The two facts are what a state IS (§3), and the
+ * listing projection already carries both, so the rule reads both.
  *
  * Ownership is checked FIRST, and not only because `set_acl` is owner-only
- * (ADR-0059 §2): the mode of a report the actor does not own is not their
+ * (ADR-0059 §2): the state of a report the actor does not own is not their
  * business to have described back to them.
  *
- * Advanced modes are refused in BOTH directions. The org direction must not
- * publish a password-protected report; the private direction must not silently
- * discard the password. §4 forbids that destruction on the single-report
- * control, and a loop over N reports is the worst possible place to make an
- * exception.
+ * Advanced modes are refused towards EVERY target. Sharing must not publish a
+ * password-protected report; making it private must not silently discard the
+ * password. §4 forbids that destruction on the single-report control, and a
+ * loop over N reports is the worst possible place to make an exception.
+ *
+ * A report in NO expressible state (`reportSharingState` → null for the
+ * API-only org-write-without-org-read combination) is a candidate: it can never
+ * equal a target, and applying one REPAIRS the pair rather than trampling
+ * anything.
  *
  * The reasons are the DOMAIN's, not the UI's — the use case, the API response
  * and the dashboard banner all quote the same sentence, so what an operator
  * reads is what the server actually decided.
  */
 export function sharingCandidacy(
-  report: { readonly ownerId: string; readonly aclMode: AclMode },
+  report: {
+    readonly ownerId: string;
+    readonly aclMode: AclMode;
+    readonly hasOrgWrite: boolean;
+  },
   actorUserId: string,
-  direction: SharingDirection,
+  target: ReportSharingState,
 ): SharingCandidacy {
   if (report.ownerId !== actorUserId) return skip("not owned by you");
-  switch (report.aclMode) {
-    case "password":
-      return skip("password-protected");
-    case "allowlist":
-      return skip("allowlisted");
-    case "public":
-      return skip("already public");
-    case "private":
-      return direction === "org" ? CANDIDATE : skip("already private");
-    case "org":
-      return direction === "private" ? CANDIDATE : skip("already shared with your org");
+  if (isAdvancedAclMode(report.aclMode)) {
+    switch (report.aclMode) {
+      case "password":
+        return skip("password-protected");
+      case "allowlist":
+        return skip("allowlisted");
+      default:
+        return skip("already public");
+    }
   }
+  const current = reportSharingState(report.aclMode, report.hasOrgWrite);
+  return current === target ? skip(ALREADY_AT[target]) : CANDIDATE;
 }

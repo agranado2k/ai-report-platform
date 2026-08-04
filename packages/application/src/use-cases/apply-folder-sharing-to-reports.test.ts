@@ -9,7 +9,11 @@ import {
   report,
   slug,
 } from "../testing/fixtures";
-import { InMemoryFolderRepository, InMemoryGrantStore } from "../testing/in-memory";
+import {
+  InMemoryFolderRepository,
+  InMemoryGrantStore,
+  InMemoryReportRepository,
+} from "../testing/in-memory";
 import {
   applyFolderSharingToReports,
   MAX_SHARING_BULK_APPLY,
@@ -46,6 +50,10 @@ async function seed() {
   const deps = {
     ...base,
     ...makeFolderAccessDeps(),
+    // The repository must read the SAME org-write store the use case writes,
+    // or its `hasOrgWrite` projection is permanently false and the candidate
+    // rule can never see an `org_edit` report as one.
+    reports: new InMemoryReportRepository(grantDeps.grants, grantDeps.orgWriteGrants, orgA),
     folders,
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
     orgWriteGrants: grantDeps.orgWriteGrants,
@@ -162,27 +170,77 @@ describe("applyFolderSharingToReports (ADR-0078 §5)", () => {
       });
       expect(r.ok && r.value.changed).toEqual([]);
       expect(r.ok && r.value.skipped.map((s) => s.reason)).toEqual([
-        "already shared with your org",
+        "already shared with your org to view",
       ]);
     });
   });
 
-  describe("the private direction", () => {
-    it("takes the actor's org-shared reports back, revoking org write", async () => {
+  // ── THE SIX TRANSITIONS (ADR-0078 §5) ──────────────────────────────────
+  //
+  // Three states, both directions between each pair, asserted on what actually
+  // LANDED in the stores — not on the summary, which is exactly what used to
+  // lie. The rule reads the COMPOSED state, so an org_edit → org_view
+  // REDUCTION really revokes the org-write row instead of skipping every report
+  // as "already shared with your org" and returning 200 with `changed: []`.
+  describe("moves between all three states, in both directions", () => {
+    const EXPECTED = {
+      private: { aclMode: "private", orgWrite: false },
+      org_view: { aclMode: "org", orgWrite: false },
+      org_edit: { aclMode: "org", orgWrite: true },
+    } as const;
+    const TRANSITIONS = [
+      ["private", "org_view"],
+      ["private", "org_edit"],
+      ["org_view", "private"],
+      ["org_view", "org_edit"],
+      ["org_edit", "private"],
+      ["org_edit", "org_view"],
+    ] as const;
+
+    for (const [from, to] of TRANSITIONS) {
+      it(`moves a folder of ${from} reports to ${to}`, async () => {
+        const deps = await seed();
+        const a = await place(deps, "aaaaaaaaaa");
+        await setReportSharing(deps, ACTOR, { slug: slug(a.slug), sharing: from });
+
+        const r = await applyFolderSharingToReports(deps, ACTOR, {
+          folderId: FOLDER_ID,
+          sharing: to,
+        });
+        expect(r.ok && r.value.changed.map((c) => c.slug)).toEqual([a.slug]);
+        expect(r.ok && r.value.skipped).toEqual([]);
+        expect(r.ok && r.value.failed).toEqual([]);
+
+        const after = await deps.reports.findById(a.id);
+        expect(after.ok && after.value?.acl.mode).toBe(EXPECTED[to].aclMode);
+        const grant = await deps.orgWriteGrants.find(a.id);
+        expect(grant.ok && grant.value !== null).toBe(EXPECTED[to].orgWrite);
+      });
+    }
+
+    it("an org_edit → org_view REDUCTION really revokes org write, and says it changed", async () => {
+      // The named regression: this used to return 200 / `changed: []` /
+      // `failed: []` with the whole org still holding edit, which an operator
+      // reads as success.
       const deps = await seed();
       const a = await place(deps, "aaaaaaaaaa");
       await setReportSharing(deps, ACTOR, { slug: slug(a.slug), sharing: "org_edit" });
+      expect((await deps.orgWriteGrants.find(a.id)).ok).toBe(true);
+
       const r = await applyFolderSharingToReports(deps, ACTOR, {
         folderId: FOLDER_ID,
-        sharing: "private",
+        sharing: "org_view",
       });
-      expect(r.ok && r.value.changed.map((c) => c.slug)).toEqual([a.slug]);
-      const after = await deps.reports.findById(a.id);
-      expect(after.ok && after.value?.acl.mode).toBe("private");
+      expect(r.ok && r.value.changed.length).toBe(1);
       const grant = await deps.orgWriteGrants.find(a.id);
       expect(grant.ok && grant.value).toBeNull();
+      // Read survives — the reduction is write-only.
+      const after = await deps.reports.findById(a.id);
+      expect(after.ok && after.value?.acl.mode).toBe("org");
     });
+  });
 
+  describe("the private direction", () => {
     it("still refuses to discard an advanced mode", async () => {
       const deps = await seed();
       const locked = await place(deps, "cccccccccc");

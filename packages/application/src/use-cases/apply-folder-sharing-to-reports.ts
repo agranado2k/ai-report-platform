@@ -33,7 +33,6 @@ import {
   ok,
   type ReportSharingState,
   type Result,
-  type SharingDirection,
   type Slug,
   sharingCandidacy,
   validationError,
@@ -144,22 +143,28 @@ export async function applyFolderSharingToReports(
     );
   }
 
-  const direction: SharingDirection = input.sharing === "private" ? "private" : "org";
   const changed: SharingApplyEntry[] = [];
   const skipped: SharingApplyRefusal[] = [];
   const failed: SharingApplyRefusal[] = [];
 
   for (const summary of listed.value.items) {
     const entry: SharingApplyEntry = { slug: summary.slug, title: summary.title };
-    // The candidate rule needs the OWNER and the CURRENT mode, and the listing
-    // projection carries both (ADR-0078 §7) — read from the join the
-    // visibility predicate was already paying for, so classifying N reports
-    // costs no extra round trips. It is only a FILTER: the authoritative gate
-    // is still setReportSharing's own owner check, re-run per report below.
+    // The candidate rule needs the OWNER and the CURRENT SHARING STATE, and
+    // the listing projection carries all three facts (ADR-0078 §8) — read from
+    // the join and the EXISTS the visibility predicate was already paying for,
+    // so classifying N reports costs no extra round trips. `hasOrgWrite` is
+    // what lets the rule tell `org_view` from `org_edit`; without it every
+    // transition between the two silently no-opped while reporting success.
+    // It is only a FILTER: the authoritative gate is still setReportSharing's
+    // own owner check, re-run per report below.
     const candidacy = sharingCandidacy(
-      { ownerId: summary.ownerId, aclMode: summary.aclMode },
+      {
+        ownerId: summary.ownerId,
+        aclMode: summary.aclMode,
+        hasOrgWrite: summary.hasOrgWrite,
+      },
       actor.userId,
-      direction,
+      input.sharing,
     );
     if (candidacy.kind === "skip") {
       skipped.push({ ...entry, reason: candidacy.reason });

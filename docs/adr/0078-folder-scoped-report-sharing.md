@@ -194,22 +194,41 @@ touching anything, so a refusal changes nothing at all) with an honest message,
 never a silent truncation.
 
 **The candidate rule, chosen for least surprise.** A report inside the folder is
-a candidate **only if** the actor **owns** it **AND** its `acl.mode` is currently
-`private`. Everything else is **SKIPPED and NAMED with a reason**:
+a candidate **only if** the actor **owns** it **AND** its **composed sharing
+state** (Decision 3) is not already the one being applied. Everything else is
+**SKIPPED and NAMED with a reason**:
 
 - *not owned by you* — the actor cannot `set_acl` it, and the loop asks rather
   than decides (ADR-0076's cascade principle);
 - *password-protected* / *allowlisted* / *already public* — deliberate owner
-  intent this control must not trample (Decision 4). A report already at `org`
-  is likewise not a candidate for the org direction; it is already there.
+  intent this control must not trample (Decision 4), refused towards **every**
+  target, not just the org ones;
+- *already private* / *already shared with your org to view* / *already shared
+  with your org to view and edit* — already there.
+
+**The rule reads the COMPOSED STATE, not the `Acl` mode.** `org_view` and
+`org_edit` share an `Acl` mode and differ only in the org-write row, so a rule
+that read the mode alone could not tell them apart: every transition between
+them silently no-opped while the summary reported success, and the `org_edit →
+org_view` case — an access **reduction** — left the whole org holding edit while
+returning `changed: []`, `failed: []` and 200. The listing projection already
+carries `ownerId`, `aclMode` **and** `hasOrgWrite` (Decision 8), so all three
+facts the rule needs cost no extra round trips. **All six transitions between
+the three states are pinned**, in both directions, on what actually landed in
+the stores rather than on the summary.
+
+A report in **no expressible state** (org write without org read — the
+combination only the API can produce) is a **candidate**: it can never equal a
+target, and applying one *repairs* the pair rather than trampling anything.
 
 The result uses the folder cascade's honest partial-reporting shape (`changed[]`
 plus `failed[]`/`skipped[]`) and **never claims success for something it did not
 touch**.
 
-**Direction-aware.** Making a folder `private` offers the mirror: make its
-`org`-shared reports private again and revoke their org-write rows. The
-candidate rule mirrors too (owned by the actor, currently `org`).
+**All three targets are offered**, not two directions: the panel renders three
+separate submits (`org_view`, `org_edit`, `private`), so `private` takes the
+folder's org-shared reports back and revokes their org-write rows, and the two
+org targets move reports between view and edit in either direction.
 
 **v1 covers the ORG direction only.** Person-level folder shares stay
 visibility-only, exactly as today, and the UI **says so**. The report-level

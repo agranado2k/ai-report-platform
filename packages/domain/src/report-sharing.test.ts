@@ -125,62 +125,118 @@ describe("advancedSharingDiscardWarning — the confirmation copy (ADR-0078 §4)
 });
 
 describe("sharingCandidacy — the bulk-apply rule (ADR-0078 §5)", () => {
-  const asOwner = (aclMode: Parameters<typeof sharingCandidacy>[0]["aclMode"]) =>
-    sharingCandidacy({ ownerId: owner, aclMode }, owner, "org");
+  const ownedAt = (
+    aclMode: Parameters<typeof sharingCandidacy>[0]["aclMode"],
+    hasOrgWrite = false,
+  ) => ({ ownerId: owner, aclMode, hasOrgWrite }) as const;
 
-  it("accepts a report the actor OWNS that is currently private (org direction)", () => {
-    expect(asOwner("private")).toEqual({ kind: "candidate" });
-  });
+  // The three sharing states, spelled as the two facts that compose them —
+  // exactly what the listing projection carries.
+  const STATE_FACTS = {
+    private: ownedAt("private"),
+    org_view: ownedAt("org"),
+    org_edit: ownedAt("org", true),
+  } as const;
 
   it("skips a report someone else owns, and says so", () => {
     // The loop asks rather than decides (the ADR-0076 cascade principle):
     // the actor cannot set_acl a colleague's report, so it is named, not tried.
-    const r = sharingCandidacy({ ownerId: colleague, aclMode: "private" }, owner, "org");
+    const r = sharingCandidacy(
+      { ownerId: colleague, aclMode: "private", hasOrgWrite: false },
+      owner,
+      "org_view",
+    );
     expect(r.kind).toBe("skip");
     if (r.kind === "skip") expect(r.reason).toBe("not owned by you");
   });
 
-  it("skips each advanced mode with its OWN reason, never a generic one", () => {
-    expect(asOwner("password")).toEqual({ kind: "skip", reason: "password-protected" });
-    expect(asOwner("allowlist")).toEqual({ kind: "skip", reason: "allowlisted" });
-    expect(asOwner("public")).toEqual({ kind: "skip", reason: "already public" });
-  });
-
-  it("skips a report already at the destination state rather than counting it as changed", () => {
-    expect(asOwner("org")).toEqual({ kind: "skip", reason: "already shared with your org" });
-  });
-
-  describe("the private direction mirrors it", () => {
-    const asOwnerPrivate = (aclMode: Parameters<typeof sharingCandidacy>[0]["aclMode"]) =>
-      sharingCandidacy({ ownerId: owner, aclMode }, owner, "private");
-
-    it("accepts an owned, currently org-shared report", () => {
-      expect(asOwnerPrivate("org")).toEqual({ kind: "candidate" });
-    });
-
-    it("skips one that is already private", () => {
-      expect(asOwnerPrivate("private")).toEqual({ kind: "skip", reason: "already private" });
-    });
-
-    it("still refuses to trample an advanced mode, in EITHER direction", () => {
-      // Making a password-protected report "private" would silently discard
-      // the password — the same destruction §4 forbids on the single-report
-      // control, and a bulk loop is the worst place to do it silently.
-      expect(asOwnerPrivate("password")).toEqual({ kind: "skip", reason: "password-protected" });
-      expect(asOwnerPrivate("allowlist")).toEqual({ kind: "skip", reason: "allowlisted" });
-      expect(asOwnerPrivate("public")).toEqual({ kind: "skip", reason: "already public" });
-    });
-
-    it("skips a colleague's report here too", () => {
-      const r = sharingCandidacy({ ownerId: colleague, aclMode: "org" }, owner, "private");
-      expect(r).toEqual({ kind: "skip", reason: "not owned by you" });
-    });
-  });
-
-  it("checks ownership BEFORE the mode, so a colleague's password report reads as theirs", () => {
-    // Ownership is the fact the actor can act on; the mode of a report they
+  it("checks ownership BEFORE the state, so a colleague's password report reads as theirs", () => {
+    // Ownership is the fact the actor can act on; the state of a report they
     // don't own is not their business to have described back to them.
-    const r = sharingCandidacy({ ownerId: colleague, aclMode: "password" }, owner, "org");
+    const r = sharingCandidacy(
+      { ownerId: colleague, aclMode: "password", hasOrgWrite: false },
+      owner,
+      "org_view",
+    );
     expect(r).toEqual({ kind: "skip", reason: "not owned by you" });
+  });
+
+  it("skips each advanced mode with its OWN reason, towards EVERY target", () => {
+    // Advanced modes are deliberate owner intent (§4). Moving one to `private`
+    // would silently discard the password just as surely as moving it to `org`
+    // would publish it — a bulk loop is the worst place to do either silently.
+    for (const target of REPORT_SHARING_STATES) {
+      expect(sharingCandidacy(ownedAt("password"), owner, target)).toEqual({
+        kind: "skip",
+        reason: "password-protected",
+      });
+      expect(sharingCandidacy(ownedAt("allowlist"), owner, target)).toEqual({
+        kind: "skip",
+        reason: "allowlisted",
+      });
+      expect(sharingCandidacy(ownedAt("public"), owner, target)).toEqual({
+        kind: "skip",
+        reason: "already public",
+      });
+    }
+  });
+
+  // ── THE SIX TRANSITIONS ────────────────────────────────────────────────
+  //
+  // Three states, both directions between each pair. The rule is "composed
+  // state ≠ target", not "acl mode ≠ direction": collapsing `org_view` and
+  // `org_edit` into one `org` direction made `org_edit → org_view` (an access
+  // REDUCTION) skip every report as "already shared with your org" while
+  // reporting success and revoking nothing.
+  const TRANSITIONS = [
+    ["private", "org_view"],
+    ["private", "org_edit"],
+    ["org_view", "private"],
+    ["org_view", "org_edit"],
+    ["org_edit", "private"],
+    ["org_edit", "org_view"],
+  ] as const;
+
+  for (const [from, to] of TRANSITIONS) {
+    it(`accepts ${from} → ${to}`, () => {
+      expect(sharingCandidacy(STATE_FACTS[from], owner, to)).toEqual({ kind: "candidate" });
+    });
+  }
+
+  it("skips a report already AT the target state rather than counting it as changed", () => {
+    for (const state of REPORT_SHARING_STATES) {
+      const r = sharingCandidacy(STATE_FACTS[state], owner, state);
+      expect(r.kind).toBe("skip");
+    }
+  });
+
+  it("names the state a skipped report is already in, distinguishing view from edit", () => {
+    // "already shared with your org" said the same thing about `org_view` and
+    // `org_edit`, so an operator reducing edit → view read a refusal as a
+    // success. The reason must name which one it is.
+    expect(sharingCandidacy(STATE_FACTS.private, owner, "private")).toEqual({
+      kind: "skip",
+      reason: "already private",
+    });
+    expect(sharingCandidacy(STATE_FACTS.org_view, owner, "org_view")).toEqual({
+      kind: "skip",
+      reason: "already shared with your org to view",
+    });
+    expect(sharingCandidacy(STATE_FACTS.org_edit, owner, "org_edit")).toEqual({
+      kind: "skip",
+      reason: "already shared with your org to view and edit",
+    });
+  });
+
+  it("treats the API-only org-write-without-org-read combination as a candidate", () => {
+    // `reportSharingState` returns null there, so it can never equal a target:
+    // the report is in no expressible state, and applying one REPAIRS the pair
+    // rather than trampling anything. It is not an advanced mode, so §4's
+    // protection does not apply.
+    for (const target of REPORT_SHARING_STATES) {
+      expect(sharingCandidacy(ownedAt("private", true), owner, target)).toEqual({
+        kind: "candidate",
+      });
+    }
   });
 });

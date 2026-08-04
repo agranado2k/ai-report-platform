@@ -227,8 +227,9 @@ function ReportBulkApply({ node }: { node: FolderNode }) {
       <p className="mb-1 text-xs font-medium text-fg">The reports inside</p>
       <p className="mb-1.5 text-[0.65rem] leading-snug text-subtle">
         Sharing this folder shows its NAME. These change the {subject} inside it that you can see.
-        Only reports you own and haven't given a password, an invite list, or a public link will
-        change — the rest are listed back to you untouched.
+        Only reports you own change, and only those that aren't already in the state you pick —
+        reports with a password, an invite list, or a public link are never touched. Everything left
+        alone is listed back to you with the reason.
       </p>
       <div className="flex flex-col gap-1">
         {[
