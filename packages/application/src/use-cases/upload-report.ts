@@ -4,12 +4,15 @@
 // to 201 { id, slug, view_url, version, scan_status }.
 
 import {
+  type Acl,
   type AppError,
   addVersion,
   createReport,
+  DEFAULT_ACL,
   err,
   type FolderId,
   insufficientScope,
+  isRootFolder,
   makeSlug,
   notAllowed,
   notFound,
@@ -24,12 +27,13 @@ import {
   type VersionManifest,
   type VersionOrigin,
 } from "arp-domain";
-import { canWrite, type WriteGrantCheckDeps } from "../load-owned";
+import { type CanWriteDeps, canWrite } from "../load-owned";
 import type {
   AuditLogger,
   BlobStore,
   BundleProcessor,
   EventOutbox,
+  FolderRepository,
   Hasher,
   IdempotencyStore,
   IdGenerator,
@@ -43,8 +47,11 @@ import type {
 
 const ROUTE = "POST /api/v1/reports";
 
-export interface UploadReportDeps extends WriteGrantCheckDeps {
+export interface UploadReportDeps extends CanWriteDeps {
   readonly reports: ReportRepository;
+  /** The folder tree — read ONLY to derive a NEW report's initial sharing from
+   *  its destination folder (ADR-0078 §6). Never consulted on re-upload. */
+  readonly folders: FolderRepository;
   readonly blobs: BlobStore;
   readonly bundles: BundleProcessor;
   readonly idempotency: IdempotencyStore;
@@ -119,6 +126,18 @@ export async function uploadReport(
   const processed = await deps.bundles.process(cmd.upload.filename, cmd.upload.bytes);
   if (!processed.ok) return processed;
   const bundle = processed.value;
+
+  // 2b. Initial sharing, inherited from the DESTINATION folder (ADR-0078 §6).
+  //
+  // Resolved BEFORE the idempotency claim on purpose: a failure here must not
+  // leave an in-flight key behind for a request that will never complete.
+  //
+  // Create-only. A re-upload keeps whatever sharing the report already has —
+  // inheritance is a CREATE-time rule (ADR-0078 §7's reasoning, applied to the
+  // other write path): re-deriving it later would let a folder move, or a
+  // write-grantee's re-upload, silently publish content its owner made private.
+  const initialAcl = cmd.updateSlug ? null : await resolveInheritedAcl(deps, cmd.actor.folderId);
+  if (initialAcl !== null && !initialAcl.ok) return initialAcl;
 
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
   //
@@ -197,6 +216,15 @@ export async function uploadReport(
   const committed = await deps.uow.run(async () => {
     const saved = await deps.reports.save(report);
     if (!saved.ok) return saved;
+    // The Acl lives in its own 1:1 row, which `save` deliberately does not
+    // touch (only setAcl writes it) — so an inherited non-default Acl is
+    // written here, inside the SAME transaction as the report itself. A report
+    // that committed without its inherited sharing would be a privacy defect
+    // in the safe direction on create, and an unexplained one on retry.
+    if (initialAcl !== null && initialAcl.ok && initialAcl.value.mode !== DEFAULT_ACL.mode) {
+      const acled = await deps.reports.setAcl(report.id, initialAcl.value);
+      if (!acled.ok) return acled;
+    }
     const enq = await deps.outbox.enqueue(events);
     if (!enq.ok) return enq;
     const audited = await deps.audit.record([
@@ -331,4 +359,32 @@ async function reUpload(
     sizeBytes: bundle.sizeBytes,
     origin: origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
   });
+}
+
+/**
+ * The Acl a NEW report inherits from the folder it is uploaded into
+ * (ADR-0078 §6), precisely mirroring `inheritedVisibility` for child folders.
+ *
+ * THE ROOT CARVE-OUT IS THE WHOLE SAFETY PROPERTY. Root is permanently
+ * org-visible (ADR-0076 §3) *and* is the default upload placement (ADR-0037),
+ * so inheriting from it would make every upload in the product org-visible —
+ * a silent, product-wide privacy regression shipped as a convenience. Root's
+ * `org` visibility is a usability invariant, not a sharing intent, which is
+ * exactly the reason `inheritedVisibility` already special-cases it.
+ *
+ * An UNRESOLVABLE folder falls back to `private`: an unknown destination must
+ * never widen a report's reach. A folder-store ERROR propagates instead —
+ * silently narrowing on infrastructure trouble is fine, but doing so without
+ * anyone being able to tell the difference is not.
+ */
+async function resolveInheritedAcl(
+  deps: Pick<UploadReportDeps, "folders">,
+  destination: FolderId,
+): Promise<Result<Acl, AppError>> {
+  const found = await deps.folders.findById(destination);
+  if (!found.ok) return found;
+  const folder = found.value;
+  if (!folder || folder.deletedAt !== null) return ok(DEFAULT_ACL);
+  if (isRootFolder(folder)) return ok(DEFAULT_ACL);
+  return ok(folder.visibility === "org" ? { mode: "org" } : DEFAULT_ACL);
 }

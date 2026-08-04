@@ -12,6 +12,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "../testing/in-memory";
@@ -24,7 +25,11 @@ const grantee = userId("00000000-0000-7000-8000-0000000000d2");
 const stranger = userId("00000000-0000-7000-8000-0000000000d3");
 
 function writeDeps() {
-  return { grants: new InMemoryWriteGrantStore(), identities: new InMemoryIdentityStore() };
+  return {
+    grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+    identities: new InMemoryIdentityStore(),
+  };
 }
 
 function slug(s: string): Slug {

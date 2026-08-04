@@ -9,6 +9,7 @@
 import {
   InMemoryIdentityStore,
   InMemoryReportRepository,
+  InMemoryOrgWriteGrantStore,
   InMemoryWriteGrantStore,
 } from "arp-application/testing";
 import {
@@ -65,6 +66,7 @@ function makeDeps(
     readonly identities: InMemoryIdentityStore;
   } = {
     grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   },
 ) {

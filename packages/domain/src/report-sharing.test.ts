@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { UserId } from "./brand";
 import {
   ADVANCED_ACL_MODES,
+  advancedSharingDiscardWarning,
   isAdvancedAclMode,
   makeReportSharingState,
   REPORT_SHARING_STATES,
@@ -85,6 +86,41 @@ describe("advanced Acl modes are protected, not clobbered (ADR-0078 §4)", () =>
     expect(isAdvancedAclMode("password")).toBe(true);
     expect(isAdvancedAclMode("allowlist")).toBe(true);
     expect(isAdvancedAclMode("public")).toBe(true);
+  });
+});
+
+describe("advancedSharingDiscardWarning — the confirmation copy (ADR-0078 §4)", () => {
+  it("says nothing for the two states the control can produce", () => {
+    expect(advancedSharingDiscardWarning({ mode: "private" })).toBeNull();
+    expect(advancedSharingDiscardWarning({ mode: "org" })).toBeNull();
+  });
+
+  it("names the PASSWORD, not a generic 'your settings'", () => {
+    const w = advancedSharingDiscardWarning({ mode: "password", passwordHash: "x" });
+    expect(w).toContain("remove the password");
+  });
+
+  it("counts the allowlist, and agrees with itself in the singular", () => {
+    const one = advancedSharingDiscardWarning({
+      mode: "allowlist",
+      allowedEmails: ["a@x.com"],
+      accessTtlSeconds: 60,
+    });
+    expect(one).toContain("1 address");
+    expect(one).toContain("remove it");
+
+    const many = advancedSharingDiscardWarning({
+      mode: "allowlist",
+      allowedEmails: ["a@x.com", "b@x.com"],
+      accessTtlSeconds: 60,
+    });
+    expect(many).toContain("2 addresses");
+    expect(many).toContain("remove them");
+  });
+
+  it("says what going away from PUBLIC costs", () => {
+    const w = advancedSharingDiscardWarning({ mode: "public" });
+    expect(w).toContain("existing links will stop working");
   });
 });
 

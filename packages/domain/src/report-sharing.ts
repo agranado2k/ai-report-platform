@@ -16,6 +16,7 @@
 // capability (grant) deliberately separate; at ORG scale, composing them the
 // wrong way round would hand every member of the org the ability to publish
 // content into a report none of them can open.
+import type { Acl } from "./acl";
 import type { AppError } from "./errors";
 import { validationError } from "./errors";
 import type { Result } from "./result";
@@ -87,6 +88,36 @@ export const ADVANCED_ACL_MODES: readonly AclMode[] = ["password", "allowlist", 
 
 export function isAdvancedAclMode(mode: AclMode): boolean {
   return ADVANCED_ACL_MODES.includes(mode);
+}
+
+/**
+ * What a three-state sharing change would DISCARD, said out loud — or `null`
+ * when it would discard nothing (ADR-0078 §4).
+ *
+ * This is the sentence the confirmation step shows and the sentence the API
+ * returns when it refuses an unconfirmed change, and it is deliberately ONE
+ * string in ONE place: a control that silently replaced a curated allowlist
+ * would be bad; a control that warned about it in the dashboard and not on the
+ * API would be worse, because only one of the two would be true.
+ *
+ * It names the specific thing at stake — the password, the size of the
+ * roster, the fact the link is already public — rather than a generic "this
+ * will change your settings", which tells an operator nothing they can weigh.
+ */
+export function advancedSharingDiscardWarning(acl: Acl): string | null {
+  switch (acl.mode) {
+    case "password":
+      return "This report is password-protected. Changing its sharing will remove the password, and the current link will stop asking for one.";
+    case "allowlist": {
+      const n = acl.allowedEmails.length;
+      const people = n === 1 ? "1 address" : `${n} addresses`;
+      return `This report is shared with ${people} by invitation. Changing its sharing will remove ${n === 1 ? "it" : "them"}, and anyone who redeemed a link will lose access.`;
+    }
+    case "public":
+      return "This report is public — anyone with the link can open it. Changing its sharing will revoke that, and existing links will stop working for people outside your org.";
+    default:
+      return null;
+  }
 }
 
 /** Which way a bulk apply is going (ADR-0078 §5). `org` shares the reports

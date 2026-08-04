@@ -276,6 +276,44 @@ export interface WriteGrantStore {
 }
 
 /**
+ * An ORG-WIDE write grant on a report (ADR-0078) — the row shape of
+ * `report_org_write_grants`. At most ONE per report (a report belongs to
+ * exactly one org), which is the structural difference from `WriteGrant`.
+ */
+export interface OrgWriteGrant {
+  readonly reportId: ReportId;
+  /** The org the grant was issued FOR. Carried explicitly so the `canWrite`
+   *  leg verifies the match rather than assuming it — a stale row must fail
+   *  the check, never silently widen it. */
+  readonly orgId: OrgId;
+  readonly grantedBy: UserId;
+  /** Epoch ms. */
+  readonly grantedAt: number;
+}
+
+/**
+ * The Org write grant store (ADR-0078) — the third leg of the `canWrite` seam,
+ * over `report_org_write_grants`.
+ *
+ * Deliberately NOT shaped like `WriteGrantStore`: there is no `findFor(actor)`
+ * and no email anywhere. A personal write grant is matched against a PERSON
+ * (userId or normalized email, ADR-0060 §2); this one is matched against an
+ * ORG, and that comparison belongs in the application layer where both the
+ * report's org and the actor's org are in hand — `find` returns the row and the
+ * caller does the match, so the org check can never be quietly skipped inside
+ * a store implementation.
+ *
+ * `grant` is an upsert (one row per report), `revoke` a delete — the same
+ * revoke-by-row-delete semantics as the rest of the grant family.
+ */
+export interface OrgWriteGrantStore {
+  grant(reportId: ReportId, orgId: OrgId, grantedBy: UserId): Promise<Result<void, AppError>>;
+  revoke(reportId: ReportId): Promise<Result<void, AppError>>;
+  /** The report's org write grant, or null. */
+  find(reportId: ReportId): Promise<Result<OrgWriteGrant | null, AppError>>;
+}
+
+/**
  * The viewing user a folder listing is scoped to (ADR-0076) — same shape and
  * semantics as `ReportViewer` (ADR-0075): a folder is listed ONLY when the
  * viewer owns it, it's a legacy row (ownerId null), its visibility is `org`,

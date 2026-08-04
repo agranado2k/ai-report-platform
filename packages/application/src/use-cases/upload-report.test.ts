@@ -1,4 +1,13 @@
-import { err, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
+import {
+  createFolder,
+  err,
+  folderId,
+  makeSlug,
+  orgId,
+  reportId,
+  userId,
+  versionId,
+} from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { makeAppTestHarness } from "../testing/harness";
 import { type UploadActor, type UploadCommand, uploadReport } from "./upload-report";
@@ -258,5 +267,104 @@ describe("uploadReport", () => {
       const sidecarV3 = await blobs.readObject(reportId("r1"), versionId("v3"), "_source.json");
       expect(sidecarV3.ok && sidecarV3.value).toBeNull();
     });
+  });
+});
+
+// ── Inherit-on-upload (ADR-0078 §6) ────────────────────────────────────────
+// A report created in a non-Root folder takes that folder's visibility as its
+// initial Acl. The ROOT CARVE-OUT is the whole reason this is safe: Root is
+// permanently org-visible AND is the default upload placement, so inheriting
+// without exempting it would make EVERY upload in the product org-visible.
+describe("uploadReport — initial sharing inherits the destination folder (ADR-0078 §6)", () => {
+  const ROOT = folderId("00000000-0000-7000-8000-0000000000a0");
+  const CHILD = folderId("00000000-0000-7000-8000-0000000000a2");
+
+  const seedTree = async (h: ReturnType<typeof makeDeps>, childVisibility: "private" | "org") => {
+    const root = createFolder({
+      id: ROOT,
+      orgId: orgId("o1"),
+      parentId: null,
+      ownerId: null,
+      visibility: "org",
+      name: "Root",
+    });
+    if (!root.ok) throw new Error("root fixture");
+    await h.folders.save(root.value);
+    const child = createFolder({
+      id: CHILD,
+      orgId: orgId("o1"),
+      parentId: ROOT,
+      ownerId: userId("u1"),
+      visibility: childVisibility,
+      name: "House Numbers",
+    });
+    if (!child.ok) throw new Error("child fixture");
+    await h.folders.save(child.value);
+  };
+
+  it("uploads into an ORG-shared folder land org-visible", async () => {
+    const h = makeDeps();
+    await seedTree(h, "org");
+    const r = await uploadReport(h.deps, cmd({ actor: actor({ folderId: CHILD }) }));
+    expect(r.ok).toBe(true);
+    const saved = await h.reports.findBySlug(sv(r.ok ? r.value.result.slug : ""));
+    expect(saved.ok && saved.value?.acl.mode).toBe("org");
+  });
+
+  it("uploads into a PRIVATE folder stay private", async () => {
+    const h = makeDeps();
+    await seedTree(h, "private");
+    const r = await uploadReport(h.deps, cmd({ actor: actor({ folderId: CHILD }) }));
+    const saved = await h.reports.findBySlug(sv(r.ok ? r.value.result.slug : ""));
+    expect(saved.ok && saved.value?.acl.mode).toBe("private");
+  });
+
+  it("uploads into ROOT stay PRIVATE even though Root is permanently org-visible", async () => {
+    // THE carve-out. Root is the default upload placement (ADR-0037) and is
+    // always `org` (ADR-0076 §3) — inheriting from it would silently publish
+    // every upload in the product.
+    const h = makeDeps();
+    await seedTree(h, "org");
+    const r = await uploadReport(h.deps, cmd({ actor: actor({ folderId: ROOT }) }));
+    const saved = await h.reports.findBySlug(sv(r.ok ? r.value.result.slug : ""));
+    expect(saved.ok && saved.value?.acl.mode).toBe("private");
+  });
+
+  it("never inherits ORG WRITE — write is always an explicit act", async () => {
+    const h = makeDeps();
+    await seedTree(h, "org");
+    const r = await uploadReport(h.deps, cmd({ actor: actor({ folderId: CHILD }) }));
+    const saved = await h.reports.findBySlug(sv(r.ok ? r.value.result.slug : ""));
+    const grant = saved.ok && saved.value ? await h.deps.orgWriteGrants.find(saved.value.id) : null;
+    expect(grant && grant.ok && grant.value).toBeNull();
+  });
+
+  it("falls back to PRIVATE when the destination folder can't be resolved", async () => {
+    // Fail-safe: an unknown folder must never widen a report's reach.
+    const h = makeDeps();
+    const r = await uploadReport(h.deps, cmd({ actor: actor({ folderId: CHILD }) }));
+    const saved = await h.reports.findBySlug(sv(r.ok ? r.value.result.slug : ""));
+    expect(saved.ok && saved.value?.acl.mode).toBe("private");
+  });
+
+  it("a RE-UPLOAD never re-derives sharing from the folder", async () => {
+    // Inheritance is a CREATE-time rule only (ADR-0078 §6/§7). A re-upload into
+    // an org-shared folder must not publish a report its owner made private.
+    const h = makeDeps();
+    await seedTree(h, "org");
+    const first = await uploadReport(h.deps, cmd({ actor: actor({ folderId: CHILD }) }));
+    const slugStr = first.ok ? first.value.result.slug : "";
+    const created = await h.reports.findBySlug(sv(slugStr));
+    if (!created.ok || !created.value) throw new Error("seed");
+    await h.reports.setAcl(created.value.id, { mode: "private" });
+
+    h.bundles.setContentHash("b".repeat(64)); // a genuinely new version
+    const again = await uploadReport(
+      h.deps,
+      cmd({ actor: actor({ folderId: CHILD }), updateSlug: slugStr }),
+    );
+    expect(again.ok).toBe(true);
+    const after = await h.reports.findBySlug(sv(slugStr));
+    expect(after.ok && after.value?.acl.mode).toBe("private");
   });
 });

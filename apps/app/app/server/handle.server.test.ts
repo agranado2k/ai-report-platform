@@ -364,7 +364,8 @@ describe("handle() — end-to-end idempotency through the seam (ADR-0039)", () =
       InMemoryReportRepository,
       InMemoryAuditLogger,
       InMemoryIdentityStore,
-      InMemoryWriteGrantStore,
+      InMemoryOrgWriteGrantStore,
+  InMemoryWriteGrantStore,
       PassThroughUnitOfWork,
       idempotencyTestDeps,
     } = await import("arp-application/testing");
@@ -377,6 +378,7 @@ describe("handle() — end-to-end idempotency through the seam (ADR-0039)", () =
       audit,
       uow: new PassThroughUnitOfWork(),
       grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
       identities: new InMemoryIdentityStore(),
       ...idempotencyTestDeps(),
     };

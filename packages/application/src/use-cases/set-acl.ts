@@ -170,7 +170,7 @@ export async function setAcl(
  * the new allowlist, so a re-added email should NOT need to re-redeem a
  * magic link.
  */
-async function pruneStaleGrants(
+export async function pruneStaleGrants(
   grants: GrantStore,
   reportId: Report["id"],
   previousAcl: Report["acl"],

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryAuditLogger,
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
   idempotencyTestDeps,
@@ -36,6 +37,7 @@ async function seed() {
   return {
     reports,
     grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),

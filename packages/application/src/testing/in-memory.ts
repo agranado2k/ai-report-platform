@@ -68,6 +68,8 @@ import type {
   IdentityStore,
   IdGenerator,
   NonceStore,
+  OrgWriteGrant,
+  OrgWriteGrantStore,
   PasswordHasher,
   PlanLimiter,
   ProcessedBundle,
@@ -1064,6 +1066,32 @@ export class InMemoryWriteGrantStore implements WriteGrantStore {
       if (k.startsWith(`${reportId}|`) && g.granteeUserId === actor.userId) return ok(g);
     }
     return ok(null);
+  }
+}
+
+/** In-memory OrgWriteGrantStore (ADR-0078) — one row per report, keyed by
+ *  report id alone. No email and no `findFor(actor)`: the org match is the
+ *  APPLICATION layer's job (`hasOrgWriteGrant`), so a store fake cannot
+ *  accidentally make the real check pass. */
+export class InMemoryOrgWriteGrantStore implements OrgWriteGrantStore {
+  private readonly grants = new Map<string, OrgWriteGrant>(); // reportId -> grant
+
+  async grant(
+    reportId: ReportId,
+    orgId: OrgId,
+    grantedBy: UserId,
+  ): Promise<Result<void, AppError>> {
+    this.grants.set(reportId, { reportId, orgId, grantedBy, grantedAt: Date.now() });
+    return ok(undefined);
+  }
+
+  async revoke(reportId: ReportId): Promise<Result<void, AppError>> {
+    this.grants.delete(reportId);
+    return ok(undefined);
+  }
+
+  async find(reportId: ReportId): Promise<Result<OrgWriteGrant | null, AppError>> {
+    return ok(this.grants.get(reportId) ?? null);
   }
 }
 
