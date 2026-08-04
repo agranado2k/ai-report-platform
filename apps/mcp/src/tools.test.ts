@@ -19,6 +19,9 @@ interface RegisteredTool {
   readonly config: {
     readonly annotations?: Record<string, unknown>;
     readonly inputSchema: Record<string, unknown>;
+    /** The agent-facing description. Asserted on directly — for a tool an
+     *  autonomous caller drives, the description IS the interface (ADR-0072). */
+    readonly description?: string;
   };
   readonly handler: Handler;
 }

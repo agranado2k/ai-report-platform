@@ -425,6 +425,176 @@ Then(
   },
 );
 
+// ── ADR-0078: folder sharing REACHES the reports inside ────────────────────
+//
+// THE BUG THIS EXISTS FOR. Everything above leaves the third identity looking
+// at a folder it can see and reports it can't — because a folder share confers
+// visibility of the FOLDER (ADR-0076 §6), and each report's reach is still its
+// own Acl. These four steps prove the ADR-0078 repair against real
+// infrastructure, through the same doors a real client uses.
+
+const PRIVATE_MARKER = `arp-e2e-private-${RUN_ID}`;
+const PRIVATE_HTML = `<!doctype html><html><body><h1>${PRIVATE_MARKER}</h1></body></html>`;
+let privateBody: Record<string, unknown>;
+
+When(
+  "the first run-scoped identity puts a private report inside the shared folder",
+  async ({ request }) => {
+    privateBody = await uploadHtml(
+      request,
+      "/api/v1/reports",
+      firstSession.jwt,
+      "report-private.html",
+      PRIVATE_HTML,
+      "first run-scoped identity's private upload",
+    );
+    // Uploads land in Root (ADR-0037), and a Root upload stays PRIVATE — the
+    // ADR-0078 §6 carve-out, without which every upload in the product would
+    // be org-visible.
+    const moved = await request.post(`/api/v1/reports/${privateBody.slug}/move`, {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { folder_id: folderId },
+    });
+    const movedBody = (await expectJson(moved, 200, "move the private report into the folder")) as {
+      acl?: { mode?: string };
+    };
+    // ADR-0078 §7, proved end to end: moving into an ORG-VISIBLE folder must
+    // NOT publish the report. Move is canWrite-gated, so an auto-apply would
+    // let a write grantee — who has no view access at all (ADR-0060 §6) —
+    // publish content they cannot read.
+    expect(
+      movedBody.acl?.mode,
+      "moving a private report into an org-shared folder must NOT change its sharing (ADR-0078 §7)",
+    ).toBe("private");
+  },
+);
+
+Then(
+  "the third run-scoped identity cannot see the private report inside the shared folder",
+  async ({ request }) => {
+    // THE REPORTED BUG, asserted as the pre-condition it is: the folder is
+    // org-visible (proved two steps up) and the report inside it is still
+    // invisible. This assertion must keep passing forever — the repair is an
+    // EXPLICIT action, not a change to what a folder share means.
+    const res = await request.get("/api/v1/reports?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const listing = (await expectJson(
+      res,
+      200,
+      "third identity's listing before the bulk apply",
+    )) as {
+      data?: ReadonlyArray<{ slug?: string }>;
+    };
+    expect(
+      (listing.data ?? []).map((r) => r.slug),
+      "a private report inside an ORG-SHARED folder must still be invisible — a folder share " +
+        "confers visibility of the FOLDER only (ADR-0076 §6, unchanged by ADR-0078)",
+    ).not.toContain(privateBody.slug);
+  },
+);
+
+When(
+  "the first run-scoped identity shares the folder's reports for viewing and editing",
+  async ({ request }) => {
+    const res = await request.post(`/api/v1/folders/${folderId}/reports/sharing`, {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { sharing: "org_edit" },
+    });
+    const outcome = (await expectJson(res, 200, "folder bulk apply")) as {
+      changed?: ReadonlyArray<{ slug?: string }>;
+      skipped?: ReadonlyArray<{ slug?: string; reason?: string }>;
+      failed?: ReadonlyArray<{ slug?: string }>;
+    };
+    expect(
+      (outcome.changed ?? []).map((c) => c.slug),
+      "the private report the owner holds must be changed",
+    ).toContain(privateBody.slug);
+    // The honest partial result, end to end: the report that was ALREADY
+    // org-shared is named back with its reason rather than counted as a change.
+    const skipped = outcome.skipped ?? [];
+    expect(
+      skipped.map((c) => c.slug),
+      "the already-org-shared report must be SKIPPED, not silently re-counted as changed",
+    ).toContain(firstBody.slug);
+    expect(skipped.find((c) => c.slug === firstBody.slug)?.reason).toBe(
+      "already shared with your org",
+    );
+    expect(outcome.failed ?? [], "nothing should have failed").toHaveLength(0);
+  },
+);
+
+Then(
+  "the third run-scoped identity can list, open and edit the once-private report",
+  async ({ request }) => {
+    const auth = {
+      Authorization: `Bearer ${thirdSession.jwt}`,
+      "Content-Type": "application/json",
+    };
+
+    // SEES it — through ADR-0075's existing predicate, because its real Acl
+    // changed. No new listing leg was needed for folders.
+    const listRes = await request.get("/api/v1/reports?limit=100", {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const listing = (await expectJson(
+      listRes,
+      200,
+      "third identity's listing after the bulk apply",
+    )) as {
+      data?: ReadonlyArray<{ slug?: string }>;
+    };
+    expect(
+      (listing.data ?? []).map((r) => r.slug),
+      "after the bulk apply the once-private report must be listed for every org member",
+    ).toContain(privateBody.slug);
+
+    // CAN OPEN it — the single-report read, which is what the dashboard row and
+    // the viewer entry both go through.
+    const getRes = await request.get(`/api/v1/reports/${privateBody.slug}`, {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const detail = (await expectJson(getRes, 200, "third identity opens the report")) as {
+      slug?: string;
+    };
+    expect(detail.slug).toBe(privateBody.slug);
+
+    // CAN EDIT it — a rename goes through the canWrite seam, so a 200 here is
+    // the ADR-0078 §1 org-write leg working through the real HTTP door and not
+    // just in a unit test. The third identity owns nothing and holds no
+    // personal write grant, so this can ONLY be the org-write row.
+    const renamed = await request.patch(`/api/v1/reports/${privateBody.slug}`, {
+      headers: auth,
+      data: { title: `renamed-by-colleague-${RUN_ID}` },
+    });
+    const renamedBody = (await expectJson(
+      renamed,
+      200,
+      "org-write colleague renames the report",
+    )) as { title?: string };
+    expect(
+      renamedBody.title,
+      "an org-write colleague must be able to rename (ADR-0078 §1 canWrite leg)",
+    ).toBe(`renamed-by-colleague-${RUN_ID}`);
+
+    // …but DELETE stays owner-only in every sharing state (ADR-0059 §2,
+    // reaffirmed by ADR-0078 §3). The coarse control must not have widened it.
+    const deleted = await request.delete(`/api/v1/reports/${privateBody.slug}`, {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    expect(
+      deleted.status(),
+      "DELETE must stay owner-only even at org_edit (ADR-0059 §2 / ADR-0078 §3)",
+    ).toBe(403);
+  },
+);
+
 // Best-effort accumulation bound: delete the run-scoped users (+ their decoy
 // orgs) after every attempt of the @run-scoped scenario, pass or fail. Deleting
 // the users also removes their canonical-org memberships, keeping the shared
