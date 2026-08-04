@@ -288,10 +288,49 @@ and **never** an `owner:true` one. ADR-0063 is explicit: "minting an
 `owner:true` token for a non-owner would be a privilege escalation". A test pins
 this.
 
-Their *read* comes from `acl.mode = 'org'`, through the viewer's existing gate.
-This is why Decision 3 pairs read with write: without the paired `Acl`, an
-org-write user would hold an edit token for content the viewer would refuse to
-serve them.
+Their *read* on `GET /{slug}` comes from `acl.mode = 'org'`, through the
+viewer's existing gate.
+
+> **Correction (2026-08-04).** An earlier revision of this section claimed that
+> "without the paired `Acl`, an org-write user would hold an edit token for
+> content the viewer would refuse to serve them", and used that as a safety
+> argument for Decision 3. **That is false, and it must not be relied on.**
+>
+> `decideEdit` in `apps/view/app/server/gate.server.ts` **never consults
+> `report.acl`** — deliberately, and since ADR-0063 Decisions 3-4: the edit
+> capability is checked *instead of* the share-mode ACL, because a valid edit
+> token proves the app already ran `canWrite` at mint time. Its one remaining
+> gate is `resolveViewableReport`, which maps not-found / deleted / flagged /
+> scanning and otherwise serves the live version. So **an edit token IS a read
+> capability** on `/{slug}/edit`, whatever the `Acl` says.
+>
+> The pairing in Decision 3 therefore stands on its own merit — ADR-0060 §6's
+> read/write separation, and not handing an org write capability to people who
+> cannot open the report — and **not** on any viewer-side refusal. It is also
+> what makes Decision 11 a *read* fix and not only a write one: an org-write row
+> that outlived its `Acl` left every org member holding a mintable edit token,
+> and therefore the content, on a report the `Acl` had made private.
+
+**The org an edit token acts in is a CLAIM, not the report's.** The acceptance
+seam (`edit-token-actor.server.ts`) used to source the actor's org from the
+report it was resolving, which made `hasOrgWriteGrant`'s `actor.orgId ===
+report.orgId` guard a tautology on that door: every valid token was, by
+construction, in the report's org — including a **cross-org personal grantee's**
+(ADR-0060 §4 supports those by design), who would keep passing through the ORG
+leg after their own personal grant was revoked. `mintEditToken` now stamps the
+Clerk-**verified** session org as an optional `org` claim, carried forward across
+refreshes exactly like `sessionStart`, and the seam compares that.
+
+**What this does and does not buy, stated plainly.** It makes the org check
+*meaningful*; it does not make it *live*. This system mirrors no org-membership
+row — membership is asserted by the Clerk session — so a user who **leaves** the
+org keeps whatever org their token already claims until it dies. The bound on
+that is `SESSION_CAP_SECONDS` (ADR-0063's amendment), which exists precisely for
+revocations the server cannot observe. Ownership, the personal grant row and the
+org-write row itself all remain re-checked **live** on every accept. A token
+minted before the claim existed falls back to the report's org — today's
+behavior, for the ≤ `EDIT_TTL_SECONDS` window after a deploy; failing closed
+there would 401 every in-flight editor.
 
 ### 10. Parity, idempotency, audit
 

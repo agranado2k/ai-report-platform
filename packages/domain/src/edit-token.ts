@@ -42,6 +42,19 @@ export interface EditClaims extends TokenClaims {
    *  diff), only the refresh path treats a missing `sessionStart` specially
    *  (fail closed — see refreshEditToken's module doc). */
   readonly sessionStart?: number;
+  /** The OrgId the minting session was acting in (ADR-0078 §1). Stamped from the
+   *  Clerk-verified session at `/open` and carried forward across refreshes.
+   *
+   *  WHY IT EXISTS: `canWrite`'s org-write leg requires `actor.orgId ===
+   *  report.orgId`, and the acceptance seam had no independent source for the
+   *  actor's org — it read one off the REPORT, which made the comparison a
+   *  tautology every token passed. With the org carried as a claim, a token
+   *  minted while acting in a different org (the cross-org personal grantee
+   *  ADR-0060 §4 explicitly supports) can no longer ride the ORG-wide leg.
+   *
+   *  OPTIONAL for backward compat, exactly like `sessionStart`: a token minted
+   *  before this field existed has none and still authenticates. */
+  readonly org?: string;
 }
 
 /** Narrow a parsed JSON payload into `EditClaims`, or null if it doesn't look like
@@ -62,12 +75,20 @@ function parseEditClaims(raw: unknown): EditClaims | null {
   if (typeof claims.sub !== "string" || claims.sub.length === 0) return null;
   if (claims.scope !== "edit") return null;
   if (claims.sessionStart !== undefined && typeof claims.sessionStart !== "number") return null;
+  // Type-confusion guard, same shape as `sessionStart`: present-but-not-a-string
+  // is rejected outright rather than coerced. An EMPTY string is rejected too —
+  // it would compare unequal to every real OrgId, but silently, and a claim that
+  // can only ever fail is a claim that was never really carried.
+  if (claims.org !== undefined && (typeof claims.org !== "string" || claims.org.length === 0)) {
+    return null;
+  }
   return {
     slug: claims.slug,
     exp: claims.exp,
     sub: claims.sub,
     scope: "edit",
     ...(claims.sessionStart !== undefined ? { sessionStart: claims.sessionStart } : {}),
+    ...(claims.org !== undefined ? { org: claims.org } : {}),
   };
 }
 
@@ -89,9 +110,20 @@ export function mintEditToken(
   secret: string,
   nowSeconds: number,
   sessionStartSeconds: number = nowSeconds,
+  org?: string,
 ): string {
   return codec.mint(
-    { slug, exp: nowSeconds + ttlSeconds, sub, scope: "edit", sessionStart: sessionStartSeconds },
+    {
+      slug,
+      exp: nowSeconds + ttlSeconds,
+      sub,
+      scope: "edit",
+      sessionStart: sessionStartSeconds,
+      // Omitted rather than sent as undefined when the caller has no org to
+      // stamp: the wire payload is JSON-encoded verbatim, and an absent key is
+      // what `parseEditClaims` treats as "legacy token".
+      ...(org !== undefined ? { org } : {}),
+    },
     secret,
   );
 }

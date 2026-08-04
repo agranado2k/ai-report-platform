@@ -77,8 +77,87 @@ function makeDeps(
     writeGrant: { grants, identities, orgWriteGrants: new InMemoryOrgWriteGrantStore() },
     secret,
     nowSeconds: () => NOW_SECONDS,
-  };
+  } as const;
 }
+
+const OTHER_ORG = orgId("00000000-0000-7000-8000-0000000000a2");
+
+describe("resolveEditTokenActor — the org-write leg is org-BOUND (ADR-0078 §1)", () => {
+  // The hazard: `candidate.orgId` used to be read off the REPORT, so
+  // `hasOrgWriteGrant`'s `report.orgId !== actor.orgId` guard could never be
+  // false on this door. Any holder of a valid edit token was, by construction,
+  // "in the report's org" — including a CROSS-ORG personal write grantee
+  // (ADR-0060 §4 makes those work cross-org by design), who would ride the
+  // org-write leg after their own personal grant was revoked.
+  //
+  // The org is now a CLAIM stamped at mint from the verified Clerk session, so
+  // the guard compares two independent facts again.
+  it("a cross-org token does NOT ride the org-write leg once its personal grant is gone", async () => {
+    const { reports, report, grants, identities } = await seeded("orgorg0001");
+    const deps = makeDeps(reports, grants, identities);
+    // The report carries an org-write row for ITS org.
+    await deps.writeGrant.orgWriteGrants.grant(report.id, ORG, OWNER);
+    identities.seedUser(OUTSIDER, "outsider@elsewhere.com");
+    // Minted while the user was acting in a DIFFERENT org — no personal grant.
+    const token = mintEditToken(
+      "orgorg0001",
+      OUTSIDER,
+      900,
+      SECRET,
+      NOW_SECONDS,
+      NOW_SECONDS,
+      OTHER_ORG,
+    );
+
+    expect(await resolveEditTokenActor(bearerRequest(token), "orgorg0001", deps)).toBeNull();
+  });
+
+  it("a same-org token DOES ride the org-write leg — the feature still works", async () => {
+    const { reports, report, grants, identities } = await seeded("orgorg0002");
+    const deps = makeDeps(reports, grants, identities);
+    await deps.writeGrant.orgWriteGrants.grant(report.id, ORG, OWNER);
+    identities.seedUser(OUTSIDER, "colleague@x.com");
+    const token = mintEditToken("orgorg0002", OUTSIDER, 900, SECRET, NOW_SECONDS, NOW_SECONDS, ORG);
+
+    const actor = await resolveEditTokenActor(bearerRequest(token), "orgorg0002", deps);
+    expect(actor?.userId).toBe(OUTSIDER);
+  });
+
+  it("a cross-org token still works through its own PERSONAL grant (ADR-0060 §4)", async () => {
+    // The deliberate asymmetry: a personal write grant is cross-org BY DESIGN.
+    // Binding the org must not break it.
+    const { reports, report, grants, identities } = await seeded("orgorg0003");
+    const deps = makeDeps(reports, grants, identities);
+    identities.seedUser(OUTSIDER, "outsider@elsewhere.com");
+    await grants.grant(report.id, "outsider@elsewhere.com", OWNER, OUTSIDER);
+    const token = mintEditToken(
+      "orgorg0003",
+      OUTSIDER,
+      900,
+      SECRET,
+      NOW_SECONDS,
+      NOW_SECONDS,
+      OTHER_ORG,
+    );
+
+    const actor = await resolveEditTokenActor(bearerRequest(token), "orgorg0003", deps);
+    expect(actor?.userId).toBe(OUTSIDER);
+  });
+
+  it("a LEGACY token with no org claim keeps today's behavior on the org-write leg", async () => {
+    // Backward compat for the ≤15-min window after a deploy: an unstamped token
+    // falls back to the report's org, exactly as before. Documented rather than
+    // silently fail-closed, which would break every in-flight editor.
+    const { reports, report, grants, identities } = await seeded("orgorg0004");
+    const deps = makeDeps(reports, grants, identities);
+    await deps.writeGrant.orgWriteGrants.grant(report.id, ORG, OWNER);
+    identities.seedUser(OUTSIDER, "colleague@x.com");
+    const token = mintEditToken("orgorg0004", OUTSIDER, 900, SECRET, NOW_SECONDS);
+
+    const actor = await resolveEditTokenActor(bearerRequest(token), "orgorg0004", deps);
+    expect(actor?.userId).toBe(OUTSIDER);
+  });
+});
 
 describe("resolveEditTokenActor (ADR-0063 — the edit-token trust boundary)", () => {
   it("VALID: a write-grantee's edit token resolves to their actor, with the report's real folderId", async () => {

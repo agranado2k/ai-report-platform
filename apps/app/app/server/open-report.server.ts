@@ -104,6 +104,12 @@ export async function ownerOpenLocation(
     EDIT_TTL_SECONDS,
     req.secret,
     nowSeconds,
+    nowSeconds, // a fresh session — this route is the only FIRST mint
+    // The org the actor is VERIFIED to be acting in (ADR-0078 §1). The
+    // acceptance seam compares it against the report's org for the org-write
+    // leg; without it that comparison reads the org off the report and can
+    // never fail.
+    req.actor.orgId,
   );
 
   // OWNER vs write-grantee (`writable.value` already carries `ownerId` — one

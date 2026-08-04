@@ -213,6 +213,11 @@ export async function refreshEditToken(
     deps.secret,
     nowSeconds,
     sessionStart,
+    // The org the re-checked actor is acting in, carried forward exactly like
+    // `sessionStart` (ADR-0078 §1). When this call arrived on an edit token,
+    // that org came from the presented token's own claim, so a refresh can
+    // never WIDEN the org a chain acts in — only keep it.
+    actor.orgId,
   );
   return ok({ editToken, expiresAt: nowSeconds + deps.ttlSeconds });
 }

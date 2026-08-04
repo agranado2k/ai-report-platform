@@ -23,7 +23,13 @@ import {
   type ReportRepository,
   type TenancyActor,
 } from "arp-application";
-import { type FolderId, makeSlug, readEditToken, userId as toUserId } from "arp-domain";
+import {
+  type FolderId,
+  makeSlug,
+  readEditToken,
+  orgId as toOrgId,
+  userId as toUserId,
+} from "arp-domain";
 
 /** The resolved actor for an accepted edit token: `TenancyActor` (exactly the
  *  shape `loadWritableReport` itself needs) PLUS the report's CURRENT
@@ -90,13 +96,40 @@ export async function resolveEditTokenActor(
   const slugR = makeSlug(slug);
   if (!slugR.ok) return null; // the route's own slug doesn't even parse
 
-  // Look up the report ONCE to learn its CURRENT orgId — `canWrite` itself is
-  // org-agnostic (ADR-0060 §4), but `TenancyActor`'s shape requires one, and
-  // we need the live row for the re-check below regardless.
+  // Look up the report ONCE — we need the live row for the re-check below
+  // regardless, and its `folderId` for the returned actor.
   const probe = await deps.reports.findBySlug(slugR.value);
   if (!probe.ok || !probe.value || probe.value.deletedAt !== null) return null;
 
-  const candidate: TenancyActor = { orgId: probe.value.orgId, userId: toUserId(claims.sub) };
+  // THE ACTING ORG COMES FROM THE TOKEN, NOT THE REPORT (ADR-0078 §1).
+  //
+  // Two of `canWrite`'s three legs are org-agnostic — ownership, and a PERSONAL
+  // write grant, which ADR-0060 §4 makes cross-org BY DESIGN. The third, the
+  // ADR-0078 org-write leg, is strictly org-matched: `actor.orgId ===
+  // report.orgId`. Sourcing the actor's org from the report made that
+  // comparison a tautology on this door — every valid token was, by
+  // construction, "in the report's org", including a cross-org personal
+  // grantee's, who would keep passing via the ORG leg after their own personal
+  // grant was revoked.
+  //
+  // The `org` claim is stamped at mint from the Clerk-VERIFIED session org, so
+  // the two facts are independent again.
+  //
+  // LIMIT, stated plainly: this makes the org check meaningful, not LIVE. This
+  // system mirrors no org-membership row (org membership is asserted by the
+  // Clerk session), so a user who LEAVES the org keeps whatever org their token
+  // already claims until it dies. The bound on that is `SESSION_CAP_SECONDS`
+  // (edit-token-refresh.server.ts), which exists for exactly this class of
+  // revocation the server cannot observe. What IS re-checked live below:
+  // ownership, the personal grant row, and the org-write row itself.
+  //
+  // A LEGACY token (minted before the claim existed) falls back to the report's
+  // org — today's behavior for the ≤ EDIT_TTL_SECONDS window after a deploy.
+  // Failing closed there would 401 every in-flight editor instead.
+  const candidate: TenancyActor = {
+    orgId: claims.org ? toOrgId(claims.org) : probe.value.orgId,
+    userId: toUserId(claims.sub),
+  };
 
   // THE LIVE RE-CHECK (ADR-0060 §4 revocation): the token's valid signature
   // proves it was minted for a canWrite user AT MINT TIME — it says nothing
