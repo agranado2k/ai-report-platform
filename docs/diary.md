@@ -3545,3 +3545,39 @@ Still unverified in production, unchanged: legacy-folder ADOPTION (every legacy 
 real user data), the second-user "colleague loses sight" transition (single browser session), and
 the >50 `MAX_CASCADE` refusal. Outstanding follow-ups: **#235** (transfer) and **#236** (batched
 share counts — which would retire the interim `Limited` label).
+
+### 2026-08-04 — Dependabot backlog: 51 open alerts triaged, 36 closed, 15 deferred
+
+First deliberate pass over the Dependabot alert backlog. Alerting is on but automated PRs are
+not, so nothing had been remediated automatically — the queue had grown to **51 open alerts
+(1 critical, 21 high, 25 medium, 4 low)**. Worktree `worktree/dep-vulns`, branch
+`fix/dep-vulns`, four commits, one per remediation class. Baseline (typecheck + 1958 unit tests
++ all three app builds) was captured green **before** any dependency moved, so every later
+result was attributable.
+
+**Closed (36)** — 1 critical, 17 high, 14 medium, 4 low. The great majority needed no override at all: `pnpm update -r --depth Infinity`
+re-resolved every transitive package that already had a patched release inside its parent's
+declared range — brace-expansion, undici, hono, @hono/node-server, ip-address, valibot,
+body-parser, express-rate-limit, plus the dev-scope postcss / js-yaml / fast-uri. One floor bump
+(`@modelcontextprotocol/sdk` ^1.26 → ^1.30) was needed to widen the @hono/node-server range.
+`@clerk/remix` ^4.13.43 → ^4.13.49 closed the CVE-2026-42349 authorization-bypass alert.
+Two pnpm `overrides` were unavoidable and are documented in the root `package.json`: **`tar`
+→ ^7.5.22** (13 alerts including the sole critical, CVE-2026-59873; cacache@17.1.4 pins `^6.1.11`
+and no 6.x patch line exists) and **`ajv@8.6.3` → ^8.20.0** (@vercel/static-config pins that
+exact version). Both carry a documented drop condition.
+
+**Deferred (15)** — 4 high, 11 medium, all needing a framework major this repo is not doing in a security-patch PR.
+Nine `vite` alerts (direct devDep at ^5.4.10; advisories want 6.4.3 — @remix-run/dev 2.17.5
+already peer-accepts `^5.1.0 || ^6.0.0`, so this is a small standalone follow-up, and every
+advisory is dev-server or Windows-path shaped), two `react-router` + one `react-router-dom` (v6
+via Remix 2; react-router-dom 6.30.2–6.30.4 has **no patched version at all**), one
+`turbo-stream` (`v3_singleFetch: true` is on in both apps, so the DoS **is** reachable —
+@remix-run/server-runtime pins turbo-stream to exactly 2.4.1 and the fix ships only in React
+Router 7), one `estree-util-value-to-estree` and one residual `esbuild` (both inside build-time
+tooling we never invoke). **The honest read is that most of the deferred set is one decision:
+Remix 2 → React Router 7.** Remix 2 is in maintenance and its pins are what hold turbo-stream,
+react-router and react-router-dom on unpatchable versions. That migration wants its own ADR and
+its own PR; it is now the largest single security-debt item in the tree.
+
+**No ADR.** Nothing architectural was decided here — the two overrides are recorded in
+`package.json` with their drop conditions, and the deferrals are documented in the PR body.
