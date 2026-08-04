@@ -437,6 +437,28 @@ const PRIVATE_MARKER = `arp-e2e-private-${RUN_ID}`;
 const PRIVATE_HTML = `<!doctype html><html><body><h1>${PRIVATE_MARKER}</h1></body></html>`;
 let privateBody: Record<string, unknown>;
 
+/** The `sharing_apply` body's honest-partial shape, read by both bulk-apply
+ *  steps below so they cannot drift apart on what they expect to be told. */
+type SharingApplyBody = {
+  changed?: ReadonlyArray<{ slug?: string }>;
+  skipped?: ReadonlyArray<{ slug?: string; reason?: string }>;
+  failed?: ReadonlyArray<{ slug?: string }>;
+  total?: number;
+};
+
+/** The second bulk apply's summary — performed by one step, asserted by the
+ *  next. Module state like every other handle in this file (workers: 1). */
+let reapplyOutcome: SharingApplyBody;
+
+/** The domain's OWN sentence for a report already AT the `org_edit` target,
+ *  quoted from `ALREADY_AT` in `packages/domain/src/report-sharing.ts` rather
+ *  than paraphrased. The `…to view` / `…to view and edit` split in those
+ *  sentences IS part of the fix: one reason covering both org states cannot
+ *  tell the truth about either, which is how an `org_edit → org_view`
+ *  reduction came to skip every report and report success while revoking
+ *  nothing. */
+const ALREADY_AT_ORG_EDIT = "already shared with your org to view and edit";
+
 When(
   "the first run-scoped identity puts a private report inside the shared folder",
   async ({ request }) => {
@@ -507,26 +529,36 @@ When(
       },
       data: { sharing: "org_edit" },
     });
-    const outcome = (await expectJson(res, 200, "folder bulk apply")) as {
-      changed?: ReadonlyArray<{ slug?: string }>;
-      skipped?: ReadonlyArray<{ slug?: string; reason?: string }>;
-      failed?: ReadonlyArray<{ slug?: string }>;
-    };
-    expect(
-      (outcome.changed ?? []).map((c) => c.slug),
-      "the private report the owner holds must be changed",
-    ).toContain(privateBody.slug);
-    // The honest partial result, end to end: the report that was ALREADY
-    // org-shared is named back with its reason rather than counted as a change.
-    const skipped = outcome.skipped ?? [];
-    expect(
-      skipped.map((c) => c.slug),
-      "the already-org-shared report must be SKIPPED, not silently re-counted as changed",
-    ).toContain(firstBody.slug);
-    expect(skipped.find((c) => c.slug === firstBody.slug)?.reason).toBe(
-      "already shared with your org",
+    const outcome = (await expectJson(res, 200, "folder bulk apply")) as SharingApplyBody;
+    const changed = (outcome.changed ?? []).map((c) => c.slug);
+    expect(changed, "the private report the owner holds must be changed").toContain(
+      privateBody.slug,
     );
+    // THE ESCALATION — and the reason this step no longer asserts a skip here.
+    // This report is at `org_view` (its Acl is `org`, with no org-write row);
+    // the target is `org_edit`, a DIFFERENT composed sharing state, so it is a
+    // candidate and the apply must grant it the org-write leg.
+    //
+    // The rule that read `acl.mode` alone could not tell the two org states
+    // apart and skipped this report as "already shared with your org": HTTP
+    // 200, `changed: []`, `failed: []`, and not one grant issued — a refusal
+    // the operator read as a done job. Asserting that skip is what this file
+    // used to do, so the assertion pinned the silent no-op in place.
+    expect(
+      changed,
+      "an already-org_view report targeted at org_edit must be CHANGED — the escalation grants " +
+        "the org-write leg, which the Acl mode alone cannot express (ADR-0078 §5)",
+    ).toContain(firstBody.slug);
+    expect(
+      (outcome.skipped ?? []).map((c) => c.slug),
+      "…and must NOT be skipped: a skip here IS the silent no-op — 200, nothing granted, " +
+        "reported as success",
+    ).not.toContain(firstBody.slug);
     expect(outcome.failed ?? [], "nothing should have failed").toHaveLength(0);
+    expect(
+      outcome.total,
+      "the run-scoped folder holds exactly the two reports these steps put in it",
+    ).toBe(2);
   },
 );
 
@@ -592,6 +624,100 @@ Then(
       deleted.status(),
       "DELETE must stay owner-only even at org_edit (ADR-0059 §2 / ADR-0078 §3)",
     ).toBe(403);
+  },
+);
+
+Then(
+  "the third run-scoped identity can edit the escalated report, whose sharing reads org_edit",
+  async ({ request }) => {
+    // PROOF THE ESCALATION LANDED — against the real API, not against the
+    // summary's own word for it. Before the apply this report was `org_view`:
+    // the whole org could read it and NONE of them could write it. A rename
+    // goes through the canWrite seam, and the third identity owns nothing and
+    // holds no personal write grant, so a 200 here can only be the org-write
+    // row the escalation created. Under the pre-fix rule this report was
+    // skipped, no grant was ever issued, and this PATCH would 403.
+    const renamed = await request.patch(`/api/v1/reports/${firstBody.slug}`, {
+      headers: {
+        Authorization: `Bearer ${thirdSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { title: `escalated-rename-${RUN_ID}` },
+    });
+    const renamedBody = (await expectJson(
+      renamed,
+      200,
+      "org-write colleague renames the escalated report",
+    )) as { title?: string };
+    expect(
+      renamedBody.title,
+      "the org_view → org_edit escalation must have granted the org-write leg (ADR-0078 §5)",
+    ).toBe(`escalated-rename-${RUN_ID}`);
+
+    // …and the read surface must say the same thing (ADR-0078 §13). `acl.mode`
+    // is `org` in BOTH org states, so the composed `sharing` field is the only
+    // one that can tell an escalated report from an unescalated one — which is
+    // exactly the distinction the old candidate rule could not make either.
+    const detail = await request.get(`/api/v1/reports/${firstBody.slug}`, {
+      headers: { Authorization: `Bearer ${thirdSession.jwt}` },
+    });
+    const detailBody = (await expectJson(
+      detail,
+      200,
+      "third identity reads the escalated report's sharing state",
+    )) as { sharing?: string };
+    expect(
+      detailBody.sharing,
+      "the composed sharing state must read back as org_edit — acl.mode alone cannot " +
+        "distinguish it from org_view (ADR-0078 §13)",
+    ).toBe("org_edit");
+  },
+);
+
+When(
+  "the first run-scoped identity applies the same sharing to the folder's reports again",
+  async ({ request }) => {
+    const res = await request.post(`/api/v1/folders/${folderId}/reports/sharing`, {
+      headers: {
+        Authorization: `Bearer ${firstSession.jwt}`,
+        "Content-Type": "application/json",
+      },
+      data: { sharing: "org_edit" },
+    });
+    reapplyOutcome = (await expectJson(
+      res,
+      200,
+      "folder bulk apply, applied a second time",
+    )) as SharingApplyBody;
+  },
+);
+
+Then(
+  "every report in the folder is skipped as already shared with your org to view and edit",
+  async () => {
+    // THE GENUINE SKIP — which is what the escalation above is NOT, and the
+    // case that keeps the reason strings covered end to end. Both reports are
+    // now AT the target state, so the candidate rule declines both and names
+    // WHICH org state each is already in.
+    const skipped = reapplyOutcome.skipped ?? [];
+    for (const { label, slug } of [
+      { label: "the escalated report", slug: firstBody.slug },
+      { label: "the once-private report", slug: privateBody.slug },
+    ]) {
+      expect(
+        skipped.find((s) => s.slug === slug)?.reason,
+        `${label} must be skipped with the domain's own sentence, which names the org state it ` +
+          "is already in — a single reason covering org_view and org_edit alike is what let a " +
+          "refusal read as a success",
+      ).toBe(ALREADY_AT_ORG_EDIT);
+    }
+    expect(skipped, "both of the folder's reports must be named back").toHaveLength(2);
+    expect(
+      reapplyOutcome.changed ?? [],
+      "a second identical apply must change nothing — a report at the target state is not a " +
+        "candidate",
+    ).toHaveLength(0);
+    expect(reapplyOutcome.failed ?? [], "nothing should have failed").toHaveLength(0);
   },
 );
 
