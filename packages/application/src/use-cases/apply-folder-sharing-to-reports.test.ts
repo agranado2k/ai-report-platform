@@ -53,7 +53,7 @@ async function seed() {
     // The repository must read the SAME org-write store the use case writes,
     // or its `hasOrgWrite` projection is permanently false and the candidate
     // rule can never see an `org_edit` report as one.
-    reports: new InMemoryReportRepository(grantDeps.grants, grantDeps.orgWriteGrants, orgA),
+    reports: new InMemoryReportRepository(grantDeps.grants, grantDeps.orgWriteGrants),
     folders,
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
     orgWriteGrants: grantDeps.orgWriteGrants,

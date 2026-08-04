@@ -54,9 +54,20 @@ export interface ReportRepositoryContractHarness {
    *  same semantics as `WriteGrantStore.grant`. */
   grantWrite(reportId: ReportId, granteeEmail: string, granteeUserId: UserId | null): Promise<void>;
   /** Record an ORG-WIDE write grant (ADR-0078 §1) visible to the same
-   *  predicate — same semantics as `OrgWriteGrantStore.grant`, for the org the
-   *  harness's fixtures live in. */
-  grantOrgWrite(reportId: ReportId): Promise<void>;
+   *  predicate — same semantics as `OrgWriteGrantStore.grant`.
+   *
+   *  `orgId` is REQUIRED, not defaulted to the harness's own org. The whole
+   *  safety property of this leg is that the row's stored `org_id` is matched
+   *  against the SEARCHED org (§1, §8), and a hook that could only ever write
+   *  the matching org made the cross-org NON-listing case structurally
+   *  inexpressible — which is how the in-memory fake came to drop the org
+   *  comparison entirely while the SQL kept it. */
+  grantOrgWrite(reportId: ReportId, orgId: OrgId): Promise<void>;
+  /** A DIFFERENT, really-existing org id — the stale/foreign `org_id` an
+   *  org-write row must fail to match. Real in both implementations (the
+   *  adapter's `org_id` is an FK), so the cross-org case is a genuine row and
+   *  not a fabricated value the DB would have rejected. */
+  readonly foreignOrgId: OrgId;
   /** A fresh Report aggregate (one pending version) bound to the harness's
    *  seeded org/folder/user — id/slug/title default to a unique auto-generated
    *  value each call, and are overridable so a test can build several
@@ -215,7 +226,7 @@ export function describeReportRepositoryContract(
       const r = h.makeReport({ slug: "sum0000001", title: "Projected" });
       await h.repo.save(r);
       await h.repo.setAcl(r.id, { mode: "org" });
-      await h.grantOrgWrite(r.id);
+      await h.grantOrgWrite(r.id, h.orgId);
       const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 50 });
       const item = page.ok ? page.value.items.find((i) => i.title === "Projected") : undefined;
       expect(item).toMatchObject({ ownerId: h.owner.userId, aclMode: "org", hasOrgWrite: true });
@@ -326,7 +337,7 @@ export function describeReportRepositoryContract(
     it("visibility: an ORG write grant lists an otherwise-private report for a same-org colleague", async () => {
       const r = h.makeReport({ slug: "vis0000051", title: "Org-writable" });
       await h.repo.save(r); // no acls row = private by default
-      await h.grantOrgWrite(r.id);
+      await h.grantOrgWrite(r.id, h.orgId);
       expect(await titlesFor(h.colleague)).toContain("Org-writable");
     });
 
@@ -339,11 +350,35 @@ export function describeReportRepositoryContract(
       expect(await titlesFor(h.colleague)).not.toContain("No org write");
     });
 
+    it("visibility: an org-write row issued for ANOTHER org never lists the report", async () => {
+      // THE SAFETY PROPERTY OF THIS LEG (§1, §8): the row's own `org_id` is
+      // matched against the SEARCHED org, so a stale or foreign row fails the
+      // match rather than silently widening write — and listing — access. A
+      // fake that answered "a row exists" without comparing orgs would say
+      // LISTED here while production said hidden.
+      const r = h.makeReport({ slug: "vis0000054", title: "Foreign org write" });
+      await h.repo.save(r);
+      await h.grantOrgWrite(r.id, h.foreignOrgId);
+      expect(await titlesFor(h.colleague)).not.toContain("Foreign org write");
+    });
+
+    it("summary: a foreign-org write row does not badge the report as org-writable", async () => {
+      // The projection must agree with the predicate: a row that does not list
+      // the report cannot be the row that badges it `Org + edit`. The owner
+      // sees the report regardless (they own it), so this isolates the flag.
+      const r = h.makeReport({ slug: "vis0000055", title: "Foreign badge" });
+      await h.repo.save(r);
+      await h.grantOrgWrite(r.id, h.foreignOrgId);
+      const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 50 });
+      const row = page.ok ? page.value.items.find((i) => i.title === "Foreign badge") : undefined;
+      expect(row?.hasOrgWrite).toBe(false);
+    });
+
     it("visibility: the org-write leg survives alongside acl=org (the normal org_edit state)", async () => {
       const r = h.makeReport({ slug: "vis0000053", title: "Org edit" });
       await h.repo.save(r);
       await h.repo.setAcl(r.id, { mode: "org" });
-      await h.grantOrgWrite(r.id);
+      await h.grantOrgWrite(r.id, h.orgId);
       const titles = await titlesFor(h.colleague);
       // Listed exactly ONCE — the EXISTS probe must not fan the row out.
       expect(titles.filter((t) => t === "Org edit")).toHaveLength(1);

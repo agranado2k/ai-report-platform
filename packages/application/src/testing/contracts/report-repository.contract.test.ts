@@ -14,6 +14,9 @@ import {
 } from "./report-repository.contract";
 
 const ORG_ID = orgId("contract-org");
+// A different org the fixtures never live in — the "stale row" side of the
+// ADR-0078 org-write org match.
+const FOREIGN_ORG_ID = orgId("contract-other-org");
 const FOLDER_ID = folderId("contract-folder");
 const UPLOADER_ID = userId("contract-user");
 const COLLEAGUE_ID = userId("contract-colleague");
@@ -41,7 +44,7 @@ describeReportRepositoryContract("in-memory", async () => {
   const writeGrants = new InMemoryWriteGrantStore();
   // Same sharing, for the ADR-0078 org-write leg.
   const orgWriteGrants = new InMemoryOrgWriteGrantStore();
-  const repo = new InMemoryReportRepository(writeGrants, orgWriteGrants, ORG_ID);
+  const repo = new InMemoryReportRepository(writeGrants, orgWriteGrants);
   let seq = 0;
 
   return {
@@ -53,8 +56,9 @@ describeReportRepositoryContract("in-memory", async () => {
       const granted = await writeGrants.grant(reportId, granteeEmail, UPLOADER_ID, granteeUserId);
       if (!granted.ok) throw new Error(`grantWrite failed: ${granted.error.message}`);
     },
-    async grantOrgWrite(reportId) {
-      const granted = await orgWriteGrants.grant(reportId, ORG_ID, UPLOADER_ID);
+    foreignOrgId: FOREIGN_ORG_ID,
+    async grantOrgWrite(reportId, orgId) {
+      const granted = await orgWriteGrants.grant(reportId, orgId, UPLOADER_ID);
       if (!granted.ok) throw new Error(`grantOrgWrite failed: ${granted.error.message}`);
     },
     nextVersionId: versionIdFixture,

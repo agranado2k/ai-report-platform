@@ -220,14 +220,31 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
   /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg and
    *  `orgWriteGrants` the ADR-0078 org-write leg — share the SAME store
    *  instances the test grants through. Omitted = that leg never matches (fine
-   *  for tests not exercising grants). `viewerOrgId` is the org the org-write
-   *  leg matches against; the fake has no report→org join to consult, and the
-   *  real adapter's SQL restricts to the searched org anyway. */
+   *  for tests not exercising grants).
+   *
+   *  There is deliberately NO "viewer org" constructor parameter: the org an
+   *  org-write row is matched against is the org `searchByOrg` was CALLED with,
+   *  exactly as the adapter's SQL matches `report_org_write_grants.org_id`
+   *  against the searched org. A constructor-level org would be a second,
+   *  fake-only source of truth for the one comparison this leg exists to make. */
   constructor(
     private readonly writeGrants?: WriteGrantStore,
     private readonly orgWriteGrants?: OrgWriteGrantStore,
-    private readonly viewerOrgId?: OrgId,
   ) {}
+
+  /** Does an org-write row exist for this report, ISSUED FOR `org`?
+   *
+   *  The `org_id` comparison is the whole safety property of the ADR-0078 §8
+   *  leg (§1: "a stale row must fail the match, never widen it"), so it lives
+   *  in ONE place that both the visibility predicate and the listing projection
+   *  call. They previously asked separately and disagreed: the predicate
+   *  compared orgs, the projection asked only whether a row existed — so a
+   *  foreign-org row hid the report and simultaneously badged it `Org + edit`. */
+  private async hasOrgWriteFor(id: ReportId, org: OrgId): Promise<boolean> {
+    if (!this.orgWriteGrants) return false;
+    const found = await this.orgWriteGrants.find(id);
+    return found.ok && found.value !== null && found.value.orgId === org;
+  }
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -242,7 +259,7 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
    *  broadly shared (`org`/`public`) OR write-granted (userId-or-email match,
    *  ADR-0060 §2) OR org-write-granted (ADR-0078 §8). Anything else is
    *  invisible — existence is private. */
-  private async isVisibleTo(r: Report, viewer: ReportViewer): Promise<boolean> {
+  private async isVisibleTo(r: Report, viewer: ReportViewer, org: OrgId): Promise<boolean> {
     if (r.ownerId === viewer.userId) return true;
     if (r.acl.mode === "org" || r.acl.mode === "public") return true;
     if (this.writeGrants) {
@@ -253,15 +270,9 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       if (grant.ok && grant.value !== null) return true;
     }
     // ADR-0078 §8: an org-write row lists the report for members of the org it
-    // was issued for, even if the acl never made it broadly readable (a
+    // was ISSUED FOR, even if the acl never made it broadly readable (a
     // combination only the API can produce — see the contract matrix).
-    if (this.orgWriteGrants) {
-      const orgGrant = await this.orgWriteGrants.find(r.id);
-      if (orgGrant.ok && orgGrant.value !== null) {
-        return orgGrant.value.orgId === (this.viewerOrgId ?? r.orgId);
-      }
-    }
-    return false;
+    return this.hasOrgWriteFor(r.id, org);
   }
 
   async searchByOrg(
@@ -280,12 +291,11 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       );
     const visible: Report[] = [];
     for (const r of matched) {
-      if (await this.isVisibleTo(r, viewer)) visible.push(r);
+      if (await this.isVisibleTo(r, viewer, orgId)) visible.push(r);
     }
     const { items, hasMore } = keysetPage(visible, q); // keyset on id DESC (ADR-0053)
     const summaries: ReportSummary[] = [];
     for (const r of items) {
-      const orgGrant = this.orgWriteGrants ? await this.orgWriteGrants.find(r.id) : null;
       summaries.push({
         id: r.id,
         slug: r.slug,
@@ -294,7 +304,7 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
         folderId: r.folderId,
         ownerId: r.ownerId,
         aclMode: r.acl.mode,
-        hasOrgWrite: orgGrant !== null && orgGrant.ok && orgGrant.value !== null,
+        hasOrgWrite: await this.hasOrgWriteFor(r.id, orgId),
       });
     }
     return ok({ items: summaries, hasMore });

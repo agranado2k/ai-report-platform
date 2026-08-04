@@ -7,7 +7,7 @@ import { describeReportRepositoryContract } from "arp-application/testing";
 import { createReport, makeSlug, reportId, versionId } from "arp-domain";
 import { DrizzleOrgWriteGrantStore } from "./org-write-grant-store";
 import { DrizzleReportRepository } from "./report-repository";
-import { makeTestDb, seedColleague, seedIdentity } from "./testing/pglite";
+import { makeTestDb, seedColleague, seedIdentity, seedSecondOrg } from "./testing/pglite";
 import { DrizzleWriteGrantStore } from "./write-grant-store";
 
 function slugFor(n: number): string {
@@ -29,6 +29,9 @@ describeReportRepositoryContract("drizzle+pglite", async () => {
   const tdb = await makeTestDb();
   const ids = await seedIdentity(tdb.ctx);
   const colleague = await seedColleague(tdb.ctx);
+  // A REAL second org — `report_org_write_grants.org_id` is an FK, so the
+  // foreign-org case cannot be faked with an unused uuid.
+  const foreignOrgId = await seedSecondOrg(tdb.ctx);
   const repo = new DrizzleReportRepository(tdb.ctx);
   // Grants land in the real report_write_grants table — exactly what the
   // adapter's ADR-0075 visibility EXISTS subquery reads.
@@ -48,8 +51,9 @@ describeReportRepositoryContract("drizzle+pglite", async () => {
       const granted = await writeGrants.grant(reportId, granteeEmail, ids.userId, granteeUserId);
       if (!granted.ok) throw new Error(`grantWrite failed: ${granted.error.message}`);
     },
-    async grantOrgWrite(reportId) {
-      const granted = await orgWriteGrants.grant(reportId, ids.orgId, ids.userId);
+    foreignOrgId,
+    async grantOrgWrite(reportId, orgId) {
+      const granted = await orgWriteGrants.grant(reportId, orgId, ids.userId);
       if (!granted.ok) throw new Error(`grantOrgWrite failed: ${granted.error.message}`);
     },
     nextVersionId() {
