@@ -75,6 +75,7 @@ export async function reassembleAndSaveEditedVersion(
 ): Promise<Result<UploadOutcome, AppError>> {
   const found = await loadWritableReport(deps.reports, actor, slug, {
     grants: deps.grants,
+    orgWriteGrants: deps.orgWriteGrants,
     identities: deps.identities,
   });
   if (!found.ok) return found;

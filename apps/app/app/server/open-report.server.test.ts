@@ -8,8 +8,8 @@
 // learns whether the report exists.
 import {
   InMemoryIdentityStore,
-  InMemoryReportRepository,
   InMemoryOrgWriteGrantStore,
+  InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "arp-application/testing";
 import {
@@ -63,6 +63,7 @@ function makeDeps(
   reports: InMemoryReportRepository,
   writeGrant: {
     readonly grants: InMemoryWriteGrantStore;
+    readonly orgWriteGrants: InMemoryOrgWriteGrantStore;
     readonly identities: InMemoryIdentityStore;
   } = {
     grants: new InMemoryWriteGrantStore(),
@@ -124,7 +125,11 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     const identities = new InMemoryIdentityStore();
     identities.seedUser(GRANTEE, "grantee@x.com");
     await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
+    const { deps, logged } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
 
     const location = await ownerOpenLocation(deps, {
       actor: { orgId: ORG, userId: GRANTEE },
@@ -204,7 +209,11 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     const identities = new InMemoryIdentityStore();
     identities.seedUser(GRANTEE, "grantee@x.com");
     await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
+    const { deps, logged } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
 
     const location = await ownerOpenLocation(deps, {
       actor: { orgId: ORG, userId: GRANTEE },

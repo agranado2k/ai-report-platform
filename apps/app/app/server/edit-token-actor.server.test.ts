@@ -6,6 +6,7 @@
 // canWrite LIVE, not just trust the token's signature.
 import {
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "arp-application/testing";
@@ -73,7 +74,7 @@ function makeDeps(
 ) {
   return {
     reports,
-    writeGrant: { grants, identities },
+    writeGrant: { grants, identities, orgWriteGrants: new InMemoryOrgWriteGrantStore() },
     secret,
     nowSeconds: () => NOW_SECONDS,
   };
@@ -293,7 +294,7 @@ describe("resolveEditTokenActor (ADR-0063 — the edit-token trust boundary)", (
     const token = mintEditToken("pppppppppp", OWNER, 900, SECRET, NOW_SECONDS);
     const actor = await resolveEditTokenActor(bearerRequest(token), "pppppppppp", {
       reports,
-      writeGrant: { grants, identities },
+      writeGrant: { grants, identities, orgWriteGrants: new InMemoryOrgWriteGrantStore() },
       secret: undefined, // explicitly undefined — not routed through makeDeps's default param
       nowSeconds: () => NOW_SECONDS,
     });

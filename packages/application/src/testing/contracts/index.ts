@@ -6,6 +6,7 @@ export * from "./folder-share-store.contract";
 export * from "./grant-store.contract";
 export * from "./idempotency-store.contract";
 export * from "./identity-store.contract";
+export * from "./org-write-grant-store.contract";
 export * from "./report-repository.contract";
 export * from "./set-acl-grant-pruning.contract";
 export * from "./unit-of-work.contract";

@@ -18,6 +18,7 @@ export * from "./grant-store";
 export * from "./idempotency-store";
 export * from "./identity-store";
 export * from "./nonce-store";
+export * from "./org-write-grant-store";
 export * from "./password-hasher";
 export * from "./pg-boss";
 export * from "./pg-boss-scan-queue";

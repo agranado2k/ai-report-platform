@@ -216,10 +216,17 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
   private readonly versionUploadedAt = new Map<string, number>();
   private uploadSeq = 0;
 
-  /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg —
-   *  share the SAME store instance the test grants through. Omitted = the
-   *  grant leg never matches (fine for tests not exercising grants). */
-  constructor(private readonly writeGrants?: WriteGrantStore) {}
+  /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg and
+   *  `orgWriteGrants` the ADR-0078 org-write leg — share the SAME store
+   *  instances the test grants through. Omitted = that leg never matches (fine
+   *  for tests not exercising grants). `viewerOrgId` is the org the org-write
+   *  leg matches against; the fake has no report→org join to consult, and the
+   *  real adapter's SQL restricts to the searched org anyway. */
+  constructor(
+    private readonly writeGrants?: WriteGrantStore,
+    private readonly orgWriteGrants?: OrgWriteGrantStore,
+    private readonly viewerOrgId?: OrgId,
+  ) {}
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -232,16 +239,28 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
 
   /** The ADR-0075 visibility predicate — mirrors the adapter's SQL: owned OR
    *  broadly shared (`org`/`public`) OR write-granted (userId-or-email match,
-   *  ADR-0060 §2). Anything else is invisible — existence is private. */
+   *  ADR-0060 §2) OR org-write-granted (ADR-0078 §8). Anything else is
+   *  invisible — existence is private. */
   private async isVisibleTo(r: Report, viewer: ReportViewer): Promise<boolean> {
     if (r.ownerId === viewer.userId) return true;
     if (r.acl.mode === "org" || r.acl.mode === "public") return true;
-    if (!this.writeGrants) return false;
-    const grant = await this.writeGrants.findFor(r.id, {
-      userId: viewer.userId,
-      email: viewer.email,
-    });
-    return grant.ok && grant.value !== null;
+    if (this.writeGrants) {
+      const grant = await this.writeGrants.findFor(r.id, {
+        userId: viewer.userId,
+        email: viewer.email,
+      });
+      if (grant.ok && grant.value !== null) return true;
+    }
+    // ADR-0078 §8: an org-write row lists the report for members of the org it
+    // was issued for, even if the acl never made it broadly readable (a
+    // combination only the API can produce — see the contract matrix).
+    if (this.orgWriteGrants) {
+      const orgGrant = await this.orgWriteGrants.find(r.id);
+      if (orgGrant.ok && orgGrant.value !== null) {
+        return orgGrant.value.orgId === (this.viewerOrgId ?? r.orgId);
+      }
+    }
+    return false;
   }
 
   async searchByOrg(

@@ -53,6 +53,10 @@ export interface ReportRepositoryContractHarness {
   /** Record a write grant (ADR-0060) visible to the repo's search predicate —
    *  same semantics as `WriteGrantStore.grant`. */
   grantWrite(reportId: ReportId, granteeEmail: string, granteeUserId: UserId | null): Promise<void>;
+  /** Record an ORG-WIDE write grant (ADR-0078 §1) visible to the same
+   *  predicate — same semantics as `OrgWriteGrantStore.grant`, for the org the
+   *  harness's fixtures live in. */
+  grantOrgWrite(reportId: ReportId): Promise<void>;
   /** A fresh Report aggregate (one pending version) bound to the harness's
    *  seeded org/folder/user — id/slug/title default to a unique auto-generated
    *  value each call, and are overridable so a test can build several
@@ -284,8 +288,42 @@ export function describeReportRepositoryContract(
       expect(await titlesFor(h.colleague)).not.toContain("Granted elsewhere");
     });
 
+    // ── The ADR-0078 org-write leg ─────────────────────────────────────────
+    // In the three states the sharing control produces, this leg is redundant:
+    // `org_edit` always implies acl=org, which the broad-share leg already
+    // catches. It exists because the API can produce an org-write row on a
+    // report that is NOT acl=org (the grant and the Acl are separate
+    // resources), and a listing that hid a report the viewer can EDIT would be
+    // dishonest in exactly the way ADR-0075 exists to prevent.
+
+    it("visibility: an ORG write grant lists an otherwise-private report for a same-org colleague", async () => {
+      const r = h.makeReport({ slug: "vis0000051", title: "Org-writable" });
+      await h.repo.save(r); // no acls row = private by default
+      await h.grantOrgWrite(r.id);
+      expect(await titlesFor(h.colleague)).toContain("Org-writable");
+    });
+
+    it("visibility: an org-write report the viewer cannot edit is still not conjured from nothing", async () => {
+      // The control: an otherwise-identical report WITHOUT the row stays
+      // invisible, so the assertion above is testing the leg and not the
+      // fixture.
+      const r = h.makeReport({ slug: "vis0000052", title: "No org write" });
+      await h.repo.save(r);
+      expect(await titlesFor(h.colleague)).not.toContain("No org write");
+    });
+
+    it("visibility: the org-write leg survives alongside acl=org (the normal org_edit state)", async () => {
+      const r = h.makeReport({ slug: "vis0000053", title: "Org edit" });
+      await h.repo.save(r);
+      await h.repo.setAcl(r.id, { mode: "org" });
+      await h.grantOrgWrite(r.id);
+      const titles = await titlesFor(h.colleague);
+      // Listed exactly ONCE — the EXISTS probe must not fan the row out.
+      expect(titles.filter((t) => t === "Org edit")).toHaveLength(1);
+    });
+
     it("hasReportsInFolder reflects live reports only — org-scoped, not visibility-scoped", async () => {
-      const r = h.makeReport({ slug: "vis0000051", title: "Occupant" });
+      const r = h.makeReport({ slug: "vis0000061", title: "Occupant" });
       // Empty before any save.
       const before = await h.repo.hasReportsInFolder(h.orgId, r.folderId);
       expect(before.ok && before.value).toBe(false);

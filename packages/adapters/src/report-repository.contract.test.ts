@@ -5,6 +5,7 @@
 // per test (matches the other *.integration.test.ts files in this package).
 import { describeReportRepositoryContract } from "arp-application/testing";
 import { createReport, makeSlug, reportId, versionId } from "arp-domain";
+import { DrizzleOrgWriteGrantStore } from "./org-write-grant-store";
 import { DrizzleReportRepository } from "./report-repository";
 import { makeTestDb, seedColleague, seedIdentity } from "./testing/pglite";
 import { DrizzleWriteGrantStore } from "./write-grant-store";
@@ -32,6 +33,9 @@ describeReportRepositoryContract("drizzle+pglite", async () => {
   // Grants land in the real report_write_grants table — exactly what the
   // adapter's ADR-0075 visibility EXISTS subquery reads.
   const writeGrants = new DrizzleWriteGrantStore(tdb.ctx);
+  // Org-write rows land in the real report_org_write_grants table — what the
+  // adapter's ADR-0078 EXISTS subquery reads.
+  const orgWriteGrants = new DrizzleOrgWriteGrantStore(tdb.ctx);
   let seq = 0;
   let versionSeq = 0;
 
@@ -43,6 +47,10 @@ describeReportRepositoryContract("drizzle+pglite", async () => {
     async grantWrite(reportId, granteeEmail, granteeUserId) {
       const granted = await writeGrants.grant(reportId, granteeEmail, ids.userId, granteeUserId);
       if (!granted.ok) throw new Error(`grantWrite failed: ${granted.error.message}`);
+    },
+    async grantOrgWrite(reportId) {
+      const granted = await orgWriteGrants.grant(reportId, ids.orgId, ids.userId);
+      if (!granted.ok) throw new Error(`grantOrgWrite failed: ${granted.error.message}`);
     },
     nextVersionId() {
       versionSeq += 1;

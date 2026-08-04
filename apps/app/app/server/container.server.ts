@@ -19,6 +19,7 @@ import {
   DrizzleGrantStore,
   DrizzleIdempotencyStore,
   DrizzleIdentityStore,
+  DrizzleOrgWriteGrantStore,
   DrizzleReportRepository,
   DrizzleScanQueue,
   DrizzleUnitOfWork,
@@ -45,6 +46,7 @@ import type {
   HandleUserDeletedDeps,
   IdentityStore,
   NonceStore,
+  OrgWriteGrantStore,
   ProvisionIdentityDeps,
   UploadReportDeps,
   WriteGrantStore,
@@ -161,6 +163,17 @@ export function writeGrantStore(): WriteGrantStore {
   return _writeGrants;
 }
 
+let _orgWriteGrants: DrizzleOrgWriteGrantStore | undefined;
+/** The ORG-WIDE write grant store (ADR-0078 §1) — the third leg of the
+ *  `canWrite` seam. Deliberately a separate accessor from `writeGrantStore()`:
+ *  the two answer different questions ("may this PERSON edit?" vs "may anyone
+ *  in this ORG edit?") and naming them apart is what stops one being wired
+ *  where the other was meant, the way `setAcl`'s two `grants` already are. */
+export function orgWriteGrantStore(): OrgWriteGrantStore {
+  if (!_orgWriteGrants) _orgWriteGrants = new DrizzleOrgWriteGrantStore(context());
+  return _orgWriteGrants;
+}
+
 let _folderShares: DrizzleFolderShareStore | undefined;
 /** The folder-share store (ADR-0076) — per-folder visibility shares; backs the
  *  folder visibility predicate's share leg + the share/unshare/list use cases. */
@@ -220,7 +233,11 @@ export function deps(): UploadReportDeps {
     hasher: new Sha256Hasher(),
     uow: new DrizzleUnitOfWork(ctx),
     grants: writeGrantStore(),
+    orgWriteGrants: orgWriteGrantStore(),
     identities: identityStore(),
+    // The upload pipeline reads the DESTINATION folder to derive a new
+    // report's initial sharing (ADR-0078 §6).
+    folders: folderRepo(),
   };
   return _deps;
 }
@@ -389,11 +406,13 @@ export function ops() {
     getReport: bind2(getReport, {
       reports: d.reports,
       grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       identities: identityStore(),
     }),
     renameReport: bind2(renameReport, {
       reports: d.reports,
       grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
@@ -407,6 +426,7 @@ export function ops() {
     }),
     moveReport: bind2(moveReport, {
       reports: d.reports,
+      orgWriteGrants: orgWriteGrantStore(),
       folders: folderRepo(),
       grants: writeGrantStore(),
       folderShares: folderShareStore(),
@@ -487,6 +507,7 @@ export function ops() {
     grantWrite: bind2(grantWrite, {
       reports: d.reports,
       grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,

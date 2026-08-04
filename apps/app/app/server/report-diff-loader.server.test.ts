@@ -100,6 +100,7 @@ describe("loadReportDiff", () => {
         reports: deps.reports,
         blobs: deps.blobs,
         grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
         identities: deps.identities,
       },
       { orgId: ORG, userId: OWNER },
@@ -125,6 +126,7 @@ describe("loadReportDiff", () => {
         reports: deps.reports,
         blobs: deps.blobs,
         grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
         identities: deps.identities,
       },
       { orgId: ORG, userId: OWNER },
@@ -148,6 +150,7 @@ describe("loadReportDiff", () => {
         reports: deps.reports,
         blobs: deps.blobs,
         grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
         identities: deps.identities,
       },
       { orgId: ORG, userId: OWNER },
@@ -169,6 +172,7 @@ describe("loadReportDiff", () => {
         reports: deps.reports,
         blobs: deps.blobs,
         grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
         identities: deps.identities,
       },
       { orgId: outsiderOrg, userId: OUTSIDER },
@@ -190,7 +194,11 @@ describe("loadReportDiff", () => {
     });
     const editActor = await resolveEditTokenActor(request, reportSlug, {
       reports: deps.reports,
-      writeGrant: { grants: deps.grants, identities: deps.identities },
+      writeGrant: {
+        grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
+        identities: deps.identities,
+      },
       secret: SECRET,
       nowSeconds: () => NOW_SECONDS,
     });
@@ -202,6 +210,7 @@ describe("loadReportDiff", () => {
         reports: deps.reports,
         blobs: deps.blobs,
         grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
         identities: deps.identities,
       },
       { orgId: editActor.orgId, userId: editActor.userId },

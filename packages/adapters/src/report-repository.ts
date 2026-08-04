@@ -11,7 +11,13 @@ import type {
   ReportViewer,
   VersionPage,
 } from "arp-application";
-import { acls, reports, reportVersions, reportWriteGrants } from "arp-db/schema";
+import {
+  acls,
+  reportOrgWriteGrants,
+  reports,
+  reportVersions,
+  reportWriteGrants,
+} from "arp-db/schema";
 import {
   type Acl,
   type AppError,
@@ -178,13 +184,15 @@ export class DrizzleReportRepository implements ReportRepository {
     // `ending_before` pages back (id > cursor, fetched ASC then reversed). Optional
     // folder filter + literal title/slug substring search.
     //
-    // Visibility (ADR-0075): within the org scope, a row is listed ONLY when
-    // the viewer owns it, its acl mode shares it broadly (`org`/`public` — no
-    // acls row = `private`, the private-by-default), or the viewer holds a
-    // write grant on it (userId-or-normalized-email match, the same semantics
-    // as `hasWriteGrant`/`WriteGrantStore.findFor`, ADR-0060 §2). Other
-    // owners' private/password/allowlist reports are absent entirely —
-    // existence is private, not just content.
+    // Visibility (ADR-0075, extended by ADR-0078 §8): within the org scope, a
+    // row is listed ONLY when the viewer owns it, its acl mode shares it
+    // broadly (`org`/`public` — no acls row = `private`, the
+    // private-by-default), the viewer holds a write grant on it
+    // (userId-or-normalized-email match, the same semantics as
+    // `hasWriteGrant`/`WriteGrantStore.findFor`, ADR-0060 §2), or the report
+    // carries an ORG-WIDE write grant issued for this org. Other owners'
+    // private/password/allowlist reports are absent entirely — existence is
+    // private, not just content.
     try {
       const db = this.ctx.current();
       const normalizedEmail = viewer.email ? normalizeEmailAddress(viewer.email) : undefined;
@@ -200,6 +208,25 @@ export class DrizzleReportRepository implements ReportRepository {
             .select({ one: sql`1` })
             .from(reportWriteGrants)
             .where(and(eq(reportWriteGrants.reportId, reports.id), grantMatch)),
+        ),
+        // ADR-0078 §8 — the org-write leg. Redundant in the three states the
+        // sharing control produces (`org_edit` always implies acl=org, caught
+        // above), but the API can grant org write on a report that is NOT
+        // acl=org, and a list that hid a report the viewer can EDIT would be
+        // dishonest in exactly the way ADR-0075 exists to prevent. The row's
+        // own `org_id` is matched against the SEARCHED org — a stale row must
+        // fail the match, never widen it, which is the same rule
+        // `hasOrgWriteGrant` applies on the authorization path.
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(reportOrgWriteGrants)
+            .where(
+              and(
+                eq(reportOrgWriteGrants.reportId, reports.id),
+                eq(reportOrgWriteGrants.orgId, org),
+              ),
+            ),
         ),
       );
       const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];

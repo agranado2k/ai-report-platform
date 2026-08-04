@@ -56,6 +56,7 @@ import {
   accessTokenSecret,
   deps,
   identityStore,
+  orgWriteGrantStore,
   writeGrantStore,
 } from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
@@ -89,6 +90,7 @@ const postHandler = handle({
       {
         reports: deps().reports,
         grants: writeGrantStore(),
+        orgWriteGrants: orgWriteGrantStore(),
         identities: identityStore(),
         secret,
         ttlSeconds: EDIT_TTL_SECONDS,

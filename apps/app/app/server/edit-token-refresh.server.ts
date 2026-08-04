@@ -59,10 +59,10 @@
 //       is independently revocable. See `resolvePresentedSession` below for
 //       how the route recovers which case it's in.
 import {
+  type CanWriteDeps,
   loadWritableReport,
   type ReportRepository,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "arp-application";
 import {
   type AppError,
@@ -136,7 +136,7 @@ export function resolvePresentedSession(
   return { kind: "edit-token", sessionStart: claims.sessionStart };
 }
 
-export interface RefreshEditTokenDeps extends WriteGrantCheckDeps {
+export interface RefreshEditTokenDeps extends CanWriteDeps {
   readonly reports: ReportRepository;
   /** The shared HMAC secret — the SAME one open-report.server.ts mints edit
    *  tokens under (`VIEW_ACCESS_TOKEN_SECRET` via `accessTokenSecret()`).

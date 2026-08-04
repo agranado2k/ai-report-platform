@@ -18,10 +18,10 @@
 // calls this at all, so it can never become a general Clerk bypass for
 // unrelated routes (e.g. /api/v1/keys).
 import {
+  type CanWriteDeps,
   loadWritableReport,
   type ReportRepository,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "arp-application";
 import { type FolderId, makeSlug, readEditToken, userId as toUserId } from "arp-domain";
 
@@ -37,7 +37,7 @@ export interface EditTokenActor extends TenancyActor {
 
 export interface EditTokenActorDeps {
   readonly reports: ReportRepository;
-  readonly writeGrant: WriteGrantCheckDeps;
+  readonly writeGrant: CanWriteDeps;
   /** The shared HMAC secret — the SAME one open-report.server.ts mints
    *  under. Undefined when private viewing isn't configured (previews/dev):
    *  then NO token is ever trusted, fail closed. */
