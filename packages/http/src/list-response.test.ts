@@ -101,6 +101,11 @@ describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
           title: "First",
           isPublished: true,
           folderId: folderId(F1),
+          // ADR-0078 listing projection — present on the summary, deliberately
+          // NOT on the wire (see the assertion below).
+          ownerId: userId(U1),
+          aclMode: "org" as const,
+          hasOrgWrite: true,
         },
       ],
       hasMore: false,
@@ -133,6 +138,9 @@ describe("searchReportsToHttp (Stripe list envelope, ADR-0053)", () => {
           title: "x",
           isPublished: false,
           folderId: folderId(F1),
+          ownerId: userId(U1),
+          aclMode: "private" as const,
+          hasOrgWrite: false,
         },
       ],
       hasMore: false,
@@ -267,5 +275,35 @@ describe("listReportVersionsToHttp (ADR-0065 list envelope)", () => {
     const res = listReportVersionsToHttp(err({ kind: "NotFound", message: "nope" }), CTX);
     expect(res.status).toBe(404);
     expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("the ADR-0078 listing projection stays OFF the wire", () => {
+  it("does not serialize ownerId / aclMode / hasOrgWrite into list items", () => {
+    // These three ride the internal ReportSummary so the DASHBOARD LOADER can
+    // decide, server-side, whether to enable a row's sharing control. Shipping
+    // them would put an authorization input in the client's hands and change
+    // the ADR-0053 list envelope at the same time.
+    const page: ReportPage = {
+      items: [
+        {
+          id: reportId(R1),
+          slug: slug("aaaaaaaaaa"),
+          title: "First",
+          isPublished: true,
+          folderId: folderId(F1),
+          ownerId: userId(U1),
+          aclMode: "org" as const,
+          hasOrgWrite: true,
+        },
+      ],
+      hasMore: false,
+    };
+    const res = searchReportsToHttp(ok(page), { mode: "prod" });
+    const json = JSON.stringify(res.body);
+    expect(json).not.toContain("ownerId");
+    expect(json).not.toContain("aclMode");
+    expect(json).not.toContain("hasOrgWrite");
+    expect(json).not.toContain(userIdToWire(userId(U1)));
   });
 });

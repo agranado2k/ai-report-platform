@@ -9,6 +9,7 @@
 
 import type {
   Acl,
+  AclMode,
   AppError,
   ClerkOrgId,
   ClerkUserId,
@@ -44,6 +45,23 @@ export interface ReportSummary {
   readonly title: string;
   readonly isPublished: boolean;
   readonly folderId: FolderId;
+  /** The owning user (ADR-0059). Carried so the dashboard can decide, in the
+   *  LOADER, whether to render this row's sharing control enabled — the
+   *  ownerId itself is never shipped to the client. */
+  readonly ownerId: UserId;
+  /** The report's `Acl` mode (ADR-0056) and whether it carries an Org write
+   *  grant (ADR-0078) — the two facts a sharing state is composed from.
+   *
+   *  These cost NOTHING extra to read: the listing query already LEFT JOINs
+   *  `acls` and already probes `report_org_write_grants` for its visibility
+   *  predicate. Fetching them per row instead would be an N+1 on the
+   *  dashboard's hot path — the compromise the folder sidebar had to make
+   *  (ADR-0076 amendment §5) and does not have to be repeated here.
+   *
+   *  They stay OFF the wire: `reportBody` picks its fields explicitly, so the
+   *  list envelope is unchanged (ADR-0053). */
+  readonly aclMode: AclMode;
+  readonly hasOrgWrite: boolean;
 }
 
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC

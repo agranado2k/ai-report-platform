@@ -205,6 +205,33 @@ export function describeReportRepositoryContract(
       expect(res.ok && res.value.items).toHaveLength(0);
     });
 
+    // ── The ADR-0078 listing projection ────────────────────────────────────
+    // `ownerId` / `aclMode` / `hasOrgWrite` ride the listing so the dashboard
+    // can badge every row without an N+1. They come from the join and the
+    // EXISTS the visibility predicate already needs, so both implementations
+    // must agree on them exactly.
+
+    it("summary: carries the owner, the acl mode and the org-write flag", async () => {
+      const r = h.makeReport({ slug: "sum0000001", title: "Projected" });
+      await h.repo.save(r);
+      await h.repo.setAcl(r.id, { mode: "org" });
+      await h.grantOrgWrite(r.id);
+      const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 50 });
+      const item = page.ok ? page.value.items.find((i) => i.title === "Projected") : undefined;
+      expect(item).toMatchObject({ ownerId: h.owner.userId, aclMode: "org", hasOrgWrite: true });
+    });
+
+    it("summary: a report with NO acls row projects as `private`, not as a missing mode", async () => {
+      // The private-by-default (ADR-0056), applied to the projection — a
+      // nullable join column reaching the UI as undefined would badge an
+      // owner's private report as nothing at all.
+      const r = h.makeReport({ slug: "sum0000002", title: "Bare" });
+      await h.repo.save(r);
+      const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 50 });
+      const item = page.ok ? page.value.items.find((i) => i.title === "Bare") : undefined;
+      expect(item).toMatchObject({ aclMode: "private", hasOrgWrite: false });
+    });
+
     // ── The ADR-0075 visibility matrix ─────────────────────────────────────
     // Fixture owner = h.owner; viewer under test = h.colleague (same org,
     // owns nothing). "Visible" = the row is in the page; "invisible" = the

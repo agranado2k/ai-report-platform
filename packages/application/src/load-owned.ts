@@ -95,9 +95,15 @@ const REPORT_ORG_MESSAGES: OwnedGuardMessages = {
   notAllowed: "report is not in your org",
 };
 
+/** The 403 `loadOwnedReport` returns for a report someone else owns. Exported
+ *  because the dashboard renders the SERVER's reason on a disabled sharing
+ *  control rather than inventing a client-side phrasing (ADR-0078 §7, the
+ *  `FOLDER_NOT_MANAGEABLE` precedent). */
+export const SETTING_SHARING_NOT_OWNER = "you do not own this report";
+
 const REPORT_OWNER_MESSAGES: OwnedGuardMessages = {
   notFound: "report not found",
-  notAllowed: "you do not own this report",
+  notAllowed: SETTING_SHARING_NOT_OWNER,
 };
 
 const REPORT_WRITE_MESSAGES: OwnedGuardMessages = {

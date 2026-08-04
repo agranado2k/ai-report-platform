@@ -77,6 +77,7 @@ import type {
   ReportPage,
   ReportRepository,
   ReportSearchQuery,
+  ReportSummary,
   ReportVersionSummary,
   ReportViewer,
   ScanJobMessage,
@@ -282,16 +283,21 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       if (await this.isVisibleTo(r, viewer)) visible.push(r);
     }
     const { items, hasMore } = keysetPage(visible, q); // keyset on id DESC (ADR-0053)
-    return ok({
-      items: items.map((r) => ({
+    const summaries: ReportSummary[] = [];
+    for (const r of items) {
+      const orgGrant = this.orgWriteGrants ? await this.orgWriteGrants.find(r.id) : null;
+      summaries.push({
         id: r.id,
         slug: r.slug,
         title: r.title,
         isPublished: r.liveVersionId !== null,
         folderId: r.folderId,
-      })),
-      hasMore,
-    });
+        ownerId: r.ownerId,
+        aclMode: r.acl.mode,
+        hasOrgWrite: orgGrant !== null && orgGrant.ok && orgGrant.value !== null,
+      });
+    }
+    return ok({ items: summaries, hasMore });
   }
 
   async hasReportsInFolder(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>> {

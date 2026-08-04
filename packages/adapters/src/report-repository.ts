@@ -20,6 +20,7 @@ import {
 } from "arp-db/schema";
 import {
   type Acl,
+  type AclMode,
   type AppError,
   DEFAULT_ACCESS_TTL_SECONDS,
   DEFAULT_ACL,
@@ -247,6 +248,10 @@ export class DrizzleReportRepository implements ReportRepository {
       if (q.startingAfter) filters.push(lt(reports.id, q.startingAfter));
       if (q.endingBefore) filters.push(gt(reports.id, q.endingBefore));
 
+      // `ownerId` / `aclMode` / `hasOrgWrite` ride along at zero cost: the
+      // join and the EXISTS are already there for the visibility predicate
+      // above. Selecting them here is what lets the dashboard badge every row
+      // accurately instead of paying an N+1 per row (ADR-0078 §7).
       const rows = await db
         .select({
           id: reports.id,
@@ -254,6 +259,19 @@ export class DrizzleReportRepository implements ReportRepository {
           title: reports.title,
           liveVersionId: reports.liveVersionId,
           folderId: reports.folderId,
+          ownerId: reports.ownerId,
+          aclMode: acls.mode,
+          hasOrgWrite: exists(
+            db
+              .select({ one: sql`1` })
+              .from(reportOrgWriteGrants)
+              .where(
+                and(
+                  eq(reportOrgWriteGrants.reportId, reports.id),
+                  eq(reportOrgWriteGrants.orgId, org),
+                ),
+              ),
+          ),
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.
@@ -272,6 +290,11 @@ export class DrizzleReportRepository implements ReportRepository {
           title: r.title,
           isPublished: r.liveVersionId !== null,
           folderId: folderId(r.folderId),
+          ownerId: userId(r.ownerId),
+          // No `acls` row = private (the private-by-default, ADR-0056) — the
+          // same fallback `rowToAcl` applies to the single-report read.
+          aclMode: (r.aclMode ?? "private") as AclMode,
+          hasOrgWrite: r.hasOrgWrite === true,
         })),
         hasMore,
       });

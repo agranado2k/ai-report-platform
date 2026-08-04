@@ -34,6 +34,7 @@ import {
   type ReportSharingState,
   type Result,
   type SharingDirection,
+  type Slug,
   sharingCandidacy,
   validationError,
 } from "arp-domain";
@@ -150,22 +151,13 @@ export async function applyFolderSharingToReports(
 
   for (const summary of listed.value.items) {
     const entry: SharingApplyEntry = { slug: summary.slug, title: summary.title };
-    // The candidate rule needs the OWNER and the CURRENT mode, and the lean
-    // list projection carries neither (ReportSummary is deliberately lean —
-    // widening it would push owner/acl onto the wire's list shape).
-    const full = await deps.reports.findById(summary.id);
-    if (!full.ok) {
-      failed.push({ ...entry, reason: full.error.message });
-      continue;
-    }
-    if (!full.value || full.value.deletedAt !== null) {
-      // Raced with a delete between the listing and now. Not a candidate, and
-      // not a failure of anything the operator did.
-      skipped.push({ ...entry, reason: "no longer available" });
-      continue;
-    }
+    // The candidate rule needs the OWNER and the CURRENT mode, and the listing
+    // projection carries both (ADR-0078 §7) — read from the join the
+    // visibility predicate was already paying for, so classifying N reports
+    // costs no extra round trips. It is only a FILTER: the authoritative gate
+    // is still setReportSharing's own owner check, re-run per report below.
     const candidacy = sharingCandidacy(
-      { ownerId: full.value.ownerId, aclMode: full.value.acl.mode },
+      { ownerId: summary.ownerId, aclMode: summary.aclMode },
       actor.userId,
       direction,
     );
@@ -179,7 +171,7 @@ export async function applyFolderSharingToReports(
     // so there is nothing here that could need confirming, and passing it would
     // turn a bulk action into a bulk discard.
     const applied = await setReportSharing(deps, actor, {
-      slug: full.value.slug,
+      slug: summary.slug as Slug,
       sharing: input.sharing,
     });
     if (applied.ok) changed.push(entry);

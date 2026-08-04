@@ -52,6 +52,18 @@ export interface FolderNode {
    *  from `shares === null` (never asked for): an error must not render as
    *  "not shared with anyone". */
   readonly sharesUnavailable: boolean;
+  /** The ADR-0078 bulk apply, for the ONE folder being managed (`?manage=`).
+   *  Null everywhere else: counting the reports in every sidebar folder would
+   *  be an N+1 on the dashboard's hot path, and an uncounted offer would have
+   *  to say "the reports inside" without knowing whether there are any. */
+  readonly reportSharing: {
+    /** How many reports in this folder THIS viewer can see — which is exactly
+     *  the scope the action will walk. */
+    readonly visibleCount: number;
+    /** True when the folder holds more than one change may cover; the panel
+     *  explains instead of offering. */
+    readonly overCap: boolean;
+  } | null;
   /** The identity of this folder's sharing forms — changes whenever an action
    *  actually moved its visibility or its roster, which remounts the forms so
    *  a cascade tick or a submitted address cannot survive into the next state
@@ -86,6 +98,7 @@ export function FolderTree({
   manageHref,
   inertShareNotice,
   rosterUnavailableNotice,
+  personShareLimitNotice,
   openMenuId,
 }: {
   node: FolderNode;
@@ -96,6 +109,7 @@ export function FolderTree({
   manageHref: (folderId: string) => string;
   inertShareNotice: string;
   rosterUnavailableNotice: string;
+  personShareLimitNotice: string;
   /** The folder whose kebab should render already open — the one being
    *  managed, or the one the last action reported on. */
   openMenuId: string | null;
@@ -137,6 +151,7 @@ export function FolderTree({
               manageHref={manageHref(node.id)}
               inertShareNotice={inertShareNotice}
               rosterUnavailableNotice={rosterUnavailableNotice}
+              personShareLimitNotice={personShareLimitNotice}
               open={openMenuId === node.id}
             />
           </>
@@ -177,6 +192,7 @@ export function FolderTree({
           manageHref={manageHref}
           inertShareNotice={inertShareNotice}
           rosterUnavailableNotice={rosterUnavailableNotice}
+          personShareLimitNotice={personShareLimitNotice}
           openMenuId={openMenuId}
         />
       ))}
