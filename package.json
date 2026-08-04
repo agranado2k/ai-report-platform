@@ -25,6 +25,12 @@
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci"
   },
+  "pnpm": {
+    "overrides": {
+      "tar": "^7.5.22",
+      "ajv@8.6.3": "^8.20.0"
+    }
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@clerk/testing": "^2.2.5",

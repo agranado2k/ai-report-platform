@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@clerk/backend": "^2.33.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "arp-domain": "workspace:*",
     "arp-http": "workspace:*",
     "express": "^5.1.0",
@@ -21,7 +21,7 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "@types/supertest": "^6.0.0",
-    "esbuild": "^0.21.5",
+    "esbuild": "^0.25.12",
     "supertest": "^7.0.0",
     "typescript": "^5.6.3"
   },
