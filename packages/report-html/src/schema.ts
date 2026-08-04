@@ -1,11 +1,12 @@
 import { Schema } from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
-import { withClassStyle, withSafeHref } from "./schema/attrs.js";
+import { withClassStyle, withId, withSafeHref } from "./schema/attrs.js";
 import { chipMark } from "./schema/chip.js";
 import { detailsNode, resrowNode, summaryNode } from "./schema/details.js";
 import { htmlBlockNode } from "./schema/generic-block.js";
 import { blockLabelNode, chipsNode, rdNode, rtagsNode, rtNode } from "./schema/inline-content.js";
+import { withLinkTargetRel } from "./schema/link.js";
 import { htmlInlineMark, kbdMark, pillMark } from "./schema/marks.js";
 import { withParagraphVariant } from "./schema/paragraph.js";
 import {
@@ -71,13 +72,35 @@ const paragraphSpec = nodes.get("paragraph");
 if (!paragraphSpec) throw new Error("schema-basic's paragraph node spec is missing");
 nodes = nodes.update("paragraph", withParagraphVariant(paragraphSpec));
 
+// `id` retention (ADR-0062 Amendment 3) — the anchor half of "links behave
+// like links". Swept over EVERY node with a `toDOM`, so a new node spec added
+// later inherits it for free instead of quietly reintroducing the bug.
+//
+// ORDER IS LOAD-BEARING: this sweep runs LAST, after `withParagraphVariant`
+// above. That wrapper's `toDOM` rebuilds its output spec from scratch rather
+// than delegating to the spec it wraps, so anything applied underneath it is
+// discarded silently — `withId` applied before it would ship green and drop
+// every `<p id>`. Pinned by the named trap test in anchors-and-links.test.ts.
+const idRetainedNodeNames: string[] = [];
+nodes.forEach((name, spec) => {
+  if (spec.toDOM) idRetainedNodeNames.push(name);
+});
+for (const name of idRetainedNodeNames) {
+  const spec = nodes.get(name);
+  if (spec) nodes = nodes.update(name, withId(spec));
+}
+
 let marks = basicSchema.spec.marks;
 for (const name of ["link", "em", "strong"]) {
   const spec = marks.get(name);
   if (!spec) continue;
   // link's href is sanitized (Fix 1, PR #151 review) before the generic
   // class/style retention wrap — see withSafeHref's doc comment in attrs.ts.
-  const safe = name === "link" ? withSafeHref(spec) : spec;
+  // `withLinkTargetRel` (ADR-0062 Amendment 3) sits between them: OUTSIDE
+  // withSafeHref, so a `javascript:` href still rejects the whole rule before
+  // any target/rel is retained from it. `id` is deliberately NOT applied to
+  // any mark — see withId's doc comment.
+  const safe = name === "link" ? withLinkTargetRel(withSafeHref(spec)) : spec;
   marks = marks.update(name, withClassStyle(safe));
 }
 marks = marks

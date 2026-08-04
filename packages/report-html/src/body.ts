@@ -1,5 +1,6 @@
 import { DOMSerializer, DOMParser as PMDOMParser, Node as PMNode } from "prosemirror-model";
 import { getDomEnvironmentDocument } from "./dom-environment.js";
+import { dedupeElementIds } from "./schema/ids.js";
 import { reportSchema } from "./schema.js";
 
 /**
@@ -27,6 +28,11 @@ export function parseBody(bodyHtml: string): PMDocJson {
 
 /**
  * Serialize a ProseMirror doc (as JSON) back to a report body HTML string.
+ *
+ * `dedupeElementIds` runs on the assembled fragment (ADR-0062 Amendment 3):
+ * `id` is now retained on every node, so a copy/paste or a mid-paragraph
+ * `splitBlock` can put the same id on two elements — and duplicate ids make
+ * `#fragment` anchor resolution undefined. First wins; see `schema/ids.ts`.
  */
 export function serializeBody(doc: PMDocJson): string {
   const document = getDomEnvironmentDocument();
@@ -35,5 +41,6 @@ export function serializeBody(doc: PMDocJson): string {
   const fragment = serializer.serializeFragment(node.content, { document });
   const container = document.createElement("div");
   container.appendChild(fragment);
+  dedupeElementIds(container);
   return container.innerHTML;
 }
