@@ -296,16 +296,46 @@ describe("applyFolderSharingToReports (ADR-0078 §5)", () => {
         sharing: "org_view",
       });
       expect(clean.ok && sharingApplyIsPartial(clean.value)).toBe(false);
+    });
 
-      expect(
-        sharingApplyIsPartial({
-          sharing: "org_view",
-          changed: [],
-          skipped: [],
-          failed: [{ slug: "x", title: "t", reason: "db down" }],
-          total: 1,
-        }),
-      ).toBe(true);
+    it("a candidate the server then REFUSES lands in failed[] with the server's own message", async () => {
+      // The `failed` branch, actually EXECUTED. It was previously asserted only
+      // against a hand-built literal, so the push that produces it — and the
+      // decision to carry the use case's own `error.message` rather than an
+      // invented sentence — was never run.
+      const deps = await seed();
+      const doomed = await place(deps, "eeeeeeeeee", { title: "Doomed" });
+      const ok1 = await place(deps, "ffffffffff", { title: "Fine" });
+      const failing = {
+        ...deps,
+        orgWriteGrants: {
+          ...deps.orgWriteGrants,
+          find: deps.orgWriteGrants.find.bind(deps.orgWriteGrants),
+          revoke: deps.orgWriteGrants.revoke.bind(deps.orgWriteGrants),
+          async grant(id: typeof doomed.id) {
+            if (id === doomed.id) {
+              return {
+                ok: false as const,
+                error: { kind: "Unexpected" as const, message: "db down" },
+              };
+            }
+            return deps.orgWriteGrants.grant(id, orgA, owner);
+          },
+        },
+      };
+
+      const r = await applyFolderSharingToReports(failing, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_edit",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.value.failed).toEqual([{ slug: doomed.slug, title: "Doomed", reason: "db down" }]);
+      expect(r.value.changed.map((c) => c.title)).toEqual(["Fine"]);
+      // A failure IS partial; the clean sibling in the same run is not rounded
+      // up into it, nor down out of `changed`.
+      expect(sharingApplyIsPartial(r.value)).toBe(true);
+      expect(ok1.title).toBe("Fine");
     });
 
     it("a SKIP is not a failure — the two are reported separately", async () => {

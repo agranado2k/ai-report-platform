@@ -106,10 +106,20 @@ export interface SharingApplyOutcome {
   readonly total: number;
 }
 
-/** Is this outcome anything less than a clean success? Named rather than
- *  re-derived at each call site, for the reason ADR-0076 records: a condition
- *  inlined at the surface can be inverted without a single test noticing. */
-export function sharingApplyIsPartial(outcome: SharingApplyOutcome): boolean {
+/**
+ * Is this outcome anything less than a clean success? Named rather than
+ * re-derived at each call site, for the reason ADR-0076 records: a condition
+ * inlined at the surface can be inverted without a single test noticing.
+ *
+ * A SKIP does not make it partial — the candidate rule declining a colleague's
+ * report is the rule working, not a failure. Only `failed` counts.
+ *
+ * Takes the minimal shape it reads rather than the full outcome, so the API
+ * mapper, the dashboard banner and the use case's own tests all call THIS
+ * function. Two predicates spelling the same condition — one of them referenced
+ * only by its own test — is how the real call site drifts alone.
+ */
+export function sharingApplyIsPartial(outcome: { readonly failed: readonly unknown[] }): boolean {
   return outcome.failed.length > 0;
 }
 

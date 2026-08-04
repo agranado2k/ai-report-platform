@@ -2,11 +2,12 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type {
-  FolderShare,
-  ReportSharingResult,
-  SharingApplyOutcome,
-  WriteGrant,
+import {
+  type FolderShare,
+  type ReportSharingResult,
+  type SharingApplyOutcome,
+  sharingApplyIsPartial,
+  type WriteGrant,
 } from "arp-application";
 import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
@@ -233,6 +234,8 @@ export function applyFolderSharingToReportsToHttp(
     changed: o.changed.map(sharingEntry),
     skipped: o.skipped.map(sharingEntry),
     failed: o.failed.map(sharingEntry),
+    // The SERVER's conclusion, not a fact for the client to re-derive.
+    partial: sharingApplyIsPartial(o),
     mode: ctx.mode,
   };
   return { status: 200, contentType: "application/json", body };

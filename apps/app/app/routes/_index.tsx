@@ -61,7 +61,7 @@ import {
   reportSharingBadge,
   reportSharingManagement,
   SHARING_CHOICES,
-  sharingApplyIsWarning,
+  sharingApplyIsPartial,
   sharingApplySummary,
 } from "../server/report-sharing.server";
 
@@ -478,9 +478,9 @@ export async function action(args: ActionFunctionArgs) {
     if (!r.ok) return folderError(rawId, r.error);
     // A run that could not change every candidate is NOT a success — the
     // banner renders as a warning and names each report and why. The condition
-    // lives in `sharingApplyIsWarning`, under test, rather than as an
+    // lives in `sharingApplyIsPartial`, under test, rather than as an
     // expression here that could be inverted without a test noticing.
-    return folderOk(rawId, sharingApplySummary(r.value), sharingApplyIsWarning(r.value));
+    return folderOk(rawId, sharingApplySummary(r.value), sharingApplyIsPartial(r.value));
   }
 
   if (intent === "rename-folder") {

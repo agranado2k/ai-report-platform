@@ -1906,6 +1906,13 @@ components:
         failed:
           type: array
           items: { $ref: '#/components/schemas/SharingApplyEntry' }
+        partial:
+          type: boolean
+          description: >-
+            The server's own verdict on whether this run was a clean success —
+            true when anything landed in `failed`. A skip is the candidate rule
+            working as designed and does NOT make a run partial. Read this rather
+            than re-deriving `failed.length > 0`.
         mode: { type: string, enum: [dev, prod] }
 
     SetFolderVisibilityRequest:

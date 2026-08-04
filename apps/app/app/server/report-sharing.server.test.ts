@@ -1,5 +1,6 @@
 import { userId } from "arp-domain";
 import { describe, expect, it } from "vitest";
+import type { SharingApplySummaryInput } from "./report-sharing.server";
 import {
   NO_ACTOR_REASON,
   NO_SCOPE_REASON,
@@ -7,7 +8,7 @@ import {
   reportFormKey,
   reportSharingBadge,
   reportSharingManagement,
-  sharingApplyIsWarning,
+  sharingApplyIsPartial,
   sharingApplySummary,
 } from "./report-sharing.server";
 
@@ -174,22 +175,35 @@ describe("sharingApplySummary — the bulk apply never rounds up (ADR-0078 §5)"
   });
 });
 
-describe("sharingApplyIsWarning — the banner's success/warning switch", () => {
-  const base = { sharing: "org_view" as const, total: 1, changed: [], skipped: [], failed: [] };
+describe("sharingApplyIsPartial — the banner's success/warning switch", () => {
+  // The SAME predicate the API mapper serializes as `partial` and the use case
+  // asserts on a real failed run — re-exported here, never re-implemented.
+  const base: SharingApplySummaryInput = {
+    sharing: "org_view",
+    total: 1,
+    changed: [],
+    skipped: [],
+    failed: [],
+  };
 
   it("a clean run is not a warning", () => {
-    expect(sharingApplyIsWarning({ ...base, changed: [{ title: "A" }] })).toBe(false);
+    const outcome: SharingApplySummaryInput = { ...base, changed: [{ title: "A" }] };
+    expect(sharingApplyIsPartial(outcome)).toBe(false);
   });
 
   it("a SKIP is not a warning — the candidate rule working is not a failure", () => {
-    expect(
-      sharingApplyIsWarning({ ...base, skipped: [{ title: "A", reason: "already public" }] }),
-    ).toBe(false);
+    const outcome: SharingApplySummaryInput = {
+      ...base,
+      skipped: [{ title: "A", reason: "already public" }],
+    };
+    expect(sharingApplyIsPartial(outcome)).toBe(false);
   });
 
   it("a FAILURE is", () => {
-    expect(sharingApplyIsWarning({ ...base, failed: [{ title: "A", reason: "db down" }] })).toBe(
-      true,
-    );
+    const outcome: SharingApplySummaryInput = {
+      ...base,
+      failed: [{ title: "A", reason: "db down" }],
+    };
+    expect(sharingApplyIsPartial(outcome)).toBe(true);
   });
 });

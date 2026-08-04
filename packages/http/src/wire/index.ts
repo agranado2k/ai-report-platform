@@ -126,6 +126,12 @@ export interface SharingApplyWire {
   readonly changed: readonly SharingApplyEntryWire[];
   readonly skipped: readonly SharingApplyEntryWire[];
   readonly failed: readonly SharingApplyEntryWire[];
+  /** The server's OWN verdict on whether this run was a clean success — from
+   *  the same `sharingApplyIsPartial` the dashboard banner reads. Every client
+   *  was otherwise re-deriving `failed.length > 0`, which is a condition each
+   *  of them can invert independently, and a bulk action reporting success it
+   *  did not achieve is the one thing this shape exists to prevent. */
+  readonly partial: boolean;
   readonly mode: WireMode;
 }
 

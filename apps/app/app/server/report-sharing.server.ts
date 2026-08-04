@@ -14,6 +14,12 @@
 // That is the `folderManagement` rule, and it exists because an independently
 // invented client rule drifts from the server that actually decides.
 
+// Re-exported, not re-implemented: the banner's success/warning switch is the
+// SAME condition the API mapper serializes as `partial` and the use case's own
+// tests assert. Two spellings of it — one of them referenced only by its own
+// test — is how the real call site drifts alone.
+export { sharingApplyIsPartial } from "arp-application";
+
 import { SETTING_SHARING_NOT_OWNER } from "arp-application";
 import {
   type AclMode,
@@ -231,16 +237,6 @@ const STATE_WORDS: Record<ReportSharingState, string> = {
   org_view: "visible to your org",
   org_edit: "visible and editable by your org",
 };
-
-/** Is this outcome anything less than a clean success? Named rather than
- *  re-derived at the call site, for the reason ADR-0076 records: a condition
- *  inlined in JSX can be inverted without a single test noticing.
- *
- *  A SKIP does not make it partial — the candidate rule declining a
- *  colleague's report is the rule working, not a failure. */
-export function sharingApplyIsWarning(outcome: SharingApplySummaryInput): boolean {
-  return outcome.failed.length > 0;
-}
 
 /** The one sentence the dashboard shows after a bulk apply. Every report that
  *  did NOT change is named with the server's own reason — a bulk action that

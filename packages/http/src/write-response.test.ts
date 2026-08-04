@@ -422,8 +422,21 @@ describe("applyFolderSharingToReportsToHttp (ADR-0078 §5)", () => {
       changed: [{ slug: "aaaaaaaaaa", title: "Mine" }],
       skipped: [{ slug: "bbbbbbbbbb", title: "Theirs", reason: "not owned by you" }],
       failed: [{ slug: "cccccccccc", title: "Broken", reason: "db down" }],
+      partial: true,
       mode: "prod",
     });
+  });
+
+  it("carries the server's OWN partial verdict, so no client re-derives it", () => {
+    // A skip is the candidate rule working as designed and does NOT make the
+    // run partial — the distinction every client was otherwise re-implementing
+    // from `failed.length > 0`.
+    const skippedOnly = { ...outcome, failed: [] };
+    const res = applyFolderSharingToReportsToHttp(ok(skippedOnly), CTX);
+    expect((res.body as { partial: boolean }).partial).toBe(false);
+    expect(
+      (applyFolderSharingToReportsToHttp(ok(outcome), CTX).body as { partial: boolean }).partial,
+    ).toBe(true);
   });
 
   it("keeps skipped and failed SEPARATE — a skip is not a server failure", () => {
