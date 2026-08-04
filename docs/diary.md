@@ -3513,3 +3513,35 @@ cover it), the second-user "colleague loses sight of the folder" transition (one
 session; the e2e covers it), and the >50 `MAX_CASCADE` refusal.
 
 ADR-0076 gains a third amendment recording the badge label change and the staged-action rule.
+
+---
+
+## 2026-08-04 — Verification run: the folder-sharing UI fixes are live in production (#237)
+
+A follow-up dogfood pass against **production** at `main` @ `d97822a` (the merge of PR #237,
+deployed 2026-08-03 20:50 UTC), driven the same way as the 2026-08-03 run — throwaway folders
+created and deleted, every claim cross-checked through MCP `folders_list`, no real folder
+modified. **All four findings from that run are confirmed fixed in production, and the run found
+zero new defects.** The unknown-roster badge reads `Limited` and every badge carries an
+explanatory `title`; every folder link now carries its full name as a `title` (verified on all
+six real folders plus both test folders, where before there were none); the cascade checkbox
+comes back **unticked** after an action under a correctly flipped panel; the org-direction
+warning agrees in the singular. Ten adjacent behaviours were re-walked for regressions and none
+appeared. Full detail, verbatim copy and the measured DOM values:
+`docs/dogfood-reports/2026-08-04-folder-share-ui-verify.md`. The fixes themselves are recorded in
+ADR-0076's 2026-08-03 amendment; nothing about the decision changed.
+
+**One process near-miss, recorded because the margin was thin.** A coordinate-based click meant
+for the test folder's submit button landed on a neighbouring sidebar row's kebab and opened the
+sharing panel for **a real folder** carrying the permanent-adoption warning. Nothing mutated —
+opening the panel is read-only, and an immediate `folders_list` confirmed `visibility: org`,
+`owner: null` — but the click landed **one control away from an irreversible adoption**. The run
+switched to DOM/element-targeted interaction scoped to the folder's own panel for everything
+after that. This is direct evidence for **#235** (ownership transfer): adoption is permanent, has
+no transfer path, and sits one stray click from a read-only browse. It also argues for a confirm
+step on adoption specifically — a call to make alongside #235, not here.
+
+Still unverified in production, unchanged: legacy-folder ADOPTION (every legacy folder in prod is
+real user data), the second-user "colleague loses sight" transition (single browser session), and
+the >50 `MAX_CASCADE` refusal. Outstanding follow-ups: **#235** (transfer) and **#236** (batched
+share counts — which would retire the interim `Limited` label).
