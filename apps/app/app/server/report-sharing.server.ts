@@ -149,36 +149,49 @@ export function reportSharingManagement(
     readonly ownerId: UserId;
     readonly aclMode: AclMode;
     readonly hasOrgWrite: boolean;
-    readonly allowedEmailCount?: number;
+    /** The REAL roster size, off the listing projection (ADR-0078 §4). Required,
+     *  not optional: the old default of `1` meant every allowlisted report
+     *  warned about "1 address" while the server's own 422 named the true N —
+     *  the operator saw a right number and a wrong one. */
+    readonly allowedEmailCount: number;
   },
   actor: SharingActor | null,
 ): ReportSharingManagement {
   const state = reportSharingState(report.aclMode, report.hasOrgWrite);
-  // The listing projection carries the mode but not the allowlist roster, so
-  // the warning is composed from a minimal Acl of the right shape. It is only
-  // ever a WARNING — the use case re-derives it from the real Acl before
-  // refusing, so the count the operator sees can never authorize anything.
+  // The listing projection carries the mode and the roster SIZE but not the
+  // roster itself, so the warning is composed from a minimal Acl of the right
+  // shape — the addresses are padding, only the length is read. It is only ever
+  // a WARNING: the use case re-derives it from the real Acl before refusing, so
+  // the count the operator sees can never authorize anything.
   const discardWarning = advancedSharingDiscardWarning(
     report.aclMode === "allowlist"
       ? {
           mode: "allowlist",
-          allowedEmails: new Array(report.allowedEmailCount ?? 1).fill(""),
+          allowedEmails: new Array(report.allowedEmailCount).fill(""),
           accessTtlSeconds: 0,
         }
       : report.aclMode === "password"
         ? { mode: "password", passwordHash: "" }
         : { mode: report.aclMode },
   );
-  const blocked = (blockedReason: string): ReportSharingManagement => ({
-    manageable: false,
-    blockedReason,
-    state,
-    discardWarning,
-  });
-  if (!actor) return blocked(NO_ACTOR_REASON);
-  if (!hasFolderManagementScope(actor.scopes)) return blocked(NO_SCOPE_REASON);
-  if (report.ownerId !== actor.userId) return blocked(NON_OWNER_REASON);
+  if (!actor) return blockedManagement(NO_ACTOR_REASON, state);
+  if (!hasFolderManagementScope(actor.scopes)) return blockedManagement(NO_SCOPE_REASON, state);
+  if (report.ownerId !== actor.userId) return blockedManagement(NON_OWNER_REASON, state);
   return { manageable: true, blockedReason: null, state, discardWarning };
+}
+
+/** A control the server would refuse. `discardWarning` is deliberately NULL
+ *  here (L-1): it is the sentence the CONFIRMATION shows, and a row nobody can
+ *  change has no confirmation to offer. Serializing it regardless put "shared
+ *  with N addresses by invitation" into a non-owner's loader payload — no
+ *  emails, but a fact about someone else's report that the surface had no
+ *  reason to state. Conclusions the actor cannot act on are not conclusions
+ *  they are owed. */
+function blockedManagement(
+  blockedReason: string,
+  state: ReportSharingState | null,
+): ReportSharingManagement {
+  return { manageable: false, blockedReason, state, discardWarning: null };
 }
 
 /**

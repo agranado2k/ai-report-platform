@@ -362,6 +362,27 @@ export function describeReportRepositoryContract(
       expect(await titlesFor(h.colleague)).not.toContain("Foreign org write");
     });
 
+    it("summary: carries the allowlist ROSTER SIZE, and 0 in every other mode", async () => {
+      // The dashboard's discard warning names this N (ADR-0078 §4). Without it
+      // the row warned "1 address" on every allowlisted report while the
+      // server's 422 carried the truth.
+      const many = h.makeReport({ slug: "sum0000002", title: "Roster" });
+      await h.repo.save(many);
+      await h.repo.setAcl(many.id, {
+        mode: "allowlist",
+        allowedEmails: ["a@b.com", "c@d.io", "e@f.net"],
+        accessTtlSeconds: 3600,
+      });
+      const plain = h.makeReport({ slug: "sum0000003", title: "No roster" });
+      await h.repo.save(plain);
+      await h.repo.setAcl(plain.id, { mode: "org" });
+
+      const page = await h.repo.searchByOrg(h.orgId, h.owner, { limit: 50 });
+      const rows = page.ok ? page.value.items : [];
+      expect(rows.find((r) => r.title === "Roster")?.allowedEmailCount).toBe(3);
+      expect(rows.find((r) => r.title === "No roster")?.allowedEmailCount).toBe(0);
+    });
+
     it("summary: a foreign-org write row does not badge the report as org-writable", async () => {
       // The projection must agree with the predicate: a row that does not list
       // the report cannot be the row that badges it `Org + edit`. The owner

@@ -305,6 +305,9 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
         ownerId: r.ownerId,
         aclMode: r.acl.mode,
         hasOrgWrite: await this.hasOrgWriteFor(r.id, orgId),
+        // 0 in every non-allowlist mode, mirroring the adapter's
+        // COALESCE(jsonb_array_length(...), 0).
+        allowedEmailCount: r.acl.mode === "allowlist" ? r.acl.allowedEmails.length : 0,
       });
     }
     return ok({ items: summaries, hasMore });

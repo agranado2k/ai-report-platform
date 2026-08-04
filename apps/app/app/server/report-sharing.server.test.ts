@@ -53,7 +53,12 @@ describe("reportSharingBadge (ADR-0078 §7)", () => {
 });
 
 describe("reportSharingManagement — the server decides, the client renders (ADR-0078 §7)", () => {
-  const own = { ownerId: OWNER, aclMode: "private" as const, hasOrgWrite: false };
+  const own = {
+    ownerId: OWNER,
+    aclMode: "private" as const,
+    hasOrgWrite: false,
+    allowedEmailCount: 0,
+  };
 
   it("enables the control for the owner with acl:write", () => {
     const m = reportSharingManagement(own, ACL_WRITE);
@@ -80,36 +85,60 @@ describe("reportSharingManagement — the server decides, the client renders (AD
     expect(reportSharingManagement(own, null).blockedReason).toBe(NO_ACTOR_REASON);
   });
 
-  it("still reports the STATE and the warning on a blocked row", () => {
+  it("still reports the STATE on a blocked row — the badge must stay truthful", () => {
     // A colleague may not change the sharing, but the badge above the disabled
     // control still has to be truthful about what the sharing IS.
     const m = reportSharingManagement(
-      { ownerId: COLLEAGUE, aclMode: "org", hasOrgWrite: true },
+      { ownerId: COLLEAGUE, aclMode: "org", hasOrgWrite: true, allowedEmailCount: 0 },
       ACL_WRITE,
     );
     expect(m.state).toBe("org_edit");
   });
 
+  it("withholds the discard warning on a row the actor cannot change (L-1)", () => {
+    // The warning is the CONFIRMATION's sentence, and a row nobody can change
+    // has no confirmation to offer. Serializing it anyway put "shared with N
+    // addresses by invitation" into a non-owner's loader payload.
+    const blocked = reportSharingManagement(
+      { ownerId: COLLEAGUE, aclMode: "allowlist", hasOrgWrite: false, allowedEmailCount: 4 },
+      ACL_WRITE,
+    );
+    expect(blocked.manageable).toBe(false);
+    expect(blocked.discardWarning).toBeNull();
+    // …while the owner still gets it, with the REAL count.
+    const owned = reportSharingManagement(
+      { ownerId: OWNER, aclMode: "allowlist", hasOrgWrite: false, allowedEmailCount: 4 },
+      ACL_WRITE,
+    );
+    expect(owned.discardWarning).toContain("4 addresses");
+  });
+
+  it("names the REAL roster size, never a fabricated default (ADR-0078 §4)", () => {
+    // The old `?? 1` fallback made every allowlisted report warn about "1
+    // address" while the server's 422 carried the true N.
+    for (const n of [1, 2, 7]) {
+      const m = reportSharingManagement(
+        { ownerId: OWNER, aclMode: "allowlist", hasOrgWrite: false, allowedEmailCount: n },
+        ACL_WRITE,
+      );
+      expect(m.discardWarning).toContain(n === 1 ? "1 address" : `${n} addresses`);
+    }
+  });
+
   it("carries a discard warning for an advanced mode, and none for the plain ones", () => {
     expect(
       reportSharingManagement(
-        { ownerId: OWNER, aclMode: "password", hasOrgWrite: false },
+        { ownerId: OWNER, aclMode: "password", hasOrgWrite: false, allowedEmailCount: 0 },
         ACL_WRITE,
       ).discardWarning,
     ).toContain("remove the password");
     expect(reportSharingManagement(own, ACL_WRITE).discardWarning).toBeNull();
     expect(
-      reportSharingManagement({ ownerId: OWNER, aclMode: "org", hasOrgWrite: false }, ACL_WRITE)
-        .discardWarning,
+      reportSharingManagement(
+        { ownerId: OWNER, aclMode: "org", hasOrgWrite: false, allowedEmailCount: 0 },
+        ACL_WRITE,
+      ).discardWarning,
     ).toBeNull();
-  });
-
-  it("counts the allowlist in the warning when the loader knows the size", () => {
-    const m = reportSharingManagement(
-      { ownerId: OWNER, aclMode: "allowlist", hasOrgWrite: false, allowedEmailCount: 3 },
-      ACL_WRITE,
-    );
-    expect(m.discardWarning).toContain("3 addresses");
   });
 });
 

@@ -288,7 +288,14 @@ export async function loader(args: LoaderFunctionArgs) {
       // spread below — the server sends conclusions, never the authorization
       // input (the `folderManagement` doctrine).
       const sharing = reportSharingManagement(
-        { ownerId: r.ownerId, aclMode: r.aclMode, hasOrgWrite: r.hasOrgWrite },
+        {
+          ownerId: r.ownerId,
+          aclMode: r.aclMode,
+          hasOrgWrite: r.hasOrgWrite,
+          // The REAL roster size, off the same free join (ADR-0078 §4) — the
+          // warning must name the N the server's own refusal names.
+          allowedEmailCount: r.allowedEmailCount,
+        },
         actor ? { userId: actor.userId, scopes: actor.scopes } : null,
       );
       return {

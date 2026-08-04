@@ -62,6 +62,21 @@ export interface ReportSummary {
    *  list envelope is unchanged (ADR-0053). */
   readonly aclMode: AclMode;
   readonly hasOrgWrite: boolean;
+  /** How many addresses an `allowlist` report's roster holds; `0` in every
+   *  other mode (ADR-0078 §4).
+   *
+   *  Rides the SAME free join: `acls.allowed_emails` is already selected-from
+   *  for `aclMode`, so counting it costs nothing. It is here because the
+   *  dashboard's discard warning must name the REAL N — "this will remove the N
+   *  allowlisted addresses" — and without it the row had no roster to count,
+   *  so every allowlisted report warned about "1 address" while the server's
+   *  own 422 carried the true number. Two numbers, one of them wrong, is worse
+   *  than no number.
+   *
+   *  Never the addresses themselves: the count is what the warning needs, and
+   *  a roster on a listing row would put other people's emails into a payload
+   *  that is not about them. */
+  readonly allowedEmailCount: number;
 }
 
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC

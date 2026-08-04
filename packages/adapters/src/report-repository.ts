@@ -269,6 +269,11 @@ export class DrizzleReportRepository implements ReportRepository {
           // The SAME subquery the visibility predicate above is built from, so
           // the badge can never disagree with the decision to list the row.
           hasOrgWrite: orgWriteExists,
+          // The allowlist roster SIZE, never the roster (ADR-0078 §4): the
+          // dashboard's discard warning has to name the real N, and the column
+          // is already on the joined `acls` row, so counting it is free.
+          // COALESCE covers both "no acls row" and a null/non-allowlist column.
+          allowedEmailCount: sql<number>`COALESCE(jsonb_array_length(${acls.allowedEmails}), 0)`,
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.
@@ -292,6 +297,7 @@ export class DrizzleReportRepository implements ReportRepository {
           // same fallback `rowToAcl` applies to the single-report read.
           aclMode: (r.aclMode ?? "private") as AclMode,
           hasOrgWrite: r.hasOrgWrite === true,
+          allowedEmailCount: Number(r.allowedEmailCount ?? 0),
         })),
         hasMore,
       });
