@@ -19,6 +19,7 @@ export * from "./magic-link";
 export * from "./org-key";
 export * from "./report";
 export * from "./report-id";
+export * from "./report-sharing";
 export * from "./report-version";
 export * from "./result";
 export * from "./scope";
