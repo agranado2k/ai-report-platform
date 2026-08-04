@@ -218,6 +218,32 @@ export function reportFormKey(input: {
   return `${input.aclMode}:${input.hasOrgWrite ? "orgwrite" : "noorgwrite"}`;
 }
 
+/**
+ * Did a JSON caller EXPLICITLY confirm discarding an advanced mode's config
+ * (ADR-0078 §4)?
+ *
+ * STRICTLY the boolean `true`. A truthy string — `"false"`, `"0"`, `"no"` — must
+ * never authorize deleting a password, and `Boolean(body.confirm_discard)` would
+ * let all three through. Named and exported so the coercion the API route
+ * depends on is under test rather than inlined in a route nothing exercises.
+ */
+export function confirmDiscardFromJson(raw: unknown): boolean {
+  return raw === true;
+}
+
+/**
+ * The same question, asked of the dashboard's hidden input, which can only ever
+ * post a STRING (ADR-0078 §12's second-submit confirmation).
+ *
+ * A separate function on purpose: the two doors have genuinely different wire
+ * encodings, and a single permissive predicate spanning both would have to
+ * accept `"true"` on the JSON door too — widening a documented API contract to
+ * save one line.
+ */
+export function confirmDiscardFromForm(raw: unknown): boolean {
+  return raw === "true";
+}
+
 /** The three states, as the menu offers them — label + the sentence under it.
  *  Ordered by increasing reach, so the control reads as a ladder. */
 export const SHARING_CHOICES: readonly {

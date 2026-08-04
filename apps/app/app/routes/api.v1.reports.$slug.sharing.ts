@@ -17,6 +17,7 @@ import { setReportSharingToHttp } from "arp-http";
 import { ops } from "../server/container.server";
 import { handle, methods } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
+import { confirmDiscardFromJson } from "../server/report-sharing.server";
 
 export const action = methods({
   POST: handle({
@@ -34,8 +35,9 @@ export const action = methods({
           slug,
           sharing: sharing.value,
           // Strictly `=== true`: a truthy string ("false", "0") must not
-          // silently authorize discarding a password.
-          confirmDiscard: body.confirm_discard === true,
+          // silently authorize discarding a password. The coercion is a named,
+          // TESTED predicate rather than an inline comparison in a route.
+          confirmDiscard: confirmDiscardFromJson(body.confirm_discard),
           idempotencyKey,
         },
       );

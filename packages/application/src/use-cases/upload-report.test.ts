@@ -347,6 +347,26 @@ describe("uploadReport — initial sharing inherits the destination folder (ADR-
     expect(saved.ok && saved.value?.acl.mode).toBe("private");
   });
 
+  it("PROPAGATES a folder-store error instead of silently defaulting to private", async () => {
+    // The documented distinction (upload-report.ts): silently narrowing on
+    // infrastructure trouble is fine, but doing so without anyone being able to
+    // tell the difference from a legitimately-private upload is not. The
+    // fallback above and this branch must stay distinguishable.
+    const h = makeDeps();
+    const failing = {
+      ...h.deps,
+      folders: {
+        ...h.deps.folders,
+        async findById() {
+          return { ok: false as const, error: { kind: "Unexpected" as const, message: "db down" } };
+        },
+      },
+    };
+    const r = await uploadReport(failing, cmd({ actor: actor({ folderId: CHILD }) }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toEqual({ kind: "Unexpected", message: "db down" });
+  });
+
   it("a RE-UPLOAD never re-derives sharing from the folder", async () => {
     // Inheritance is a CREATE-time rule only (ADR-0078 §6/§7). A re-upload into
     // an org-shared folder must not publish a report its owner made private.

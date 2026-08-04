@@ -56,6 +56,7 @@ import {
 import { errorToJson, errorToJsonParts } from "../server/http.server";
 import { log } from "../server/log.server";
 import {
+  confirmDiscardFromForm,
   PERSON_SHARE_LIMIT_NOTICE,
   reportFormKey,
   reportSharingBadge,
@@ -456,7 +457,7 @@ export async function action(args: ActionFunctionArgs) {
     if (!sharing.ok) return reportError(rawSlug, sharing.error);
     // The zero-JS confirmation (ADR-0078 §4): only the SECOND submit — the one
     // rendered under the sentence naming what is discarded — carries this.
-    const confirmDiscard = form.get("confirm_discard") === "true";
+    const confirmDiscard = confirmDiscardFromForm(form.get("confirm_discard"));
     const r = await ops().setReportSharing(
       { orgId: actor.value.orgId, userId: actor.value.userId, scopes: actor.value.scopes },
       { slug: slug.value, sharing: sharing.value, confirmDiscard },

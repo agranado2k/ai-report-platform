@@ -2,6 +2,8 @@ import { userId } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import type { SharingApplySummaryInput } from "./report-sharing.server";
 import {
+  confirmDiscardFromForm,
+  confirmDiscardFromJson,
   NO_ACTOR_REASON,
   NO_SCOPE_REASON,
   NON_OWNER_REASON,
@@ -139,6 +141,31 @@ describe("reportSharingManagement — the server decides, the client renders (AD
         ACL_WRITE,
       ).discardWarning,
     ).toBeNull();
+  });
+});
+
+describe("confirmDiscardFromJson / confirmDiscardFromForm (ADR-0078 §4)", () => {
+  // The guard whose own comment names the hazard: `Boolean(...)` would let
+  // "false" and "0" through, and a client would delete a password by sending a
+  // string it thought meant no.
+  it("the JSON door accepts ONLY the boolean true", () => {
+    expect(confirmDiscardFromJson(true)).toBe(true);
+    for (const truthyButNotTrue of ["true", "false", "0", "yes", 1, {}, []]) {
+      expect(confirmDiscardFromJson(truthyButNotTrue)).toBe(false);
+    }
+  });
+
+  it("the JSON door refuses absence and every falsy value", () => {
+    for (const v of [undefined, null, false, 0, ""]) {
+      expect(confirmDiscardFromJson(v)).toBe(false);
+    }
+  });
+
+  it("the FORM door accepts ONLY the exact string the hidden input posts", () => {
+    expect(confirmDiscardFromForm("true")).toBe(true);
+    for (const v of [true, "false", "0", "TRUE", " true", "on", null, undefined]) {
+      expect(confirmDiscardFromForm(v)).toBe(false);
+    }
   });
 });
 
