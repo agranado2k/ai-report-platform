@@ -6,7 +6,7 @@
 // react instead of the call throwing a protocol error.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES } from "arp-domain";
+import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES, REPORT_SHARING_STATES } from "arp-domain";
 import { z } from "zod";
 import type { ApiClient, ApiResult, Problem } from "./client";
 
@@ -125,12 +125,15 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Get a report",
       description:
-        "Fetch a single report by its slug — returns slug, title, is_published, folder_id, and " +
-        "owner (the owning user's user_… id, ADR-0059); the acl block is included only when " +
-        "you are the report's owner (use reports_get_acl for share config). Read-only. Use it " +
-        "to confirm a report exists / check its current title or folder before an update, " +
-        "move, or delete. A missing slug returns not-found; a report outside your org returns " +
-        "forbidden.",
+        "Fetch a single report by its slug — returns slug, title, is_published, folder_id, " +
+        "owner (the owning user's user_… id, ADR-0059), and sharing: 'private' | 'org_view' | " +
+        "'org_edit' | null (ADR-0078). Read `sharing`, NOT acl.mode, to tell how a report is " +
+        "shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an " +
+        "org write grant the acl cannot express. null means an advanced mode " +
+        "(password/allowlist/public) — use reports_get_acl for that. The acl block itself is " +
+        "included only when you are the report's owner. Read-only. Use it to confirm a report " +
+        "exists / check its title, folder or sharing before an update, move, or delete. A " +
+        "missing slug returns not-found; a report outside your org returns forbidden.",
       inputSchema: {
         slug: z.string().describe("The report's slug or its report_ id (from reports_search)."),
       },
@@ -169,11 +172,15 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
     {
       title: "Get a report's sharing settings",
       description:
-        "Read a report's sharing acl — returns { object:'acl', mode, and for allowlist the " +
-        "allowed_emails + access_ttl_seconds }. Read-only and OWNER-ONLY (ADR-0059): only the " +
-        "user who created the report can read its share config. mode is one of private " +
-        "(owner-only, the default) | public | password | org | allowlist. Use it before " +
-        "reports_set_acl to see the current sharing state.",
+        "Read a report's sharing acl — returns { object:'acl', mode, for allowlist the " +
+        "allowed_emails + access_ttl_seconds, and sharing }. Read-only and OWNER-ONLY " +
+        "(ADR-0059): only the user who created the report can read its share config. mode is " +
+        "one of private (owner-only, the default) | public | password | org | allowlist. " +
+        "sharing is the composed three-state answer (ADR-0078): 'private' | 'org_view' | " +
+        "'org_edit' | null. READ `sharing`, NOT `mode`, to decide whether the org can EDIT: " +
+        "org_view and org_edit both have mode 'org' and differ only in an org write grant the " +
+        "acl cannot express, so inferring from mode alone gets it wrong. Use it before " +
+        "reports_set_acl or reports_set_sharing to see the current state.",
       inputSchema: {
         slug: SLUG_INPUT,
       },
@@ -385,6 +392,43 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
           allowedEmails: args.allowed_emails,
           password: args.password,
           accessTtlSeconds: args.access_ttl_seconds,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "reports_set_sharing",
+    {
+      title: "Set who in your org can view or edit a report",
+      description:
+        "Set a report's sharing in ONE step (ADR-0078): 'private' (only you), 'org_view' " +
+        "(everyone in your org can view), or 'org_edit' (everyone in your org can view AND " +
+        "edit). OWNER-ONLY; requires the `acl:write` scope. Read and write are always paired — " +
+        "'org_edit' also grants viewing, so this can never give people edit access to something " +
+        "they cannot open. DELETE stays owner-only in every option. Prefer this over " +
+        "reports_set_acl for org sharing; use reports_set_acl when you need a password, an " +
+        "invite list, or a public link, and reports_grant_write to give ONE named person edit " +
+        "access instead of the whole org. If the report currently uses password, allowlist or " +
+        "public, this REFUSES with an explanation of what would be lost — re-send with " +
+        "confirm_discard: true only if the user has agreed to lose that setting.",
+      inputSchema: {
+        slug: SLUG_INPUT,
+        sharing: z.enum(REPORT_SHARING_STATES).describe("The target sharing state."),
+        confirm_discard: z
+          .boolean()
+          .optional()
+          .describe(
+            "Only needed when the report currently uses password/allowlist/public. " +
+              "Acknowledges that the setting will be permanently discarded.",
+          ),
+      },
+      annotations: MUTATE,
+    },
+    async (args) =>
+      toToolResult(
+        await client.setReportSharing(args.slug, {
+          sharing: args.sharing,
+          confirmDiscard: args.confirm_discard,
         }),
       ),
   );
@@ -618,6 +662,31 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
       annotations: MUTATE,
     },
     async (args) => toToolResult(await client.setFolderVisibility(args.id, args.visibility)),
+  );
+
+  server.registerTool(
+    "folders_apply_sharing_to_reports",
+    {
+      title: "Share the reports inside a folder",
+      description:
+        "Apply a sharing state to the REPORTS INSIDE a folder (ADR-0078). Sharing a folder with " +
+        "folders_set_visibility shows people the folder's NAME only — this is what reaches the " +
+        "reports in it. Requires the `acl:write` scope. You must be able to see the folder; each " +
+        "report is then authorized on its own, so ONLY REPORTS YOU OWN can change. A report is " +
+        "changed only if you own it and it is currently in the state the direction starts from; " +
+        "everything else is listed back to you untouched with a reason (not owned by you, " +
+        "password-protected, allowlisted, already public, already at the destination). Always " +
+        "read `skipped` and `failed` in the result before telling the user it worked — this tool " +
+        "reports exactly what it did and did not change.",
+      inputSchema: {
+        id: z.string().describe("The folder_ id (from folders_list)."),
+        sharing: z
+          .enum(REPORT_SHARING_STATES)
+          .describe("The state to apply to the reports inside the folder."),
+      },
+      annotations: MUTATE,
+    },
+    async (args) => toToolResult(await client.applyFolderSharingToReports(args.id, args.sharing)),
   );
 
   server.registerTool(

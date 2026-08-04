@@ -15,7 +15,14 @@
 // are return-typed against these shapes, and src/wire/index.test.ts locks the
 // emitted objects to them — so the catalog cannot drift from what the server
 // actually sends.
-import type { AclMode, FolderVisibility, Intent, ScanStatus, VersionOrigin } from "arp-domain";
+import type {
+  AclMode,
+  FolderVisibility,
+  Intent,
+  ReportSharingState,
+  ScanStatus,
+  VersionOrigin,
+} from "arp-domain";
 
 /** Which deployment a resource belongs to (ADR-0053): the live product vs preview/dev. */
 export type WireMode = "prod" | "dev";
@@ -76,6 +83,16 @@ export type AclShareWire =
  *  prefixed ids and no `mode` deployment stamp. */
 export type AclWire = { readonly object: "acl" } & AclShareWire;
 
+/** The `acl` resource PLUS its composed ADR-0078 sharing state — what
+ *  `GET /reports/{slug}/acl` returns. `acl` fields describe READ authorization;
+ *  `sharing` is the three-state answer that also accounts for the Org write
+ *  grant, and is `null` when the report is in a state that vocabulary cannot
+ *  express. Without it a caller reading `mode: "org"` cannot tell `org_view`
+ *  from `org_edit` — the two are IDENTICAL in the `Acl`. */
+export type AclSharingWire = AclWire & {
+  readonly sharing: ReportSharingState | null;
+};
+
 /** A `report` resource in its SINGLE-REPORT shape (get/rename/move/set-acl):
  *  the summary plus `owner` (a `user_…` id, ADR-0059 §6) and — ONLY when the
  *  viewer is the owner — the `acl` share config (ADR-0059 §3). */
@@ -83,6 +100,50 @@ export type ReportDetailWire = ReportWire & {
   readonly owner: string;
   readonly acl?: AclShareWire;
 };
+
+/** A report resource carrying its ADR-0078 SHARING STATE alongside its `acl`.
+ *  The two are not redundant: `acl` is the read authorization the viewer
+ *  consumes, `sharing` is the composed three-state answer that also accounts
+ *  for the Org write grant. `sharing` is null when the report is in a state the
+ *  three-state control cannot express — an advanced mode (`password`/
+ *  `allowlist`/`public`), or an org write grant without org read, which only
+ *  the API can produce. Null is the honest answer there; rounding it down to
+ *  `private` would understate a report the whole org can edit. */
+export type ReportSharingWire = ReportDetailWire & {
+  readonly sharing: ReportSharingState | null;
+};
+
+/** One report a folder-scoped bulk apply touched, or declined to touch
+ *  (ADR-0078 §5). `reason` is present only on a skip or a failure, and is the
+ *  SERVER's own wording. */
+export interface SharingApplyEntryWire {
+  readonly slug: string;
+  readonly title: string;
+  readonly reason?: string;
+}
+
+/** The result of a folder-scoped bulk apply (ADR-0078 §5).
+ *
+ *  `skipped` and `failed` stay separate on the wire for the same reason they
+ *  are separate in the use case: a skip is the candidate rule working as
+ *  designed, a failure is the server refusing something the rule thought was a
+ *  candidate. A client that collapsed them would report the second as the
+ *  first — the exact rounding-up this shape exists to prevent. */
+export interface SharingApplyWire {
+  readonly object: "sharing_apply";
+  readonly sharing: ReportSharingState;
+  readonly total: number;
+  readonly changed: readonly SharingApplyEntryWire[];
+  readonly skipped: readonly SharingApplyEntryWire[];
+  readonly failed: readonly SharingApplyEntryWire[];
+  /** The server's OWN verdict on whether this run was a clean success — from
+   *  the same `sharingApplyIsPartial` the dashboard banner reads. Every client
+   *  was otherwise re-deriving `failed.length > 0`, which is a condition each
+   *  of them can invert independently, and a bulk action reporting success it
+   *  did not achieve is the one thing this shape exists to prevent. */
+  readonly partial: boolean;
+  readonly mode: WireMode;
+}
 
 /** A `folder` resource. `parent_id` links the tree (null at the root).
  *  `visibility` + `owner` carry the ADR-0076 creator-owned model: `owner` is a

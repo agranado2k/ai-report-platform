@@ -26,7 +26,7 @@ import {
   type IdempotentWriteDeps,
   reviveCommentReplay,
 } from "../idempotent-write";
-import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
+import { type CanWriteDeps, loadWritableReport, type TenancyActor } from "../load-owned";
 import type {
   AuditLogger,
   Clock,
@@ -41,7 +41,7 @@ import type {
 // `parent_comment_id` set) — the parent id in the fingerprint disambiguates.
 const ROUTE = "POST /api/v1/reports/{slug}/comments";
 
-export interface ReplyToCommentDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
+export interface ReplyToCommentDeps extends CanWriteDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly comments: CommentRepository;
   readonly ids: IdGenerator;

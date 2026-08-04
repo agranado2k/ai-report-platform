@@ -127,6 +127,24 @@ export async function seedColleague(ctx: DbContext): Promise<SeededColleague> {
   return { userId: userId(SEED_COLLEAGUE), email: SEED_COLLEAGUE_EMAIL };
 }
 
+const SEED_SECOND_ORG = "00000000-0000-4000-8000-000000000006";
+
+/**
+ * Insert a SECOND org, so a contract test can prove a store correlates a row to
+ * the org it was issued for rather than to its mere existence (the ADR-0078
+ * org-write leg). `report_org_write_grants.org_id` is a real FK, so a fabricated
+ * uuid would be rejected outright — the foreign org has to exist to be tested.
+ */
+export async function seedSecondOrg(ctx: DbContext): Promise<OrgId> {
+  await ctx.current().insert(orgs).values({
+    id: SEED_SECOND_ORG,
+    clerkOrgId: "org_test_second",
+    name: "Second Org",
+    planLimitsJson: {},
+  });
+  return orgId(SEED_SECOND_ORG);
+}
+
 export const SAMPLE_REPORT_ID = reportId("00000000-0000-4000-8000-0000000000a1");
 export const SAMPLE_VERSION_ID = versionId("00000000-0000-4000-8000-0000000000b1");
 

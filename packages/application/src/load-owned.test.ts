@@ -1,6 +1,7 @@
-import { err, folderId } from "arp-domain";
+import { err, folderId, ok } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  type CanWriteDeps,
   canWrite,
   hasWriteGrant,
   loadManagedFolder,
@@ -11,7 +12,6 @@ import {
   loadWritableFolder,
   loadWritableReport,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "./load-owned";
 import type { FolderRepository, ReportRepository } from "./ports";
 import {
@@ -27,6 +27,7 @@ import {
 import {
   InMemoryFolderRepository,
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "./testing/in-memory";
@@ -182,7 +183,7 @@ describe("loadOwnedReport (owner-gated writes, ADR-0059 §2)", () => {
   });
 });
 
-const writeDeps = (): WriteGrantCheckDeps => makeGrantCheckDeps();
+const writeDeps = () => makeGrantCheckDeps();
 
 describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", () => {
   it("the owner can write, with no grant needed", async () => {
@@ -208,7 +209,11 @@ describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", ()
     const grantee = { orgId: orgB, userId: otherUser };
     const rpt = report(orgA, "aaaaaaaaaa");
     await grants.grant(rpt.id, "grantee@x.com", owner, otherUser);
-    const deps: WriteGrantCheckDeps = { grants, identities: new InMemoryIdentityStore() };
+    const deps: CanWriteDeps = {
+      grants,
+      identities: new InMemoryIdentityStore(),
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+    };
     const r = await canWrite(rpt, grantee, deps);
     expect(r.ok && r.value).toBe(true);
   });
@@ -220,7 +225,11 @@ describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", ()
     const rpt = report(orgA, "aaaaaaaaaa");
     await grants.grant(rpt.id, "grantee@x.com", owner, null); // not signed up at grant time
     identities.seedUser(otherUser, "grantee@x.com"); // signs up later
-    const r = await canWrite(rpt, grantee, { grants, identities });
+    const r = await canWrite(rpt, grantee, {
+      grants,
+      identities,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+    });
     expect(r.ok && r.value).toBe(true);
   });
 
@@ -248,6 +257,109 @@ describe("canWrite / hasWriteGrant (ADR-0060 §4: isOwner OR hasWriteGrant)", ()
   });
 });
 
+describe("hasOrgWriteGrant — the third canWrite leg (ADR-0078 §1)", () => {
+  it("lets a same-org colleague write a report carrying an org write grant", async () => {
+    const deps = writeDeps();
+    const rpt = report(orgA, "aaaaaaaaaa");
+    await deps.orgWriteGrants.grant(rpt.id, orgA, owner);
+    const r = await canWrite(rpt, colleagueActor, deps);
+    expect(r.ok && r.value).toBe(true);
+  });
+
+  it("REFUSES a cross-org actor, even with the grant present", async () => {
+    // The one deliberate asymmetry with ADR-0060 §4: a PERSONAL write grant
+    // works cross-org by design; an ORG-wide one is meaningless outside the org
+    // it names, and honoring it there would be a straight privilege escalation.
+    const deps = writeDeps();
+    const rpt = report(orgA, "aaaaaaaaaa");
+    await deps.orgWriteGrants.grant(rpt.id, orgA, owner);
+    const outsider: TenancyActor = { orgId: orgB, userId: otherUser };
+    const r = await canWrite(rpt, outsider, deps);
+    expect(r.ok && r.value).toBe(false);
+  });
+
+  it("REFUSES a SOFT-DELETED report — a delete must not leave the whole org writing it", async () => {
+    // `report_org_write_grants.report_id` cascades on a HARD delete only, so
+    // the row outlives `deleteReport`. The re-upload path deliberately does NOT
+    // filter `deletedAt` (whether re-upload resurrects a soft-deleted slug is
+    // an open question, upload-report.ts), which for the owner and for one
+    // NAMED grantee is a deliberate person typing a slug they know. Extending
+    // that to EVERY member of the org is not a decision anyone made, so the
+    // org-wide leg — and only it — fails closed here.
+    const deps = writeDeps();
+    const rpt = { ...report(orgA, "aaaaaaaaaa"), deletedAt: 1 };
+    await deps.orgWriteGrants.grant(rpt.id, orgA, owner);
+    const r = await canWrite(rpt, colleagueActor, deps);
+    expect(r.ok && r.value).toBe(false);
+  });
+
+  it("REFUSES a row whose org no longer matches the report's — stale never widens", async () => {
+    const deps = writeDeps();
+    const rpt = report(orgA, "aaaaaaaaaa");
+    // A row issued for a different org than the report now lives in. Storing
+    // org_id rather than joining it is what makes this detectable at all.
+    await deps.orgWriteGrants.grant(rpt.id, orgB, owner);
+    const r = await canWrite(rpt, colleagueActor, deps);
+    expect(r.ok && r.value).toBe(false);
+  });
+
+  it("leaves a same-org colleague unable to write when there is no grant", async () => {
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), colleagueActor, writeDeps());
+    expect(r.ok && r.value).toBe(false);
+  });
+
+  it("does not consult the store at all for the owner — ownership short-circuits", async () => {
+    let calls = 0;
+    const deps = {
+      ...writeDeps(),
+      orgWriteGrants: {
+        async grant() {
+          return ok(undefined);
+        },
+        async revoke() {
+          return ok(undefined);
+        },
+        async find() {
+          calls += 1;
+          return ok(null);
+        },
+      },
+    };
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), ownerActor, deps);
+    expect(r.ok && r.value).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  it("propagates an org-write store error rather than failing open", async () => {
+    const deps = {
+      ...writeDeps(),
+      orgWriteGrants: {
+        async grant() {
+          return err({ kind: "Unexpected" as const, message: "db down" });
+        },
+        async revoke() {
+          return err({ kind: "Unexpected" as const, message: "db down" });
+        },
+        async find() {
+          return err({ kind: "Unexpected" as const, message: "db down" });
+        },
+      },
+    };
+    const r = await canWrite(report(orgA, "aaaaaaaaaa"), colleagueActor, deps);
+    expect(!r.ok && r.error).toEqual({ kind: "Unexpected", message: "db down" });
+  });
+
+  it("reaches the whole write seam — loadWritableReport admits the org-write colleague", async () => {
+    const reports = new InMemoryReportRepository();
+    const rpt = report(orgA, "aaaaaaaaaa");
+    await reports.save(rpt);
+    const deps = writeDeps();
+    await deps.orgWriteGrants.grant(rpt.id, orgA, owner);
+    const r = await loadWritableReport(reports, colleagueActor, slug("aaaaaaaaaa"), deps);
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("loadWritableReport (rename / re-upload / move seam)", () => {
   it("returns the report for the owner", async () => {
     const reports = new InMemoryReportRepository();
@@ -269,6 +381,7 @@ describe("loadWritableReport (rename / re-upload / move seam)", () => {
       {
         grants,
         identities: new InMemoryIdentityStore(),
+        orgWriteGrants: new InMemoryOrgWriteGrantStore(),
       },
     );
     expect(r.ok && r.value.title).toBe("A Title");

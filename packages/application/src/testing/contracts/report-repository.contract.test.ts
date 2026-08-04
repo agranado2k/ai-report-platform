@@ -3,13 +3,20 @@
 // packages/adapters/src/report-repository.contract.test.ts (ADR-0046) — any
 // divergence between the two fails in exactly one of the two runs.
 import { createReport, folderId, makeSlug, orgId, reportId, userId, versionId } from "arp-domain";
-import { InMemoryReportRepository, InMemoryWriteGrantStore } from "../in-memory";
+import {
+  InMemoryOrgWriteGrantStore,
+  InMemoryReportRepository,
+  InMemoryWriteGrantStore,
+} from "../in-memory";
 import {
   describeReportRepositoryContract,
   type ReportFixtureOverrides,
 } from "./report-repository.contract";
 
 const ORG_ID = orgId("contract-org");
+// A different org the fixtures never live in — the "stale row" side of the
+// ADR-0078 org-write org match.
+const FOREIGN_ORG_ID = orgId("contract-other-org");
 const FOLDER_ID = folderId("contract-folder");
 const UPLOADER_ID = userId("contract-user");
 const COLLEAGUE_ID = userId("contract-colleague");
@@ -35,7 +42,9 @@ describeReportRepositoryContract("in-memory", async () => {
   // the harness reach the ADR-0075 visibility predicate (like the real
   // adapter's SQL reads the report_write_grants table directly).
   const writeGrants = new InMemoryWriteGrantStore();
-  const repo = new InMemoryReportRepository(writeGrants);
+  // Same sharing, for the ADR-0078 org-write leg.
+  const orgWriteGrants = new InMemoryOrgWriteGrantStore();
+  const repo = new InMemoryReportRepository(writeGrants, orgWriteGrants);
   let seq = 0;
 
   return {
@@ -46,6 +55,11 @@ describeReportRepositoryContract("in-memory", async () => {
     async grantWrite(reportId, granteeEmail, granteeUserId) {
       const granted = await writeGrants.grant(reportId, granteeEmail, UPLOADER_ID, granteeUserId);
       if (!granted.ok) throw new Error(`grantWrite failed: ${granted.error.message}`);
+    },
+    foreignOrgId: FOREIGN_ORG_ID,
+    async grantOrgWrite(reportId, orgId) {
+      const granted = await orgWriteGrants.grant(reportId, orgId, UPLOADER_ID);
+      if (!granted.ok) throw new Error(`grantOrgWrite failed: ${granted.error.message}`);
     },
     nextVersionId: versionIdFixture,
     makeReport(overrides: ReportFixtureOverrides = {}) {

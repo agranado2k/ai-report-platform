@@ -13,8 +13,10 @@ import {
   InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
+  InMemoryFolderRepository,
   InMemoryIdempotencyStore,
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
   PassThroughUnitOfWork,
@@ -37,6 +39,9 @@ export interface AppTestHarness {
   /** Write grants (ADR-0060) — the canWrite seam's reUpload call site. */
   readonly grants: InMemoryWriteGrantStore;
   readonly identities: InMemoryIdentityStore;
+  /** The folder tree (ADR-0078 §6) — uploadReport reads the DESTINATION
+   *  folder's visibility to decide the new report's initial Acl. */
+  readonly folders: InMemoryFolderRepository;
 }
 
 /** The subset of {@link AppTestHarness} a caller may override — one seam at a
@@ -54,6 +59,7 @@ export type AppTestHarnessOverrides = Partial<
     | "planLimiter"
     | "grants"
     | "identities"
+    | "folders"
   >
 >;
 
@@ -76,8 +82,14 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const planLimiter = overrides.planLimiter ?? new FakePlanLimiter();
   const grants = overrides.grants ?? new InMemoryWriteGrantStore();
   const identities = overrides.identities ?? new InMemoryIdentityStore();
+  const folders = overrides.folders ?? new InMemoryFolderRepository();
+  // ADR-0078: the third canWrite leg. reUpload runs through canWrite, so the
+  // upload harness has to carry it even though no upload test grants one.
+  const orgWriteGrants = new InMemoryOrgWriteGrantStore();
 
   const deps: UploadReportDeps = {
+    orgWriteGrants,
+    folders,
     reports,
     blobs,
     bundles,
@@ -96,6 +108,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
 
   return {
     deps,
+    folders,
     reports,
     blobs,
     bundles,

@@ -29,4 +29,9 @@ export { type FolderNode, FolderTree } from "./FolderTree";
 export { Logo } from "./Logo";
 export { PageShell } from "./PageShell";
 export { RenameReportForm } from "./RenameReportForm";
+export {
+  type ReportSharingChoice,
+  ReportSharingMenu,
+  type ReportSharingNode,
+} from "./ReportSharingMenu";
 export { StatusBadge } from "./StatusBadge";

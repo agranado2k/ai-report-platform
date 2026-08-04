@@ -22,12 +22,12 @@ import {
   reviveReportReplay,
 } from "../idempotent-write";
 import {
+  type CanWriteDeps,
   type FolderAccessDeps,
   type FolderGuardMessages,
   loadVisibleFolder,
   loadWritableReport,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "../load-owned";
 import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
 
@@ -39,7 +39,7 @@ const TARGET_FOLDER_MESSAGES: FolderGuardMessages = {
   notWritable: "you do not have write access to the target folder", // unused (visibility-gated)
 };
 
-export interface MoveReportDeps extends WriteGrantCheckDeps, FolderAccessDeps, IdempotentWriteDeps {
+export interface MoveReportDeps extends CanWriteDeps, FolderAccessDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   readonly folders: FolderRepository;
   /** Audit log (ADR-0070) — one `report.moved` row per move. */

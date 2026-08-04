@@ -25,6 +25,7 @@ export function FolderShareMenu({
   manageHref,
   inertShareNotice,
   rosterUnavailableNotice,
+  personShareLimitNotice,
   open,
 }: {
   node: FolderNode;
@@ -33,6 +34,7 @@ export function FolderShareMenu({
   manageHref: string;
   inertShareNotice: string;
   rosterUnavailableNotice: string;
+  personShareLimitNotice: string;
   open: boolean;
 }) {
   return (
@@ -59,6 +61,7 @@ export function FolderShareMenu({
             manageHref={manageHref}
             inertShareNotice={inertShareNotice}
             rosterUnavailableNotice={rosterUnavailableNotice}
+            personShareLimitNotice={personShareLimitNotice}
           />
         ) : (
           // Non-owner: the controls are shown DISABLED with the server's own
@@ -81,11 +84,13 @@ function ManageControls({
   manageHref,
   inertShareNotice,
   rosterUnavailableNotice,
+  personShareLimitNotice,
 }: {
   node: FolderNode;
   manageHref: string;
   inertShareNotice: string;
   rosterUnavailableNotice: string;
+  personShareLimitNotice: string;
 }) {
   const nextVisibility = node.visibility === "org" ? "private" : "org";
   return (
@@ -149,6 +154,8 @@ function ManageControls({
         </Button>
       </Form>
 
+      <ReportBulkApply node={node} />
+
       <div className="mt-1 border-t border-border pt-1">
         {node.sharesUnavailable ? (
           // The roster load FAILED. Saying nothing (or rendering an empty
@@ -165,10 +172,87 @@ function ManageControls({
             Manage who it's shared with →
           </Link>
         ) : (
-          <ShareRoster node={node} shares={node.shares} inertShareNotice={inertShareNotice} />
+          <ShareRoster
+            node={node}
+            shares={node.shares}
+            inertShareNotice={inertShareNotice}
+            personShareLimitNotice={personShareLimitNotice}
+          />
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The ADR-0078 bulk apply — "also share the N reports inside this folder".
+ *
+ * Rendered only for the folder actually being managed (`?manage=<id>`), which
+ * is the one folder the loader paid to count. Everywhere else `reportSharing`
+ * is null and nothing is offered: an uncounted offer would have to say "the
+ * reports inside" without knowing whether there are any, and the whole point of
+ * this surface is that it only claims what it can support.
+ *
+ * The count is what the VIEWER can see, which is exactly the scope the action
+ * walks — a colleague's private report in this folder was never a candidate and
+ * is not admitted to exist (ADR-0076's "existence is private", applied here).
+ *
+ * Three separate submits, not a select + a submit: each button says what it
+ * does, and none of them can be left staged in a form that outlives the state
+ * it was staged for.
+ */
+function ReportBulkApply({ node }: { node: FolderNode }) {
+  if (!node.reportSharing) return null;
+  const { visibleCount, overCap } = node.reportSharing;
+  if (visibleCount === 0) {
+    return (
+      <p className="mt-1 border-t border-border px-1 pt-1.5 text-[0.65rem] leading-snug text-subtle">
+        There are no reports you can see in this folder.
+      </p>
+    );
+  }
+  const subject = `${visibleCount} ${visibleCount === 1 ? "report" : "reports"}`;
+  if (overCap) {
+    // Refused PRE-FLIGHT rather than truncated — a bulk action that reported
+    // success for a partial run is the lie this whole surface avoids.
+    return (
+      <p className="mt-1 border-t border-border px-1 pt-1.5 text-[0.65rem] leading-snug text-warning">
+        This folder holds more reports than one change can cover, so sharing them all at once isn't
+        available here. Share them from their own rows instead.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1 border-t border-border p-1 pt-1.5">
+      <p className="mb-1 text-xs font-medium text-fg">The reports inside</p>
+      <p className="mb-1.5 text-[0.65rem] leading-snug text-subtle">
+        Sharing this folder shows its NAME. These change the {subject} inside it that you can see.
+        Only reports you own change, and only those that aren't already in the state you pick —
+        reports with a password, an invite list, or a public link are never touched. Everything left
+        alone is listed back to you with the reason.
+      </p>
+      <div className="flex flex-col gap-1">
+        {[
+          { sharing: "org_view", label: `Let your org VIEW the ${subject}` },
+          { sharing: "org_edit", label: `Let your org view AND EDIT the ${subject}` },
+          { sharing: "private", label: `Make the ${subject} private again` },
+        ].map((choice) => (
+          <Form method="post" key={choice.sharing} autoComplete="off">
+            <input type="hidden" name="intent" value="apply-folder-sharing" />
+            <input type="hidden" name="folderId" value={node.id} />
+            <input type="hidden" name="sharing" value={choice.sharing} />
+            <Button
+              type="submit"
+              size="sm"
+              variant={choice.sharing === "private" ? "secondary" : "primary"}
+              className="w-full justify-start text-left text-xs"
+            >
+              {choice.label}
+            </Button>
+          </Form>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -176,10 +260,12 @@ function ShareRoster({
   node,
   shares,
   inertShareNotice,
+  personShareLimitNotice,
 }: {
   node: FolderNode;
   shares: readonly FolderShareRow[];
   inertShareNotice: string;
+  personShareLimitNotice: string;
 }) {
   return (
     <div className="p-1">
@@ -241,6 +327,10 @@ function ShareRoster({
           address is accepted and recorded, but is INERT — folder listings are
           org-scoped, so the grantee sees nothing until they join. */}
       <p className="mt-1 text-[0.65rem] leading-snug text-subtle">{inertShareNotice}</p>
+      {/* ADR-0078 §5 v1 covers the ORG direction only. A person-share stays
+          visibility-only, and an operator who has just added a colleague by
+          email would otherwise reasonably assume the reports came with it. */}
+      <p className="mt-1 text-[0.65rem] leading-snug text-subtle">{personShareLimitNotice}</p>
     </div>
   );
 }

@@ -9,13 +9,16 @@
 //   can read the metadata of a report they can write, even outside its org.
 // - `loadOwnedReport` — owner-gated WRITES (delete, setAcl, grant management).
 //   Org-agnostic: the row must be OWNED by the acting user (ADR-0059 §2).
-// - `hasWriteGrant` + `canWrite` + `loadWritableReport` — the write seam for
-//   rename / re-upload / move: `isOwner OR hasWriteGrant` (ADR-0060 §4). A
-//   grant is matched by `granteeUserId === actor.userId` OR normalized-email
-//   equality with the actor's mirrored email (resolved via IdentityStore —
-//   the grantee may not have had a `grantee_user_id` at grant time). This is
-//   a distinct seam from `loadOwnedReport` — delete/setAcl stay owner-only
-//   permanently.
+// - `hasWriteGrant` + `hasOrgWriteGrant` + `canWrite` + `loadWritableReport` —
+//   the write seam for rename / re-upload / move: `isOwner OR hasWriteGrant OR
+//   hasOrgWriteGrant` (ADR-0060 §4, extended by ADR-0078 §1). A PERSONAL grant
+//   is matched by `granteeUserId === actor.userId` OR normalized-email equality
+//   with the actor's mirrored email (resolved via IdentityStore — the grantee
+//   may not have had a `grantee_user_id` at grant time), and works CROSS-ORG by
+//   design. An ORG-WIDE grant is the opposite: strictly org-matched, on both
+//   the actor's org and the stored row's own `org_id`, and refused outright on
+//   a SOFT-DELETED report (ADR-0078 §11). This is a distinct seam
+//   from `loadOwnedReport` — delete/setAcl stay owner-only permanently.
 // - `loadVisibleFolder` + `loadWritableFolder` — the ADR-0076 folder seams
 //   (replacing the old org-only `loadOwnedFolder`; ADR-0059 §5 is reversed):
 //   a folder is VISIBLE to its owner, to everyone when legacy (ownerId null)
@@ -54,6 +57,7 @@ import type {
   FolderRepository,
   FolderShareStore,
   IdentityStore,
+  OrgWriteGrantStore,
   ReportRepository,
   WriteGrantStore,
 } from "./ports";
@@ -79,14 +83,28 @@ export interface WriteGrantCheckDeps {
   readonly identities: Pick<IdentityStore, "findEmailByUserId">;
 }
 
+/** Deps the full `canWrite` seam needs (ADR-0078): the ADR-0060 personal-grant
+ *  pair PLUS the org-wide grant store. Kept as a separate extension so
+ *  `hasWriteGrant` — which answers only "does this PERSON hold a grant?" —
+ *  still takes exactly what it uses. */
+export interface CanWriteDeps extends WriteGrantCheckDeps {
+  readonly orgWriteGrants: OrgWriteGrantStore;
+}
+
 const REPORT_ORG_MESSAGES: OwnedGuardMessages = {
   notFound: "report not found",
   notAllowed: "report is not in your org",
 };
 
+/** The 403 `loadOwnedReport` returns for a report someone else owns. Exported
+ *  because the dashboard renders the SERVER's reason on a disabled sharing
+ *  control rather than inventing a client-side phrasing (ADR-0078 §12, the
+ *  `FOLDER_NOT_MANAGEABLE` precedent). */
+export const SETTING_SHARING_NOT_OWNER = "you do not own this report";
+
 const REPORT_OWNER_MESSAGES: OwnedGuardMessages = {
   notFound: "report not found",
-  notAllowed: "you do not own this report",
+  notAllowed: SETTING_SHARING_NOT_OWNER,
 };
 
 const REPORT_WRITE_MESSAGES: OwnedGuardMessages = {
@@ -182,26 +200,72 @@ export async function hasWriteGrant(
   return hasEmailKeyedGrant(reportId, actor, deps.grants, deps.identities);
 }
 
+/**
+ * Does `actor` hold the report's ORG-WIDE write grant (ADR-0078 §1)?
+ *
+ * Two independent org checks, and BOTH are load-bearing:
+ *  - the actor must be acting in the REPORT's org. This is the one deliberate
+ *    asymmetry with ADR-0060 §4, where a personal grant works cross-org BY
+ *    DESIGN (the typical grantee lands in a JIT personal org). An org-wide
+ *    grant is meaningless outside the org it names, and honoring it there
+ *    would be a straight privilege escalation.
+ *  - the stored row's own `org_id` must still match the report's. The column
+ *    exists precisely so this is checkable: a stale row fails the match rather
+ *    than silently widening write access.
+ *
+ * Fails CLOSED on a store error (the error propagates; it never degrades to
+ * "no grant, carry on" — that would be indistinguishable from a denial only
+ * by luck).
+ *
+ * A SOFT-DELETED report is refused outright. The FK on
+ * `report_org_write_grants.report_id` cascades on a HARD delete only, so the
+ * row survives `deleteReport` — and the re-upload path deliberately does NOT
+ * filter `deletedAt` (whether re-upload resurrects a soft-deleted slug is an
+ * open question, see upload-report.ts's `reUpload`). Leaving that open for the
+ * OWNER and for one NAMED grantee is a deliberate person typing a slug they
+ * know; leaving it open for EVERY member of the org is a blast radius nobody
+ * chose. So this leg — and only this leg — narrows: the two pre-existing legs
+ * keep today's behavior until the open question is actually decided.
+ */
+export async function hasOrgWriteGrant(
+  report: Report,
+  actor: TenancyActor,
+  deps: Pick<CanWriteDeps, "orgWriteGrants">,
+): Promise<Result<boolean, AppError>> {
+  if (report.deletedAt !== null) return ok(false);
+  if (report.orgId !== actor.orgId) return ok(false);
+  const found = await deps.orgWriteGrants.find(report.id);
+  if (!found.ok) return found;
+  if (found.value === null) return ok(false);
+  return ok(found.value.orgId === report.orgId);
+}
+
 /** May `actor` modify this report (rename / re-upload / move)? `isOwner OR
- *  hasWriteGrant` (ADR-0060 §4) — deliberately org-agnostic; a write grant
- *  works cross-org. */
+ *  hasWriteGrant OR hasOrgWriteGrant` (ADR-0060 §4, extended by ADR-0078 §1)
+ *  — the first two legs are deliberately org-agnostic (a personal write grant
+ *  works cross-org); the third is strictly org-matched. Ownership
+ *  short-circuits, so the common path costs no extra query. */
 export async function canWrite(
   report: Report,
-  actor: Pick<TenancyActor, "userId">,
-  deps: WriteGrantCheckDeps,
+  actor: TenancyActor,
+  deps: CanWriteDeps,
 ): Promise<Result<boolean, AppError>> {
   if (report.ownerId === actor.userId) return ok(true);
-  return hasWriteGrant(report.id, actor, deps);
+  const personal = await hasWriteGrant(report.id, actor, deps);
+  if (!personal.ok) return personal;
+  if (personal.value) return ok(true);
+  return hasOrgWriteGrant(report, actor, deps);
 }
 
 /** Load a Report by slug for a `canWrite`-gated write (rename / re-upload /
- *  move — ADR-0059 §2 / ADR-0060 §4): must exist, not be soft-deleted, and
- *  pass `canWrite`. Replaces the old org check for these operations. */
+ *  move — ADR-0059 §2 / ADR-0060 §4 / ADR-0078 §1): must exist, not be
+ *  soft-deleted, and pass `canWrite`. Replaces the old org check for these
+ *  operations. */
 export async function loadWritableReport(
   reports: ReportRepository,
   actor: TenancyActor,
   slug: Slug,
-  deps: WriteGrantCheckDeps,
+  deps: CanWriteDeps,
   messages: OwnedGuardMessages = REPORT_WRITE_MESSAGES,
 ): Promise<Result<Report, AppError>> {
   const found = await loadLiveReport(reports, slug, messages);

@@ -6,12 +6,14 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
+import { MAX_SHARING_BULK_APPLY } from "arp-application";
 import {
   type AppError,
   folderIdToWire,
   makeFolderId,
   makeFolderVisibility,
   makeReportId,
+  makeReportSharingState,
   makeSlug,
   reportIdToWire,
   visibleFolderOrRoot,
@@ -30,6 +32,7 @@ import {
   MoreIcon,
   PageShell,
   RenameReportForm,
+  ReportSharingMenu,
   Select,
   StatusBadge,
 } from "../components";
@@ -52,6 +55,16 @@ import {
 } from "../server/folder-sharing.server";
 import { errorToJson, errorToJsonParts } from "../server/http.server";
 import { log } from "../server/log.server";
+import {
+  confirmDiscardFromForm,
+  PERSON_SHARE_LIMIT_NOTICE,
+  reportFormKey,
+  reportSharingBadge,
+  reportSharingManagement,
+  SHARING_CHOICES,
+  sharingApplyIsPartial,
+  sharingApplySummary,
+} from "../server/report-sharing.server";
 
 export const meta: MetaFunction = () => [
   { title: "Your reports — Centaur" },
@@ -105,6 +118,8 @@ export async function loader(args: LoaderFunctionArgs) {
     endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
     rosterUnavailableNotice: ROSTER_UNAVAILABLE_NOTICE,
+    sharingChoices: SHARING_CHOICES,
+    personShareLimitNotice: PERSON_SHARE_LIMIT_NOTICE,
   };
   if (!actor) return json(empty);
 
@@ -163,6 +178,32 @@ export async function loader(args: LoaderFunctionArgs) {
       }
     }
   }
+  // The ADR-0078 bulk apply offers a COUNT, so it has to have one. Paid for
+  // exactly like the share roster above: only for the folder in `?manage=`,
+  // one query, never per sidebar row (which would be an N+1 on the hot path).
+  // The count is the ACTOR's visible listing for that folder — precisely the
+  // scope the action will walk, so the offer and the outcome agree.
+  let manageReportCount: { readonly visibleCount: number; readonly overCap: boolean } | null = null;
+  if (manageTarget) {
+    const decoded = makeFolderId(manageTarget.id);
+    if (decoded.ok) {
+      const inFolder = await ops().searchReports(
+        { orgId: actor.orgId, userId: actor.userId },
+        { folderId: decoded.value, limit: MAX_SHARING_BULK_APPLY + 1 },
+      );
+      if (inFolder.ok) {
+        manageReportCount = {
+          visibleCount: Math.min(inFolder.value.items.length, MAX_SHARING_BULK_APPLY),
+          overCap: inFolder.value.items.length > MAX_SHARING_BULK_APPLY,
+        };
+      } else {
+        // Unknown is not zero. Leaving it null renders no offer at all, rather
+        // than an offer for a count we could not read.
+        log.warn(`dashboard: report count for bulk apply failed — ${inFolder.error.message}`);
+      }
+    }
+  }
+
   const folders: FolderNode[] = grafted.map((f) => {
     const own = manageTarget?.id === f.id ? shares : null;
     const m = management.get(f.id) ?? {
@@ -195,6 +236,7 @@ export async function loader(args: LoaderFunctionArgs) {
       // many people were added — so the badge and the forms can never disagree
       // about whether anything moved.
       formKey: folderFormKey({ visibility: f.visibility, shareCount: own?.length ?? null }),
+      reportSharing: manageTarget?.id === f.id ? manageReportCount : null,
     };
   });
   // Only honor a folder filter that exists in the org (this existence check also
@@ -241,10 +283,38 @@ export async function loader(args: LoaderFunctionArgs) {
     folders,
     items: result.items.map((r) => {
       const folderId = folderIdToWire(r.folderId);
+      // ADR-0078 §12: `manageable` / `blockedReason` / the badge / the discard
+      // warning are decided HERE, by the same predicates `setReportSharing`
+      // enforces, and shipped as plain data. `ownerId` is NOT among the fields
+      // spread below — the server sends conclusions, never the authorization
+      // input (the `folderManagement` doctrine).
+      const sharing = reportSharingManagement(
+        {
+          ownerId: r.ownerId,
+          aclMode: r.aclMode,
+          hasOrgWrite: r.hasOrgWrite,
+          // The REAL roster size, off the same free join (ADR-0078 §4) — the
+          // warning must name the N the server's own refusal names.
+          allowedEmailCount: r.allowedEmailCount,
+        },
+        actor ? { userId: actor.userId, scopes: actor.scopes } : null,
+      );
       return {
-        ...r,
         id: reportIdToWire(r.id),
+        slug: r.slug,
+        title: r.title,
+        isPublished: r.isPublished,
         folderId,
+        sharing: {
+          slug: r.slug,
+          title: r.title,
+          badge: reportSharingBadge({ aclMode: r.aclMode, hasOrgWrite: r.hasOrgWrite }),
+          manageable: sharing.manageable,
+          blockedReason: sharing.blockedReason,
+          state: sharing.state,
+          discardWarning: sharing.discardWarning,
+          formKey: reportFormKey({ aclMode: r.aclMode, hasOrgWrite: r.hasOrgWrite }),
+        },
         // A visible report can live in an INVISIBLE folder (ADR-0075/0076), so
         // its folderId resolves to nothing in `folders`. Resolve the id the UI
         // should BIND to here, on the server, where arp-domain is already
@@ -266,6 +336,8 @@ export async function loader(args: LoaderFunctionArgs) {
     endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
     rosterUnavailableNotice: ROSTER_UNAVAILABLE_NOTICE,
+    sharingChoices: SHARING_CHOICES,
+    personShareLimitNotice: PERSON_SHARE_LIMIT_NOTICE,
   });
 }
 
@@ -278,6 +350,29 @@ interface FolderActionData {
   readonly error: string | null;
   readonly summary: string | null;
   readonly partial: boolean;
+}
+
+/** The shape every ADR-0078 report-sharing action returns, success or failure.
+ *  `pendingSharing` is the state the operator asked for on a submit the server
+ *  refused for want of confirmation — echoed back so the panel can offer the
+ *  confirm button for THAT choice, and null otherwise (so a plain refusal
+ *  never renders a confirm button for something nobody asked for). */
+interface ReportActionData {
+  readonly reportSlug: string;
+  readonly error: string | null;
+  readonly summary: string | null;
+  readonly pendingSharing: string | null;
+}
+
+function reportError(reportSlug: string, error: AppError, pendingSharing: string | null = null) {
+  const { message, status } = errorToJsonParts(error);
+  const data: ReportActionData = { reportSlug, error: message, summary: null, pendingSharing };
+  return json(data, { status });
+}
+
+function reportOk(reportSlug: string, summary: string) {
+  const data: ReportActionData = { reportSlug, error: null, summary, pendingSharing: null };
+  return json(data);
 }
 
 /** A folder-scoped action failure: the same status `errorToHttp` gives the JSON
@@ -347,6 +442,53 @@ export async function action(args: ActionFunctionArgs) {
     );
     if (!r.ok) return errorToJson(r.error);
     return redirect(folder ? `/?folder=${folder}` : "/");
+  }
+
+  // ── ADR-0078 §12: report sharing, from the dashboard ────────────────────
+  // Posts to the SAME use case the /api/v1 route calls, through this
+  // cookie-authenticated Remix action — the browser never touches the Bearer
+  // API. `resolveUploadActor` carries SELF_SCOPES, which includes `acl:write`.
+  if (intent === "set-report-sharing") {
+    const slug = makeSlug(String(form.get("slug") ?? ""));
+    if (!slug.ok) return reportError("", slug.error);
+    const rawSlug = String(form.get("slug") ?? "");
+    // ONE validator, shared with the JSON API route and the MCP tool.
+    const sharing = makeReportSharingState(String(form.get("sharing") ?? ""));
+    if (!sharing.ok) return reportError(rawSlug, sharing.error);
+    // The zero-JS confirmation (ADR-0078 §4): only the SECOND submit — the one
+    // rendered under the sentence naming what is discarded — carries this.
+    const confirmDiscard = confirmDiscardFromForm(form.get("confirm_discard"));
+    const r = await ops().setReportSharing(
+      { orgId: actor.value.orgId, userId: actor.value.userId, scopes: actor.value.scopes },
+      { slug: slug.value, sharing: sharing.value, confirmDiscard },
+    );
+    if (!r.ok) {
+      // A refusal for want of confirmation is not a dead end: echo back WHICH
+      // state was asked for, so the panel can render the confirm button for
+      // exactly that choice rather than making the operator start over.
+      return reportError(rawSlug, r.error, confirmDiscard ? null : sharing.value);
+    }
+    return reportOk(rawSlug, `Sharing set to ${sharing.value.replace("_", " ")}.`);
+  }
+
+  if (intent === "apply-folder-sharing") {
+    const rawId = String(form.get("folderId") ?? "").trim();
+    const folderId = makeFolderId(rawId);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
+    const sharing = makeReportSharingState(String(form.get("sharing") ?? ""));
+    if (!sharing.ok) return folderError(rawId, sharing.error);
+    const r = await ops().applyFolderSharingToReports(
+      { orgId: actor.value.orgId, userId: actor.value.userId, scopes: actor.value.scopes },
+      { folderId: folderId.value, sharing: sharing.value },
+    );
+    // A refusal here is the server's own (403, 404, or the 422 pre-flight cap)
+    // and nothing was changed.
+    if (!r.ok) return folderError(rawId, r.error);
+    // A run that could not change every candidate is NOT a success — the
+    // banner renders as a warning and names each report and why. The condition
+    // lives in `sharingApplyIsPartial`, under test, rather than as an
+    // expression here that could be inverted without a test noticing.
+    return folderOk(rawId, sharingApplySummary(r.value), sharingApplyIsPartial(r.value));
   }
 
   if (intent === "rename-folder") {
@@ -470,8 +612,12 @@ export default function Index() {
     endingBefore,
     inertShareNotice,
     rosterUnavailableNotice,
+    sharingChoices,
+    personShareLimitNotice,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  // A report sharing action's outcome, tagged with the report it belongs to.
+  const reportOutcome = actionData && "reportSlug" in actionData ? actionData : null;
   // A sharing action's outcome (success summary OR the server's refusal),
   // tagged with the folder it belongs to.
   const folderOutcome = actionData && "folderId" in actionData ? actionData : null;
@@ -580,6 +726,7 @@ export default function Index() {
               manageHref={manageHref}
               inertShareNotice={inertShareNotice}
               rosterUnavailableNotice={rosterUnavailableNotice}
+              personShareLimitNotice={personShareLimitNotice}
               openMenuId={manageFolderId ?? folderOutcome?.folderId ?? null}
             />
           ) : (
@@ -594,6 +741,18 @@ export default function Index() {
             {q ? ` · matching “${q}”` : ""} · {items.length}
             {hasNext ? "+" : ""} report{items.length === 1 && !hasNext ? "" : "s"}
           </p>
+          {reportOutcome ? (
+            <p
+              role="status"
+              className={cx(
+                "mb-3 rounded-control px-2 py-1.5 text-xs",
+                reportOutcome.error ? "bg-danger/10 text-danger" : "bg-success/12 text-success",
+              )}
+            >
+              <span className="font-medium">{reportOutcome.reportSlug}: </span>
+              {reportOutcome.error ?? reportOutcome.summary}
+            </p>
+          ) : null}
           {items.length === 0 ? (
             <EmptyState
               icon="🗂️"
@@ -653,6 +812,21 @@ export default function Index() {
                     </div>
                   </div>
                   <StatusBadge isPublished={r.isPublished} />
+                  {/* Sharing (ADR-0078 §12). Its own kebab, next to the actions
+                      one, because "who can see this" is a different decision
+                      from "rename / move / delete" and folding them together
+                      would put a destructive action one row from a sharing
+                      one. `relative z-10` lifts it above the stretched-link
+                      overlay, exactly like the actions menu below. */}
+                  <ReportSharingMenu
+                    node={r.sharing}
+                    choices={sharingChoices}
+                    pendingState={
+                      reportOutcome?.reportSlug === r.slug
+                        ? (reportOutcome.pendingSharing ?? null)
+                        : null
+                    }
+                  />
                   {/* Row actions behind a native <details> menu — no JS, CSP-safe.
                       `relative z-10` lifts it (Move/Delete/Rename) above the
                       stretched-link overlay above. */}
@@ -761,7 +935,11 @@ export default function Index() {
                   a colleague's folder here too — a second time, next to
                   "+ New folder", reading as if folder creation had failed.
                   `folderOutcome` is the sharing channel; this is not it. */}
-              {!folderOutcome && actionData && "error" in actionData && actionData.error ? (
+              {!folderOutcome &&
+              !reportOutcome &&
+              actionData &&
+              "error" in actionData &&
+              actionData.error ? (
                 <span className="text-sm text-danger">✗ {actionData.error}</span>
               ) : null}
             </Form>

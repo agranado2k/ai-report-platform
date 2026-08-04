@@ -8,13 +8,16 @@
 // model. Injectable `fetch` keeps this unit-testable without a live API.
 
 import type {
+  AclSharingWire,
   AclWire,
   CommentWire,
   FolderShareWire,
   FolderWire,
   ListEnvelope,
   ReportDetailWire,
+  ReportSharingWire,
   ReportWire,
+  SharingApplyWire,
   VersionWire,
   WriteGrantWire,
 } from "arp-http/wire";
@@ -76,9 +79,10 @@ export class ApiClient {
   }
 
   /** Fetch a single report by slug or report_ id — the single-report resource
-   *  (`owner` always present; `acl` only when the caller is the owner); 404 → problem. */
-  getReport(slug: string): Promise<ApiResult<ReportDetailWire>> {
-    return this.get<ReportDetailWire>(`/api/v1/reports/${encodeURIComponent(slug)}`);
+   *  (`owner` always present; `acl` only when the caller is the owner; `sharing`
+   *  always, ADR-0078 §13); 404 → problem. */
+  getReport(slug: string): Promise<ApiResult<ReportSharingWire>> {
+    return this.get<ReportSharingWire>(`/api/v1/reports/${encodeURIComponent(slug)}`);
   }
 
   listFolders(params: CursorParams = {}): Promise<ApiResult<ListEnvelope<FolderWire>>> {
@@ -139,9 +143,12 @@ export class ApiClient {
     );
   }
 
-  /** Read a report's sharing acl — `{ object: "acl", mode, allowed_emails?, access_ttl_seconds? }`. */
-  getReportAcl(slug: string): Promise<ApiResult<AclWire>> {
-    return this.get<AclWire>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
+  /** Read a report's sharing acl PLUS its composed three-state `sharing`
+   *  (ADR-0078 §13) — `{ object: "acl", mode, allowed_emails?,
+   *  access_ttl_seconds?, sharing }`. Both are needed: `mode: "org"` is
+   *  identical for `org_view` and `org_edit`. */
+  getReportAcl(slug: string): Promise<ApiResult<AclSharingWire>> {
+    return this.get<AclSharingWire>(`/api/v1/reports/${encodeURIComponent(slug)}/acl`);
   }
 
   /** Set a report's sharing acl (ADR-0056). Sends only the fields relevant to `mode`. */
@@ -169,6 +176,38 @@ export class ApiClient {
             : {}),
         },
       },
+    );
+  }
+
+  /** Set a report's three-state sharing (ADR-0078): `private` / `org_view` /
+   *  `org_edit`. Owner-only; requires the `acl:write` scope. `confirmDiscard`
+   *  is forwarded ONLY when the caller passed it — the server refuses to leave
+   *  `password`/`allowlist`/`public` without it, and defaulting it here would
+   *  quietly remove that protection for every MCP caller. */
+  setReportSharing(
+    slug: string,
+    params: { readonly sharing: string; readonly confirmDiscard?: boolean },
+  ): Promise<ApiResult<ReportSharingWire>> {
+    return this.request<ReportSharingWire>(
+      "POST",
+      `/api/v1/reports/${encodeURIComponent(slug)}/sharing`,
+      {
+        json: {
+          sharing: params.sharing,
+          ...(params.confirmDiscard === true ? { confirm_discard: true } : {}),
+        },
+      },
+    );
+  }
+
+  /** Apply a sharing state to the reports INSIDE a folder (ADR-0078). Returns
+   *  the per-report outcome — `changed`, `skipped` (with reasons) and
+   *  `failed` — never a bare success. */
+  applyFolderSharingToReports(id: string, sharing: string): Promise<ApiResult<SharingApplyWire>> {
+    return this.request<SharingApplyWire>(
+      "POST",
+      `/api/v1/folders/${encodeURIComponent(id)}/reports/sharing`,
+      { json: { sharing } },
     );
   }
 

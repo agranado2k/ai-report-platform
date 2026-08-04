@@ -169,6 +169,42 @@ describe("edit token (ADR-0063)", () => {
     ]);
   });
 
+  describe("the org claim (ADR-0078 §1 — the org-write leg's independent fact)", () => {
+    function forge(extra: Record<string, unknown>): string {
+      const payload = Buffer.from(
+        JSON.stringify({ slug: SLUG, exp: NOW + 900, sub: SUB, scope: "edit", ...extra }),
+        "utf8",
+      ).toString("base64url");
+      const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
+      return `${payload}.${sig}`;
+    }
+
+    it("round-trips the minting session's org", () => {
+      const t = mintEditToken(SLUG, SUB, 900, SECRET, NOW, NOW, "org-abc");
+      expect(readEditToken(t, SLUG, SECRET, NOW + 60)?.org).toBe("org-abc");
+    });
+
+    it("OMITS the key entirely when no org is stamped — absence is what 'legacy' means", () => {
+      const t = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
+      const claims = readEditToken(t, SLUG, SECRET, NOW + 60);
+      expect("org" in (claims ?? {})).toBe(false);
+    });
+
+    it("a legacy token with NO org still authenticates", () => {
+      const claims = readEditToken(forge({}), SLUG, SECRET, NOW + 60);
+      expect(claims?.sub).toBe(SUB);
+      expect(claims?.org).toBeUndefined();
+    });
+
+    it("rejects a non-string org (type confusion)", () => {
+      expect(readEditToken(forge({ org: 42 }), SLUG, SECRET, NOW)).toBeNull();
+    });
+
+    it("rejects an EMPTY org — a claim that can only ever fail was never carried", () => {
+      expect(readEditToken(forge({ org: "" }), SLUG, SECRET, NOW)).toBeNull();
+    });
+  });
+
   describe("sessionStart backward-compat (ADR-0063 absolute session cap)", () => {
     it("a legacy token minted with NO sessionStart field still round-trips and authenticates", () => {
       const payload = Buffer.from(

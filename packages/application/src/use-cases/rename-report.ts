@@ -19,12 +19,12 @@ import {
   reportReplayBody,
   reviveReportReplay,
 } from "../idempotent-write";
-import { loadWritableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
+import { type CanWriteDeps, loadWritableReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "PATCH /api/v1/reports/{slug}";
 
-export interface RenameReportDeps extends WriteGrantCheckDeps, IdempotentWriteDeps {
+export interface RenameReportDeps extends CanWriteDeps, IdempotentWriteDeps {
   readonly reports: ReportRepository;
   /** Audit log (ADR-0070) — one `report.renamed` row per rename. */
   readonly audit: AuditLogger;

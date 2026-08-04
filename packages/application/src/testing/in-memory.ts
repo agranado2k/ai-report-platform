@@ -68,6 +68,8 @@ import type {
   IdentityStore,
   IdGenerator,
   NonceStore,
+  OrgWriteGrant,
+  OrgWriteGrantStore,
   PasswordHasher,
   PlanLimiter,
   ProcessedBundle,
@@ -75,6 +77,7 @@ import type {
   ReportPage,
   ReportRepository,
   ReportSearchQuery,
+  ReportSummary,
   ReportVersionSummary,
   ReportViewer,
   ScanJobMessage,
@@ -214,10 +217,34 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
   private readonly versionUploadedAt = new Map<string, number>();
   private uploadSeq = 0;
 
-  /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg —
-   *  share the SAME store instance the test grants through. Omitted = the
-   *  grant leg never matches (fine for tests not exercising grants). */
-  constructor(private readonly writeGrants?: WriteGrantStore) {}
+  /** `writeGrants` backs the ADR-0075 visibility predicate's grant leg and
+   *  `orgWriteGrants` the ADR-0078 org-write leg — share the SAME store
+   *  instances the test grants through. Omitted = that leg never matches (fine
+   *  for tests not exercising grants).
+   *
+   *  There is deliberately NO "viewer org" constructor parameter: the org an
+   *  org-write row is matched against is the org `searchByOrg` was CALLED with,
+   *  exactly as the adapter's SQL matches `report_org_write_grants.org_id`
+   *  against the searched org. A constructor-level org would be a second,
+   *  fake-only source of truth for the one comparison this leg exists to make. */
+  constructor(
+    private readonly writeGrants?: WriteGrantStore,
+    private readonly orgWriteGrants?: OrgWriteGrantStore,
+  ) {}
+
+  /** Does an org-write row exist for this report, ISSUED FOR `org`?
+   *
+   *  The `org_id` comparison is the whole safety property of the ADR-0078 §8
+   *  leg (§1: "a stale row must fail the match, never widen it"), so it lives
+   *  in ONE place that both the visibility predicate and the listing projection
+   *  call. They previously asked separately and disagreed: the predicate
+   *  compared orgs, the projection asked only whether a row existed — so a
+   *  foreign-org row hid the report and simultaneously badged it `Org + edit`. */
+  private async hasOrgWriteFor(id: ReportId, org: OrgId): Promise<boolean> {
+    if (!this.orgWriteGrants) return false;
+    const found = await this.orgWriteGrants.find(id);
+    return found.ok && found.value !== null && found.value.orgId === org;
+  }
 
   async findBySlug(slug: Slug): Promise<Result<Report | null, AppError>> {
     const id = this.slugToId.get(slug);
@@ -230,16 +257,22 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
 
   /** The ADR-0075 visibility predicate — mirrors the adapter's SQL: owned OR
    *  broadly shared (`org`/`public`) OR write-granted (userId-or-email match,
-   *  ADR-0060 §2). Anything else is invisible — existence is private. */
-  private async isVisibleTo(r: Report, viewer: ReportViewer): Promise<boolean> {
+   *  ADR-0060 §2) OR org-write-granted (ADR-0078 §8). Anything else is
+   *  invisible — existence is private. */
+  private async isVisibleTo(r: Report, viewer: ReportViewer, org: OrgId): Promise<boolean> {
     if (r.ownerId === viewer.userId) return true;
     if (r.acl.mode === "org" || r.acl.mode === "public") return true;
-    if (!this.writeGrants) return false;
-    const grant = await this.writeGrants.findFor(r.id, {
-      userId: viewer.userId,
-      email: viewer.email,
-    });
-    return grant.ok && grant.value !== null;
+    if (this.writeGrants) {
+      const grant = await this.writeGrants.findFor(r.id, {
+        userId: viewer.userId,
+        email: viewer.email,
+      });
+      if (grant.ok && grant.value !== null) return true;
+    }
+    // ADR-0078 §8: an org-write row lists the report for members of the org it
+    // was ISSUED FOR, even if the acl never made it broadly readable (a
+    // combination only the API can produce — see the contract matrix).
+    return this.hasOrgWriteFor(r.id, org);
   }
 
   async searchByOrg(
@@ -258,19 +291,26 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       );
     const visible: Report[] = [];
     for (const r of matched) {
-      if (await this.isVisibleTo(r, viewer)) visible.push(r);
+      if (await this.isVisibleTo(r, viewer, orgId)) visible.push(r);
     }
     const { items, hasMore } = keysetPage(visible, q); // keyset on id DESC (ADR-0053)
-    return ok({
-      items: items.map((r) => ({
+    const summaries: ReportSummary[] = [];
+    for (const r of items) {
+      summaries.push({
         id: r.id,
         slug: r.slug,
         title: r.title,
         isPublished: r.liveVersionId !== null,
         folderId: r.folderId,
-      })),
-      hasMore,
-    });
+        ownerId: r.ownerId,
+        aclMode: r.acl.mode,
+        hasOrgWrite: await this.hasOrgWriteFor(r.id, orgId),
+        // 0 in every non-allowlist mode, mirroring the adapter's
+        // COALESCE(jsonb_array_length(...), 0).
+        allowedEmailCount: r.acl.mode === "allowlist" ? r.acl.allowedEmails.length : 0,
+      });
+    }
+    return ok({ items: summaries, hasMore });
   }
 
   async hasReportsInFolder(orgId: OrgId, folderId: FolderId): Promise<Result<boolean, AppError>> {
@@ -1064,6 +1104,32 @@ export class InMemoryWriteGrantStore implements WriteGrantStore {
       if (k.startsWith(`${reportId}|`) && g.granteeUserId === actor.userId) return ok(g);
     }
     return ok(null);
+  }
+}
+
+/** In-memory OrgWriteGrantStore (ADR-0078) — one row per report, keyed by
+ *  report id alone. No email and no `findFor(actor)`: the org match is the
+ *  APPLICATION layer's job (`hasOrgWriteGrant`), so a store fake cannot
+ *  accidentally make the real check pass. */
+export class InMemoryOrgWriteGrantStore implements OrgWriteGrantStore {
+  private readonly grants = new Map<string, OrgWriteGrant>(); // reportId -> grant
+
+  async grant(
+    reportId: ReportId,
+    orgId: OrgId,
+    grantedBy: UserId,
+  ): Promise<Result<void, AppError>> {
+    this.grants.set(reportId, { reportId, orgId, grantedBy, grantedAt: Date.now() });
+    return ok(undefined);
+  }
+
+  async revoke(reportId: ReportId): Promise<Result<void, AppError>> {
+    this.grants.delete(reportId);
+    return ok(undefined);
+  }
+
+  async find(reportId: ReportId): Promise<Result<OrgWriteGrant | null, AppError>> {
+    return ok(this.grants.get(reportId) ?? null);
   }
 }
 

@@ -13,6 +13,9 @@ export type AuditAction =
   | "report.renamed"
   | "report.moved"
   | "report.deleted"
+  // The ADR-0078 three-state sharing transition. `meta` carries from/to, so
+  // the log records what changed and not merely which endpoint was hit.
+  | "report.sharing_set"
   | "folder.created"
   | "folder.renamed"
   | "folder.deleted"
@@ -22,6 +25,11 @@ export type AuditAction =
   | "acl.set"
   | "grant.write.granted"
   | "grant.write.revoked"
+  // ADR-0078 — the ORG-wide write leg. Deliberately distinct from the personal
+  // email-keyed pair above: "everyone in the org may edit this" and "this one
+  // person may edit this" are different acts and must be separately auditable.
+  | "grant.org_write.granted"
+  | "grant.org_write.revoked"
   | "comment.added"
   | "comment.replied"
   | "comment.resolved"

@@ -1,0 +1,372 @@
+import { folderId } from "arp-domain";
+import { describe, expect, it } from "vitest";
+import {
+  ACTORS,
+  folder,
+  makeFolderAccessDeps,
+  makeGrantCheckDeps,
+  makeOwnerMutationDeps,
+  report,
+  slug,
+} from "../testing/fixtures";
+import {
+  InMemoryFolderRepository,
+  InMemoryGrantStore,
+  InMemoryReportRepository,
+} from "../testing/in-memory";
+import {
+  applyFolderSharingToReports,
+  MAX_SHARING_BULK_APPLY,
+  sharingApplyIsPartial,
+} from "./apply-folder-sharing-to-reports";
+import { setAcl } from "./set-acl";
+import { setReportSharing } from "./set-report-sharing";
+
+const { orgA, owner, otherUser } = ACTORS;
+const FOLDER_ID = folderId("00000000-0000-7000-8000-0000000000f7");
+const ACTOR = { orgId: orgA, userId: owner, scopes: ["acl:write"] };
+
+const FAKE_HASHER = {
+  async hash() {
+    return { ok: true as const, value: "x" };
+  },
+  async verify() {
+    return { ok: true as const, value: true };
+  },
+};
+
+async function seed() {
+  const base = makeOwnerMutationDeps();
+  const folders = new InMemoryFolderRepository();
+  // An org-visible, owned folder — the shape the panel offers this action on.
+  await folders.save(
+    folder(FOLDER_ID, orgA, "House Numbers", {
+      parentId: folderId("00000000-0000-7000-8000-0000000000a0"),
+      ownerId: owner,
+      visibility: "org",
+    }),
+  );
+  const grantDeps = makeGrantCheckDeps();
+  const deps = {
+    ...base,
+    ...makeFolderAccessDeps(),
+    // The repository must read the SAME org-write store the use case writes,
+    // or its `hasOrgWrite` projection is permanently false and the candidate
+    // rule can never see an `org_edit` report as one.
+    reports: new InMemoryReportRepository(grantDeps.grants, grantDeps.orgWriteGrants),
+    folders,
+    grants: new InMemoryGrantStore({ now: () => Date.now() }),
+    orgWriteGrants: grantDeps.orgWriteGrants,
+  };
+  return deps;
+}
+
+type Deps = Awaited<ReturnType<typeof seed>>;
+
+async function place(
+  deps: Deps,
+  slugStr: string,
+  overrides: { readonly ownerId?: typeof owner; readonly title?: string } = {},
+) {
+  const rpt = report(orgA, slugStr, { ...overrides, folderId: FOLDER_ID });
+  await deps.reports.save(rpt);
+  return rpt;
+}
+
+describe("applyFolderSharingToReports (ADR-0078 §5)", () => {
+  it("requires the acl:write scope", async () => {
+    const deps = await seed();
+    const r = await applyFolderSharingToReports(
+      deps,
+      { orgId: orgA, userId: owner, scopes: [] },
+      { folderId: FOLDER_ID, sharing: "org_view" },
+    );
+    expect(!r.ok && r.error.kind).toBe("InsufficientScope");
+  });
+
+  it("refuses a folder the actor cannot SEE as NotFound — existence is private", async () => {
+    const deps = await seed();
+    const r = await applyFolderSharingToReports(deps, ACTOR, {
+      folderId: folderId("00000000-0000-7000-8000-0000000000ff"),
+      sharing: "org_view",
+    });
+    expect(!r.ok && r.error.kind).toBe("NotFound");
+  });
+
+  it("shares the actor's own private reports inside the folder", async () => {
+    const deps = await seed();
+    const a = await place(deps, "aaaaaaaaaa");
+    const b = await place(deps, "bbbbbbbbbb");
+    const r = await applyFolderSharingToReports(deps, ACTOR, {
+      folderId: FOLDER_ID,
+      sharing: "org_view",
+    });
+    expect(r.ok && r.value.changed.map((c) => c.slug).sort()).toEqual([a.slug, b.slug].sort());
+    expect(r.ok && r.value.total).toBe(2);
+    const after = await deps.reports.findById(a.id);
+    expect(after.ok && after.value?.acl.mode).toBe("org");
+  });
+
+  it("org_edit grants the org-write row on each report it changes", async () => {
+    const deps = await seed();
+    const a = await place(deps, "aaaaaaaaaa");
+    await applyFolderSharingToReports(deps, ACTOR, {
+      folderId: FOLDER_ID,
+      sharing: "org_edit",
+    });
+    const grant = await deps.orgWriteGrants.find(a.id);
+    expect(grant.ok && grant.value).not.toBeNull();
+  });
+
+  describe("the candidate rule, and its honest skips", () => {
+    it("SKIPS a colleague's report and names the reason — never claims it changed", async () => {
+      const deps = await seed();
+      const mine = await place(deps, "aaaaaaaaaa");
+      const theirs = await place(deps, "bbbbbbbbbb", { ownerId: otherUser });
+      // The colleague's report is only in the actor's listing because it is
+      // org-shared; a private one of theirs would never even be enumerated.
+      await setAcl(
+        { ...deps, hasher: FAKE_HASHER },
+        { ...ACTOR, userId: otherUser },
+        {
+          slug: slug(theirs.slug),
+          mode: "org",
+        },
+      );
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(r.ok && r.value.changed.map((c) => c.slug)).toEqual([mine.slug]);
+      expect(r.ok && r.value.skipped).toEqual([
+        { slug: theirs.slug, title: "A Title", reason: "not owned by you" },
+      ]);
+    });
+
+    it("SKIPS a password-protected report rather than publishing it", async () => {
+      const deps = await seed();
+      const locked = await place(deps, "cccccccccc");
+      await setAcl({ ...deps, hasher: FAKE_HASHER }, ACTOR, {
+        slug: slug(locked.slug),
+        mode: "password",
+        password: "hunter2",
+      });
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(r.ok && r.value.skipped.map((s) => s.reason)).toEqual(["password-protected"]);
+      const after = await deps.reports.findById(locked.id);
+      expect(after.ok && after.value?.acl.mode).toBe("password");
+    });
+
+    it("SKIPS one already at the destination rather than counting it as changed", async () => {
+      const deps = await seed();
+      const already = await place(deps, "dddddddddd");
+      await setReportSharing(deps, ACTOR, { slug: slug(already.slug), sharing: "org_view" });
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(r.ok && r.value.changed).toEqual([]);
+      expect(r.ok && r.value.skipped.map((s) => s.reason)).toEqual([
+        "already shared with your org to view",
+      ]);
+    });
+  });
+
+  // ── THE SIX TRANSITIONS (ADR-0078 §5) ──────────────────────────────────
+  //
+  // Three states, both directions between each pair, asserted on what actually
+  // LANDED in the stores — not on the summary, which is exactly what used to
+  // lie. The rule reads the COMPOSED state, so an org_edit → org_view
+  // REDUCTION really revokes the org-write row instead of skipping every report
+  // as "already shared with your org" and returning 200 with `changed: []`.
+  describe("moves between all three states, in both directions", () => {
+    const EXPECTED = {
+      private: { aclMode: "private", orgWrite: false },
+      org_view: { aclMode: "org", orgWrite: false },
+      org_edit: { aclMode: "org", orgWrite: true },
+    } as const;
+    const TRANSITIONS = [
+      ["private", "org_view"],
+      ["private", "org_edit"],
+      ["org_view", "private"],
+      ["org_view", "org_edit"],
+      ["org_edit", "private"],
+      ["org_edit", "org_view"],
+    ] as const;
+
+    for (const [from, to] of TRANSITIONS) {
+      it(`moves a folder of ${from} reports to ${to}`, async () => {
+        const deps = await seed();
+        const a = await place(deps, "aaaaaaaaaa");
+        await setReportSharing(deps, ACTOR, { slug: slug(a.slug), sharing: from });
+
+        const r = await applyFolderSharingToReports(deps, ACTOR, {
+          folderId: FOLDER_ID,
+          sharing: to,
+        });
+        expect(r.ok && r.value.changed.map((c) => c.slug)).toEqual([a.slug]);
+        expect(r.ok && r.value.skipped).toEqual([]);
+        expect(r.ok && r.value.failed).toEqual([]);
+
+        const after = await deps.reports.findById(a.id);
+        expect(after.ok && after.value?.acl.mode).toBe(EXPECTED[to].aclMode);
+        const grant = await deps.orgWriteGrants.find(a.id);
+        expect(grant.ok && grant.value !== null).toBe(EXPECTED[to].orgWrite);
+      });
+    }
+
+    it("an org_edit → org_view REDUCTION really revokes org write, and says it changed", async () => {
+      // The named regression: this used to return 200 / `changed: []` /
+      // `failed: []` with the whole org still holding edit, which an operator
+      // reads as success.
+      const deps = await seed();
+      const a = await place(deps, "aaaaaaaaaa");
+      await setReportSharing(deps, ACTOR, { slug: slug(a.slug), sharing: "org_edit" });
+      expect((await deps.orgWriteGrants.find(a.id)).ok).toBe(true);
+
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(r.ok && r.value.changed.length).toBe(1);
+      const grant = await deps.orgWriteGrants.find(a.id);
+      expect(grant.ok && grant.value).toBeNull();
+      // Read survives — the reduction is write-only.
+      const after = await deps.reports.findById(a.id);
+      expect(after.ok && after.value?.acl.mode).toBe("org");
+    });
+  });
+
+  describe("the private direction", () => {
+    it("still refuses to discard an advanced mode", async () => {
+      const deps = await seed();
+      const locked = await place(deps, "cccccccccc");
+      await setAcl({ ...deps, hasher: FAKE_HASHER }, ACTOR, {
+        slug: slug(locked.slug),
+        mode: "public",
+      });
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "private",
+      });
+      expect(r.ok && r.value.skipped.map((s) => s.reason)).toEqual(["already public"]);
+    });
+  });
+
+  describe("the cap refuses PRE-FLIGHT (ADR-0078 §5)", () => {
+    it("changes nothing at all when the folder is over the cap", async () => {
+      const deps = await seed();
+      // Distinct HEX two-char prefixes: the `report()` fixture derives the
+      // report id from the slug's first two characters, so a shared prefix
+      // would collapse 51 reports into one row.
+      const hex = "0123456789abcdef";
+      for (let i = 0; i <= MAX_SHARING_BULK_APPLY; i += 1) {
+        const prefix = `${hex[Math.floor(i / 16)]}${hex[i % 16]}`;
+        await place(deps, `${prefix}zzzzzzzz`);
+      }
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(!r.ok && r.error.kind).toBe("ValidationError");
+      if (!r.ok) expect(r.error.message).toContain("Nothing was changed");
+      // A refusal must change NOTHING — the point of enumerating first.
+      const page = await deps.reports.searchByOrg(
+        orgA,
+        { userId: owner },
+        { folderId: FOLDER_ID, limit: 100 },
+      );
+      expect(page.ok).toBe(true);
+      for (const item of page.ok ? page.value.items : []) {
+        const full = await deps.reports.findById(item.id);
+        expect(full.ok && full.value?.acl.mode).toBe("private");
+      }
+    });
+  });
+
+  describe("partial results are reported, never rounded up", () => {
+    it("sharingApplyIsPartial is false for a clean run and true when something failed", async () => {
+      const deps = await seed();
+      await place(deps, "aaaaaaaaaa");
+      const clean = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      expect(clean.ok && sharingApplyIsPartial(clean.value)).toBe(false);
+    });
+
+    it("a candidate the server then REFUSES lands in failed[] with the server's own message", async () => {
+      // The `failed` branch, actually EXECUTED. It was previously asserted only
+      // against a hand-built literal, so the push that produces it — and the
+      // decision to carry the use case's own `error.message` rather than an
+      // invented sentence — was never run.
+      const deps = await seed();
+      const doomed = await place(deps, "eeeeeeeeee", { title: "Doomed" });
+      const ok1 = await place(deps, "ffffffffff", { title: "Fine" });
+      const failing = {
+        ...deps,
+        orgWriteGrants: {
+          ...deps.orgWriteGrants,
+          find: deps.orgWriteGrants.find.bind(deps.orgWriteGrants),
+          revoke: deps.orgWriteGrants.revoke.bind(deps.orgWriteGrants),
+          async grant(id: typeof doomed.id) {
+            if (id === doomed.id) {
+              return {
+                ok: false as const,
+                error: { kind: "Unexpected" as const, message: "db down" },
+              };
+            }
+            return deps.orgWriteGrants.grant(id, orgA, owner);
+          },
+        },
+      };
+
+      const r = await applyFolderSharingToReports(failing, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_edit",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.value.failed).toEqual([{ slug: doomed.slug, title: "Doomed", reason: "db down" }]);
+      expect(r.value.changed.map((c) => c.title)).toEqual(["Fine"]);
+      // A failure IS partial; the clean sibling in the same run is not rounded
+      // up into it, nor down out of `changed`.
+      expect(sharingApplyIsPartial(r.value)).toBe(true);
+      expect(ok1.title).toBe("Fine");
+    });
+
+    it("a SKIP is not a failure — the two are reported separately", async () => {
+      const deps = await seed();
+      const locked = await place(deps, "cccccccccc");
+      await setAcl({ ...deps, hasher: FAKE_HASHER }, ACTOR, {
+        slug: slug(locked.slug),
+        mode: "public",
+      });
+      const r = await applyFolderSharingToReports(deps, ACTOR, {
+        folderId: FOLDER_ID,
+        sharing: "org_view",
+      });
+      // The rule working as designed must not read as a server failure.
+      expect(r.ok && r.value.failed).toEqual([]);
+      expect(r.ok && sharingApplyIsPartial(r.value)).toBe(false);
+    });
+  });
+
+  it("never touches a report outside the folder", async () => {
+    const deps = await seed();
+    const inside = await place(deps, "aaaaaaaaaa");
+    const outside = report(orgA, "bbbbbbbbbb");
+    await deps.reports.save(outside);
+    await applyFolderSharingToReports(deps, ACTOR, {
+      folderId: FOLDER_ID,
+      sharing: "org_view",
+    });
+    const untouched = await deps.reports.findById(outside.id);
+    expect(untouched.ok && untouched.value?.acl.mode).toBe("private");
+    const touched = await deps.reports.findById(inside.id);
+    expect(touched.ok && touched.value?.acl.mode).toBe("org");
+  });
+});

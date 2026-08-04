@@ -8,6 +8,7 @@
 // learns whether the report exists.
 import {
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "arp-application/testing";
@@ -27,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { EDIT_TTL_SECONDS, OWNER_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
+const OTHER_ORG = orgId("00000000-0000-7000-8000-0000000000b1");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
 const COLLEAGUE = userId("00000000-0000-7000-8000-0000000000d2");
 const GRANTEE = userId("00000000-0000-7000-8000-0000000000d3");
@@ -62,9 +64,11 @@ function makeDeps(
   reports: InMemoryReportRepository,
   writeGrant: {
     readonly grants: InMemoryWriteGrantStore;
+    readonly orgWriteGrants: InMemoryOrgWriteGrantStore;
     readonly identities: InMemoryIdentityStore;
   } = {
     grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   },
 ) {
@@ -122,7 +126,11 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     const identities = new InMemoryIdentityStore();
     identities.seedUser(GRANTEE, "grantee@x.com");
     await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
+    const { deps, logged } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
 
     const location = await ownerOpenLocation(deps, {
       actor: { orgId: ORG, userId: GRANTEE },
@@ -144,6 +152,60 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       sessionStart: nowSeconds, // /open always starts a FRESH session (ADR-0063 session cap)
     });
     expect(logged).toHaveLength(1); // audited exactly like the owner path — same capability now
+  });
+
+  it("ORG-WRITE GRANTEE (ADR-0078): same edit token, and NEVER an owner:true one", async () => {
+    // The ADR-0063 keystone, re-pinned for the third canWrite leg. An org-write
+    // colleague reaches /open through loadWritableReport → canWrite exactly as
+    // a personal grantee does, and must come out with the SAME capability:
+    // `scope: "edit"`, subject = themselves. Minting `owner:true` here would be
+    // a privilege escalation — that token bypasses every share gate, and its
+    // un-revocability (ADR-0056) would then apply to every member of the org.
+    const { reports, report } = await seededReports("gggggggggg");
+    const orgWriteGrants = new InMemoryOrgWriteGrantStore();
+    await orgWriteGrants.grant(report.id, ORG, OWNER);
+    const { deps, logged } = makeDeps(reports, {
+      grants: new InMemoryWriteGrantStore(),
+      orgWriteGrants,
+      identities: new InMemoryIdentityStore(),
+    });
+
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: COLLEAGUE },
+      rawHandle: "gggggggggg",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+
+    expect(location.startsWith(`${VIEW}/gggggggggg/edit?et=`)).toBe(true);
+    expect(location).not.toContain("&oa=");
+    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    expect(readEditToken(token, "gggggggggg", SECRET, nowSeconds)).toMatchObject({
+      slug: "gggggggggg",
+      sub: COLLEAGUE,
+      scope: "edit",
+    });
+    expect(logged).toHaveLength(1);
+  });
+
+  it("ORG-WRITE is org-matched: a CROSS-ORG actor is still bounced (ADR-0078 §1)", async () => {
+    const { reports, report } = await seededReports("hhhhhhhhhh");
+    const orgWriteGrants = new InMemoryOrgWriteGrantStore();
+    await orgWriteGrants.grant(report.id, ORG, OWNER);
+    const { deps } = makeDeps(reports, {
+      grants: new InMemoryWriteGrantStore(),
+      orgWriteGrants,
+      identities: new InMemoryIdentityStore(),
+    });
+
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: OTHER_ORG, userId: GRANTEE },
+      rawHandle: "hhhhhhhhhh",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+    expect(location).not.toContain("/edit?et=");
   });
 
   it("KEYSTONE: a same-org non-owner, non-grantee is bounced to the dashboard — no token", async () => {
@@ -202,7 +264,11 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     const identities = new InMemoryIdentityStore();
     identities.seedUser(GRANTEE, "grantee@x.com");
     await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
-    const { deps, logged } = makeDeps(reports, { grants, identities });
+    const { deps, logged } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
 
     const location = await ownerOpenLocation(deps, {
       actor: { orgId: ORG, userId: GRANTEE },

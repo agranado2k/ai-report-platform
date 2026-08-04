@@ -85,6 +85,39 @@ describe("db schema", () => {
     expect(onDeleteFor(schema.apiKeys, "acting_user_id")).toBe("restrict");
   });
 
+  // ADR-0078: the Org write grant — one row per report (a report belongs to
+  // exactly one org), mirroring the report_write_grants family's shape but
+  // keyed on the report alone rather than on (report, grantee email).
+  describe("report_org_write_grants (ADR-0078)", () => {
+    it("is named in snake_case and keyed on report_id alone", () => {
+      expect(getTableName(schema.reportOrgWriteGrants)).toBe("report_org_write_grants");
+      expect(schema.reportOrgWriteGrants.reportId.primary).toBe(true);
+      expect(getTableConfig(schema.reportOrgWriteGrants).primaryKeys).toHaveLength(0);
+    });
+
+    it("carries the org the grant was issued for, and the grantor", () => {
+      // org_id is STORED, not merely joinable from reports: the canWrite leg
+      // must verify the org match, and a stale row must fail that match rather
+      // than silently widen (ADR-0078 §1).
+      expect(schema.reportOrgWriteGrants.orgId.name).toBe("org_id");
+      expect(schema.reportOrgWriteGrants.orgId.notNull).toBe(true);
+      expect(schema.reportOrgWriteGrants.grantedBy.name).toBe("granted_by");
+      expect(schema.reportOrgWriteGrants.grantedBy.notNull).toBe(true);
+      expect(schema.reportOrgWriteGrants.grantedAt.notNull).toBe(true);
+    });
+
+    it("cascades from reports but RESTRICTs on orgs and users", () => {
+      const fks = getTableConfig(schema.reportOrgWriteGrants).foreignKeys;
+      const onDeleteFor = (localCol: string) =>
+        fks.find((fk) => fk.reference().columns.some((c) => c.name === localCol))?.onDelete;
+      // Deleting a report must not strand its grant; deleting an org or the
+      // granting user must be refused while the grant exists.
+      expect(onDeleteFor("report_id")).toBe("cascade");
+      expect(onDeleteFor("org_id")).toBe("restrict");
+      expect(onDeleteFor("granted_by")).toBe("restrict");
+    });
+  });
+
   it("uses a composite primary key on idempotency_keys", () => {
     const { primaryKeys } = getTableConfig(schema.idempotencyKeys);
     expect(primaryKeys).toHaveLength(1);

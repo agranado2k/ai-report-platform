@@ -7,6 +7,7 @@ import {
   FakePasswordHasher,
   InMemoryAuditLogger,
   InMemoryGrantStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   PassThroughUnitOfWork,
 } from "../in-memory";
@@ -38,6 +39,7 @@ describeSetAclGrantPruningContract("in-memory", async () => {
     reports,
     // Real wall-clock time — mirrors the real adapter (grant-store.contract.test.ts).
     grants: new InMemoryGrantStore({ now: () => Date.now() }),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     hasher: new FakePasswordHasher(),
     audit: new InMemoryAuditLogger(),
     uow: new PassThroughUnitOfWork(),

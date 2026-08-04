@@ -61,6 +61,20 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # owner's call, acl:write rides the session) must then surface the folder in
   # the third identity's tree. Folded into this scenario (not a sibling) so it
   # reuses the run-scoped fixtures the @run-scoped cleanup hook deletes.
+  # REPORT SHARING REACHES THE FOLDER'S CONTENTS (ADR-0078 — the bug this was
+  # written for). Sharing a folder with the org shows the FOLDER; the reports
+  # inside stay governed by their own Acls (ADR-0076 §6, deliberately). So a
+  # colleague sees an empty-looking shared folder. The last four steps prove the
+  # repair END TO END against real infra: the first identity puts a PRIVATE
+  # report into the now-org-shared folder (the move must NOT publish it —
+  # ADR-0078 §7, since move is canWrite-gated and a cross-org grantee must never
+  # be able to publish what they cannot read); the third identity cannot see it,
+  # which IS the reported bug; the owner then applies `org_edit` to the folder's
+  # reports; and the third identity must then LIST it, be able to OPEN it
+  # (single-report GET), and be able to EDIT it (PATCH rename — the canWrite
+  # seam's new org-write leg, exercised through the real HTTP door). The same
+  # response must SKIP the already-org-shared report by name with a reason,
+  # which is the honest-partial-result contract this surface exists for.
   @run-scoped
   Scenario: Two same-domain identities share one team org
     Given a first run-scoped team-domain identity is signed in
@@ -75,3 +89,7 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
     Then the third run-scoped identity lists the org-shared report but NOT the private folder
     When the first run-scoped identity sets the folder's visibility to org
     Then the third run-scoped identity's folder list now includes the run-scoped folder
+    When the first run-scoped identity puts a private report inside the shared folder
+    Then the third run-scoped identity cannot see the private report inside the shared folder
+    When the first run-scoped identity shares the folder's reports for viewing and editing
+    Then the third run-scoped identity can list, open and edit the once-private report

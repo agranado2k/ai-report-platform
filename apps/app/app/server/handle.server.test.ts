@@ -364,6 +364,7 @@ describe("handle() — end-to-end idempotency through the seam (ADR-0039)", () =
       InMemoryReportRepository,
       InMemoryAuditLogger,
       InMemoryIdentityStore,
+      InMemoryOrgWriteGrantStore,
       InMemoryWriteGrantStore,
       PassThroughUnitOfWork,
       idempotencyTestDeps,
@@ -377,6 +378,7 @@ describe("handle() — end-to-end idempotency through the seam (ADR-0039)", () =
       audit,
       uow: new PassThroughUnitOfWork(),
       grants: new InMemoryWriteGrantStore(),
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
       identities: new InMemoryIdentityStore(),
       ...idempotencyTestDeps(),
     };

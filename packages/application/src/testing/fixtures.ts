@@ -38,6 +38,7 @@ import {
   InMemoryEventOutbox,
   InMemoryFolderShareStore,
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
   idempotencyTestDeps,
@@ -120,9 +121,15 @@ export function folder(
   return r.value;
 }
 
-/** The `WriteGrantCheckDeps` pair (canWrite / hasWriteGrant, ADR-0060 §4). */
+/** The `CanWriteDeps` trio (canWrite, ADR-0060 §4 + ADR-0078 §1): the
+ *  personal email-keyed grant store, the identity mirror it resolves emails
+ *  through, and the org-wide grant store. */
 export function makeGrantCheckDeps() {
-  return { grants: new InMemoryWriteGrantStore(), identities: new InMemoryIdentityStore() };
+  return {
+    grants: new InMemoryWriteGrantStore(),
+    identities: new InMemoryIdentityStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+  };
 }
 
 /** The `FolderAccessDeps` pair (folder visibility / write guards, ADR-0076). */
@@ -170,6 +177,7 @@ export function makeCommentDeps() {
     uow: new PassThroughUnitOfWork(),
     grants: new InMemoryWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     ...idempotencyTestDeps(),
   };
 }

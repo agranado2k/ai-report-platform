@@ -195,7 +195,7 @@ describe("reassembleAndSaveEditedVersion", () => {
 
     const editActor = await resolveEditTokenActor(request, reportSlug, {
       reports: deps.reports,
-      writeGrant: { grants, identities },
+      writeGrant: { grants, orgWriteGrants: deps.orgWriteGrants, identities },
       secret: SECRET,
       nowSeconds: () => NOW_SECONDS,
     });
@@ -234,7 +234,7 @@ describe("reassembleAndSaveEditedVersion", () => {
     });
     const editActor = await resolveEditTokenActor(request, reportSlug, {
       reports: deps.reports,
-      writeGrant: { grants, identities },
+      writeGrant: { grants, orgWriteGrants: deps.orgWriteGrants, identities },
       secret: SECRET,
       nowSeconds: () => NOW_SECONDS,
     });
@@ -251,7 +251,7 @@ describe("reassembleAndSaveEditedVersion", () => {
     });
     const editActor = await resolveEditTokenActor(request, reportSlug, {
       reports: deps.reports,
-      writeGrant: { grants, identities },
+      writeGrant: { grants, orgWriteGrants: deps.orgWriteGrants, identities },
       secret: SECRET,
       nowSeconds: () => NOW_SECONDS,
     });

@@ -15,6 +15,7 @@ import {
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
+  applyFolderSharingToReportsToHttp,
   createFolderToHttp,
   deleteFolderToHttp,
   deleteReportToHttp,
@@ -29,6 +30,7 @@ import {
   revokeWriteToHttp,
   setAclToHttp,
   setFolderVisibilityToHttp,
+  setReportSharingToHttp,
   shareFolderToHttp,
   unshareFolderToHttp,
 } from "./write-response";
@@ -106,9 +108,13 @@ describe("report resource mappers (ADR-0053)", () => {
   });
 
   it("getReportToHttp → 200 with the report resource (owner sees the acl)", () => {
-    const res = getReportToHttp(ok(report("A Title")), CTX, OWNER);
+    const res = getReportToHttp(
+      ok({ report: report("A Title"), sharing: "private" as const }),
+      CTX,
+      OWNER,
+    );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual(reportResource("A Title"));
+    expect(res.body).toEqual({ ...reportResource("A Title"), sharing: "private" });
   });
 
   it("getReportToHttp for a NON-owner org member omits the acl block (ADR-0059 §3)", () => {
@@ -117,7 +123,7 @@ describe("report resource mappers (ADR-0053)", () => {
       ...r,
       acl: { mode: "allowlist", allowedEmails: ["secret@example.com"], accessTtlSeconds: 3600 },
     };
-    const res = getReportToHttp(ok(withAllowlist), CTX, COLLEAGUE);
+    const res = getReportToHttp(ok({ report: withAllowlist, sharing: null }), CTX, COLLEAGUE);
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty("acl");
     // owner stays org-visible (ADR-0059 §6) …
@@ -127,7 +133,10 @@ describe("report resource mappers (ADR-0053)", () => {
   });
 
   it("getReportToHttp with no viewer identity omits the acl block (fail closed)", () => {
-    const res = getReportToHttp(ok(report("A Title")), CTX);
+    const res = getReportToHttp(
+      ok({ report: report("A Title"), sharing: "private" as const }),
+      CTX,
+    );
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty("acl");
   });
@@ -196,10 +205,20 @@ describe("folder resource mappers (ADR-0053)", () => {
     expect(res.body).toBeUndefined();
   });
 
-  it("getAclToHttp public → 200 { object: acl, mode }", () => {
-    const res = getAclToHttp(ok(report("R")));
+  it("getAclToHttp public → 200 { object: acl, mode, sharing }", () => {
+    const res = getAclToHttp(ok({ report: report("R"), sharing: null }));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ object: "acl", mode: "public" });
+    expect(res.body).toEqual({ object: "acl", mode: "public", sharing: null });
+  });
+
+  it("getAclToHttp distinguishes org_view from org_edit, which the acl cannot", () => {
+    // The whole point of ADR-0078 §13: `mode: "org"` is IDENTICAL in both
+    // states, so a reader given only the acl infers the wrong one.
+    const orgReport: Report = { ...report("R"), acl: { mode: "org" } };
+    const view = getAclToHttp(ok({ report: orgReport, sharing: "org_view" as const }));
+    const edit = getAclToHttp(ok({ report: orgReport, sharing: "org_edit" as const }));
+    expect(view.body).toEqual({ object: "acl", mode: "org", sharing: "org_view" });
+    expect(edit.body).toEqual({ object: "acl", mode: "org", sharing: "org_edit" });
   });
 
   it("getAclToHttp allowlist → surfaces allowed_emails + access_ttl_seconds (no hash)", () => {
@@ -207,12 +226,13 @@ describe("folder resource mappers (ADR-0053)", () => {
       ...report("R"),
       acl: { mode: "allowlist", allowedEmails: ["a@b.com"], accessTtlSeconds: 604800 },
     };
-    const res = getAclToHttp(ok(allowlistReport));
+    const res = getAclToHttp(ok({ report: allowlistReport, sharing: null }));
     expect(res.body).toEqual({
       object: "acl",
       mode: "allowlist",
       allowed_emails: ["a@b.com"],
       access_ttl_seconds: 604800,
+      sharing: null,
     });
   });
 
@@ -371,5 +391,93 @@ describe("folder share mappers (ADR-0076)", () => {
     );
     expect(res.status).toBe(403);
     expect(res.contentType).toBe("application/problem+json");
+  });
+});
+
+// ── ADR-0078: the three-state sharing surface ──────────────────────────────
+describe("setReportSharingToHttp (ADR-0078 §3)", () => {
+  it("200 with the report resource PLUS its composed sharing state", () => {
+    const r = { ...report("Shared"), acl: { mode: "org" as const } };
+    const res = setReportSharingToHttp(ok({ report: r, sharing: "org_edit" }), CTX, OWNER);
+    expect(res.status).toBe(200);
+    const body = res.body as { acl: unknown; sharing: string; owner: string };
+    // Both, never one: `acl` is the read authorization the viewer consumes;
+    // `sharing` is the answer that also accounts for the org write grant. A
+    // client shown only `acl` would render an org-editable report as "org".
+    expect(body.acl).toEqual({ mode: "org" });
+    expect(body.sharing).toBe("org_edit");
+    expect(body.owner).toBe(userIdToWire(userId(U1)));
+  });
+
+  it("never leaks a password hash on the way out of an advanced mode", () => {
+    const r = { ...report("Was locked"), acl: { mode: "private" as const } };
+    const res = setReportSharingToHttp(ok({ report: r, sharing: "private" }), CTX, OWNER);
+    expect(JSON.stringify(res.body)).not.toContain("argon2");
+  });
+
+  it("maps a refusal through the shared problem mapper", () => {
+    const res = setReportSharingToHttp(err(insufficientScope("acl:write")), CTX, OWNER);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("applyFolderSharingToReportsToHttp (ADR-0078 §5)", () => {
+  const outcome = {
+    sharing: "org_view" as const,
+    total: 3,
+    changed: [{ slug: "aaaaaaaaaa", title: "Mine" }],
+    skipped: [{ slug: "bbbbbbbbbb", title: "Theirs", reason: "not owned by you" }],
+    failed: [{ slug: "cccccccccc", title: "Broken", reason: "db down" }],
+  };
+
+  it("200 carrying changed, skipped and failed IN FULL", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      object: "sharing_apply",
+      sharing: "org_view",
+      total: 3,
+      changed: [{ slug: "aaaaaaaaaa", title: "Mine" }],
+      skipped: [{ slug: "bbbbbbbbbb", title: "Theirs", reason: "not owned by you" }],
+      failed: [{ slug: "cccccccccc", title: "Broken", reason: "db down" }],
+      partial: true,
+      mode: "prod",
+    });
+  });
+
+  it("carries the server's OWN partial verdict, so no client re-derives it", () => {
+    // A skip is the candidate rule working as designed and does NOT make the
+    // run partial — the distinction every client was otherwise re-implementing
+    // from `failed.length > 0`.
+    const skippedOnly = { ...outcome, failed: [] };
+    const res = applyFolderSharingToReportsToHttp(ok(skippedOnly), CTX);
+    expect((res.body as { partial: boolean }).partial).toBe(false);
+    expect(
+      (applyFolderSharingToReportsToHttp(ok(outcome), CTX).body as { partial: boolean }).partial,
+    ).toBe(true);
+  });
+
+  it("keeps skipped and failed SEPARATE — a skip is not a server failure", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    const body = res.body as { skipped: unknown[]; failed: unknown[] };
+    expect(body.skipped).toHaveLength(1);
+    expect(body.failed).toHaveLength(1);
+  });
+
+  it("omits `reason` entirely on a changed entry rather than sending an empty one", () => {
+    const res = applyFolderSharingToReportsToHttp(ok(outcome), CTX);
+    expect((res.body as { changed: Record<string, unknown>[] }).changed[0]).not.toHaveProperty(
+      "reason",
+    );
+  });
+
+  it("a PRE-FLIGHT refusal is an error response, not a 200 with an empty result", () => {
+    // Nothing was changed, so answering 200-with-nothing would read as "the
+    // folder was empty" — the exact ambiguity the cap exists to avoid.
+    const res = applyFolderSharingToReportsToHttp(
+      err({ kind: "ValidationError", message: "too many", field: "folder_id" }),
+      CTX,
+    );
+    expect(res.status).toBe(422);
   });
 });

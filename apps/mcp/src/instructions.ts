@@ -16,8 +16,9 @@ export const INSTRUCTIONS =
   "publish a new version while keeping that URL; use folders_list/folders_create " +
   "and reports_move to organize reports into folders; use reports_list_comments, " +
   "reports_add_comment, and reports_resolve_comment to read and resolve reviewer " +
-  "feedback on a report. Sharing tools (reports_set_acl, reports_grant_write, " +
-  "reports_revoke_write, folders_set_visibility, folders_share, folders_unshare, " +
+  "feedback on a report. Sharing tools (reports_set_sharing, reports_set_acl, " +
+  "reports_grant_write, reports_revoke_write, folders_set_visibility, " +
+  "folders_apply_sharing_to_reports, folders_share, folders_unshare, " +
   "folders_list_shares) need an API key minted with the acl:write scope.";
 
 // Patterns an onboarding string must NOT match — each reads as "this server can

@@ -2,7 +2,14 @@
 // use-case Result into the resource body (Stripe-style `object` + `mode` +
 // prefixed id) or an application/problem+json error. snake_case on the wire; the
 // internal org id is never serialized.
-import type { FolderShare, WriteGrant } from "arp-application";
+import {
+  type FolderShare,
+  type ReportSharingResult,
+  type ReportSharingView,
+  type SharingApplyOutcome,
+  sharingApplyIsPartial,
+  type WriteGrant,
+} from "arp-application";
 import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
@@ -16,9 +23,13 @@ import {
 } from "./resource";
 import type {
   AclShareWire,
+  AclSharingWire,
   AclWire,
   FolderShareWire,
   ReportDetailWire,
+  ReportSharingWire,
+  SharingApplyEntryWire,
+  SharingApplyWire,
   WriteGrantWire,
 } from "./wire";
 
@@ -93,18 +104,27 @@ export function renameReportToHttp(
   };
 }
 
-/** GET /api/v1/reports/{slug} — 200 with the report resource, or a problem. */
+/** GET /api/v1/reports/{slug} — 200 with the report resource PLUS its composed
+ *  ADR-0078 `sharing` state, or a problem.
+ *
+ *  `sharing` rides alongside `acl` for the same reason it does on the write
+ *  response, and is present for EVERY reader, not only the owner: it is
+ *  strictly coarser than the `acl` block ADR-0059 §3 withholds (it collapses
+ *  every advanced mode to `null`), and it is the same claim the dashboard badge
+ *  already makes to every member for every row they can see. Withholding it
+ *  would leave the read surfaces unable to distinguish `org_view` from
+ *  `org_edit` — the gap that made an MCP agent infer the wrong one. */
 export function getReportToHttp(
-  result: Result<Report, AppError>,
+  result: Result<ReportSharingView, AppError>,
   ctx: WireContext,
   viewer?: ReportViewer,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: reportResource(result.value, ctx, viewer),
+  const body: ReportSharingWire = {
+    ...reportResource(result.value.report, ctx, viewer),
+    sharing: result.value.sharing,
   };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** POST /api/v1/reports/{slug}/acl — 200 with the report resource + its new acl
@@ -128,11 +148,20 @@ function aclResource(acl: Acl): AclWire {
   return { object: "acl", ...aclToWire(acl) };
 }
 
-/** GET /api/v1/reports/{slug}/acl — 200 with just the acl resource, or a problem.
- *  No `WireContext` needed: the acl carries no prefixed ids. */
-export function getAclToHttp(result: Result<Report, AppError>): HttpResponse {
+/** GET /api/v1/reports/{slug}/acl — 200 with the acl resource PLUS its composed
+ *  ADR-0078 `sharing` state, or a problem. No `WireContext` needed: neither
+ *  carries a prefixed id.
+ *
+ *  This route is owner-only (ADR-0059 §3), so the owner asking "how is this
+ *  shared?" is exactly the caller who must not have to infer `org_edit` from an
+ *  `Acl` that cannot express it. */
+export function getAclToHttp(result: Result<ReportSharingView, AppError>): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  return { status: 200, contentType: "application/json", body: aclResource(result.value.acl) };
+  const body: AclSharingWire = {
+    ...aclResource(result.value.report.acl),
+    sharing: result.value.sharing,
+  };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** DELETE /api/v1/reports/{slug} — 204 No Content on success. */
@@ -173,6 +202,63 @@ export function setFolderVisibilityToHttp(
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
   return { status: 200, contentType: "application/json", body: folderBody(result.value, ctx) };
+}
+
+/** POST /api/v1/reports/{slug}/sharing — 200 with the report resource plus its
+ *  new three-state `sharing` (ADR-0078 §3).
+ *
+ *  `sharing` rides ALONGSIDE `acl` rather than replacing it: `acl` is the read
+ *  authorization the viewer consumes, `sharing` is the composed answer that
+ *  also accounts for the Org write grant. A client shown only one of the two
+ *  would be able to render a report the whole org can edit as "private".
+ *
+ *  The caller is the owner by construction (setReportSharing is owner-gated),
+ *  so the `acl` block is always serialized here. */
+export function setReportSharingToHttp(
+  result: Result<ReportSharingResult, AppError>,
+  ctx: WireContext,
+  viewer?: ReportViewer,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const body: ReportSharingWire = {
+    ...reportResource(result.value.report, ctx, viewer),
+    sharing: result.value.sharing,
+  };
+  return { status: 200, contentType: "application/json", body };
+}
+
+const sharingEntry = (e: {
+  readonly slug: string;
+  readonly title: string;
+  readonly reason?: string;
+}): SharingApplyEntryWire => (e.reason === undefined ? { slug: e.slug, title: e.title } : e);
+
+/** POST /api/v1/folders/{id}/reports/sharing — 200 with the honest partial
+ *  result (ADR-0078 §5).
+ *
+ *  Always 200, even when nothing changed: every entry in the folder was
+ *  examined and answered for, which is a successful bulk apply that happened to
+ *  find no candidates — not a client error. What must never happen is a 200
+ *  that omits the reports it did not touch, which is why `skipped` and `failed`
+ *  are serialized separately and in full. */
+export function applyFolderSharingToReportsToHttp(
+  result: Result<SharingApplyOutcome, AppError>,
+  ctx: WireContext,
+): HttpResponse {
+  if (!result.ok) return errorToHttp(result.error);
+  const o = result.value;
+  const body: SharingApplyWire = {
+    object: "sharing_apply",
+    sharing: o.sharing,
+    total: o.total,
+    changed: o.changed.map(sharingEntry),
+    skipped: o.skipped.map(sharingEntry),
+    failed: o.failed.map(sharingEntry),
+    // The SERVER's conclusion, not a fact for the client to re-derive.
+    partial: sharingApplyIsPartial(o),
+    mode: ctx.mode,
+  };
+  return { status: 200, contentType: "application/json", body };
 }
 
 /** A `FolderShare` → the `folder_share` resource body (ADR-0076). Mirrors

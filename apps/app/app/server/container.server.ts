@@ -19,6 +19,7 @@ import {
   DrizzleGrantStore,
   DrizzleIdempotencyStore,
   DrizzleIdentityStore,
+  DrizzleOrgWriteGrantStore,
   DrizzleReportRepository,
   DrizzleScanQueue,
   DrizzleUnitOfWork,
@@ -45,12 +46,14 @@ import type {
   HandleUserDeletedDeps,
   IdentityStore,
   NonceStore,
+  OrgWriteGrantStore,
   ProvisionIdentityDeps,
   UploadReportDeps,
   WriteGrantStore,
 } from "arp-application";
 import {
   addComment,
+  applyFolderSharingToReports,
   createApiKey,
   createFolder,
   deleteComment,
@@ -76,9 +79,11 @@ import {
   searchReports,
   setAcl,
   setFolderVisibility,
+  setReportSharing,
   shareFolder,
   unshareFolder,
   uploadReport,
+  withReportSharing,
 } from "arp-application";
 import { type AppError, err, ok, type Result } from "arp-domain";
 import { defineEnv } from "arp-env";
@@ -161,6 +166,17 @@ export function writeGrantStore(): WriteGrantStore {
   return _writeGrants;
 }
 
+let _orgWriteGrants: DrizzleOrgWriteGrantStore | undefined;
+/** The ORG-WIDE write grant store (ADR-0078 §1) — the third leg of the
+ *  `canWrite` seam. Deliberately a separate accessor from `writeGrantStore()`:
+ *  the two answer different questions ("may this PERSON edit?" vs "may anyone
+ *  in this ORG edit?") and naming them apart is what stops one being wired
+ *  where the other was meant, the way `setAcl`'s two `grants` already are. */
+export function orgWriteGrantStore(): OrgWriteGrantStore {
+  if (!_orgWriteGrants) _orgWriteGrants = new DrizzleOrgWriteGrantStore(context());
+  return _orgWriteGrants;
+}
+
 let _folderShares: DrizzleFolderShareStore | undefined;
 /** The folder-share store (ADR-0076) — per-folder visibility shares; backs the
  *  folder visibility predicate's share leg + the share/unshare/list use cases. */
@@ -220,7 +236,11 @@ export function deps(): UploadReportDeps {
     hasher: new Sha256Hasher(),
     uow: new DrizzleUnitOfWork(ctx),
     grants: writeGrantStore(),
+    orgWriteGrants: orgWriteGrantStore(),
     identities: identityStore(),
+    // The upload pipeline reads the DESTINATION folder to derive a new
+    // report's initial sharing (ADR-0078 §6).
+    folders: folderRepo(),
   };
   return _deps;
 }
@@ -386,14 +406,26 @@ export function ops() {
     // (the same findEmailByUserId seam hasWriteGrant uses).
     searchReports: bind2(searchReports, { reports: d.reports, identities: identityStore() }),
     uploadReport: (cmd: Parameters<typeof uploadReport>[1]) => uploadReport(d, cmd),
-    getReport: bind2(getReport, {
-      reports: d.reports,
-      grants: writeGrantStore(),
-      identities: identityStore(),
-    }),
+    // Both READ surfaces answer with the COMPOSED sharing state (ADR-0078 §13),
+    // not the `Acl` alone: `org_view` and `org_edit` are identical in the `Acl`,
+    // so a reader given only the mode infers the wrong one. `withReportSharing`
+    // wraps the read AFTER its own gate has passed; it adds no authorization.
+    getReport: async (
+      actor: Parameters<typeof getReport>[1],
+      input: Parameters<typeof getReport>[2],
+    ) =>
+      withReportSharing(
+        orgWriteGrantStore(),
+        await getReport(
+          { reports: d.reports, grants: writeGrantStore(), identities: identityStore() },
+          actor,
+          input,
+        ),
+      ),
     renameReport: bind2(renameReport, {
       reports: d.reports,
       grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
@@ -407,6 +439,7 @@ export function ops() {
     }),
     moveReport: bind2(moveReport, {
       reports: d.reports,
+      orgWriteGrants: orgWriteGrantStore(),
       folders: folderRepo(),
       grants: writeGrantStore(),
       folderShares: folderShareStore(),
@@ -474,11 +507,37 @@ export function ops() {
     }),
     listReportVersions: bind2(listReportVersions, { reports: d.reports }),
     // ── Sharing (ACL + write grants) ───────────────────────────────────────
-    getAcl: bind2(getAcl, { reports: d.reports }),
+    getAcl: async (actor: Parameters<typeof getAcl>[1], input: Parameters<typeof getAcl>[2]) =>
+      withReportSharing(orgWriteGrantStore(), await getAcl({ reports: d.reports }, actor, input)),
     setAcl: bind2(setAcl, {
       reports: d.reports,
       hasher: passwordHasher(),
+      // The VIEWER-ACCESS grant store (allowlist redemptions) AND the ADR-0078
+      // org-write store: this route narrows the Acl too, so it must prune both
+      // grant families (ADR-0078 §11).
       grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    setReportSharing: bind2(setReportSharing, {
+      reports: d.reports,
+      // The VIEWER-ACCESS grant store (allowlist redemptions), like setAcl's —
+      // NOT the write-grant store. Named wiring keeps the two apart.
+      grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      audit: auditLogger(),
+      uow: d.uow,
+      ...writeCommon,
+    }),
+    applyFolderSharingToReports: bind2(applyFolderSharingToReports, {
+      reports: d.reports,
+      folders: folderRepo(),
+      folderShares: folderShareStore(),
+      grants: grantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,
       ...writeCommon,
@@ -487,6 +546,7 @@ export function ops() {
     grantWrite: bind2(grantWrite, {
       reports: d.reports,
       grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
       identities: identityStore(),
       audit: auditLogger(),
       uow: d.uow,

@@ -32,10 +32,12 @@ worked examples, and `docs/mcp-usage.md` for connection details.
 5. **Collaborate** — `reports_list_comments`, `reports_add_comment` (reply with
    `parent_comment_id`), `reports_resolve_comment`, `reports_edit_comment`,
    `reports_delete_comment`.
-6. **Share & access control** — `reports_get_acl` / `reports_set_acl` control *who can view*
-   (private/public/password/org/allowlist); `reports_grant_write` / `reports_revoke_write` /
-   `reports_list_write_grants` control *who else can rename, re-upload, or move* a specific
-   report. These are separate axes.
+6. **Share & access control** — `reports_set_sharing` is the everyday control: three states
+   (`private` / `org_view` / `org_edit`) that always pair viewing with editing. `reports_get_acl`
+   / `reports_set_acl` remain the way to set a password, an invite list, or a public link;
+   `reports_grant_write` / `reports_revoke_write` / `reports_list_write_grants` give ONE named
+   person edit access. Those two are separate axes. `folders_apply_sharing_to_reports` reaches
+   the reports INSIDE a folder — sharing the folder itself only shows its name.
 
 ## Quick reference
 
@@ -48,6 +50,8 @@ worked examples, and `docs/mcp-usage.md` for connection details.
 | Locate a report you don't have the slug for | `reports_search` |
 | Read reviewer feedback | `reports_list_comments` |
 | Leave feedback or reply | `reports_add_comment` |
-| Change who can view | `reports_get_acl` (check), `reports_set_acl` (change) |
+| Let your org view (or edit) a report | `reports_set_sharing` |
+| Share the reports inside a folder | `folders_apply_sharing_to_reports` |
+| Set a password / invite list / public link | `reports_get_acl` (check), `reports_set_acl` (change) |
 | Let someone else write to one report | `reports_grant_write` |
 | Delete a report or comment | `reports_delete`, `reports_delete_comment` (destructive) |

@@ -213,3 +213,57 @@ describe("moveReport idempotency (ADR-0039)", () => {
     expect(deps.audit.recorded().length).toBe(1);
   });
 });
+
+// ── Move stays ACL-neutral (ADR-0078 §7) ───────────────────────────────────
+// A deliberate decision, not an omission. moveReport is gated on `canWrite`,
+// NOT on ownership — so a write grantee, who may be cross-org and who by
+// ADR-0060 §6 has no view access at all, can move a report. If a move applied
+// the destination folder's sharing, that grantee could publish a report they
+// cannot read into an org-visible folder: exactly the write→read composition
+// ADR-0060 §6 forbids. Inheritance is therefore a CREATE-time rule only.
+describe("moveReport leaves sharing alone (ADR-0078 §7)", () => {
+  it("moving a PRIVATE report into an ORG-visible folder does NOT publish it", async () => {
+    const reports = new InMemoryReportRepository();
+    const folders = new InMemoryFolderRepository();
+    const shared = folder("00000000-0000-7000-8000-0000000000a3", orgA, "Shared", {
+      parentId: folderId("00000000-0000-7000-8000-0000000000a0"),
+      ownerId: owner,
+      visibility: "org",
+    });
+    await folders.save(shared);
+    const rpt = report(orgA, "mmmmmmmmmm");
+    await reports.save(rpt);
+    const deps = { reports, folders, ...writeDeps() };
+
+    const r = await moveReport(deps, ownerActor, {
+      slug: slug("mmmmmmmmmm"),
+      toFolderId: shared.id,
+    });
+    expect(r.ok).toBe(true);
+    const after = await reports.findById(rpt.id);
+    expect(after.ok && after.value?.acl.mode).toBe("private");
+  });
+
+  it("moving an ORG-shared report into a PRIVATE folder does NOT un-share it", async () => {
+    const reports = new InMemoryReportRepository();
+    const folders = new InMemoryFolderRepository();
+    const hidden = folder("00000000-0000-7000-8000-0000000000a4", orgA, "Hidden", {
+      parentId: folderId("00000000-0000-7000-8000-0000000000a0"),
+      ownerId: owner,
+      visibility: "private",
+    });
+    await folders.save(hidden);
+    const rpt = report(orgA, "nnnnnnnnnn");
+    await reports.save(rpt);
+    await reports.setAcl(rpt.id, { mode: "org" });
+    const deps = { reports, folders, ...writeDeps() };
+
+    const r = await moveReport(deps, ownerActor, {
+      slug: slug("nnnnnnnnnn"),
+      toFolderId: hidden.id,
+    });
+    expect(r.ok).toBe(true);
+    const after = await reports.findById(rpt.id);
+    expect(after.ok && after.value?.acl.mode).toBe("org");
+  });
+});

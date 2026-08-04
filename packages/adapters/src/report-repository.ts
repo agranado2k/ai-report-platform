@@ -11,9 +11,16 @@ import type {
   ReportViewer,
   VersionPage,
 } from "arp-application";
-import { acls, reports, reportVersions, reportWriteGrants } from "arp-db/schema";
+import {
+  acls,
+  reportOrgWriteGrants,
+  reports,
+  reportVersions,
+  reportWriteGrants,
+} from "arp-db/schema";
 import {
   type Acl,
+  type AclMode,
   type AppError,
   DEFAULT_ACCESS_TTL_SECONDS,
   DEFAULT_ACL,
@@ -178,15 +185,35 @@ export class DrizzleReportRepository implements ReportRepository {
     // `ending_before` pages back (id > cursor, fetched ASC then reversed). Optional
     // folder filter + literal title/slug substring search.
     //
-    // Visibility (ADR-0075): within the org scope, a row is listed ONLY when
-    // the viewer owns it, its acl mode shares it broadly (`org`/`public` — no
-    // acls row = `private`, the private-by-default), or the viewer holds a
-    // write grant on it (userId-or-normalized-email match, the same semantics
-    // as `hasWriteGrant`/`WriteGrantStore.findFor`, ADR-0060 §2). Other
-    // owners' private/password/allowlist reports are absent entirely —
-    // existence is private, not just content.
+    // Visibility (ADR-0075, extended by ADR-0078 §8): within the org scope, a
+    // row is listed ONLY when the viewer owns it, its acl mode shares it
+    // broadly (`org`/`public` — no acls row = `private`, the
+    // private-by-default), the viewer holds a write grant on it
+    // (userId-or-normalized-email match, the same semantics as
+    // `hasWriteGrant`/`WriteGrantStore.findFor`, ADR-0060 §2), or the report
+    // carries an ORG-WIDE write grant issued for this org. Other owners'
+    // private/password/allowlist reports are absent entirely — existence is
+    // private, not just content.
     try {
       const db = this.ctx.current();
+      // ADR-0078 §8 — the org-write EXISTS, written ONCE. It is load-bearing in
+      // two opposite directions: whether a row is LISTED (the visibility
+      // predicate) and how that row is BADGED (`hasOrgWrite` in the projection).
+      // Two verbatim copies meant an edit to one alone would yield a listing
+      // that disagreed with its own badge — a report shown as `Org + edit` that
+      // the same query had decided not to show, or the reverse.
+      //
+      // The row's own `org_id` is matched against the SEARCHED org — a stale row
+      // must fail the match, never widen it, which is the same rule
+      // `hasOrgWriteGrant` applies on the authorization path.
+      const orgWriteExists = exists(
+        db
+          .select({ one: sql`1` })
+          .from(reportOrgWriteGrants)
+          .where(
+            and(eq(reportOrgWriteGrants.reportId, reports.id), eq(reportOrgWriteGrants.orgId, org)),
+          ),
+      );
       const normalizedEmail = viewer.email ? normalizeEmailAddress(viewer.email) : undefined;
       const grantUserMatch = eq(reportWriteGrants.granteeUserId, viewer.userId);
       const grantMatch = normalizedEmail
@@ -201,6 +228,12 @@ export class DrizzleReportRepository implements ReportRepository {
             .from(reportWriteGrants)
             .where(and(eq(reportWriteGrants.reportId, reports.id), grantMatch)),
         ),
+        // The org-write leg. Redundant in the three states the sharing control
+        // produces (`org_edit` always implies acl=org, caught above), but the
+        // API can grant org write on a report that is NOT acl=org, and a list
+        // that hid a report the viewer can EDIT would be dishonest in exactly
+        // the way ADR-0075 exists to prevent.
+        orgWriteExists,
       );
       const filters = [eq(reports.orgId, org), isNull(reports.deletedAt)];
       if (visibility) filters.push(visibility);
@@ -220,6 +253,10 @@ export class DrizzleReportRepository implements ReportRepository {
       if (q.startingAfter) filters.push(lt(reports.id, q.startingAfter));
       if (q.endingBefore) filters.push(gt(reports.id, q.endingBefore));
 
+      // `ownerId` / `aclMode` / `hasOrgWrite` ride along at zero cost: the
+      // join and the EXISTS are already there for the visibility predicate
+      // above. Selecting them here is what lets the dashboard badge every row
+      // accurately instead of paying an N+1 per row (ADR-0078 §8).
       const rows = await db
         .select({
           id: reports.id,
@@ -227,6 +264,16 @@ export class DrizzleReportRepository implements ReportRepository {
           title: reports.title,
           liveVersionId: reports.liveVersionId,
           folderId: reports.folderId,
+          ownerId: reports.ownerId,
+          aclMode: acls.mode,
+          // The SAME subquery the visibility predicate above is built from, so
+          // the badge can never disagree with the decision to list the row.
+          hasOrgWrite: orgWriteExists,
+          // The allowlist roster SIZE, never the roster (ADR-0078 §4): the
+          // dashboard's discard warning has to name the real N, and the column
+          // is already on the joined `acls` row, so counting it is free.
+          // COALESCE covers both "no acls row" and a null/non-allowlist column.
+          allowedEmailCount: sql<number>`COALESCE(jsonb_array_length(${acls.allowedEmails}), 0)`,
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.
@@ -245,6 +292,12 @@ export class DrizzleReportRepository implements ReportRepository {
           title: r.title,
           isPublished: r.liveVersionId !== null,
           folderId: folderId(r.folderId),
+          ownerId: userId(r.ownerId),
+          // No `acls` row = private (the private-by-default, ADR-0056) — the
+          // same fallback `rowToAcl` applies to the single-report read.
+          aclMode: (r.aclMode ?? "private") as AclMode,
+          hasOrgWrite: r.hasOrgWrite === true,
+          allowedEmailCount: Number(r.allowedEmailCount ?? 0),
         })),
         hasMore,
       });

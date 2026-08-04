@@ -13,6 +13,7 @@ import {
   accessTokenSecret,
   deps,
   identityStore,
+  orgWriteGrantStore,
   viewOrigin,
   writeGrantStore,
 } from "../server/container.server";
@@ -30,7 +31,11 @@ export async function loader(args: LoaderFunctionArgs) {
       reports: deps().reports,
       now: () => Date.now(),
       log: (f, m) => log.info(f, m),
-      writeGrant: { grants: writeGrantStore(), identities: identityStore() },
+      writeGrant: {
+        grants: writeGrantStore(),
+        orgWriteGrants: orgWriteGrantStore(),
+        identities: identityStore(),
+      },
     },
     {
       actor: actor.ok ? actor.value : null,

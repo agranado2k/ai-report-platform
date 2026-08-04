@@ -59,10 +59,10 @@
 //       is independently revocable. See `resolvePresentedSession` below for
 //       how the route recovers which case it's in.
 import {
+  type CanWriteDeps,
   loadWritableReport,
   type ReportRepository,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "arp-application";
 import {
   type AppError,
@@ -136,7 +136,7 @@ export function resolvePresentedSession(
   return { kind: "edit-token", sessionStart: claims.sessionStart };
 }
 
-export interface RefreshEditTokenDeps extends WriteGrantCheckDeps {
+export interface RefreshEditTokenDeps extends CanWriteDeps {
   readonly reports: ReportRepository;
   /** The shared HMAC secret — the SAME one open-report.server.ts mints edit
    *  tokens under (`VIEW_ACCESS_TOKEN_SECRET` via `accessTokenSecret()`).
@@ -213,6 +213,11 @@ export async function refreshEditToken(
     deps.secret,
     nowSeconds,
     sessionStart,
+    // The org the re-checked actor is acting in, carried forward exactly like
+    // `sessionStart` (ADR-0078 §1). When this call arrived on an edit token,
+    // that org came from the presented token's own claim, so a refresh can
+    // never WIDEN the org a chain acts in — only keep it.
+    actor.orgId,
   );
   return ok({ editToken, expiresAt: nowSeconds + deps.ttlSeconds });
 }

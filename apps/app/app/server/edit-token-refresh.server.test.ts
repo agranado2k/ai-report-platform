@@ -12,6 +12,7 @@
 import { createHmac } from "node:crypto";
 import {
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
 } from "arp-application/testing";
@@ -82,6 +83,9 @@ function makeDeps(
   return {
     reports,
     grants,
+    // ADR-0078: the third canWrite leg. No refresh test grants one — the
+    // point of the fake here is that the leg exists and simply never matches.
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     identities,
     secret: SECRET,
     ttlSeconds: TTL,

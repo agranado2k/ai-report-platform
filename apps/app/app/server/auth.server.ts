@@ -20,6 +20,7 @@ import {
   apiKeyStore,
   deps as containerDeps,
   identityStore,
+  orgWriteGrantStore,
   provisionDeps,
   writeGrantStore,
 } from "./container.server";
@@ -32,7 +33,11 @@ import { type Actor, type ResolveActorDeps, resolveActor } from "./resolve-actor
 function editTokenDeps(): EditTokenActorDeps {
   return {
     reports: containerDeps().reports,
-    writeGrant: { grants: writeGrantStore(), identities: identityStore() },
+    writeGrant: {
+      grants: writeGrantStore(),
+      orgWriteGrants: orgWriteGrantStore(),
+      identities: identityStore(),
+    },
     secret: accessTokenSecret(),
     nowSeconds: () => Math.floor(Date.now() / 1000),
   };

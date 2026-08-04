@@ -9,6 +9,7 @@
 
 import type {
   Acl,
+  AclMode,
   AppError,
   ClerkOrgId,
   ClerkUserId,
@@ -44,6 +45,38 @@ export interface ReportSummary {
   readonly title: string;
   readonly isPublished: boolean;
   readonly folderId: FolderId;
+  /** The owning user (ADR-0059). Carried so the dashboard can decide, in the
+   *  LOADER, whether to render this row's sharing control enabled — the
+   *  ownerId itself is never shipped to the client. */
+  readonly ownerId: UserId;
+  /** The report's `Acl` mode (ADR-0056) and whether it carries an Org write
+   *  grant (ADR-0078) — the two facts a sharing state is composed from.
+   *
+   *  These cost NOTHING extra to read: the listing query already LEFT JOINs
+   *  `acls` and already probes `report_org_write_grants` for its visibility
+   *  predicate. Fetching them per row instead would be an N+1 on the
+   *  dashboard's hot path — the compromise the folder sidebar had to make
+   *  (ADR-0076 amendment §5) and does not have to be repeated here.
+   *
+   *  They stay OFF the wire: `reportBody` picks its fields explicitly, so the
+   *  list envelope is unchanged (ADR-0053). */
+  readonly aclMode: AclMode;
+  readonly hasOrgWrite: boolean;
+  /** How many addresses an `allowlist` report's roster holds; `0` in every
+   *  other mode (ADR-0078 §4).
+   *
+   *  Rides the SAME free join: `acls.allowed_emails` is already selected-from
+   *  for `aclMode`, so counting it costs nothing. It is here because the
+   *  dashboard's discard warning must name the REAL N — "this will remove the N
+   *  allowlisted addresses" — and without it the row had no roster to count,
+   *  so every allowlisted report warned about "1 address" while the server's
+   *  own 422 carried the true number. Two numbers, one of them wrong, is worse
+   *  than no number.
+   *
+   *  Never the addresses themselves: the count is what the warning needs, and
+   *  a roster on a listing row would put other people's emails into a payload
+   *  that is not about them. */
+  readonly allowedEmailCount: number;
 }
 
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC
@@ -273,6 +306,44 @@ export interface WriteGrantStore {
     reportId: ReportId,
     actor: { readonly userId: UserId; readonly email?: string },
   ): Promise<Result<WriteGrant | null, AppError>>;
+}
+
+/**
+ * An ORG-WIDE write grant on a report (ADR-0078) — the row shape of
+ * `report_org_write_grants`. At most ONE per report (a report belongs to
+ * exactly one org), which is the structural difference from `WriteGrant`.
+ */
+export interface OrgWriteGrant {
+  readonly reportId: ReportId;
+  /** The org the grant was issued FOR. Carried explicitly so the `canWrite`
+   *  leg verifies the match rather than assuming it — a stale row must fail
+   *  the check, never silently widen it. */
+  readonly orgId: OrgId;
+  readonly grantedBy: UserId;
+  /** Epoch ms. */
+  readonly grantedAt: number;
+}
+
+/**
+ * The Org write grant store (ADR-0078) — the third leg of the `canWrite` seam,
+ * over `report_org_write_grants`.
+ *
+ * Deliberately NOT shaped like `WriteGrantStore`: there is no `findFor(actor)`
+ * and no email anywhere. A personal write grant is matched against a PERSON
+ * (userId or normalized email, ADR-0060 §2); this one is matched against an
+ * ORG, and that comparison belongs in the application layer where both the
+ * report's org and the actor's org are in hand — `find` returns the row and the
+ * caller does the match, so the org check can never be quietly skipped inside
+ * a store implementation.
+ *
+ * `grant` is an upsert (one row per report), `revoke` a delete — the same
+ * revoke-by-row-delete semantics as the rest of the grant family.
+ */
+export interface OrgWriteGrantStore {
+  grant(reportId: ReportId, orgId: OrgId, grantedBy: UserId): Promise<Result<void, AppError>>;
+  revoke(reportId: ReportId): Promise<Result<void, AppError>>;
+  /** The report's org write grant, or null. */
+  find(reportId: ReportId): Promise<Result<OrgWriteGrant | null, AppError>>;
 }
 
 /**

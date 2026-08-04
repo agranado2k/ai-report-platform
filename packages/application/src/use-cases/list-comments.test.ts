@@ -17,6 +17,7 @@ import {
   InMemoryCommentRepository,
   InMemoryEventOutbox,
   InMemoryIdentityStore,
+  InMemoryOrgWriteGrantStore,
   InMemoryReportRepository,
   InMemoryWriteGrantStore,
   idempotencyTestDeps,
@@ -67,6 +68,7 @@ function makeDeps() {
     uow: new PassThroughUnitOfWork(),
     ...idempotencyTestDeps(),
     grants: new InMemoryWriteGrantStore(),
+    orgWriteGrants: new InMemoryOrgWriteGrantStore(),
     identities: new InMemoryIdentityStore(),
   };
 }

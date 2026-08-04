@@ -8,6 +8,7 @@ import { describeSetAclGrantPruningContract, FakePasswordHasher } from "arp-appl
 import { createReport, makeSlug, reportId, versionId } from "arp-domain";
 import { DrizzleAuditLogger } from "./audit-logger";
 import { DrizzleGrantStore } from "./grant-store";
+import { DrizzleOrgWriteGrantStore } from "./org-write-grant-store";
 import { DrizzleReportRepository } from "./report-repository";
 import { makeTestDb, seedIdentity } from "./testing/pglite";
 import { DrizzleUnitOfWork } from "./unit-of-work";
@@ -39,6 +40,7 @@ describeSetAclGrantPruningContract("drizzle+pglite", async () => {
   return {
     reports,
     grants: new DrizzleGrantStore(tdb.ctx),
+    orgWriteGrants: new DrizzleOrgWriteGrantStore(tdb.ctx),
     hasher: new FakePasswordHasher(),
     audit: new DrizzleAuditLogger(tdb.ctx),
     uow: new DrizzleUnitOfWork(tdb.ctx),

@@ -18,7 +18,12 @@
 // OPTIONS answered before auth).
 import { err, makeVersionId, validationError } from "arp-domain";
 import { reportDiffToHttp } from "arp-http";
-import { deps, identityStore, writeGrantStore } from "../server/container.server";
+import {
+  deps,
+  identityStore,
+  orgWriteGrantStore,
+  writeGrantStore,
+} from "../server/container.server";
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
@@ -46,6 +51,7 @@ export const loader = corsRoute(
           reports: deps().reports,
           blobs: deps().blobs,
           grants: writeGrantStore(),
+          orgWriteGrants: orgWriteGrantStore(),
           identities: identityStore(),
         },
         actor,

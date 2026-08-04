@@ -17,10 +17,10 @@
 // access to translate an ordinal can use.
 import {
   type BlobStore,
+  type CanWriteDeps,
   getReport,
   type ReportRepository,
   type TenancyActor,
-  type WriteGrantCheckDeps,
 } from "arp-application";
 import {
   type AppError,
@@ -34,7 +34,7 @@ import {
 import { splitShell } from "arp-report-html";
 import { computeReportDiff, type ReportDiffResult } from "./report-diff.server";
 
-export interface LoadReportDiffDeps extends WriteGrantCheckDeps {
+export interface LoadReportDiffDeps extends CanWriteDeps {
   readonly reports: ReportRepository;
   readonly blobs: BlobStore;
 }
