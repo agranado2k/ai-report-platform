@@ -216,7 +216,7 @@ visibility-only, exactly as today, and the UI **says so**. The report-level
 analogue of a person share is `allowlist` — a TTL-bounded, magic-link-redeemed,
 viewer-side read grant addressed by email — which does not map cleanly onto a
 folder share (different lifetime, different redemption, different actor
-identity). Tracked as a follow-up issue.
+identity). Tracked as **issue #242**.
 
 ### 6. Inherit on upload
 
@@ -324,8 +324,8 @@ serve them.
   unchanged, and the change is create-time only (Decision 7), so no existing
   report's sharing moves under anyone.
 - **Not addressed:** person-level folder shares reaching reports (the
-  `allowlist` mapping) — deliberately out of v1 scope, tracked as a follow-up
-  issue. The dead `folder_collaborators` + `grant_level` schema remains awaiting
+  `allowlist` mapping) — deliberately out of v1 scope, tracked as **issue
+  #242**. The dead `folder_collaborators` + `grant_level` schema remains awaiting
   its cleanup migration (unchanged from ADR-0060/0076); the new
   `report_org_write_grants` table must not be confused with it.
 

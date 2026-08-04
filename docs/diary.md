@@ -3686,7 +3686,7 @@ the precise tool and are not superseded — the two compose. If role- or
 group-scoped write is ever needed, it layers onto the same seam this ADR just
 widened, exactly as this ADR layered onto ADR-0060's.
 
-**Out of v1, tracked as a follow-up issue:** person-level folder shares reaching
+**Out of v1, tracked as issue #242:** person-level folder shares reaching
 reports. The report-level analogue of a person share is `allowlist` — a
 TTL-bounded, magic-link-redeemed, email-addressed read grant — which does not map
 cleanly onto a folder share. The folder panel says so out loud rather than
