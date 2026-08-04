@@ -236,6 +236,18 @@ PK `(report_id, email)` — one grant per allowlisted viewer; redeem upserts. Cr
 
 PK `(report_id, grantee_email)`; index `grantee_email`. No expiry (persists until revoked), no `permission` level (one implicit level: rename + re-upload + move — ADR-0060), no surrogate id (wire-addressed as `(slug, email)`). View access is NOT conferred — the read capability stays with the `Acl`.
 
+#### `report_org_write_grants` — org-wide write on a report (ADR-0078, added migration 0020)
+| Column | Type | Notes |
+|---|---|---|
+| `report_id` | uuid **PK** FK → reports **ON DELETE CASCADE** | the PK on its own — a report belongs to exactly one org, so there is at most one org write grant per report |
+| `org_id` | uuid FK → orgs | the org the grant was issued for. STORED, not joined from `reports`: the `canWrite` leg must verify the org match, so a stale row fails the match rather than silently widening |
+| `granted_by` | uuid FK → users | the `Owner` who granted |
+| `granted_at` | timestamptz | |
+
+The **Org write grant** — the third leg of the `canWrite` seam (owner OR personal write grant OR this), layered onto the seam ADR-0060 left open rather than into the `Acl`, which is READ authorization and stays so. Confers exactly what a personal write grant confers: **rename, re-upload, move** — never delete, never `set_acl` (owner-only, ADR-0059 §2). Unlike `report_write_grants`, which works **cross-org by design**, this leg **must** be org-matched: an org write grant is meaningless outside the org it names and honoring it cross-org would be a privilege escalation.
+
+Never issued without `acls.mode = 'org'` by the three-state sharing control (ADR-0078 §3 — write is never offered without read), though the API can produce the combination since the grant and the `Acl` are separate resources; the listing predicate carries an org-write leg so such a report is still listed honestly.
+
 ### Authoring & Collaboration
 
 #### `comments` — the `Comment` aggregate (ADR-0064, added migration 0013; `intent` added migration 0015)
@@ -346,8 +358,9 @@ app writes from the closed `AuditAction` union in
 
 - **report**: `report.uploaded`, `report.renamed`, `report.moved`, `report.deleted`
 - **folder**: `folder.created`, `folder.renamed`, `folder.deleted`, `folder.visibility_set`, `folder.shared`, `folder.unshared`
+- **report** (sharing): `report.sharing_set` — the ADR-0078 three-state transition (`private` / `org_view` / `org_edit`); `meta_json` carries `from`/`to`, so the log records the transition and not merely the endpoint that was hit
 - **acl**: `acl.set`
-- **grant**: `grant.write.granted`, `grant.write.revoked`
+- **grant**: `grant.write.granted`, `grant.write.revoked`, `grant.org_write.granted`, `grant.org_write.revoked` (ADR-0078 — the org-wide leg, distinct from the personal email-keyed ones)
 - **comment**: `comment.added`, `comment.replied`, `comment.resolved`, `comment.deleted`
 - **api_key**: `api_key.created`, `api_key.revoked`
 

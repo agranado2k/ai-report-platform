@@ -356,6 +356,39 @@ export const reportWriteGrants = pgTable(
   ],
 );
 
+// Org-wide write on a report (ADR-0078) — the "Org write grant". The third leg
+// of the `canWrite` seam (owner OR personal write grant OR this), layered onto
+// the seam ADR-0060 left open ("folder-level can layer on the same seam
+// later") rather than into the `Acl`, which is READ authorization and must stay
+// so. Confers exactly what a personal write grant confers — rename, re-upload,
+// move — and never delete or set_acl, which stay owner-only (ADR-0059 §2).
+//
+// ONE ROW PER REPORT: the PK is `report_id` alone, because a report belongs to
+// exactly one org. That is the whole difference from `report_write_grants`,
+// which is keyed by (report, grantee email) because a report may have many
+// named grantees.
+//
+// `org_id` is STORED rather than joined from `reports`: the canWrite leg MUST
+// verify the org match (an org write grant is meaningless outside the org it
+// names, and honoring it cross-org would be a straight privilege escalation —
+// the deliberate asymmetry with personal grants, which ARE cross-org by design,
+// ADR-0060 §4). Storing it makes the check one indexed lookup and records WHICH
+// org the grant was issued for, so a stale row fails the match rather than
+// silently widening. RESTRICT on orgs/users, CASCADE from reports — a deleted
+// report must not strand its grant.
+export const reportOrgWriteGrants = pgTable("report_org_write_grants", {
+  reportId: uuid("report_id")
+    .primaryKey()
+    .references(() => reports.id, { onDelete: "cascade" }),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "restrict" }),
+  grantedBy: uuid("granted_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
+  grantedAt: tstz("granted_at").notNull().defaultNow(),
+});
+
 // Per-folder visibility shares (ADR-0076) — the folder's owner grants another
 // person VISIBILITY of a private folder (never write; folder writes stay
 // owner-or-org per ADR-0076). Mirrors report_write_grants' shape exactly:
