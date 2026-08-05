@@ -57,6 +57,65 @@ describe("linkActivation — href rules", () => {
   }
 });
 
+describe("linkActivation — what is OPENED must be what the href says", () => {
+  // The deny-check strips EVERY control char (`[\x00-\x20\x7f]`) so
+  // `jav\tascript:` cannot smuggle a scheme past the allowlist. That form is
+  // correct as a check and WRONG as a canonicalizer: a browser strips only
+  // leading/trailing C0-or-space and interior tab/LF/CR — never an interior
+  // space. Using the strict form as the thing we NAVIGATE to means the URL
+  // the user is sent to differs from the href the check approved, which is a
+  // deception primitive: `href="http s://evil.example"` 404s as a relative
+  // path in the viewer but would open `https://evil.example` from `/edit`.
+  it("REFUSES an href whose strict form and browser form disagree on the scheme", () => {
+    // Strict-stripped this reads `https://evil.example` (allowlisted!); a
+    // browser reads it as a relative path with a space in it. Never activate
+    // a link the two readings do not agree on.
+    expect(activate("http s://evil.example")).toBeNull();
+    expect(activate("htt\u0020ps://evil.example")).toBeNull();
+  });
+
+  it("keeps an interior space in the opened URL rather than closing it up", () => {
+    expect(activate("https://example.com/a b")).toEqual({
+      kind: "external",
+      url: "https://example.com/a b",
+    });
+  });
+
+  it("removes tab/LF/CR from the opened URL — exactly what a browser removes", () => {
+    expect(activate("https://example.com/a\nb")).toEqual({
+      kind: "external",
+      url: "https://example.com/ab",
+    });
+    expect(activate("https://example.com/a\tb\r")).toEqual({
+      kind: "external",
+      url: "https://example.com/ab",
+    });
+  });
+
+  it("trims leading/trailing C0-or-space, which a browser also does", () => {
+    expect(activate("  https://example.com/x  ")).toEqual({
+      kind: "external",
+      url: "https://example.com/x",
+    });
+    expect(activate("\u0000https://example.com/x")).toEqual({
+      kind: "external",
+      url: "https://example.com/x",
+    });
+  });
+
+  it("scrolls to the id the author WROTE, spaces and all — `#a b` is not `#ab`", () => {
+    expect(activate("#a b")).toEqual({ kind: "anchor", targetId: "a b" });
+    expect(activate("#top recommendation")).toEqual({
+      kind: "anchor",
+      targetId: "top recommendation",
+    });
+  });
+
+  it("still removes tab/LF/CR from a fragment, as a browser does", () => {
+    expect(activate("#a\nb")).toEqual({ kind: "anchor", targetId: "ab" });
+  });
+});
+
 describe("linkActivation — gesture rules", () => {
   it("does nothing when the click did not land on a link", () => {
     expect(linkActivation({ link: null, down: DOWN, up: AT(10, 10), altKey: false })).toBeNull();

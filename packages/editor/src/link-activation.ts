@@ -83,13 +83,41 @@ export function linkMarkAtPos(state: EditorState, pos: number): Mark | null {
   return linkType.isInSet(at) ?? linkType.isInSet(before) ?? linkType.isInSet(after) ?? null;
 }
 
-// Same normalization `isDangerousUrl` applies (packages/report-html
-// schema/attrs.ts): browsers ignore control characters when parsing a URL
-// scheme, so `jav\tascript:` is a live `javascript:` URL to a browser and
-// must be to us too — matching on the raw string would be a classic filter
-// bypass.
+// TWO FORMS OF THE SAME HREF, AND THEY DO DIFFERENT JOBS.
+//
+// The DENY form strips every control character, the same normalization
+// `isDangerousUrl` applies (packages/report-html schema/attrs.ts): browsers
+// ignore control characters when parsing a URL scheme, so `jav\tascript:` is a
+// live `javascript:` URL to a browser and must be to us too — matching on the
+// raw string would be a classic filter bypass.
+//
+// It is CORRECT as a check and WRONG as a canonicalizer. A browser strips only
+// leading/trailing C0-or-space and interior tab/LF/CR; it never closes up an
+// interior space. Navigating to the deny form would mean the URL we open
+// differs from the href we checked — `href="http s://evil.example"` is a
+// broken relative path to a browser (a 404 in the viewer) but reads as
+// `https://evil.example` once the space is stripped, so opening the stripped
+// form would send the user somewhere the report never linked to. Same class of
+// bug on the fragment path: `#a b` must scroll to the id the author wrote, not
+// to `#ab`.
+//
+// So: DENY-check the strict form, NAVIGATE the browser form, and refuse
+// outright when the two readings disagree about the scheme.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — mirrors isDangerousUrl's own stripping so scheme matching sees what a browser sees.
 const CONTROL_CHARS_RE = /[\x00-\x20\x7f]/g;
+
+/** The WHATWG URL parser's two cleanup steps, and nothing more: strip leading
+ *  and trailing C0-control-or-space, then remove every ASCII tab/LF/CR from
+ *  what remains. (`\x7f` is DEL, which is NOT a C0 control — a browser leaves
+ *  it in place, so we do too.) */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — this is the URL parser's own C0-control-or-space class.
+const LEADING_TRAILING_C0_OR_SPACE_RE = /^[\x00-\x20]+|[\x00-\x20]+$/g;
+const TAB_OR_NEWLINE_RE = /[\t\n\r]/g;
+
+/** What a browser would actually open for this href. */
+function browserForm(raw: string): string {
+  return raw.replace(LEADING_TRAILING_C0_OR_SPACE_RE, "").replace(TAB_OR_NEWLINE_RE, "");
+}
 
 /** The schemes a click may follow. Everything else — including schemes that
  *  are merely unusual rather than known-dangerous — is refused: this is an
@@ -115,9 +143,14 @@ function schemeOf(href: string): string | null {
  * empty href; a dangerous scheme (`isDangerousUrl`, run as a redundant hard
  * gate even though `withSafeHref` should already have refused to retain such
  * an href at parse time — defense in depth for a doc built from a hostile
- * `_source.json` sidecar); a bare `#` with no target; and finally anything
- * that is not an allowlisted absolute scheme, which is what refuses
- * protocol-relative (`//evil.example`) and relative hrefs.
+ * `_source.json` sidecar); a bare `#` with no target; anything that is not an
+ * allowlisted absolute scheme, which is what refuses protocol-relative
+ * (`//evil.example`) and relative hrefs; and any href whose strict
+ * control-stripped reading and whose browser reading disagree (see the two
+ * forms above — that is what refuses `http s://evil.example`).
+ *
+ * The returned `url` is the BROWSER form, so what gets opened is what the
+ * href says; only the refusal decisions consult the strict form.
  */
 export function linkActivation({
   link,
@@ -133,17 +166,28 @@ export function linkActivation({
   if (typeof rawHref !== "string") return null;
   if (isDangerousUrl(rawHref)) return null;
 
-  const href = rawHref.replace(CONTROL_CHARS_RE, "");
-  if (href.length === 0) return null;
+  const denyForm = rawHref.replace(CONTROL_CHARS_RE, "");
+  const navigable = browserForm(rawHref);
+  if (denyForm.length === 0 || navigable.length === 0) return null;
 
-  if (href.startsWith("#")) {
-    const targetId = href.slice(1);
+  if (denyForm.startsWith("#")) {
+    // Both readings must agree this is a fragment before we treat it as one.
+    if (!navigable.startsWith("#")) return null;
+    const targetId = navigable.slice(1);
     return targetId.length > 0 ? { kind: "anchor", targetId } : null;
   }
 
-  const scheme = schemeOf(href);
-  if (!scheme || !ACTIVATABLE_SCHEMES.has(scheme)) return null;
-  return { kind: "external", url: href };
+  // BOTH forms must present an allowlisted absolute scheme. The deny form
+  // closes `jav\tascript:`; the browser form is the one actually opened, so it
+  // has to clear the allowlist in its own right — that is what refuses
+  // `http s://evil.example`, which the deny form alone would wave through as
+  // `https://evil.example`. Protocol-relative (`//evil.example`) and relative
+  // hrefs have no scheme at all and are refused by the same two checks.
+  const denyScheme = schemeOf(denyForm);
+  if (!denyScheme || !ACTIVATABLE_SCHEMES.has(denyScheme)) return null;
+  const navigableScheme = schemeOf(navigable);
+  if (!navigableScheme || !ACTIVATABLE_SCHEMES.has(navigableScheme)) return null;
+  return { kind: "external", url: navigable };
 }
 
 /** The only shape the anchor scroll needs from an element. Deliberately not
