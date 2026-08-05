@@ -37,3 +37,36 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # Component-level BROWSER tests for packages/editor (ADR-0062 Amendment 3).
+  # Hermetic — a file:// harness page bundling the real ReportEditor, no
+  # deployment, no Clerk credentials, no database — so it belongs in this fast
+  # gate rather than the infrastructure-first e2e workflow. It exists because
+  # the in-page anchor scroll shipped inert under a fully green unit suite: the
+  # bug was an ordering fact about a real browser and a mounted ProseMirror,
+  # which no node-tier test can observe.
+  browser:
+    name: Editor browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: pnpm test:browser

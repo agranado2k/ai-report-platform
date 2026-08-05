@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Anchor scroll fixture</title>
+    <style>
+      body { font-family: system-ui; margin: 0; padding: 24px; }
+      section { margin: 0 0 60vh; }
+      .spacer { height: 20vh; }
+    </style>
+  </head>
+  <body>
+    <h1 id="top">Anchor scroll fixture</h1>
+    <p class="spacer" id="spacer">spacer</p>
+    <nav id="toc">
+      <a href="#deep-section">to section</a>
+      <a href="#section-two">to heading</a>
+      <a href="https://example.com/" target="_blank" rel="noopener noreferrer">external</a>
+    </nav>
+    <section id="filler"><h2 id="section-one">One</h2><p>filler</p></section>
+    <section><h2 id="section-two">Two</h2></section>
+    <section id="deep-section"><h2>Deep</h2><p>bottom</p></section>
+  </body>
+</html>
