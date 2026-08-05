@@ -4172,3 +4172,97 @@ full withdrawal list; ADR-0079 records the tier's first genuine (negative)
 contribution to the investigation and the preview gap.
 
 Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).
+
+## 2026-08-05 — the anchor jump, round 6: step 2 really is absent in production, and the failure surface is removed rather than named
+
+The operator re-ran the production trace on the live `/edit` page with **both**
+`Element.prototype.scrollIntoView` implementations patched — including the
+PARENT one round 5 established the call actually resolves through — having
+first confirmed the realm reading directly on the page (`#section-two
+instanceof parentWindow.Element === true`, `instanceof
+iframe.contentWindow.Element === false`). A real mouse click on a TOC link,
+caret confirmed placed:
+
+```
+caretHost:    "H2#section-two"
+trace:        [ { kind: "scrollBy", args: "[0,77.9453125]", y: 0 } ]
+finalScrollY: 78      targetTop: 609 (was 687)
+```
+
+A control click that MISSED the link produced an empty trace and `caretHost:
+null`, so the instrument records nothing when nothing happens and records
+`scrollBy` when it does.
+
+**The first hard fact this investigation has had about production.** The caret
+transaction (`anchorScrollTransaction`) executes and succeeds — PM's selection
+is inside the anchor, PM's own minimal reveal fires. The top-alignment pass does
+not execute at all: not aborted, not animated, not raced. Round 5's withdrawal
+of "step 2 never runs" was correct as a withdrawal *of the evidence then
+available*; on the realm-correct instrument the observation stands, and round 5
+is un-withdrawn as an observation (it remains a symptom, not a mechanism).
+
+**The divergence is now localised to a few lines.** Running the same
+instrumentation over `tests/browser/harness/plain-report.html` reads the same
+viewport (clientHeight 647), the same anchor position (`#section-two`
+documentTop 687) and the same `scrollBy(0, 77.9)` — and then records the
+alignment call. Everything up to and including PM's reveal is byte-for-byte
+identical in the two places. The only difference is the missing call, so the
+divergence lives entirely between `view.dispatch(...)` returning and the
+alignment pass issuing its scroll. (The one geometric difference — the
+production document's `maxScrollY` is 1171 against the fixture's 2142, because
+the fixture carries a deliberate trailing runway — does not bear on it: top
+alignment is reachable in both.)
+
+**The cause is STILL NOT ESTABLISHED, and no sixth theory replaces the four
+retired ones.** What was found instead is that the old shape gave the pass three
+ways to not happen, all silent, all inside that gap:
+
+1. it ran downstream of `view.dispatch(...)` in the same call stack — and
+   prosemirror-view 1.42.0 wraps a `handleDOMEvents` handler in **no try/catch**
+   (`runCustomHandler`, `dist/index.js:3145`), so anything throwing during the
+   dispatch (a caller's own `onSelectionChange` included) aborts the click
+   handler *after* PM has applied the caret and scrolled — exactly the trace
+   above;
+2. it waited on a parent-window `requestAnimationFrame` whose execution in the
+   production page has never been observed;
+3. it re-resolved by `id` an element the handler had just resolved
+   synchronously, through `findAnchor(id)?.scrollIntoView?.(...)` — three
+   optional chains returning `void`, so "not found" and "scrolled" were
+   indistinguishable to every caller and every instrument.
+
+**So the decision removes the failure surface rather than naming the failure.**
+`deferAnchorScroll(targetId, { schedule, findAnchor })` is replaced by
+`scrollAnchorIntoView(target): boolean` — synchronous, over the element already
+in hand, ordered **before** the caret transaction, and answering whether it
+scrolled. Ordering it first costs nothing: with the anchor top-aligned, PM's own
+reveal finds the caret on screen and computes a zero move, so the surface is now
+scrolled exactly once instead of twice (measured in the tier: the post-fix trace
+is a single `scrollIntoView`, no `scrollBy` at all). The deferral had also
+outlived its argument — it predates the caret transaction, and existed to
+out-run a competitor the caret transaction removed.
+
+**This is explicitly not a diagnosis.** If the production cause is one of the
+three, this fixes it. If it is something else, the next trace will show
+`scrollIntoView` being called and the failure will have moved — which is itself
+new information the previous shape could not have produced.
+
+**Two browser contracts, both RED against the previous ordering**, failing at
+exactly the production offset (stalled at PM's minimal reveal, 598–609px short
+of the anchor): "the anchor jump does not depend on a later animation frame"
+(parent-window rAF stubbed to never fire) and "the anchor jump survives a caller
+callback that throws mid-dispatch". Neither reproduces the production failure;
+the harness still does not diverge from production on its own. The second needed
+a new harness affordance — `harness/entry.tsx` can be armed to make its
+`onSelectionChange` throw — which is not a synthetic competitor in the
+`armCaretReveal` sense: it exercises the real absence of a try/catch in
+prosemirror-view.
+
+**Still not verified against a deployed preview** — not in any of the six
+rounds. Under ADR-0069 the agent does not drive an authenticated production
+surface while holding push rights, so closing that gap remains an operator step.
+
+ADR-0062 Amendment 3 Decision 7 carries the fifth-round correction (the trace,
+the localisation, the three silent paths, the retirement list); ADR-0079 records
+the tier's contribution and the new harness affordance.
+
+Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).

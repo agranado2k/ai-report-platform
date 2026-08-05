@@ -473,6 +473,78 @@ for (const fixture of FIXTURES) {
       expect(await readScrollIntoViewCalls(page, "section#deep-section")).toHaveLength(1);
     });
 
+    // THE TWO CONTRACTS ROUND FIVE ADDED, and why they are contracts rather
+    // than another theory.
+    //
+    // The operator's round-five production trace — taken with the spy on BOTH
+    // prototypes, including the parent one the call actually resolves through
+    // — reads, for a real mouse click on a TOC link on the live `/edit` page:
+    //
+    //     caretHost:    "H2#section-two"
+    //     trace:        [ { kind: "scrollBy", args: "[0,77.9453125]", y: 0 } ]
+    //     finalScrollY: 78      targetTop: 609 (was 687)
+    //
+    // Run against this harness's `plain-report.html`, the same instrumentation
+    // reads clientHeight 647, `#section-two` documentTop 687 and
+    // `scrollBy(0, 77.90625)` — the caret transaction and ProseMirror's own
+    // minimal reveal are byte-for-byte the same in both places. The ONLY
+    // difference is the entry the production trace does not have:
+    // `scrollIntoView` on the anchor. So the divergence lives entirely in the
+    // few lines between `view.dispatch(...)` returning and the alignment pass
+    // issuing its scroll, and the two tests below state, as contracts, that
+    // nothing in that gap may be load-bearing:
+    //
+    //   - it must not need a later animation frame, and
+    //   - it must not be reachable only when everything before it succeeded.
+    //
+    // NEITHER TEST REPRODUCES THE PRODUCTION FAILURE, and neither claims to
+    // identify its cause — the cause is still not established. They fail
+    // against the pre-round-five design for the right structural reason, and
+    // they remove two of the three unobserved ways the pass could be skipped
+    // without leaving a trace. Read them as the removal of a failure surface,
+    // not as a diagnosis.
+    test("the anchor jump does not depend on a later animation frame", async ({ page }) => {
+      // Every subsequent frame request on the PARENT window — the window the
+      // click handler runs in — is recorded and never invoked. A jump that
+      // still lands owes nothing to the frame; a jump that stalls at
+      // ProseMirror's minimal reveal was waiting on one.
+      await page.evaluate(() => {
+        (window as unknown as { __rafRequests: number }).__rafRequests = 0;
+        window.requestAnimationFrame = () => {
+          (window as unknown as { __rafRequests: number }).__rafRequests += 1;
+          return 0;
+        };
+      });
+      const before = await readEditorScroll(page, "deep-section");
+      expect(before.scrollY).toBe(0);
+
+      await clickLinkInEditor(page, "#deep-section");
+
+      await expectAnchorRevealed(page, "deep-section", before);
+    });
+
+    test("the anchor jump survives a caller callback that throws mid-dispatch", async ({
+      page,
+    }) => {
+      // `onSelectionChange` is invoked from inside `view.dispatch(...)`, which
+      // the anchor click makes from inside its own `handleDOMEvents.click`
+      // handler — and prosemirror-view puts no try/catch around such a
+      // handler. Arming the harness's callback to throw therefore aborts the
+      // click handler at exactly the point the production trace stops:
+      // ProseMirror has applied the caret and issued its `scrollBy`, and
+      // whatever the handler had left to do does not run.
+      await page.evaluate(() => {
+        (window as unknown as { __throwOnSelectionChange: boolean }).__throwOnSelectionChange =
+          true;
+      });
+      const before = await readEditorScroll(page, "deep-section");
+      expect(before.scrollY).toBe(0);
+
+      await clickLinkInEditor(page, "#deep-section");
+
+      await expectAnchorRevealed(page, "deep-section", before);
+    });
+
     // THE REALM FACT, PINNED, because getting it backwards cost three rounds of
     // investigation: a production trace instrumented the iframe's
     // `Element.prototype`, saw nothing, and concluded the top-alignment pass

@@ -66,7 +66,29 @@ function App() {
               shell={shell}
               comments={comments}
               onChange={() => {}}
-              onSelectionChange={setSelection}
+              // A CALLER CALLBACK THAT CAN BE ARMED TO THROW.
+              //
+              // `onSelectionChange` is called from inside `view.dispatch(...)`
+              // — i.e. from inside the editor's own `handleDOMEvents.click`
+              // handler — and prosemirror-view 1.42.0 wraps a custom DOM
+              // handler in NO try/catch (`runCustomHandler`, dist/index.js:
+              // 3145). So a caller whose callback throws aborts the rest of
+              // the click handler, after ProseMirror has already applied the
+              // caret and issued its own reveal. That is the one shape the
+              // browser tier can drive that reproduces the production trace
+              // exactly, and the anchor jump must survive it.
+              //
+              // Armed from the test rather than always-on: every other
+              // contract in this suite needs the normal, non-throwing wiring.
+              onSelectionChange={(next) => {
+                if (
+                  (window as unknown as { __throwOnSelectionChange?: boolean })
+                    .__throwOnSelectionChange
+                ) {
+                  throw new Error("the caller's onSelectionChange threw");
+                }
+                setSelection(next);
+              }}
               onCommentRangesChange={setRanges}
               onCommentClick={setFocused}
               className="editor-iframe"

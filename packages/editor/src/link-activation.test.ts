@@ -8,11 +8,11 @@ import { describe, expect, it } from "vitest";
 import type { ClickPoint } from "./click-gesture";
 import { createEditorState } from "./editor-state";
 import {
-  deferAnchorScroll,
   editorClickOutcome,
   type LinkLike,
   linkActivation,
   linkMarkAtPos,
+  scrollAnchorIntoView,
 } from "./link-activation";
 
 const AT = (x: number, y: number): ClickPoint => ({ x, y });
@@ -188,148 +188,114 @@ describe("editorClickOutcome — link activation wins over comment focus", () =>
   });
 });
 
-describe("deferAnchorScroll — the parent window schedules, the iframe's document is scrolled", () => {
-  // The two dependencies are SEPARATE parameters on purpose, and the reason is
-  // ownership, not capability. THE FRAME is scheduled on the window this code
-  // actually runs on — the PARENT, where the click handler lives. THE ELEMENT
-  // is only in the iframe's document, so the lookup has to cross the boundary
-  // the other way. Two directions, one parameter each.
+describe("scrollAnchorIntoView — the top-alignment pass, synchronous and answerable", () => {
+  // WHY THIS IS A PLAIN FUNCTION OVER AN ELEMENT, and no longer a deferred
+  // call over two injected dependencies (`schedule` + `findAnchor`).
   //
-  // THREE EARLIER CLAIMS HERE WERE WRONG, and are corrected rather than
-  // deleted because all three were load-bearing in the reasoning that shipped
-  // a broken anchor scroll:
+  // The operator's round-five production trace, taken with the spy on the
+  // realm the call actually resolves through (the PARENT's
+  // `Element.prototype` — see the realm note in link-activation.ts), is the
+  // reason. Everything the editor does up to and including ProseMirror's own
+  // caret reveal is byte-for-byte the same in production as in the browser
+  // tier: the caret lands inside the anchor, and PM's `scrollRectIntoView`
+  // issues one `window.scrollBy(0, 77.9)`. The top-alignment pass then does
+  // not happen — no call on either prototype.
   //
-  //  - "the element comes from the IFRAME's realm." It does not. Every node
-  //    ProseMirror renders — which is every node that can carry an anchor id,
-  //    since the srcdoc `<body>` ships empty — is built by the PARENT
-  //    document's `createElement` and merely ADOPTED into the iframe's
-  //    document, keeping the parent realm's prototypes. Measured, and pinned
-  //    by tests/browser/anchor-scroll.spec.ts. The mistake was not academic:
-  //    it is why a production trace instrumented
-  //    `iframe.contentWindow.Element.prototype.scrollIntoView`, recorded zero
-  //    calls, and concluded this function never runs. It runs.
+  // The previous shape had THREE ways to not happen, and every one of them
+  // was silent:
   //
-  //  - "the iframe has no `allow-scripts`, so a callback handed to ITS
-  //    `requestAnimationFrame` is at best implementation-defined and at worst
-  //    never runs." It runs. `allow-scripts` governs script the DOCUMENT
-  //    loads or contains; the iframe's own `requestAnimationFrame`, called
-  //    from the parent across a same-origin boundary, fires normally. Using
-  //    it would merely be scheduling on the wrong clock, which is a clarity
-  //    problem, not a correctness one.
-  //  - "the scroll must be deferred a frame because PM scrolls the caret
-  //    back." Deferring is not what wins that race — nothing does. This
-  //    PR's whole thesis is that a scroll performed behind ProseMirror's back
-  //    loses regardless of when it is issued, which is why the primary path
-  //    is now `anchorScrollTransaction` (editor-state.ts) and this function
-  //    is the FALLBACK plus the top-alignment pass. The deferral survives
-  //    because the alignment pass must run after PM has applied its own
-  //    reveal, not because one frame out-runs anything.
+  //  1. It ran downstream of `view.dispatch(...)` in the same call stack.
+  //     prosemirror-view 1.42.0 puts NO try/catch around a
+  //     `handleDOMEvents` handler (`runCustomHandler`, dist/index.js:3145),
+  //     so anything that throws inside the dispatch — including a caller's
+  //     own `onSelectionChange` — aborts the click handler after PM has
+  //     already applied the caret and scrolled, and the alignment pass never
+  //     runs. That is EXACTLY the production trace's shape.
+  //  2. It waited on a `requestAnimationFrame` on the parent window. That
+  //     frame's execution in the production page has never been observed.
+  //  3. It re-looked-up the anchor by id a frame later, when the caller had
+  //     just resolved that same element synchronously.
+  //
+  // None of the three is PROVEN to be the production cause; the cause is not
+  // established. What is established is that all three sit inside the four
+  // lines between the last thing production is seen to do and the thing it is
+  // not seen to do, and that none of them leaves a trace. This shape has none
+  // of them: the caller passes the element it already holds, the scroll is
+  // issued in the same tick, and the function ANSWERS whether it scrolled.
+  //
+  // THE DEFERRAL HAD ALSO OUTLIVED ITS ARGUMENT. It was added (6f52bd0) when
+  // the caret transaction did not exist and a frame's head start was being
+  // used to out-run a competing scroll. `anchorScrollTransaction`
+  // (editor-state.ts) replaced that strategy outright: the caret is put AT
+  // the anchor, so any later reveal of it re-asserts the jump. Nothing is
+  // being out-run, so there is nothing for a frame to buy.
   const anchorSpy = () => {
     const calls: unknown[] = [];
     return { el: { scrollIntoView: (o?: unknown) => calls.push(o) }, calls };
   };
 
-  /** The one call shape the fallback may make — see the "scrolls instantly"
+  /** The one call shape this pass may make — see the "scrolls instantly"
    *  test below for the measurement that fixes it. */
   const INSTANT_TOP = { behavior: "instant", block: "start" };
 
-  it("does not scroll synchronously — it waits for the scheduled frame", () => {
+  // THE CONTRACT THE OLD SHAPE INVERTED. It asserted "does not scroll
+  // synchronously — it waits for the scheduled frame"; the deferral is now
+  // the defect, so the assertion is its opposite and is stated first.
+  it("scrolls in the caller's own tick — nothing is deferred to a later frame", () => {
     const { el, calls } = anchorSpy();
-    let scheduled: (() => void) | null = null;
-    deferAnchorScroll("summary", {
-      schedule: (cb) => {
-        scheduled = cb;
-      },
-      findAnchor: () => el,
-    });
-    expect(calls).toEqual([]); // nothing yet — the frame has not run
-    (scheduled as unknown as () => void)();
+    scrollAnchorIntoView(el);
     expect(calls).toEqual([INSTANT_TOP]);
   });
 
-  // MEASURED IN CHROME, not reasoned about. A `behavior: "smooth"`
-  // `scrollIntoView` is an ABORTABLE ANIMATION: it runs for hundreds of
-  // milliseconds (1.5s over a long document), and ANY competing scroll on the
-  // same scrolling box during that window ABANDONS it — the box is left
-  // wherever the competitor put it, and the animation never resumes. Driving
-  // a 290px anchor scroll and then issuing `scrollTo(0, 32)` (the shape of a
-  // scroll that reveals a caret elsewhere) produced a final `scrollY` of 32
-  // for every competitor arrival from 0ms to 600ms, against 290 with no
-  // competitor at all.
-  //
-  // THE MEASUREMENT IS ABOUT THE ABORT AND NOTHING ELSE: it says what happens
-  // to a smooth scroll when something else scrolls the same box. It does NOT
-  // say that is what happened in production — that failure was measured on a
-  // document with no `scroll-behavior` rule, where this scroll was never
-  // animated in the first place. Nor is the competitor's identity established;
-  // see `anchorScrollTransaction`'s doc comment in editor-state.ts for the
-  // candidates that were checked and refuted.
-  //
-  // The DOM fallback therefore scrolls INSTANTLY. An instant scroll is
-  // applied within its own task and has no in-flight window to abort.
-  it("scrolls instantly, never as an abortable smooth animation", () => {
-    const { el, calls } = anchorSpy();
-    deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
-    expect(calls).toEqual([{ behavior: "instant", block: "start" }]);
-  });
-
-  // A LATENT DEFECT, AND THE REASON THIS ASSERTION IS SPELLED OUT TWICE.
+  // A LATENT DEFECT THIS PASS ONCE HAD, AND THE REASON THE OPTION IS SPELLED
+  // OUT TWICE.
   //
   // `behavior: "auto"` does NOT mean "instant". In CSSOM-View, `auto` means
-  // "use the scrolling box's own CSS `scroll-behavior`" — it is the DEFER
-  // value, not the instant one. `instant` is the value that forces a
-  // non-animated scroll regardless of CSS. This call said `"auto"` for two
-  // releases under a comment asserting it was instant, so on a report that
-  // sets `html { scroll-behavior: smooth }` — one real generated report does
-  // (packages/report-html/src/fixtures/ai-readiness-report.html); the platform
-  // adds no CSS of its own and this repo's other report fixture has none — it
-  // resolved to a ~1.5s animation. Measured on that fixture in the browser
-  // tier: the jump still ARRIVES, it just takes 1.5 seconds and is abortable
-  // for all of it.
+  // "use the scrolling box's own CSS `scroll-behavior`" — it DEFERS to the
+  // page. The editing surface renders the report's own shell CSS inside its
+  // iframe, and a real generated report sets `html { scroll-behavior: smooth
+  // }` (packages/report-html/src/fixtures/ai-readiness-report.html line 44),
+  // so on such a document `auto` resolved to an animated, abortable scroll.
+  // Measured in Chrome: a smooth scroll is abandoned permanently by ANY
+  // competing scroll on the same box during its ~1.5s run. `instant` forces a
+  // non-animated scroll whatever the CSS says.
   //
-  // IT IS NOT THE CAUSE OF THE REPORTED PRODUCTION FAILURE. The document that
-  // failed had no `scroll-behavior` rule at all, so `auto` already resolved to
-  // instant there; the browser tier reproduces that document
-  // (`tests/browser/harness/plain-report.html`) and the anchor jump works on
-  // it both before and after this change. See ADR-0062 Amendment 3 Decision 7.
-  //
-  // Asserted as a standalone property, not just as part of the call shape, so
-  // that a future edit which "simplifies" the option object has to confront
-  // the word `instant` on its own terms.
+  // It is NOT the reported production failure — that was measured on a
+  // document with no `scroll-behavior` rule at all, where `auto` already
+  // resolved to instant. Do not re-attach this fix to that symptom.
+  it("scrolls instantly, never as an abortable smooth animation", () => {
+    const { el, calls } = anchorSpy();
+    scrollAnchorIntoView(el);
+    expect(calls).toEqual([INSTANT_TOP]);
+  });
+
   it("never requests behavior 'auto' — that defers to the report's own CSS", () => {
     const { el, calls } = anchorSpy();
-    deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
+    scrollAnchorIntoView(el);
     const [options] = calls as ReadonlyArray<{ behavior?: string }>;
     expect(options?.behavior).toBe("instant");
   });
 
-  it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {
-    const { el, calls } = anchorSpy();
-    const lookedUp: string[] = [];
-    deferAnchorScroll("top-recommendation", {
-      schedule: (cb) => cb(),
-      findAnchor: (id) => {
-        lookedUp.push(id);
-        return el;
-      },
-    });
-    expect(lookedUp).toEqual(["top-recommendation"]);
-    expect(calls).toEqual([INSTANT_TOP]);
+  // THE ANSWER IS THE POINT. The old shape returned `void` through three
+  // optional chains (`findAnchor(id)?.scrollIntoView?.(...)`), so "the anchor
+  // was not there" and "the anchor was scrolled" were indistinguishable to
+  // every caller and to every instrument. A production round was spent on
+  // that ambiguity.
+  it("answers whether it actually scrolled", () => {
+    const { el } = anchorSpy();
+    expect(scrollAnchorIntoView(el)).toBe(true);
+    expect(scrollAnchorIntoView(null)).toBe(false);
+    expect(scrollAnchorIntoView(undefined)).toBe(false);
   });
 
-  it("is a no-op, never a throw, when the id matches nothing in the document", () => {
-    expect(() =>
-      deferAnchorScroll("missing", { schedule: (cb) => cb(), findAnchor: () => null }),
-    ).not.toThrow();
-    expect(() =>
-      deferAnchorScroll("missing", { schedule: (cb) => cb(), findAnchor: () => undefined }),
-    ).not.toThrow();
+  it("is a no-op, never a throw, when the anchor is missing from the document", () => {
+    expect(() => scrollAnchorIntoView(null)).not.toThrow();
+    expect(() => scrollAnchorIntoView(undefined)).not.toThrow();
   });
 
   it("survives an element with no scrollIntoView (a structural-type shape mismatch)", () => {
-    expect(() =>
-      deferAnchorScroll("x", { schedule: (cb) => cb(), findAnchor: () => ({}) }),
-    ).not.toThrow();
+    expect(() => scrollAnchorIntoView({})).not.toThrow();
+    expect(scrollAnchorIntoView({})).toBe(false);
   });
 });
 
