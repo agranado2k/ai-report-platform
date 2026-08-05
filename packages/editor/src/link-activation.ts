@@ -234,6 +234,20 @@ export interface AnchorScrollDeps {
  * operator measured in production. `block: "start"` is stated rather than
  * left to the default so the alignment is part of the contract.
  *
+ * `behavior: "instant"`, AND THE DIFFERENCE FROM `"auto"` IS THE WHOLE BUG.
+ * This call said `"auto"` for two releases, under a comment asserting it was
+ * instant. It is not: in CSSOM-View `auto` means "use this scrolling box's own
+ * CSS `scroll-behavior`", i.e. it DEFERS the decision to the page. Generated
+ * reports ship `html { scroll-behavior: smooth }`
+ * (packages/report-html/src/fixtures/ai-readiness-report.html line 44 is a
+ * verbatim real report), and the editing surface renders the report's own
+ * shell CSS inside its iframe — so in production every anchor click resolved
+ * to precisely the abortable animation the paragraph above forbids, and was
+ * abandoned by the post-click caret reveal at the caret's own offset. `instant`
+ * is the value that forces a non-animated scroll whatever the CSS says. The
+ * browser tier could not see this until its fixture carried the same rule real
+ * reports carry (tests/browser/harness/report.html, ADR-0079).
+ *
  * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame is scheduled
  * in the realm this code actually runs in — the PARENT window. The ELEMENT,
  * conversely, only exists in the iframe's document, which is why the lookup is
@@ -245,7 +259,7 @@ export interface AnchorScrollDeps {
  */
 export function deferAnchorScroll(targetId: string, deps: AnchorScrollDeps): void {
   deps.schedule(() => {
-    deps.findAnchor(targetId)?.scrollIntoView?.({ behavior: "auto", block: "start" });
+    deps.findAnchor(targetId)?.scrollIntoView?.({ behavior: "instant", block: "start" });
   });
 }
 

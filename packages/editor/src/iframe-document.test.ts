@@ -126,6 +126,28 @@ describe("buildIframeDocument", () => {
     expect(IFRAME_INJECTED_CSS).toContain("print-color-adjust: exact");
   });
 
+  // THE SECOND HALF OF THE PRODUCTION ANCHOR BUG. ProseMirror's own reveal
+  // (`scrollRectIntoView` → `doc.defaultView.scrollBy(x, y)`, prosemirror-view
+  // 1.42.0) takes NO behavior argument, so it is governed entirely by the CSS
+  // `scroll-behavior` of the document it scrolls — which, inside the editing
+  // iframe, is the REPORT's own untrusted stylesheet. Generated reports ship
+  // `html { scroll-behavior: smooth }` (see the real-report fixture in
+  // packages/report-html), which silently turns every programmatic reveal the
+  // editor performs — the anchor jump AND the comments panel's "Jump" — into
+  // an abortable animation that any competing scroll abandons mid-flight.
+  //
+  // The editor surface therefore neutralises it. `!important` is deliberate:
+  // this is an editor-tool override of author CSS, and losing to a report that
+  // wrote `!important` would reinstate exactly the defect. Ordering alone is
+  // not enough to rely on either — the injected <style> is appended last
+  // today, but that is a property of `injectCspIntoParsedDocument`, not of
+  // this rule.
+  it("neutralises the report's own smooth scrolling on the editing surface", () => {
+    expect(IFRAME_INJECTED_CSS).toContain("scroll-behavior: auto !important");
+    const doc = buildIframeDocument(makeShell(), testParse);
+    expect(doc).toContain("scroll-behavior: auto !important");
+  });
+
   it("preserves the shell's <body> attributes/classes verbatim", () => {
     const doc = buildIframeDocument(makeShell(), testParse);
     expect(doc).toContain('<body class="report" data-theme="dark">');

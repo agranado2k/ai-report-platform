@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <title>Anchor scroll fixture</title>
     <style>
+      /* LOAD-BEARING, and it is the reason this fixture exists in this shape.
+         Real reports ship this rule — `packages/report-html/src/fixtures/
+         ai-readiness-report.html` (a verbatim generated report) carries it at
+         line 44, and it is standard in generated report CSS. Without it the
+         harness ran under CSS no production report has, and every programmatic
+         scroll in the editor behaved differently here than it does in
+         production: `scrollIntoView({behavior: "auto"})` and ProseMirror's own
+         `window.scrollBy()` both mean "use the CSS `scroll-behavior`", so they
+         are INSTANT under a fixture without this rule and SMOOTH (abortable,
+         animated) under one with it. Do not remove it to make a test pass. */
+      html { scroll-behavior: smooth; }
       body { font-family: system-ui; margin: 0; padding: 24px; }
       section { margin: 0 0 60vh; }
       .spacer { height: 20vh; }

@@ -67,6 +67,26 @@ ${INTENT_HIGHLIGHT_RULES}
 a[href] {
   cursor: pointer;
 }
+/* EVERY PROGRAMMATIC REVEAL IN THE EDITOR MUST BE INSTANT, and this rule is
+   the only place that can guarantee it for ProseMirror's own scroll.
+   scrollRectIntoView (prosemirror-view 1.42.0) reveals the selection with a
+   bare doc.defaultView.scrollBy(x, y), or elt.scrollTop += moveY for a nested
+   box. Neither takes a behavior argument, so both are governed entirely by the
+   CSS scroll-behavior of the document being scrolled. Inside this iframe that
+   document is the REPORT, and generated reports ship
+   html { scroll-behavior: smooth } (a verbatim example:
+   packages/report-html/src/fixtures/ai-readiness-report.html). Under that rule
+   PM's reveal becomes an abortable animation, and any competing scroll leaves
+   the surface at the competitor's offset instead — the production anchor-jump
+   failure, and the same latent failure for the comments panel's Jump.
+   !important because the report's own stylesheet is untrusted author CSS that
+   may itself be !important; the injected style element being appended last is
+   an ordering detail of buildIframeDocument, not a contract to lean on. This
+   affects the EDITING surface only — the published report is served
+   byte-for-byte and keeps its smooth scrolling (ADR-0038, ADR-0062 §8). */
+html, body {
+  scroll-behavior: auto !important;
+}
 `.trim();
 
 /**

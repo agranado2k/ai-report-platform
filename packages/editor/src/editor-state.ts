@@ -154,6 +154,18 @@ export function jumpToCommentTransaction(
  * applied and then simply overridden. Deferring by more frames cannot help,
  * because the caret never stops being somewhere else.
  *
+ * ALSO ESTABLISHED, AND IT IS WHY THIS TRANSACTION'S OWN SCROLL WAS ANIMATED
+ * TOO: `scrollRectIntoView` (prosemirror-view 1.42.0) reveals the selection
+ * with a bare `doc.defaultView.scrollBy(moveX, moveY)` — no behavior argument,
+ * so it obeys the scrolled document's CSS `scroll-behavior` and nothing else.
+ * Inside the editing iframe that document is the REPORT, and generated reports
+ * ship `html { scroll-behavior: smooth }`. So PM's reveal here was an abortable
+ * animation in production for exactly the same reason the DOM top-alignment
+ * pass was. There is no per-call fix for this one — the call is inside
+ * ProseMirror — so the editing surface neutralises the CSS instead
+ * (`IFRAME_INJECTED_CSS`, iframe-document.ts). The comment panel's "Jump" runs
+ * on this same transaction builder and inherited the same defect.
+ *
  * NOT ESTABLISHED — deliberately left open rather than replaced with a second
  * confident guess: WHICH mechanism performs the competing scroll. Two
  * candidates were checked against the installed source and REFUTED, so neither

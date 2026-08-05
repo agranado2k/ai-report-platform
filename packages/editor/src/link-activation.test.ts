@@ -222,7 +222,7 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
 
   /** The one call shape the fallback may make — see the "scrolls instantly"
    *  test below for the measurement that fixes it. */
-  const INSTANT_TOP = { behavior: "auto", block: "start" };
+  const INSTANT_TOP = { behavior: "instant", block: "start" };
 
   it("does not scroll synchronously — it waits for the scheduled frame", () => {
     const { el, calls } = anchorSpy();
@@ -260,7 +260,32 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
   it("scrolls instantly, never as an abortable smooth animation", () => {
     const { el, calls } = anchorSpy();
     deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
-    expect(calls).toEqual([{ behavior: "auto", block: "start" }]);
+    expect(calls).toEqual([{ behavior: "instant", block: "start" }]);
+  });
+
+  // THE PRODUCTION BUG, AND THE REASON THIS ASSERTION IS SPELLED OUT TWICE.
+  //
+  // `behavior: "auto"` does NOT mean "instant". In CSSOM-View, `auto` means
+  // "use the scrolling box's own CSS `scroll-behavior`" — it is the DEFER
+  // value, not the instant one. `instant` is the value that forces a
+  // non-animated scroll regardless of CSS. Every generated report ships
+  // `html { scroll-behavior: smooth }` (see
+  // packages/report-html/src/fixtures/ai-readiness-report.html, a verbatim
+  // real report), and the editing surface renders the report's own shell CSS
+  // inside its iframe — so in PRODUCTION this call was resolving to exactly
+  // the abortable smooth animation the measurement above says must never be
+  // used, while the comment above it claimed the opposite. The browser tier
+  // could not see it either, because its fixture carried no such rule.
+  //
+  // Asserted as a standalone property, not just as part of the call shape, so
+  // that a future edit which "simplifies" the option object has to confront
+  // the word `instant` on its own terms.
+  it("never requests behavior 'auto' — that defers to the report's own CSS", () => {
+    const { el, calls } = anchorSpy();
+    deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
+    const [options] = calls as ReadonlyArray<{ behavior?: string }>;
+    expect(options?.behavior).toBe("instant");
+    expect(options?.behavior).not.toBe("auto");
   });
 
   it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {

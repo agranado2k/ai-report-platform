@@ -3965,3 +3965,62 @@ so it cannot close the standing `frame-src 'self'` question in
 `packages/headers/src/view-headers.ts`.
 
 Worktree `worktree/anchor-scroll` (branch `fix/anchor-scroll`).
+
+---
+
+## 2026-08-05 — the anchor jump, round 3: `behavior: "auto"` is not instant
+
+Third attempt at "clicking a TOC link in `/edit` jumps to the section". Rounds 1
+(#243) and 2 (#245) both shipped inert; round 2 shipped **with a browser test
+tier built specifically to catch this**, and that tier was 6/6 green on the
+broken build. So the first deliverable this time was not a fix — it was making
+the harness fail for the reason production was failing.
+
+**The harness divergence: its report fixture was not a report.**
+`tests/browser/harness/report.html` carried a four-line stylesheet. Real reports
+ship `html { scroll-behavior: smooth }` — `packages/report-html/src/fixtures/
+ai-readiness-report.html` line 44, a verbatim generated report. That single rule
+changes what the code under test *means*: `scrollIntoView({behavior: "auto"})`
+does not mean "instant", it means "use this box's CSS `scroll-behavior`". Under
+the old fixture it resolved to instant and everything passed; under a real
+report it resolves to an abortable animation. Adding the rule to the fixture
+turns "the scroll survives ProseMirror's post-click caret reveal" **red by
+602px** on `c7ae920`.
+
+**Root cause.** Both earlier rounds argued, correctly and at length, that the
+reveal must never be an abortable smooth animation — and then wrote
+`behavior: "auto"`, the value that defers the decision to the page. In
+production it deferred to the report's `smooth`, so the top-alignment pass was
+an animation, and the post-click caret reveal abandoned it at the caret's own
+offset. The operator's measurement matches to the pixel: `scrollY` 202.5, target
+top 609 in a 647px surface — the anchor **bottom-aligned**, which is exactly
+`scrollRectIntoView`'s minimal reveal of a caret in that heading with the
+top-alignment pass abandoned. Fix: `behavior: "instant"`.
+
+**The same defect one level down, where no argument exists.** ProseMirror's own
+reveal is a bare `doc.defaultView.scrollBy(x, y)` (`scrollRectIntoView`,
+prosemirror-view 1.42.0) — no behavior parameter, so it obeys the report's CSS
+and nothing else. Step 1 of the anchor jump *and* the comments panel's "Jump"
+(which has no step 2) were both animated and abortable in production. There is
+no call-site fix for a call inside ProseMirror, so the editing surface
+neutralises the CSS: `IFRAME_INJECTED_CSS` gains
+`html, body { scroll-behavior: auto !important }`. Editing surface only — the
+published report is still served byte-for-byte and keeps its smooth scrolling.
+
+Each half is pinned where it can be seen: `instant` by unit tests that assert
+the word rather than the call shape, the CSS override by a browser test that
+reads the surface's *computed* `scroll-behavior` against a fixture that asks for
+smooth. Both were verified red individually with the other fix in place.
+
+ADR-0062 Amendment 3 Decision 7 carries the correction. ADR-0079 gains a
+decision the tier did not have: **a fixture may be smaller than a real report,
+never different in kind** — anything the browser consults while running the code
+under test (`scroll-behavior`, `overflow`, `scroll-margin`, `position: sticky`,
+`overflow-anchor`) belongs in the fixture.
+
+Honest limit, unchanged from ADR-0079: the harness still needs `armCaretReveal`
+to model the competing scroll, and *which* mechanism performs it in production
+is still not established. What changed is that the harness now runs under
+production-representative CSS, which is what made the model discriminating.
+
+Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`).

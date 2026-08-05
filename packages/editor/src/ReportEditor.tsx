@@ -324,7 +324,9 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         // against the BOTTOM edge of the editing surface, where "jump to this
         // section" should put it at the top. So the DOM scroll still runs,
         // deferred one frame on the PARENT window's clock and INSTANT rather
-        // than smooth (see `deferAnchorScroll`). It is safe now in a way it
+        // than smooth (see `deferAnchorScroll` — and note that `behavior:
+        // "auto"` is NOT instant, it defers to the report's own CSS, which is
+        // the bug that survived two rounds of fixes here). It is safe now in a way it
         // never was before: the caret is already at the anchor, so any later
         // reveal of it finds it visible and scrolls nothing. The browser tier
         // asserts the resulting TOP alignment (tests/browser).

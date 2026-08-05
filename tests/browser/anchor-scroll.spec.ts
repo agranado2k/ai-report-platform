@@ -275,6 +275,42 @@ test.describe("in-page anchor links in the editor", () => {
     await expectAnchorRevealed(page, "deep-section", before);
   });
 
+  // THE OTHER HALF OF THE SAME PRODUCTION DEFECT, and the only tier that can
+  // assert it: whether the editor's injected CSS actually WINS the cascade
+  // against the report's own untrusted stylesheet is a question about a real
+  // browser's cascade, not about a string.
+  //
+  // ProseMirror's own reveal — `scrollRectIntoView` → `window.scrollBy(x, y)`
+  // — takes no behavior argument, so it obeys the document's CSS
+  // `scroll-behavior` and nothing else. The fixture asks for `smooth`, exactly
+  // as every generated report does; if the editor's override did not beat it,
+  // PM's reveal (the anchor jump's first step, and the comments panel's Jump,
+  // which has no second step at all) would be an abortable animation that any
+  // competing scroll abandons at its own offset.
+  test("the editing surface never animates its scrolls, whatever the report's CSS asks for", async ({
+    page,
+  }) => {
+    const behavior = await page.evaluate(() => {
+      const doc = (document.querySelector("iframe") as HTMLIFrameElement | null)?.contentDocument;
+      if (!doc?.defaultView) throw new Error("the editing surface has not mounted");
+      // Read from the surface's OWN realm — a parent-realm `getComputedStyle`
+      // would be resolving against the wrong document.
+      return {
+        root: doc.defaultView.getComputedStyle(doc.documentElement).scrollBehavior,
+        body: doc.defaultView.getComputedStyle(doc.body).scrollBehavior,
+        // The premise: the fixture really does ask for smooth, so this test
+        // fails for the right reason rather than because the rule vanished.
+        fixtureAsksForSmooth: Array.from(doc.querySelectorAll("style")).some((s) =>
+          /scroll-behavior:\s*smooth/.test(s.textContent ?? ""),
+        ),
+      };
+    });
+
+    expect(behavior.fixtureAsksForSmooth).toBe(true);
+    expect(behavior.root).toBe("auto");
+    expect(behavior.body).toBe("auto");
+  });
+
   test("an external link still opens a new tab, and is not scrolled to", async ({ page }) => {
     await page.evaluate(() => {
       (window as unknown as { __opened: string[] }).__opened = [];
