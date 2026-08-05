@@ -80,7 +80,12 @@ import {
   reportableSelection,
 } from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
-import { editorClickOutcome, linkActivation, linkMarkAtPos } from "./link-activation";
+import {
+  deferAnchorScroll,
+  editorClickOutcome,
+  linkActivation,
+  linkMarkAtPos,
+} from "./link-activation";
 
 // Re-exported for callers that import it from this module (the type moved to
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
@@ -265,23 +270,20 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
           onAnchorNavigateRef.current(targetId);
           return;
         }
-        // DEFERRED ONE ANIMATION FRAME, deliberately. ProseMirror re-syncs
-        // the selection to the DOM after a click, and that re-sync scrolls
-        // the caret back into view — doing this synchronously means the
-        // scroll visibly happens and is then immediately undone, which
-        // presents as "shipped it, still broken".
-        //
-        // Scroll only; never assign `location.hash`. The iframe is a
-        // sandboxed srcdoc document, and a hash assignment there is both
-        // meaningless for the user's URL bar and a navigation the sandbox
-        // has no reason to be asked to permit.
-        const scroll = () => {
-          const target = iframe?.contentDocument?.getElementById(targetId);
-          target?.scrollIntoView({ behavior: "smooth" });
-        };
-        const raf = iframe?.contentWindow?.requestAnimationFrame;
-        if (raf) raf.call(iframe.contentWindow, scroll);
-        else scroll();
+        // Deferred one animation frame, on the PARENT window's frame clock —
+        // see `deferAnchorScroll` for both halves of the rationale (why the
+        // deferral is load-bearing, and why the iframe's own
+        // `requestAnimationFrame` is the wrong realm: that document is
+        // `allow-same-origin` with no `allow-scripts`, so scripting is
+        // disabled in it). The element lookup crosses the other way, into
+        // the iframe's document, because that is the only realm it exists in.
+        deferAnchorScroll(targetId, {
+          schedule: (callback) =>
+            typeof window.requestAnimationFrame === "function"
+              ? window.requestAnimationFrame(callback)
+              : callback(),
+          findAnchor: (id) => iframe?.contentDocument?.getElementById(id),
+        });
       }
 
       const view = new EditorView(

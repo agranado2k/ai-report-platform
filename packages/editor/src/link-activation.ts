@@ -146,6 +146,50 @@ export function linkActivation({
   return { kind: "external", url: href };
 }
 
+/** The only shape the anchor scroll needs from an element. Deliberately not
+ *  `HTMLElement`: the element comes from the IFRAME's realm, where
+ *  `instanceof HTMLElement` against the parent's constructor is `false`. */
+export interface ScrollableLike {
+  scrollIntoView?: (options?: { readonly behavior?: ScrollBehavior }) => void;
+}
+
+export interface AnchorScrollDeps {
+  /** Defer one animation frame. MUST be the PARENT window's
+   *  `requestAnimationFrame`, never the iframe's — see below. */
+  readonly schedule: (callback: () => void) => void;
+  /** Look the anchor up in the IFRAME's document — that is the only realm the
+   *  element exists in. */
+  readonly findAnchor: (targetId: string) => ScrollableLike | null | undefined;
+}
+
+/**
+ * Scroll an in-page anchor into view, ONE ANIMATION FRAME LATE.
+ *
+ * The deferral is load-bearing: ProseMirror re-syncs the selection to the DOM
+ * after a click, and that re-sync scrolls the caret back into view, so a
+ * synchronous scroll visibly happens and is then immediately undone — which
+ * presents as "shipped it, still broken".
+ *
+ * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame must be
+ * scheduled in the realm this code actually runs in — the PARENT window. The
+ * editing iframe is `sandbox="allow-same-origin"` with **no `allow-scripts`**,
+ * so scripting is DISABLED in that document; a callback handed to *its*
+ * `requestAnimationFrame` is at best implementation-defined and at worst never
+ * runs. The parent's frame clock is strictly safer and is driven by the same
+ * compositor, so it defers past PM's re-sync just as well. The ELEMENT,
+ * conversely, only exists in the iframe's document, which is why the lookup is
+ * the caller's job and crosses the boundary the other way.
+ *
+ * Scroll only; `location.hash` is never assigned. The iframe is a sandboxed
+ * srcdoc document, so a hash assignment there is meaningless for the user's
+ * URL bar and a navigation the sandbox has no reason to be asked to permit.
+ */
+export function deferAnchorScroll(targetId: string, deps: AnchorScrollDeps): void {
+  deps.schedule(() => {
+    deps.findAnchor(targetId)?.scrollIntoView?.({ behavior: "smooth" });
+  });
+}
+
 /** Everything a single click on the editing surface can mean. */
 export type EditorClickOutcome =
   | LinkActivation

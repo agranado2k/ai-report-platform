@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { ClickPoint } from "./click-gesture";
 import { createEditorState } from "./editor-state";
 import {
+  deferAnchorScroll,
   editorClickOutcome,
   type LinkLike,
   linkActivation,
@@ -124,6 +125,65 @@ describe("editorClickOutcome — link activation wins over comment focus", () =>
       kind: "comment",
       commentId: "comment-1",
     });
+  });
+});
+
+describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled", () => {
+  // The two realms are SEPARATE parameters on purpose. The scroll must be
+  // deferred a frame (PM re-syncs the selection after a click and scrolls the
+  // caret back), but the frame must be scheduled in the realm the handler
+  // runs in — the PARENT. The editing iframe is `sandbox="allow-same-origin"`
+  // with NO `allow-scripts`, i.e. scripting is DISABLED in that document, so
+  // a callback handed to its `requestAnimationFrame` is at best
+  // implementation-defined and at worst never runs — which presents as the
+  // anchor click doing nothing at all. The ELEMENT, by contrast, only exists
+  // in the iframe's document, so that is where the lookup must happen.
+  const anchorSpy = () => {
+    const calls: unknown[] = [];
+    return { el: { scrollIntoView: (o?: unknown) => calls.push(o) }, calls };
+  };
+
+  it("does not scroll synchronously — it waits for the scheduled frame", () => {
+    const { el, calls } = anchorSpy();
+    let scheduled: (() => void) | null = null;
+    deferAnchorScroll("summary", {
+      schedule: (cb) => {
+        scheduled = cb;
+      },
+      findAnchor: () => el,
+    });
+    expect(calls).toEqual([]); // nothing yet — the frame has not run
+    (scheduled as unknown as () => void)();
+    expect(calls).toEqual([{ behavior: "smooth" }]);
+  });
+
+  it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {
+    const { el, calls } = anchorSpy();
+    const lookedUp: string[] = [];
+    deferAnchorScroll("top-recommendation", {
+      schedule: (cb) => cb(),
+      findAnchor: (id) => {
+        lookedUp.push(id);
+        return el;
+      },
+    });
+    expect(lookedUp).toEqual(["top-recommendation"]);
+    expect(calls).toEqual([{ behavior: "smooth" }]);
+  });
+
+  it("is a no-op, never a throw, when the id matches nothing in the document", () => {
+    expect(() =>
+      deferAnchorScroll("missing", { schedule: (cb) => cb(), findAnchor: () => null }),
+    ).not.toThrow();
+    expect(() =>
+      deferAnchorScroll("missing", { schedule: (cb) => cb(), findAnchor: () => undefined }),
+    ).not.toThrow();
+  });
+
+  it("survives an element with no scrollIntoView (a realm-crossing shape mismatch)", () => {
+    expect(() =>
+      deferAnchorScroll("x", { schedule: (cb) => cb(), findAnchor: () => ({}) }),
+    ).not.toThrow();
   });
 });
 
