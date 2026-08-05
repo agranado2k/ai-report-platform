@@ -4266,3 +4266,229 @@ the localisation, the three silent paths, the retirement list); ADR-0079 records
 the tier's contribution and the new harness affordance.
 
 Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).
+
+## 2026-08-05 — Anchor jump, round 6: candidate (i) refuted in production; the fix stands, the rationale narrows
+
+The fifth round listed three silent paths in the gap between `view.dispatch(...)`
+returning and the top-alignment pass issuing its scroll, and deliberately named
+none of them as the cause. The operator has now tested the first one directly,
+in production, on `c7ae920` — the check round 5 itself nominated as the cheap
+decisive one.
+
+**Method.** The same realm-correct probe on the live `/edit` page, on the same
+document (no `scroll-behavior` anywhere), with `window.addEventListener("error",
+…)` and `("unhandledrejection", …)` armed on the PARENT window before the click,
+plus the browser extension's console reader started beforehand. A real mouse
+click on the same TOC link:
+
+```
+caretHost:     "H2#section-two"    ← step 1 works
+finalScrollY:  78                  ← PM's minimal reveal only
+targetTop:     609                 ← target still far below
+windowErrors:  []                  ← nothing
+console:       no messages
+```
+
+**Candidate (i) is refuted, and the argument that made it a candidate is the
+argument that kills it.** prosemirror-view 1.42.0's `runCustomHandler` wraps a
+`handleDOMEvents` handler in no try/catch, so an exception thrown in that stack
+has nowhere to be swallowed and reaches `window.onerror`. Nothing was captured —
+not by the listener, not by the console reader — on the very click that
+reproduced the bug. A control run where the click missed the link gave
+`caretHost: null` and an empty trace, so the instrument distinguishes "nothing
+happened" from "it happened" and the empty error list is a measurement, not an
+absence of one.
+
+**The retirement list, cumulative — this is the fifth theory to fall.**
+
+1. `behavior: "auto"` resolving to an abortable smooth animation — a real defect
+   (Defect A), fixed, but impossible on the measured document.
+2. A post-click caret reveal racing the alignment pass — no competitor has ever
+   been observed; three candidate mechanisms refuted against the installed
+   prosemirror-view source.
+3. `updateStateInner`'s `storeScrollPos`/`resetScrollPos` restore — guard
+   measured false on `view.dom`.
+4. "The top-alignment pass never executes" — withdrawn as an instrumentation
+   artefact, then un-withdrawn by the realm-correct re-run. It stands as an
+   OBSERVATION: it is the symptom being explained, listed here only so it is
+   never mistaken for a mechanism.
+5. **NEW — "a throw during the dispatch aborted the click handler before the
+   alignment pass"**: refuted above.
+
+**Surviving, of what has been enumerated:** (ii) the parent-window
+`requestAnimationFrame` callback never running in the production page; (iii)
+`findAnchor(id)?.scrollIntoView?.(…)` returning `void` through its optional
+chains; and (iv), enumerated this round because the next instrument discriminates
+it for free — the re-resolution finds a DIFFERENT element than the handler did
+(`getElementById` returns the first element in document order with that id, so a
+duplicate id, or a `display: none` element, makes the call happen, return
+non-`void`, and scroll the wrong thing or nothing). None of the four is claimed
+as the cause. No sixth theory replaces the retired five.
+
+**`998b58e` still stands, for the reason it was made rather than a new one.** It
+was stated as removal of a failure surface and explicitly not a diagnosis.
+Refuting (i) removes one path from the live candidate list; it does not restore
+that path, and it does not touch (ii), (iii) or (iv), all of which the new shape
+also forecloses — there is no frame to wait on, no second lookup to fail, no
+second element to find. The two independent merits are untouched: ordering the
+alignment first makes the surface scroll exactly once (PM's reveal then computes
+a zero move), and the `boolean` return makes "not found" distinguishable from
+"scrolled" to every future instrument, which is exactly what made the old shape
+unfalsifiable. The code is left alone. What narrows is the rationale: the browser
+contract "survives a caller callback that throws mid-dispatch" is now a DEFENSIVE
+invariant — prosemirror-view really does lack the try/catch — and no longer a
+candidate explanation of the reported failure.
+
+**The next decisive experiment, and it is an operator step (ADR-0069).** It must
+run against what production is executing (`c7ae920`), not this branch, which has
+already removed the frame. The discriminator is not the `requestAnimationFrame`
+patch alone but its CONJUNCTION with a patch on the iframe document's
+`getElementById`: if the deferred callback ever runs, `findAnchor` calls
+`getElementById` with the anchor's id, so the presence or absence of that call
+after the click separates (ii) from (iii) from (iv). Paste into the console of
+the live `/edit` page, in the TOP frame, before clicking:
+
+```js
+(() => {
+  const W = window; // PARENT realm — the realm ReportEditor's click handler runs in
+  const iframe =
+    document.querySelector('iframe[title="Report editor surface"]') || document.querySelector("iframe");
+  const D = iframe && iframe.contentDocument;
+  const IW = iframe && iframe.contentWindow;
+  if (!D || !IW) {
+    console.log("NO EDITING IFRAME — open /edit and wait for the report to render");
+    return;
+  }
+
+  const t0 = performance.now();
+  const at = () => Math.round(performance.now() - t0);
+  const P = { clickAt: null, raf: [], getById: [], siv: [], pmScroll: [], errors: [] };
+  W.__P = P;
+
+  // (i), re-armed so the refutation travels with this run
+  W.addEventListener("error", (e) => P.errors.push({ at: at(), msg: String(e.message) }), true);
+  W.addEventListener("unhandledrejection", (e) => P.errors.push({ at: at(), msg: "rejection: " + String(e.reason) }), true);
+
+  // when the click happened, so everything below is timed relative to it
+  const mark = () => { P.clickAt = at(); };
+  W.addEventListener("click", mark, true);
+  IW.addEventListener("click", mark, true);
+
+  // CANDIDATE (ii) — does the PARENT window's rAF callback ever run?
+  const rafOrig = W.requestAnimationFrame.bind(W);
+  W.requestAnimationFrame = function (cb) {
+    const r = { id: 0, at: at(), firedAt: null, stack: String(new Error().stack || "").split("\n").slice(2, 4).join(" | ") };
+    r.id = rafOrig(function (ts) { r.firedAt = at(); return cb(ts); });
+    if (P.raf.length > 300) P.raf.shift();
+    P.raf.push(r);
+    return r.id;
+  };
+
+  // CANDIDATES (iii)/(iv) — does the re-resolution by id happen, and what comes back?
+  const gebiOrig = D.getElementById.bind(D);
+  Object.defineProperty(D, "getElementById", {
+    configurable: true, writable: true,
+    value: function (id) {
+      const el = gebiOrig(id);
+      const rec = { at: at(), id: String(id), found: !!el };
+      if (el) {
+        rec.el = el.tagName + (el.id ? "#" + el.id : "");
+        rec.hasScrollIntoView = typeof el.scrollIntoView === "function";
+        rec.display = IW.getComputedStyle(el).display;
+        rec.rectTop = Math.round(el.getBoundingClientRect().top);
+        rec.docTop = Math.round(el.getBoundingClientRect().top + IW.scrollY);
+        rec.dupes = Array.prototype.filter.call(D.querySelectorAll("[id]"), (n) => n.id === id).length;
+        rec.parentRealm = el instanceof W.Element;
+      }
+      P.getById.push(rec);
+      return el;
+    },
+  });
+
+  // THE ALIGNMENT CALL, on the prototype round 5 established it resolves through
+  const sivOrig = W.Element.prototype.scrollIntoView;
+  W.Element.prototype.scrollIntoView = function (opts) {
+    P.siv.push({ at: at(), el: this.tagName + (this.id ? "#" + this.id : ""), args: JSON.stringify(opts === undefined ? null : opts) });
+    return sivOrig.apply(this, arguments);
+  };
+
+  // STEP 1 continuity — PM's own reveal calls doc.defaultView.scrollBy
+  ["scrollBy", "scrollTo"].forEach((k) => {
+    const o = IW[k].bind(IW);
+    IW[k] = function () {
+      P.pmScroll.push({ at: at(), kind: k, args: JSON.stringify(Array.prototype.slice.call(arguments)) });
+      return o.apply(IW, arguments);
+    };
+  });
+
+  W.__report = () => {
+    const sel = D.getSelection();
+    const n = sel && sel.anchorNode;
+    const host = n && (n.nodeType === 1 ? n : n.parentElement);
+    const out = {
+      caretHost: host ? host.tagName + (host.id ? "#" + host.id : "") : null,
+      clickAt: P.clickAt,
+      finalScrollY: Math.round(IW.scrollY),
+      viewport: IW.innerHeight,
+      errors: P.errors,
+      pmScroll: P.pmScroll,
+      getById: P.getById.filter((r) => P.clickAt === null || r.at >= P.clickAt - 5),
+      scrollIntoView: P.siv.filter((r) => P.clickAt === null || r.at >= P.clickAt - 5),
+      rafAfterClick: P.raf.filter((r) => P.clickAt !== null && r.at >= P.clickAt - 5)
+        .map((r) => ({ at: r.at, firedAt: r.firedAt, stack: r.stack })),
+      rafScheduledAfterClick: P.raf.filter((r) => P.clickAt !== null && r.at >= P.clickAt - 5).length,
+      rafStillPending: P.raf.filter((r) => r.firedAt === null).length,
+    };
+    console.log(JSON.stringify(out, null, 2));
+    return out;
+  };
+
+  console.log("ARMED. Do NOT reload. Click the TOC link, wait ~2s, then run:  __report()");
+})();
+```
+
+Arm it, click the TOC link with a real mouse, wait ~2s, run `__report()`. Do not
+reload after arming — the iframe document identity would change and the
+`getElementById` patch would be lost. Read the result only from a run where the
+bug reproduced (`finalScrollY` ≈ 78, target still below).
+
+**Pass/fail, and what each reading settles:**
+
+- **`getById` contains an entry for the anchor's id after `clickAt`** → the
+  deferred callback RAN → **(ii) REFUTED**. Then:
+  - `found: false` → **(iii) CONFIRMED**: the re-resolution returned null and the
+    optional chain swallowed it.
+  - `found: true, hasScrollIntoView: false` → **(iii) CONFIRMED** on its third
+    optional chain.
+  - `found: true` with `dupes > 1` or `display: "none"`, and `scrollIntoView`
+    records a call on that element → **(iv) CONFIRMED**: the pass ran, on the
+    wrong or unscrollable element. (iii) refuted.
+  - `found: true, dupes: 1`, displayed, `scrollIntoView` records the call on the
+    right element, and the page still does not move → **all four refuted**; the
+    failure has moved downstream of the call itself (the scroll is issued and
+    ineffective, or something restores the offset after it), which is new
+    territory the timestamps in `pmScroll` will bound.
+  - `found: true, hasScrollIntoView: true` but `scrollIntoView` records NOTHING →
+    the call is being made and the parent-realm prototype is not on its lookup
+    path, which would reopen the realm question round 5 settled. Treat as a
+    contradiction to be re-run before it is believed.
+- **No `getById` entry for the anchor id, and `rafAfterClick` contains an entry
+  whose `firedAt` is still `null` two seconds later** → **(ii) CONFIRMED**: the
+  parent window's frame callback never ran; (iii) and (iv) untested, because the
+  code never reached them. Note this reading demands its own mechanism — a
+  foreground, visible tab firing no animation frame is surprising — so it should
+  be re-run before it is written up.
+- **No `getById` entry AND `rafScheduledAfterClick: 0`**, on a click where
+  `caretHost` is non-null → step 2 was never even scheduled, though step 1
+  demonstrably ran. With (i) refuted, that is a NEW fact and not one of the four;
+  the first thing to check would be whether the deployed bundle contains this
+  code path at all.
+- **`errors` non-empty** → (i) is un-refuted and this round's conclusion is wrong.
+  Expected empty, matching the run just made.
+
+ADR-0062 Amendment 3 Decision 7 carries the sixth-round correction (the method,
+the negative result, the cumulative retirement list, the narrowed rationale for
+`998b58e`); ADR-0079 records the demotion of the throw contract from candidate to
+defence.
+
+Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).

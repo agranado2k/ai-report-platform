@@ -301,18 +301,27 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         //    prosemirror-view 1.42.0 wraps a `handleDOMEvents` handler in no
         //    try/catch (`runCustomHandler`, dist/index.js:3145), so anything
         //    throwing inside that dispatch — a caller's own
-        //    `onSelectionChange` included — aborts the click handler after PM
-        //    has already applied the caret and scrolled, which is precisely
-        //    the trace above;
+        //    `onSelectionChange` included — would abort the click handler
+        //    after PM has applied the caret and scrolled, leaving exactly the
+        //    trace above. REFUTED IN PRODUCTION (round 6): with `error` and
+        //    `unhandledrejection` armed on the parent window and the console
+        //    reader running, the bug reproduced on the click and NOTHING was
+        //    captured — and with no try/catch to swallow it, a throw would
+        //    have surfaced. Kept as a removed surface, not as a candidate;
         //  - it no longer waits on a parent-window animation frame that has
-        //    never been observed running in the production page;
-        //  - it no longer re-resolves an element already in hand.
+        //    never been observed running in the production page — STILL LIVE;
+        //  - it no longer re-resolves an element already in hand, which could
+        //    return nothing, or (the same call, a different failure) the FIRST
+        //    element in document order with that id rather than the one the
+        //    handler resolved — STILL LIVE.
         //
         // Both properties are contracts in tests/browser/anchor-scroll.spec.ts
         // ("does not depend on a later animation frame", "survives a caller
         // callback that throws mid-dispatch"); both are RED against the
         // previous ordering, and neither is a reproduction of the production
-        // failure. Do not read this as a diagnosis.
+        // failure. Since round 6 the second is a DEFENSIVE invariant — the
+        // missing try/catch is real and worth not depending on — rather than a
+        // candidate explanation. Do not read any of this as a diagnosis.
         //
         // ORDERING IT FIRST COSTS NOTHING. PM's reveal scrolls only as far as
         // it must (`scrollRectIntoView`); with the anchor already top-aligned

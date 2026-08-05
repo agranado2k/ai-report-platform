@@ -292,22 +292,33 @@ export interface ScrollableLike {
  *     try/catch (`runCustomHandler`, dist/index.js:3145), so anything that
  *     throws during the dispatch — a caller's `onSelectionChange` included —
  *     aborts the click handler AFTER PM has applied the caret and scrolled,
- *     leaving exactly the trace above.
+ *     leaving exactly the trace above. **REFUTED IN PRODUCTION (round 6.)**
+ *     The operator re-ran the probe with `error` and `unhandledrejection`
+ *     armed on the parent window and the extension's console reader started
+ *     beforehand; the bug reproduced on the click and nothing was captured.
+ *     The absent try/catch is what makes this decisive: a throw there has
+ *     nowhere to be swallowed and reaches `window.onerror`.
  *  2. It waited on a parent-window animation frame that has never been
- *     observed running in the production page.
+ *     observed running in the production page. **Still live.**
  *  3. It re-resolved by `id` an element the caller had just resolved
- *     synchronously.
+ *     synchronously — which can return nothing, or (the same call, a
+ *     different failure) the FIRST element in document order carrying that
+ *     id, which a duplicate id or a `display: none` element makes something
+ *     other than the one the handler resolved. **Still live.**
  *
  * NONE OF THE THREE IS PROVEN TO BE THE PRODUCTION CAUSE — the cause is STILL
- * NOT ESTABLISHED, and this comment is not a diagnosis. What is established is
- * that all three sit inside the gap between the last thing production is seen
- * to do and the thing it is not seen to do, and that none of them leaves a
- * trace. This shape has none of them: the caller passes the element it already
- * holds, the scroll is issued in the same tick, and the return value says
- * whether it happened. Both properties are contracts in
+ * NOT ESTABLISHED, one of the three is now refuted, and this comment is not a
+ * diagnosis. What is established is that all three sit inside the gap between
+ * the last thing production is seen to do and the thing it is not seen to do,
+ * and that none of them leaves a trace. This shape has none of them: the caller
+ * passes the element it already holds, the scroll is issued in the same tick,
+ * and the return value says whether it happened. Refuting (1) narrows why this
+ * shape is right without weakening it — the surface is removed either way, and
+ * (2) and (3) are untouched. Both properties are contracts in
  * `tests/browser/anchor-scroll.spec.ts` ("does not depend on a later animation
  * frame", "survives a caller callback that throws mid-dispatch"), which are
- * RED against the deferred shape.
+ * RED against the deferred shape; since round 6 the second is a DEFENSIVE
+ * invariant rather than a candidate explanation.
  *
  * THE DEFERRAL HAD ALSO OUTLIVED ITS ARGUMENT. It was introduced (6f52bd0)
  * before the caret transaction existed, to give the DOM scroll a frame's head
