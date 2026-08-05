@@ -68,6 +68,42 @@ means some change wants to *replace* the prod DB. Steps:
 > verifies **`ai_report_platform`**; the `migrate-db` log line must read
 > `db=ai_report_platform role=app`.
 
+## Recovering ids lost to pre-Amendment-3 editor saves
+
+**Symptom.** A report's in-page anchors / table of contents stopped working:
+`<a href="#summary">` scrolls nowhere, and the target element has no `id` in
+the served HTML. Only reports that were **opened in the editor and saved
+before ADR-0062 Amendment 3 shipped** are affected.
+
+**Cause, and why it is not self-healing.** Before Amendment 3 the editor's
+schema retained `id` on `<section>` only. Every other element — `<h2>`, `<p>`,
+`<div>`, `<li>`, `<td>` — lost its `id` on the first save, in **both** the
+served HTML and the `_source.json` sidecar. The fix is forward-only: it stops
+new loss, it cannot reconstruct what a past save already dropped. Re-saving
+the report will not bring the ids back.
+
+**Recovery — version history.** Pre-edit blobs are **immutable in R2**, so the
+uploaded original still exists as an earlier version of the report:
+
+1. List the report's versions (`reports_list_versions` via MCP, or the version
+   history in the app UI) and find the last version **before** the first editor
+   save — that is the one that still carries the ids.
+2. Fetch that version's HTML and confirm it has them (`grep -o 'id="[^"]*"'`).
+3. Reconcile: if the report has had no meaningful edits since, re-upload that
+   version's HTML to the SAME slug (`reports_upload` with `update_slug`) — the
+   report keeps its URL and the ids come back as a new version. If there **have**
+   been real edits, hand-merge the ids onto the current HTML instead and
+   re-upload that; do not roll the content back over the author's edits.
+4. Note that the ids will be deduplicated first-wins on the next editor save
+   (`dedupeElementIds`), so a hand-merge that introduces a duplicate `id`
+   silently loses the later one. Check for duplicates before re-uploading.
+
+**Anchors that cannot be recovered by this procedure**: an `id` that was on an
+inline element (`<span>`, `<a>`, `<code>`, `<strong>`, `<em>`) is still dropped
+today — `id` is node-only by design (Amendment 3, Decision 1). Move the anchor
+to the enclosing block element (`<p>`, `<h2>`, `<section>`, …) as part of the
+re-upload. This is also what the report-authoring guidance now tells generators.
+
 ## Merging to `main` — signed merge commits (ADR-0044)
 
 **Current flow:** on a green PR, click the GitHub **"Create a merge commit"**
