@@ -3970,6 +3970,13 @@ Worktree `worktree/anchor-scroll` (branch `fix/anchor-scroll`).
 
 ## 2026-08-05 — the anchor jump, round 3: `behavior: "auto"` is not instant
 
+> **RETRACTED IN PART, same day — see "round 4" below.** The two defects this
+> entry describes are real and the fixes stand. Its **root-cause claim is
+> false**: the document the failure was measured on shipped no `scroll-behavior`
+> rule at all, so `behavior: "auto"` already resolved to instant there. Every
+> sentence below that attributes the production failure to an aborted smooth
+> animation is withdrawn.
+
 Third attempt at "clicking a TOC link in `/edit` jumps to the section". Rounds 1
 (#243) and 2 (#245) both shipped inert; round 2 shipped **with a browser test
 tier built specifically to catch this**, and that tier was 6/6 green on the
@@ -4024,3 +4031,76 @@ is still not established. What changed is that the harness now runs under
 production-representative CSS, which is what made the model discriminating.
 
 Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`).
+
+## 2026-08-05 — the anchor jump, round 4: the round-3 root cause was falsified by its own evidence
+
+Round 3 (above) claimed the `/edit` anchor failure was `behavior: "auto"`
+deferring to the report's `html { scroll-behavior: smooth }`, making the
+top-alignment pass an abortable animation. **The report the failure was measured
+on had no `scroll-behavior` rule anywhere** — its entire stylesheet was
+`body{font:16px/1.6 system-ui;margin:2rem;max-width:44rem}section{margin:0 0 70vh}`.
+On such a document the root element's computed `scroll-behavior` is the initial
+value `auto`, so `scrollIntoView({behavior: "auto"})` was **already instant** on
+`c7ae920`. The stated cause cannot explain the measurement it was derived from.
+
+**Reproduced the non-reproduction.** `tests/browser/harness/plain-report.html`
+is that stylesheet, in the harness, with targets far below the fold and a
+trailing runway. On it the anchor jump lands on its target and stays — **on the
+fixed code and on `c7ae920`, the build that was reported broken**. Same result
+for all nine anchors in the real 86KB generated report, where `c7ae920`'s only
+defect is that the scroll takes ~1.5s to arrive. Instrumenting the surface's
+`scroll` events through a real click shows exactly two writes (ProseMirror's
+minimal reveal, then the DOM top-alignment) and nothing after them. **The
+harness has now failed to reproduce the production failure three rounds
+running**, and the one test that goes red on the old design does so against a
+competitor the suite invents (`armCaretReveal`).
+
+**A third refuted candidate.** The reviewer's lead was a *position-restoring*
+scroll writing an absolute offset — `updateStateInner`'s
+`storeScrollPos`/`resetScrollPos` path. A previous round dismissed it on the
+`this.dom.style.overflowAnchor == null` guard but asserted that about the wrong
+element. Re-checked on the element PM is actually mounted on, the **iframe's own
+`<body>`**, in the mounted editor: `body.style.overflowAnchor === ""` in both
+Chromium and WebKit, so the guard is false and the path never runs. Refuted
+properly this time.
+
+**What the true cause is: not established.** No fix was shipped for it. The
+earlier reading of the numbers (`scrollY` 202.5, target top 609 in a 647px
+surface) as a bottom-aligned `scrollRectIntoView` reveal is an *inference*, not
+an identification — it was partly circular, and PM's `scrollMargin` defaults to
+5, so a zero-margin bottom-alignment does not uniquely pick out that path.
+
+**What did ship, on its own merits.** Both defects round 3 found are genuine and
+the fixes stay: `behavior: "instant"` (an `auto` scroll on a report that asks
+for smooth takes ~1.5s), and the editing surface neutralising the report's
+`scroll-behavior` for ProseMirror's own argument-less reveal. The override is
+widened to `*, html, body` — `scroll-behavior` is **not inherited**, so
+`html, body` could never have reached a nested scroll container, and real
+reports ship those (the ai-readiness fixture's `.sidebar` is
+`position: sticky; height: 100vh; overflow-y: auto`). Two **unrequested
+user-visible changes** follow from it and are accepted deliberately: the
+comments panel's "Jump" goes smooth → instant, and keyboard/scrollbar scrolling
+inside the editing surface goes instant too.
+
+**Three more harness/production divergences, and a mechanical guard.** ADR-0079's
+prose fidelity rule was violated by the commit that wrote it: the real report
+also styles `section { scroll-margin-top: 1rem }` and a sticky, independently
+scrollable sidebar, and the fixture had neither — the tier was asserting a
+landing position production does not produce (adding just the margin fails two
+assertions by exactly 16px). The harness page's topbar was `height: 53px` under
+content-box sizing plus 8px padding and a 1px border, i.e. 70px, making the
+editing surface 630px instead of the route's **647px — the very number the
+operator read off the real page**. Both fixed; the CSS half is now enforced by
+`tests/browser/harness/fixture-fidelity.test.ts`, a node-tier scan of the real
+report for scroll-relevant declarations. Every browser contract now runs twice,
+over the smooth fixture and the plain one.
+
+Also pinned: the published artifact never carries the editor's injected CSS
+(`apps/app/app/server/save-edited-version.server.test.ts`), which ADR-0038 and
+ADR-0062 §8 asserted only in prose.
+
+**Not verified against a deployed preview in a real browser.** Everything above
+is the hermetic Chromium tier plus source reading. ADR-0062 Amendment 3
+Decision 7 and ADR-0079 carry the corrected record.
+
+Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).

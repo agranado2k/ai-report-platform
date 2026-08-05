@@ -126,24 +126,37 @@ describe("buildIframeDocument", () => {
     expect(IFRAME_INJECTED_CSS).toContain("print-color-adjust: exact");
   });
 
-  // THE SECOND HALF OF THE PRODUCTION ANCHOR BUG. ProseMirror's own reveal
-  // (`scrollRectIntoView` → `doc.defaultView.scrollBy(x, y)`, prosemirror-view
-  // 1.42.0) takes NO behavior argument, so it is governed entirely by the CSS
-  // `scroll-behavior` of the document it scrolls — which, inside the editing
-  // iframe, is the REPORT's own untrusted stylesheet. Generated reports ship
-  // `html { scroll-behavior: smooth }` (see the real-report fixture in
-  // packages/report-html), which silently turns every programmatic reveal the
-  // editor performs — the anchor jump AND the comments panel's "Jump" — into
-  // an abortable animation that any competing scroll abandons mid-flight.
+  // A LATENT DEFECT, NOT THE PRODUCTION ANCHOR BUG — the distinction matters
+  // because an earlier revision of this file asserted the second. ProseMirror's
+  // own reveal (`scrollRectIntoView`, prosemirror-view 1.42.0) takes NO
+  // behavior argument in either of its branches — `doc.defaultView.scrollBy(x,
+  // y)` at the top level, `elt.scrollTop += moveY` for a nested scroll box — so
+  // each is governed by the `scroll-behavior` of the box it scrolls. Inside the
+  // editing iframe those boxes belong to the REPORT's own untrusted stylesheet.
+  // A report that sets `html { scroll-behavior: smooth }` (one real generated
+  // report does; the platform never adds it, and this repo's other report
+  // fixture has none) turns every reveal the editor performs — the anchor jump
+  // AND the comments panel's "Jump" — into a ~1.5s animation, measured.
   //
   // The editor surface therefore neutralises it. `!important` is deliberate:
   // this is an editor-tool override of author CSS, and losing to a report that
-  // wrote `!important` would reinstate exactly the defect. Ordering alone is
-  // not enough to rely on either — the injected <style> is appended last
-  // today, but that is a property of `injectCspIntoParsedDocument`, not of
-  // this rule.
-  it("neutralises the report's own smooth scrolling on the editing surface", () => {
-    expect(IFRAME_INJECTED_CSS).toContain("scroll-behavior: auto !important");
+  // wrote `!important` would reinstate the animation. Ordering alone is not
+  // enough to rely on either — the injected <style> is appended last today, but
+  // that is a property of `injectCspIntoParsedDocument`, not of this rule.
+  //
+  // THE UNIVERSAL SELECTOR IS REQUIRED, not tidiness. `scroll-behavior` is NOT
+  // an inherited property, so `html, body { … }` reaches exactly two elements
+  // and leaves every nested scroll container alone — and real reports ship
+  // those: the ai-readiness fixture's `.sidebar` is `position: sticky;
+  // height: 100vh; overflow-y: auto`, i.e. its own scrolling box, and PM's
+  // nested-box branch writes `elt.scrollTop` on precisely that kind of element.
+  it("neutralises smooth scrolling on EVERY box in the editing surface", () => {
+    // Comments stripped first: this file's own prose quotes CSS, and a
+    // substring assertion against prose is not an assertion about a rule.
+    const rules = IFRAME_INJECTED_CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rules).toContain("scroll-behavior: auto !important");
+    // The universal selector, not just the two root elements.
+    expect(rules).toMatch(/(^|[\s,{}])\*\s*,[^{]*\{\s*scroll-behavior:\s*auto\s*!important/);
     const doc = buildIframeDocument(makeShell(), testParse);
     expect(doc).toContain("scroll-behavior: auto !important");
   });

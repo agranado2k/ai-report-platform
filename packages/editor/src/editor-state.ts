@@ -154,37 +154,51 @@ export function jumpToCommentTransaction(
  * applied and then simply overridden. Deferring by more frames cannot help,
  * because the caret never stops being somewhere else.
  *
- * ALSO ESTABLISHED, AND IT IS WHY THIS TRANSACTION'S OWN SCROLL WAS ANIMATED
- * TOO: `scrollRectIntoView` (prosemirror-view 1.42.0) reveals the selection
- * with a bare `doc.defaultView.scrollBy(moveX, moveY)` — no behavior argument,
- * so it obeys the scrolled document's CSS `scroll-behavior` and nothing else.
- * Inside the editing iframe that document is the REPORT, and generated reports
- * ship `html { scroll-behavior: smooth }`. So PM's reveal here was an abortable
- * animation in production for exactly the same reason the DOM top-alignment
- * pass was. There is no per-call fix for this one — the call is inside
- * ProseMirror — so the editing surface neutralises the CSS instead
- * (`IFRAME_INJECTED_CSS`, iframe-document.ts). The comment panel's "Jump" runs
- * on this same transaction builder and inherited the same defect.
+ * ALSO ESTABLISHED, AND IT IS A SEPARATE, LATENT DEFECT — not the production
+ * failure: `scrollRectIntoView` (prosemirror-view 1.42.0) reveals the selection
+ * with a bare `doc.defaultView.scrollBy(moveX, moveY)` at the top level, or
+ * `elt.scrollTop += moveY` for a nested scroll box. Neither branch takes a
+ * behavior argument, so each obeys the CSS `scroll-behavior` of the box it
+ * scrolls. Inside the editing iframe those boxes belong to the REPORT, and a
+ * report MAY set `html { scroll-behavior: smooth }` — one real generated report
+ * does; the platform adds none of its own, and this repo's other report fixture
+ * has none. On such a report PM's reveal here is a ~1.5s animation (measured in
+ * the browser tier, where it still ARRIVES). There is no per-call fix — the
+ * call is inside ProseMirror — so the editing surface neutralises the CSS
+ * instead (`IFRAME_INJECTED_CSS`, iframe-document.ts). The comments panel's
+ * "Jump" runs on this same transaction builder and inherited the same slowness.
  *
- * NOT ESTABLISHED — deliberately left open rather than replaced with a second
- * confident guess: WHICH mechanism performs the competing scroll. Two
- * candidates were checked against the installed source and REFUTED, so neither
- * should be repeated:
+ * NOT ESTABLISHED — deliberately left open rather than replaced with another
+ * confident guess: WHICH mechanism performs the competing scroll, or indeed
+ * whether one exists at all outside the browser tier's hand-written model.
+ * Three candidates have now been checked and REFUTED; none should be repeated:
  *
  *  - `DOMObserver.flushSoon()`'s 20ms flush calling `view.scrollToSelection()`.
  *    The only such call inside `flush()` is gated on `Math.max(lastTouch,
  *    lastClick.time) < Date.now() - 300`, so it structurally cannot fire on
  *    the click under test.
  *  - `updateStateInner`'s preserve path (`storeScrollPos`/`resetScrollPos`)
- *    restoring the pre-transaction offset. It is guarded by
- *    `this.dom.style.overflowAnchor == null`, and Chrome supports
- *    `overflow-anchor`, so that property reads `""` there and the guard is
- *    false — the path never runs in the browser this was measured in.
+ *    restoring an ABSOLUTE pre-transaction offset. Guarded by
+ *    `this.dom.style.overflowAnchor == null`, where `this.dom` is the element
+ *    PM is mounted on — here the IFRAME's own `<body>`. Measured on that exact
+ *    element, in the mounted editor, in both Chromium and WebKit:
+ *    `body.style.overflowAnchor === ""`, so the guard is false and the path
+ *    never runs. (Checked deliberately on `view.dom` rather than on some other
+ *    element, because a previous round asserted this about the wrong one.)
+ *  - `behavior: "auto"` resolving to an abortable smooth animation. Real on a
+ *    report that asks for smooth, but the failing production document had no
+ *    `scroll-behavior` rule at all, so `auto` was already instant there.
  *
  * PM does re-sync its selection to the DOM about 20ms after a click
  * (`flushSoon` → `flush` → `selectionToDOM`), so a browser-side reveal of the
  * newly-set DOM selection fits the timeline; that is a description of WHEN,
  * not a verified WHY, and it is left as one.
+ *
+ * AND THE HARNESS STILL DOES NOT REPRODUCE THE PRODUCTION FAILURE. Over three
+ * rounds, on both fixtures and on the real 86KB generated report, an anchor
+ * click in the mounted editor lands on its target and stays. The regression
+ * spec's competitor (`armCaretReveal`) is a hand-written model, not observed
+ * behavior. Treat every causal story about that failure as unproven.
  *
  * THE FIX DOES NOT DEPEND ON KNOWING. It works by making the anchor the place
  * the selection already is, and by putting `.scrollIntoView()` on the

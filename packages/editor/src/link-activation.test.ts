@@ -246,14 +246,15 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
   // a 290px anchor scroll and then issuing `scrollTo(0, 32)` (the shape of a
   // scroll that reveals a caret elsewhere) produced a final `scrollY` of 32
   // for every competitor arrival from 0ms to 600ms, against 290 with no
-  // competitor at all. That 32 is the number the operator measured in
-  // production: the anchor scroll was issued and then silently abandoned,
-  // which is indistinguishable from "the click did nothing".
+  // competitor at all.
   //
-  // The measurement is about the ABORT, and stands on its own: it says what
-  // happens to a smooth scroll when anything else scrolls the same box. What
-  // that something else IS in the production case is not established — see
-  // `anchorScrollTransaction`'s doc comment in editor-state.ts.
+  // THE MEASUREMENT IS ABOUT THE ABORT AND NOTHING ELSE: it says what happens
+  // to a smooth scroll when something else scrolls the same box. It does NOT
+  // say that is what happened in production — that failure was measured on a
+  // document with no `scroll-behavior` rule, where this scroll was never
+  // animated in the first place. Nor is the competitor's identity established;
+  // see `anchorScrollTransaction`'s doc comment in editor-state.ts for the
+  // candidates that were checked and refuted.
   //
   // The DOM fallback therefore scrolls INSTANTLY. An instant scroll is
   // applied within its own task and has no in-flight window to abort.
@@ -263,19 +264,25 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     expect(calls).toEqual([{ behavior: "instant", block: "start" }]);
   });
 
-  // THE PRODUCTION BUG, AND THE REASON THIS ASSERTION IS SPELLED OUT TWICE.
+  // A LATENT DEFECT, AND THE REASON THIS ASSERTION IS SPELLED OUT TWICE.
   //
   // `behavior: "auto"` does NOT mean "instant". In CSSOM-View, `auto` means
   // "use the scrolling box's own CSS `scroll-behavior`" — it is the DEFER
   // value, not the instant one. `instant` is the value that forces a
-  // non-animated scroll regardless of CSS. Every generated report ships
-  // `html { scroll-behavior: smooth }` (see
-  // packages/report-html/src/fixtures/ai-readiness-report.html, a verbatim
-  // real report), and the editing surface renders the report's own shell CSS
-  // inside its iframe — so in PRODUCTION this call was resolving to exactly
-  // the abortable smooth animation the measurement above says must never be
-  // used, while the comment above it claimed the opposite. The browser tier
-  // could not see it either, because its fixture carried no such rule.
+  // non-animated scroll regardless of CSS. This call said `"auto"` for two
+  // releases under a comment asserting it was instant, so on a report that
+  // sets `html { scroll-behavior: smooth }` — one real generated report does
+  // (packages/report-html/src/fixtures/ai-readiness-report.html); the platform
+  // adds no CSS of its own and this repo's other report fixture has none — it
+  // resolved to a ~1.5s animation. Measured on that fixture in the browser
+  // tier: the jump still ARRIVES, it just takes 1.5 seconds and is abortable
+  // for all of it.
+  //
+  // IT IS NOT THE CAUSE OF THE REPORTED PRODUCTION FAILURE. The document that
+  // failed had no `scroll-behavior` rule at all, so `auto` already resolved to
+  // instant there; the browser tier reproduces that document
+  // (`tests/browser/harness/plain-report.html`) and the anchor jump works on
+  // it both before and after this change. See ADR-0062 Amendment 3 Decision 7.
   //
   // Asserted as a standalone property, not just as part of the call shape, so
   // that a future edit which "simplifies" the option object has to confront
@@ -285,7 +292,6 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
     const [options] = calls as ReadonlyArray<{ behavior?: string }>;
     expect(options?.behavior).toBe("instant");
-    expect(options?.behavior).not.toBe("auto");
   });
 
   it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {

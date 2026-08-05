@@ -155,6 +155,34 @@ describe("reassembleAndSaveEditedVersion", () => {
     expect(html).not.toContain("OLD CONTENT");
   });
 
+  // THE EDITOR'S OWN CSS MUST NEVER REACH THE PUBLISHED ARTIFACT, and this is
+  // where that is pinned rather than asserted in prose.
+  //
+  // The editing surface injects a `<style>` of its own into its iframe
+  // (`IFRAME_INJECTED_CSS`, packages/editor/src/iframe-document.ts): comment
+  // highlights, a `cursor: pointer` on links, and — since the anchor-jump work
+  // — `scroll-behavior: auto !important` on every box. That last one is a
+  // deliberate override of the AUTHOR's CSS, so a report whose stylesheet asks
+  // for smooth scrolling must still scroll smoothly for its readers. ADR-0038's
+  // byte-for-byte-serving claim and ADR-0062 §8 both say so; nothing enforced
+  // it. The seam that decides is `reassembleEditedHtml`, which rebuilds the
+  // saved document from the STORED shell plus a freshly serialized body — the
+  // editor's iframe document is never an input to it.
+  it("never leaks the editor's injected CSS into the SAVED document", () => {
+    const smoothShell =
+      "<html><head><style>html{scroll-behavior:smooth}</style></head>" +
+      '<body class="report-body">OLD CONTENT</body></html>';
+
+    const html = reassembleEditedHtml(smoothShell, DOC);
+
+    // The report keeps its own rule…
+    expect(html).toContain("scroll-behavior:smooth");
+    // …and carries none of the editor's surface-only CSS or CSP.
+    expect(html).not.toContain("scroll-behavior: auto !important");
+    expect(html).not.toContain("comment-highlight");
+    expect(html).not.toContain("Content-Security-Policy");
+  });
+
   it("rejects a save by a non-owner, non-grantee (mirrors re-upload's canWrite authorization)", async () => {
     const { deps, actor, slug: reportSlug } = await seededHarness();
     const stranger: UploadActor = {

@@ -280,20 +280,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         // LINK, and PM scrolls for a transaction only when that transaction
         // called `.scrollIntoView()` (`updateStateInner`'s `state
         // .scrollToSelection > prev.scrollToSelection` test) — so a scroll
-        // issued behind PM's back has no standing, and whatever later reveals
-        // the caret drags the document straight back to the link. Measured in
-        // Chrome: that loses whatever we do. A `behavior: "smooth"` scroll
-        // loses worst of all, because it is an abortable animation running
-        // for hundreds of milliseconds and any competing scroll abandons it
-        // permanently, leaving the box at the competitor's offset — the exact
-        // "scrollY stuck at the caret offset, unchanged after 4s" symptom
-        // that was reported.
+        // issued behind PM's back has no standing, and anything that later
+        // reveals the caret is free to drag the document back to the link.
+        // Measured in Chrome against a modelled competitor: such a scroll
+        // loses whatever we do, and a `behavior: "smooth"` one loses worst,
+        // because it is an abortable animation running for hundreds of
+        // milliseconds and any competing scroll abandons it permanently.
         //
-        // WHICH mechanism performs that competing scroll is NOT established;
-        // two plausible candidates were checked against prosemirror-view's
-        // source and refuted. `anchorScrollTransaction`'s doc comment
-        // (editor-state.ts) carries the full account — read it before
-        // repeating any causal story about this.
+        // WHETHER SUCH A COMPETITOR EXISTS IN PRODUCTION, and if so WHICH
+        // mechanism it is, is NOT established — three candidates have been
+        // checked against prosemirror-view's source and refuted, and the
+        // browser tier has never reproduced the reported failure at all.
+        // `anchorScrollTransaction`'s doc comment (editor-state.ts) carries the
+        // full account; read it before repeating any causal story about this.
         //
         // Deferring by MORE frames cannot fix it either: the caret never
         // stops being somewhere else. So don't out-run the competitor —
@@ -324,12 +323,14 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         // against the BOTTOM edge of the editing surface, where "jump to this
         // section" should put it at the top. So the DOM scroll still runs,
         // deferred one frame on the PARENT window's clock and INSTANT rather
-        // than smooth (see `deferAnchorScroll` — and note that `behavior:
-        // "auto"` is NOT instant, it defers to the report's own CSS, which is
-        // the bug that survived two rounds of fixes here). It is safe now in a way it
-        // never was before: the caret is already at the anchor, so any later
-        // reveal of it finds it visible and scrolls nothing. The browser tier
-        // asserts the resulting TOP alignment (tests/browser).
+        // than smooth (see `deferAnchorScroll` — `behavior: "auto"` is NOT
+        // instant, it defers to the report's own CSS; a latent defect fixed
+        // there, but NOT the cause of the reported production failure). It is
+        // safe in a way it never was before step 1 existed: the caret is
+        // already at the anchor, so any later reveal of it finds it visible and
+        // scrolls nothing. The browser tier asserts the resulting TOP alignment
+        // (tests/browser) — top-aligned meaning `scroll-margin-top` below the
+        // edge, which real reports do set.
         //
         // This is also the only path when the id sits on something PM cannot
         // resolve to a document position — a plain DOM scroll still beats

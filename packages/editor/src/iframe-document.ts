@@ -67,24 +67,48 @@ ${INTENT_HIGHLIGHT_RULES}
 a[href] {
   cursor: pointer;
 }
-/* EVERY PROGRAMMATIC REVEAL IN THE EDITOR MUST BE INSTANT, and this rule is
-   the only place that can guarantee it for ProseMirror's own scroll.
+/* NO PROGRAMMATIC REVEAL IN THE EDITOR SHOULD BE ANIMATED, and this rule is
+   the only place that can say so for ProseMirror's own scroll.
    scrollRectIntoView (prosemirror-view 1.42.0) reveals the selection with a
-   bare doc.defaultView.scrollBy(x, y), or elt.scrollTop += moveY for a nested
-   box. Neither takes a behavior argument, so both are governed entirely by the
-   CSS scroll-behavior of the document being scrolled. Inside this iframe that
-   document is the REPORT, and generated reports ship
-   html { scroll-behavior: smooth } (a verbatim example:
-   packages/report-html/src/fixtures/ai-readiness-report.html). Under that rule
-   PM's reveal becomes an abortable animation, and any competing scroll leaves
-   the surface at the competitor's offset instead — the production anchor-jump
-   failure, and the same latent failure for the comments panel's Jump.
+   bare doc.defaultView.scrollBy(x, y) at the top level, or elt.scrollTop +=
+   moveY for a nested box. Neither branch takes a behavior argument, so each is
+   governed by the CSS scroll-behavior of the box it scrolls. Inside this
+   iframe those boxes belong to the REPORT's own stylesheet, and a report MAY
+   set html { scroll-behavior: smooth } — one real generated report does
+   (packages/report-html/src/fixtures/ai-readiness-report.html). The platform
+   adds no CSS of its own (shell.ts is shell.pre + bodyHtml + shell.post), no
+   authoring guidance requires the rule, and this repo's other report fixture,
+   anchors-and-links.html, has none: so this is "a report may ask for smooth",
+   not "reports do". Measured on the one that does: the anchor jump becomes a
+   ~1.5s animation over a long document, and the comments panel's Jump — which
+   has no second, top-aligning pass at all — inherits the same.
+
+   THIS IS NOT THE CAUSE OF THE REPORTED PRODUCTION ANCHOR FAILURE. That was
+   measured on a document with no scroll-behavior rule anywhere, where every
+   scroll here was already instant. It is a latent defect fixed on its own
+   terms; see ADR-0062 Amendment 3 Decision 7 for what is and is not
+   established about the production failure.
+
+   THE UNIVERSAL SELECTOR IS LOAD-BEARING. scroll-behavior is NOT inherited, so
+   html, body would reach exactly two elements and leave every nested scroll
+   container untouched — and reports ship those (the same fixture's .sidebar is
+   position: sticky; height: 100vh; overflow-y: auto, i.e. its own scrolling
+   box, which is exactly what PM's elt.scrollTop branch writes to).
+
    !important because the report's own stylesheet is untrusted author CSS that
    may itself be !important; the injected style element being appended last is
-   an ordering detail of buildIframeDocument, not a contract to lean on. This
-   affects the EDITING surface only — the published report is served
-   byte-for-byte and keeps its smooth scrolling (ADR-0038, ADR-0062 §8). */
-html, body {
+   an ordering detail of buildIframeDocument, not a contract to lean on. It
+   still cannot reach a scroll driven by author JavaScript, and it is a
+   declaration rather than a guarantee: a UA or future spec change to a
+   non-CSS-governed scroll path is outside its reach.
+
+   EDITING SURFACE ONLY, and two user-visible consequences follow, neither of
+   them requested: the comments panel's "Jump" goes from smooth to instant, and
+   keyboard/scrollbar scrolling inside the editing surface goes instant too
+   (Chrome animates those under scroll-behavior: smooth). The PUBLISHED report
+   is served byte-for-byte and keeps its smooth scrolling (ADR-0038, ADR-0062
+   §8) — pinned by a test in apps/app/app/server/save-edited-version.server.test.ts. */
+*, html, body {
   scroll-behavior: auto !important;
 }
 `.trim();

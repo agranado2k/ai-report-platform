@@ -37,6 +37,12 @@ export default defineConfig({
       "apps/app/app/server/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
+      // The browser tier's own node-tier guards (ADR-0079): properties of the
+      // harness FILES — e.g. "the harness fixture carries every scroll-relevant
+      // declaration the real report carries" — which need no browser and belong
+      // in the fast gate. Playwright only collects `*.spec.ts` from that
+      // directory, so the two never overlap.
+      "tests/browser/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test

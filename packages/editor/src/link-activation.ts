@@ -230,23 +230,28 @@ export interface AnchorScrollDeps {
  * same scrolling box during that window abandons it permanently, leaving the
  * box at the competitor's offset. Driving a 290px anchor scroll and then a
  * `scrollTo(0, 32)` produced a final `scrollY` of 32 for every competitor
- * arrival from 0ms to 600ms — the exact symptom, and the exact number, the
- * operator measured in production. `block: "start"` is stated rather than
- * left to the default so the alignment is part of the contract.
+ * arrival from 0ms to 600ms. `block: "start"` is stated rather than left to
+ * the default so the alignment is part of the contract.
  *
- * `behavior: "instant"`, AND THE DIFFERENCE FROM `"auto"` IS THE WHOLE BUG.
- * This call said `"auto"` for two releases, under a comment asserting it was
- * instant. It is not: in CSSOM-View `auto` means "use this scrolling box's own
- * CSS `scroll-behavior`", i.e. it DEFERS the decision to the page. Generated
- * reports ship `html { scroll-behavior: smooth }`
- * (packages/report-html/src/fixtures/ai-readiness-report.html line 44 is a
- * verbatim real report), and the editing surface renders the report's own
- * shell CSS inside its iframe — so in production every anchor click resolved
- * to precisely the abortable animation the paragraph above forbids, and was
- * abandoned by the post-click caret reveal at the caret's own offset. `instant`
- * is the value that forces a non-animated scroll whatever the CSS says. The
- * browser tier could not see this until its fixture carried the same rule real
- * reports carry (tests/browser/harness/report.html, ADR-0079).
+ * `behavior: "instant"`, AND THE DIFFERENCE FROM `"auto"` IS REAL BUT IS NOT
+ * THE REPORTED BUG. This call said `"auto"` for two releases, under a comment
+ * asserting it was instant. It is not: in CSSOM-View `auto` means "use this
+ * scrolling box's own CSS `scroll-behavior`", i.e. it DEFERS the decision to
+ * the page. A report MAY set `html { scroll-behavior: smooth }` — one real
+ * generated report does (packages/report-html/src/fixtures/
+ * ai-readiness-report.html line 44) — and the editing surface renders the
+ * report's own shell CSS inside its iframe, so on such a document this call
+ * was resolving to an animated, abortable scroll. Measured in the browser tier
+ * against that fixture: the jump still lands, ~1.5s later. `instant` forces a
+ * non-animated scroll whatever the CSS says, which is what this call always
+ * meant to do.
+ *
+ * WHAT IT DOES NOT EXPLAIN: the production anchor failure was measured on a
+ * document with NO `scroll-behavior` rule anywhere, where `auto` already
+ * resolved to instant. `tests/browser/harness/plain-report.html` reproduces
+ * that document's CSS, and the anchor jump works on it both with `auto` and
+ * with `instant`. So the cause of that failure is still not established — see
+ * ADR-0062 Amendment 3 Decision 7. Do not re-attach this fix to that symptom.
  *
  * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame is scheduled
  * in the realm this code actually runs in — the PARENT window. The ELEMENT,

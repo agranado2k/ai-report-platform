@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plain anchor scroll fixture</title>
+    <!-- DELIBERATELY MINIMAL, and the omission is the point: NO
+         `scroll-behavior` anywhere. This is a byte-for-byte copy of the
+         stylesheet on the document the operator measured the production
+         anchor-jump failure on (an LLM-authored report uploaded verbatim —
+         `shell.ts` concatenates `shell.pre + bodyHtml + shell.post`, so the
+         platform adds no CSS of its own). On such a document the root
+         element's computed `scroll-behavior` is the initial value `auto`, so
+         `scrollIntoView({behavior: "auto"})` ALREADY resolved to instant —
+         which is why the "auto is not instant" defect, real as it is, cannot
+         be the cause of the reported bug. -->
+    <style>body{font:16px/1.6 system-ui;margin:2rem;max-width:44rem}section{margin:0 0 70vh}</style>
+  </head>
+  <body>
+    <h1 id="top">Plain anchor scroll fixture</h1>
+    <nav id="toc">
+      <a href="#deep-section">to section</a>
+      <a href="#section-two">to heading</a>
+      <a href="https://example.com/" target="_blank" rel="noopener noreferrer">external</a>
+    </nav>
+    <section id="filler"><h2 id="section-one">One</h2><p>commentable filler</p></section>
+    <section><h2 id="section-two">Two</h2></section>
+    <section id="deep-section"><h2>Deep</h2><p>bottom</p></section>
+    <!-- TRAILING RUNWAY: without content below it `#deep-section` sits past
+         the document's maximum scroll offset and cannot be brought to the top
+         of the viewport at all, which would make every "did it land on the
+         anchor" assertion unfalsifiable. -->
+    <section id="runway"><h2>Runway</h2><p>runway</p></section>
+    <section id="runway-two"><h2>Runway two</h2><p>runway</p></section>
+  </body>
+</html>
