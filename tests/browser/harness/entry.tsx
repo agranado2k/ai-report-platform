@@ -1,9 +1,14 @@
 // The harness page's app: the REAL `ReportEditor`, mounted the way
 // apps/view's `/edit` route mounts it (same props, same surrounding
 // full-height / overflow-hidden pane layout), over a report parsed by the
-// REAL `parseBody`. Nothing about link activation or the anchor scroll is
-// stubbed — that is the entire point of this tier.
-import { type CommentRange, ReportEditor } from "arp-editor";
+// REAL `parseBody`. Nothing about link activation, comment highlighting or the
+// anchor scroll is stubbed — that is the entire point of this tier.
+import {
+  type CommentForHighlight,
+  type CommentRange,
+  type EditorSelection,
+  ReportEditor,
+} from "arp-editor";
 import { type PMDocJson, parseBody, splitShell } from "arp-report-html";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
@@ -15,14 +20,43 @@ const doc: PMDocJson = parseBody(bodyHtml);
 function App() {
   // Mirrors the route's own state wiring, so the React re-render churn a real
   // click produces is present here too.
-  const [selection, setSelection] = React.useState<unknown>(null);
+  const [selection, setSelection] = React.useState<EditorSelection | null>(null);
   const [, setRanges] = React.useState<readonly CommentRange[]>([]);
   const [focused, setFocused] = React.useState<string | null>(null);
-  const comments = React.useMemo(() => [], []);
+  // Comments are STATE, not a frozen empty array: click-to-highlight shares
+  // the exact `handleDOMEvents.click` handler that link activation runs
+  // through (`editorClickOutcome` decides between them), so a fixture with no
+  // comments leaves half of that handler's dispatch matrix unexercised in the
+  // one tier that can see a real click.
+  const [comments, setComments] = React.useState<readonly CommentForHighlight[]>([]);
+
   return (
     <div className="root-layout">
       <header className="topbar">
-        Editor {focused ?? ""} {selection ? "sel" : ""}
+        {/* The route turns the pending selection into a comment through the
+            panel composer; the harness does the same thing with one button, so
+            a browser test can create a highlight from a real mouse selection
+            rather than hand-computing ProseMirror positions. */}
+        <button
+          type="button"
+          data-testid="add-comment"
+          disabled={selection === null}
+          onClick={() => {
+            if (!selection) return;
+            setComments((prev) => [
+              ...prev,
+              {
+                id: `comment-${prev.length + 1}`,
+                anchor: { relative: { from: selection.from, to: selection.to } },
+                intent: "note",
+              },
+            ]);
+          }}
+        >
+          Comment
+        </button>
+        <span data-testid="focused-comment">{focused ?? ""}</span>
+        <span data-testid="pending-selection">{selection?.text ?? ""}</span>
       </header>
       <div className="pane-row">
         <main className="doc-pane">

@@ -165,17 +165,27 @@ async function clickLinkInEditor(page: Page, href: string) {
 
 /** The centre of a link, in PARENT-page coordinates. */
 async function linkPoint(page: Page, href: string) {
-  return await page.evaluate((h) => {
+  return await elementBox(page, `a[href="${href}"]`);
+}
+
+/** An element inside the editing surface, in PARENT-page coordinates — the
+ *  frame between the two realms is the iframe's own offset. */
+async function elementBox(page: Page, selector: string) {
+  return await page.evaluate((sel) => {
     const iframe = document.querySelector("iframe") as HTMLIFrameElement;
     const frame = iframe.getBoundingClientRect();
-    const link = iframe.contentDocument?.querySelector(`a[href="${h}"]`) as HTMLElement | null;
-    if (!link) throw new Error(`the editing surface has no link to ${h}`);
-    const rect = link.getBoundingClientRect();
+    const el = iframe.contentDocument?.querySelector(sel) as HTMLElement | null;
+    if (!el) throw new Error(`the editing surface has no ${sel}`);
+    const rect = el.getBoundingClientRect();
     return {
       x: frame.left + rect.left + rect.width / 2,
       y: frame.top + rect.top + rect.height / 2,
+      left: frame.left + rect.left,
+      right: frame.left + rect.right,
+      top: frame.top + rect.top,
+      bottom: frame.top + rect.bottom,
     };
-  }, href);
+  }, selector);
 }
 
 /**
@@ -285,5 +295,31 @@ test.describe("in-page anchor links in the editor", () => {
 
     await page.waitForTimeout(HOLD_MS);
     expect((await readEditorScroll(page, "deep-section")).scrollY).toBe(0);
+  });
+
+  // THE LAST LEG OF THE CLICK-DISPATCH MATRIX. Comment click-to-highlight
+  // rides the SAME `handleDOMEvents.click` handler as link activation — the
+  // two are resolved against each other by `editorClickOutcome` — so a
+  // fixture with no comments left half of the handler untested in the only
+  // tier that can see a real click. It is also the leg that was already
+  // broken once for exactly this class of reason: PM's `handleClick` never
+  // fired inside this sandboxed iframe, which no unit test could observe.
+  test("clicking a comment highlight focuses that comment", async ({ page }) => {
+    // Make a real selection with real mouse input (a double-click selects the
+    // word under the pointer), then turn it into a comment the way the route
+    // does — rather than hand-computing ProseMirror positions here.
+    const paragraph = await elementBox(page, "#filler p");
+    await page.mouse.dblclick(paragraph.left + 10, paragraph.y);
+
+    await expect(page.getByTestId("pending-selection")).not.toHaveText("");
+    await page.getByTestId("add-comment").click();
+    await expect(page.locator("iframe").contentFrame().locator(".comment-highlight")).toHaveCount(
+      1,
+    );
+
+    const highlight = await elementBox(page, ".comment-highlight");
+    await page.mouse.click(highlight.x, highlight.y);
+
+    await expect(page.getByTestId("focused-comment")).toHaveText("comment-1");
   });
 });
