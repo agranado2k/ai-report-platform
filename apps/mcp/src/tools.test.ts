@@ -292,6 +292,21 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
     expect(html).toMatch(/\bid\b/);
   });
 
+  // The correctness half of that guidance, pinned separately because getting
+  // it WRONG is worse than omitting it: `id` is node-only (ADR-0062
+  // Amendment 3, Decision 1), so telling a generator it can "anchor whatever
+  // you need" teaches it to emit `<span id>` — a dead anchor after the first
+  // save, i.e. exactly the regression class the amendment exists to close.
+  it("the html parameter says anchors must target BLOCK elements, not marks", () => {
+    const html = (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description;
+    expect(html).toMatch(/block/i);
+    expect(html).toMatch(/span/); // the mark elements are named, not implied
+    expect(html).not.toMatch(/any element/i);
+  });
+
   it("folders_create points to reports_move for organizing reports", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });

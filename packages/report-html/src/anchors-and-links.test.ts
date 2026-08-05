@@ -94,6 +94,31 @@ describe("id retention across every node spec (ADR-0062 Amendment 3)", () => {
     expect(out).toContain("01");
   });
 
+  // THE OTHER HALF OF DECISION 1, and the half the authoring docs have to be
+  // honest about: `id` is node-only. Every element below is modelled as a
+  // MARK, not a node — marks split and merge by attribute equality, so an id
+  // on one would be copied onto every run it splits into, turning one id into
+  // N duplicates across N fragmented elements. The consequence for an author
+  // is that `<span id="x">` is a DEAD ANCHOR after the first save, which is
+  // why the generator guidance (SKILL.md / GEMINI.md / docs/mcp-usage.md /
+  // the `reports_upload` `html` parameter) says to anchor block elements only.
+  const markCases: ReadonlyArray<readonly [string, string]> = [
+    ["<a> — the link mark", '<p><a id="m" href="https://example.com/">t</a></p>'],
+    ["<span> — the generic inline catch-all", '<p><span id="m">t</span></p>'],
+    ["<span class=pill> — a named inline mark", '<p><span class="pill" id="m">t</span></p>'],
+    ["<code>", '<p><code id="m">t</code></p>'],
+    ["<strong>", '<p><strong id="m">t</strong></p>'],
+    ["<em>", '<p><em id="m">t</em></p>'],
+  ];
+
+  for (const [name, html] of markCases) {
+    it(`DROPS id on ${name} — marks cannot carry one (Decision 1)`, () => {
+      const out = roundTrip(html);
+      expect(idsIn(out)).toEqual([]);
+      expect(out).toContain("t"); // the content itself is untouched
+    });
+  }
+
   it("keeps every id in the fixture through a full round-trip", () => {
     const body = fixtureBody();
     const before = idsIn(body);

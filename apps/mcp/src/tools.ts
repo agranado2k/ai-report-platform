@@ -294,14 +294,19 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         html: z
           .string()
           .describe(
-            "The report's full HTML document. LINK CONVENTIONS (ADR-0062 Amendment 3 — the " +
-              "platform retains these verbatim through editing, it never rewrites them for " +
-              "you, so what you emit is what readers get): give every section you want to " +
-              'link to an `id` and point in-page links at it (`<a href="#summary">` → ' +
+            "The report's full HTML document. Served byte-for-byte — there is no " +
+              "serve-time rewriting — so what you emit is what readers get. LINK " +
+              "CONVENTIONS (ADR-0062 Amendment 3; nothing adds these for you): give the " +
+              "target an `id` and point in-page links at it (`<a href=\"#summary\">` → " +
               '`<section id="summary">`); put `target="_blank" rel="noopener noreferrer"` on ' +
-              "every EXTERNAL link you want to open in a new tab. A `target` other than " +
-              '`_blank`, and `rel="opener"`, are dropped as frame-escape/tabnabbing ' +
-              "primitives.",
+              "every EXTERNAL link you want to open in a new tab. Anchor BLOCK elements only " +
+              "(`section`, `h1`-`h6`, `p`, `div`, `li`, `td`, `blockquote`): editing a report " +
+              "and saving re-serializes it, and `id` is NOT retained on the inline elements " +
+              "modelled as marks (`span`, `a`, `code`, `strong`, `em`), so `<span id>` " +
+              "becomes a dead anchor. That save also normalizes: a `target` other than " +
+              '`_blank` and `rel="opener"` are dropped as frame-escape/tabnabbing ' +
+              "primitives, unrecognized `rel` tokens are dropped, `style` is sanitized, and " +
+              "attribute order is not preserved.",
           ),
         update_slug: z
           .string()

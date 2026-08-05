@@ -41,21 +41,25 @@ worked examples, and `docs/mcp-usage.md` for connection details.
 
 ## Authoring the HTML
 
-The platform stores your HTML as the artifact and **never rewrites it** — not when serving
-it, not when someone edits the report and saves. Links only behave like links if you author
-them that way.
+Your HTML **is** the artifact: on the READ path it is stored as you sent it and served
+byte-for-byte, with no serve-time rewriting. Editing a report in the browser and saving is
+the one path that **normalizes** it. Links only behave like links if you author them that way.
 
 - **In-page anchors** — give the target an `id` and point at it: `<a href="#summary">` →
-  `<section id="summary">`. `id` is retained on any element; keep ids unique (on a
-  duplicate, only the first in document order keeps it).
+  `<section id="summary">`. **Anchor BLOCK elements only** (`<section>`, `<h1>`–`<h6>`, `<p>`,
+  `<div>`, `<li>`, `<td>`, `<blockquote>`): `id` does NOT survive a save on `<span>`, `<a>`,
+  `<code>`, `<strong>` or `<em>`, which the editor models as text marks rather than elements.
+  Keep ids unique (on a duplicate, only the first in document order keeps it).
 - **External links** — add `target="_blank" rel="noopener noreferrer"` to every link you
   want to open in a new tab. Nothing adds this for you.
-- **Normalized for security** — a `target` other than `_blank` is dropped and `rel="opener"`
-  is stripped; `target="_blank"` always ends up with `noopener noreferrer`. A `javascript:`,
-  `vbscript:` or `data:text/html` href drops the whole link.
+- **Normalized for security** — a `target` other than `_blank` is dropped, `rel="opener"` and
+  unrecognized `rel` tokens are stripped, and `target="_blank"` always ends up with
+  `noopener noreferrer`. A `javascript:`, `vbscript:` or `data:text/html` href drops the
+  whole link.
 
-Everything else — bespoke classes, inline styles, structure — is preserved verbatim through
-an edit-and-save round trip.
+A save can also sanitize `style`, coerce or unwrap a tag the schema does not support, wrap
+bare inline content in `<p>`, and reorder attributes. Classes, inline styles and ordinary
+structure survive — but "byte-identical" is a read-path guarantee, not an edit-round-trip one.
 
 ## Quick reference
 
