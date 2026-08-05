@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Anchor scroll fixture</title>
+    <style>
+      body { font-family: system-ui; margin: 0; padding: 24px; }
+      section { margin: 0 0 60vh; }
+      .spacer { height: 20vh; }
+    </style>
+  </head>
+  <body>
+    <h1 id="top">Anchor scroll fixture</h1>
+    <p class="spacer" id="spacer">spacer</p>
+    <nav id="toc">
+      <a href="#deep-section">to section</a>
+      <a href="#section-two">to heading</a>
+      <a href="https://example.com/" target="_blank" rel="noopener noreferrer">external</a>
+    </nav>
+    <section id="filler"><h2 id="section-one">One</h2><p>commentable filler</p></section>
+    <section><h2 id="section-two">Two</h2></section>
+    <section id="deep-section"><h2>Deep</h2><p>bottom</p></section>
+    <!-- TRAILING RUNWAY, and it is load-bearing for the assertions. Without
+         content below it, `#deep-section` sits past the document's maximum
+         scroll offset and CANNOT be brought to the top of the viewport — which
+         makes "the target is somewhere near the top" satisfiable by scrolling
+         to the bottom of the document and says nothing about the anchor. With
+         the runway, top alignment is reachable, so the specs can assert the
+         exact scroll offset instead. -->
+    <section id="runway"><h2>Runway</h2><p>runway</p></section>
+    <section id="runway-two"><h2>Runway two</h2><p>runway</p></section>
+  </body>
+</html>

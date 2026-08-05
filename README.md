@@ -42,6 +42,20 @@ Files added:
 | **0e**    | TDD / BDD / FP lint / worktree skill / docs gate / Bruno     | Phase 1  |
 | **1+**    | Feature work — see `docs/spec.html`                          | —        |
 
+## Running the tests
+
+Three tiers, and which one a test belongs in follows what it **depends on**:
+
+```bash
+pnpm test           # node tier — pure logic, no DOM (ADR-0042); + the pglite adapter tier (ADR-0046)
+pnpm test:browser   # browser tier — a mounted editor in real Chromium, hermetic (ADR-0079)
+pnpm e2e            # e2e tier — the deployed system: auth, API, database (ADR-0019/0023)
+```
+
+`pnpm test:browser` is hermetic — a `file://` harness page, no deployment, no
+auth, no database — so it runs in the fast `unit` workflow alongside `pnpm test`.
+It needs Chromium once: `pnpm exec playwright install --with-deps chromium`.
+
 ## Checking the docs
 
 The spec, ADRs, glossary, events doc, BDD `.feature` corpus, and OpenAPI document

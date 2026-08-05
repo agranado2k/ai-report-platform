@@ -189,19 +189,40 @@ describe("editorClickOutcome — link activation wins over comment focus", () =>
 });
 
 describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled", () => {
-  // The two realms are SEPARATE parameters on purpose. The scroll must be
-  // deferred a frame (PM re-syncs the selection after a click and scrolls the
-  // caret back), but the frame must be scheduled in the realm the handler
-  // runs in — the PARENT. The editing iframe is `sandbox="allow-same-origin"`
-  // with NO `allow-scripts`, i.e. scripting is DISABLED in that document, so
-  // a callback handed to its `requestAnimationFrame` is at best
-  // implementation-defined and at worst never runs — which presents as the
-  // anchor click doing nothing at all. The ELEMENT, by contrast, only exists
-  // in the iframe's document, so that is where the lookup must happen.
+  // The two realms are SEPARATE parameters on purpose, and the reason is
+  // ownership, not capability. THE FRAME is scheduled in the realm this code
+  // actually runs in — the PARENT window, where the click handler lives. THE
+  // ELEMENT only exists in the iframe's document, so the lookup has to cross
+  // the boundary the other way. Two different realms, two different
+  // directions, one parameter each.
+  //
+  // TWO EARLIER CLAIMS HERE WERE WRONG, and are corrected rather than deleted
+  // because both were load-bearing in the reasoning that shipped a broken
+  // anchor scroll:
+  //
+  //  - "the iframe has no `allow-scripts`, so a callback handed to ITS
+  //    `requestAnimationFrame` is at best implementation-defined and at worst
+  //    never runs." It runs. `allow-scripts` governs script the DOCUMENT
+  //    loads or contains; the iframe's own `requestAnimationFrame`, called
+  //    from the parent across a same-origin boundary, fires normally. Using
+  //    it would merely be scheduling on the wrong clock, which is a clarity
+  //    problem, not a correctness one.
+  //  - "the scroll must be deferred a frame because PM scrolls the caret
+  //    back." Deferring is not what wins that race — nothing does. This
+  //    PR's whole thesis is that a scroll performed behind ProseMirror's back
+  //    loses regardless of when it is issued, which is why the primary path
+  //    is now `anchorScrollTransaction` (editor-state.ts) and this function
+  //    is the FALLBACK plus the top-alignment pass. The deferral survives
+  //    because the alignment pass must run after PM has applied its own
+  //    reveal, not because one frame out-runs anything.
   const anchorSpy = () => {
     const calls: unknown[] = [];
     return { el: { scrollIntoView: (o?: unknown) => calls.push(o) }, calls };
   };
+
+  /** The one call shape the fallback may make — see the "scrolls instantly"
+   *  test below for the measurement that fixes it. */
+  const INSTANT_TOP = { behavior: "auto", block: "start" };
 
   it("does not scroll synchronously — it waits for the scheduled frame", () => {
     const { el, calls } = anchorSpy();
@@ -214,7 +235,32 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     });
     expect(calls).toEqual([]); // nothing yet — the frame has not run
     (scheduled as unknown as () => void)();
-    expect(calls).toEqual([{ behavior: "smooth" }]);
+    expect(calls).toEqual([INSTANT_TOP]);
+  });
+
+  // MEASURED IN CHROME, not reasoned about. A `behavior: "smooth"`
+  // `scrollIntoView` is an ABORTABLE ANIMATION: it runs for hundreds of
+  // milliseconds (1.5s over a long document), and ANY competing scroll on the
+  // same scrolling box during that window ABANDONS it — the box is left
+  // wherever the competitor put it, and the animation never resumes. Driving
+  // a 290px anchor scroll and then issuing `scrollTo(0, 32)` (the shape of a
+  // scroll that reveals a caret elsewhere) produced a final `scrollY` of 32
+  // for every competitor arrival from 0ms to 600ms, against 290 with no
+  // competitor at all. That 32 is the number the operator measured in
+  // production: the anchor scroll was issued and then silently abandoned,
+  // which is indistinguishable from "the click did nothing".
+  //
+  // The measurement is about the ABORT, and stands on its own: it says what
+  // happens to a smooth scroll when anything else scrolls the same box. What
+  // that something else IS in the production case is not established — see
+  // `anchorScrollTransaction`'s doc comment in editor-state.ts.
+  //
+  // The DOM fallback therefore scrolls INSTANTLY. An instant scroll is
+  // applied within its own task and has no in-flight window to abort.
+  it("scrolls instantly, never as an abortable smooth animation", () => {
+    const { el, calls } = anchorSpy();
+    deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
+    expect(calls).toEqual([{ behavior: "auto", block: "start" }]);
   });
 
   it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {
@@ -228,7 +274,7 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
       },
     });
     expect(lookedUp).toEqual(["top-recommendation"]);
-    expect(calls).toEqual([{ behavior: "smooth" }]);
+    expect(calls).toEqual([INSTANT_TOP]);
   });
 
   it("is a no-op, never a throw, when the id matches nothing in the document", () => {

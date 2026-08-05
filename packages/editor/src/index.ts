@@ -16,6 +16,7 @@ export {
   resolvableCommentRanges,
 } from "./comment-decorations";
 export {
+  anchorScrollTransaction,
   createEditorState,
   docJson,
   type EditorSelection,

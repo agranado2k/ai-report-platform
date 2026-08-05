@@ -74,6 +74,7 @@ import {
 } from "./comment-decorations";
 import type { EditorSelection } from "./editor-state";
 import {
+  anchorScrollTransaction,
   createEditorState,
   docJson,
   jumpToCommentTransaction,
@@ -265,18 +266,73 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         window.open(url, "_blank", "noopener,noreferrer");
       }
 
-      function scrollToAnchor(targetId: string) {
+      function scrollToAnchor(targetId: string, view: EditorView) {
         if (onAnchorNavigateRef.current) {
           onAnchorNavigateRef.current(targetId);
           return;
         }
-        // Deferred one animation frame, on the PARENT window's frame clock —
-        // see `deferAnchorScroll` for both halves of the rationale (why the
-        // deferral is load-bearing, and why the iframe's own
-        // `requestAnimationFrame` is the wrong realm: that document is
-        // `allow-same-origin` with no `allow-scripts`, so scripting is
-        // disabled in it). The element lookup crosses the other way, into
-        // the iframe's document, because that is the only realm it exists in.
+        const element = iframe?.contentDocument?.getElementById(targetId);
+
+        // STEP 1 — MOVE PROSEMIRROR'S CARET TO THE ANCHOR.
+        //
+        // This is what the original implementation was missing, and why the
+        // feature shipped inert. A click leaves PM's selection ON THE TOC
+        // LINK, and PM scrolls for a transaction only when that transaction
+        // called `.scrollIntoView()` (`updateStateInner`'s `state
+        // .scrollToSelection > prev.scrollToSelection` test) — so a scroll
+        // issued behind PM's back has no standing, and whatever later reveals
+        // the caret drags the document straight back to the link. Measured in
+        // Chrome: that loses whatever we do. A `behavior: "smooth"` scroll
+        // loses worst of all, because it is an abortable animation running
+        // for hundreds of milliseconds and any competing scroll abandons it
+        // permanently, leaving the box at the competitor's offset — the exact
+        // "scrollY stuck at the caret offset, unchanged after 4s" symptom
+        // that was reported.
+        //
+        // WHICH mechanism performs that competing scroll is NOT established;
+        // two plausible candidates were checked against prosemirror-view's
+        // source and refuted. `anchorScrollTransaction`'s doc comment
+        // (editor-state.ts) carries the full account — read it before
+        // repeating any causal story about this.
+        //
+        // Deferring by MORE frames cannot fix it either: the caret never
+        // stops being somewhere else. So don't out-run the competitor —
+        // remove it. Once the caret is at the anchor, any reveal of the caret
+        // re-asserts the jump instead of undoing it. Same mechanism the
+        // comment "Jump" has always used — literally the same builder,
+        // `programmaticRevealTransaction`.
+        //
+        // `posAtDOM` is the model-side lookup for a DOM node PM rendered; it
+        // throws for a node PM does not own (an element from the shell),
+        // which is what the try/catch covers.
+        if (element) {
+          let pos: number | null = null;
+          try {
+            pos = view.posAtDOM(element as unknown as Node, 0);
+          } catch {
+            pos = null; // not a node ProseMirror rendered — step 2 still runs.
+          }
+          const tr = pos === null ? null : anchorScrollTransaction(view.state, pos);
+          if (tr) view.dispatch(tr);
+        }
+
+        // STEP 2 — TOP-ALIGN IT.
+        //
+        // Step 1 alone is not the whole fix: PM's `scrollIntoView()` reveals
+        // the selection MINIMALLY (`scrollRectIntoView` scrolls just far
+        // enough to make it visible), which lands a below-the-fold anchor
+        // against the BOTTOM edge of the editing surface, where "jump to this
+        // section" should put it at the top. So the DOM scroll still runs,
+        // deferred one frame on the PARENT window's clock and INSTANT rather
+        // than smooth (see `deferAnchorScroll`). It is safe now in a way it
+        // never was before: the caret is already at the anchor, so any later
+        // reveal of it finds it visible and scrolls nothing. The browser tier
+        // asserts the resulting TOP alignment (tests/browser).
+        //
+        // This is also the only path when the id sits on something PM cannot
+        // resolve to a document position — a plain DOM scroll still beats
+        // doing nothing. The element lookup crosses into the iframe's
+        // document, because that is the only realm it exists in.
         deferAnchorScroll(targetId, {
           schedule: (callback) =>
             typeof window.requestAnimationFrame === "function"
@@ -341,7 +397,7 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
               if (outcome?.kind === "external") {
                 openExternalLink(outcome.url);
               } else if (outcome?.kind === "anchor") {
-                scrollToAnchor(outcome.targetId);
+                scrollToAnchor(outcome.targetId, clickedView);
               } else if (outcome?.kind === "comment") {
                 onCommentClickRef.current?.(outcome.commentId);
               }
