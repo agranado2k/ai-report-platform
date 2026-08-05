@@ -189,14 +189,23 @@ async function elementBox(page: Page, selector: string) {
 }
 
 /**
- * Stand in for ProseMirror's post-click caret reveal.
+ * Stand in for the post-click scroll that reveals wherever the caret ended up.
  *
- * PM re-syncs its selection to the DOM after a click, and `DOMObserver`
- * defers that flush on a 20ms timeout — strictly AFTER the animation frame an
- * anchor scroll was deferred to. The browser then reveals the caret, which
- * scrolls the document back to wherever the caret is. That is the competitor
- * the anchor scroll used to lose to, and the ONLY thing this helper does is
- * make its timing deterministic instead of leaving it to PM's internals.
+ * A MODEL, and named as one. In production something scrolls the surface back
+ * to the caret shortly after a click; ProseMirror re-syncs its selection to
+ * the DOM about 20ms later (`DOMObserver.flushSoon` → `flush` →
+ * `selectionToDOM`), which fits the timeline. WHICH mechanism actually
+ * performs the scroll is NOT established — two candidates were checked
+ * against prosemirror-view 1.42.0's source and refuted (see
+ * `anchorScrollTransaction`'s doc comment in packages/editor). So this helper
+ * reproduces the SHAPE of the competitor — "20ms after the click, scroll
+ * whatever holds the caret into view" — with deterministic timing, rather
+ * than claiming to be PM's own code path.
+ *
+ * That is also this tier's honest limitation: the discriminating power of the
+ * scroll tests rests on this model, so a change in PM's real behavior would
+ * not be caught here. The selection assertion in `expectAnchorRevealed` is
+ * the one guard that does not depend on it.
  */
 async function armCaretReveal(page: Page) {
   await page.evaluate(() => {
@@ -250,12 +259,12 @@ test.describe("in-page anchor links in the editor", () => {
 
   // THE REGRESSION. This is the exact failure that shipped: the anchor scroll
   // was issued behind ProseMirror's back while the caret stayed on the TOC
-  // link, so a reveal ~20ms later dragged the document straight back — and
-  // because the scroll was a `behavior: "smooth"` animation, it was abandoned
-  // mid-flight and never resumed. Measured against the shipped code with this
-  // very harness: the document ended near scrollY 0 with the target still
-  // more than a thousand pixels below the fold, i.e. visually "the click did
-  // nothing".
+  // link, so a scroll that revealed the caret ~20ms later dragged the
+  // document straight back — and because the anchor scroll was a
+  // `behavior: "smooth"` animation, it was abandoned mid-flight and never
+  // resumed. Measured against the shipped code with this very harness: the
+  // document ended near scrollY 0 with the target still more than a thousand
+  // pixels below the fold, i.e. visually "the click did nothing".
   test("the scroll survives ProseMirror's post-click caret reveal", async ({ page }) => {
     await armCaretReveal(page);
     const before = await readEditorScroll(page, "deep-section");

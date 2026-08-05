@@ -136,23 +136,51 @@ export function jumpToCommentTransaction(
  * position the current doc can resolve.
  *
  * WHY THE SELECTION MOVES, rather than the anchor being scrolled to behind
- * ProseMirror's back. A click on a TOC link leaves PM's selection ON THE
- * LINK. PM then re-syncs that selection to the DOM after the click —
- * `DOMObserver.flushSoon()` defers on a 20ms timeout, i.e. strictly AFTER the
- * next animation frame — and the browser reveals the caret, scrolling the
- * document back to the link. Measured in Chrome: the reveal wins whatever we
- * do. A `behavior: "smooth"` scroll is ABANDONED mid-animation (it runs for
- * hundreds of ms — 1.5s over a long report — and any competing scroll on the
- * same box aborts it for good); an instant scroll is applied and then simply
- * overridden. Deferring by more frames cannot help, because the caret never
- * stops being somewhere else.
+ * ProseMirror's back.
  *
- * Moving the selection removes the competitor instead of out-running it: PM's
- * own reveal now targets the anchor, and every later re-sync RE-ASSERTS the
- * anchor scroll rather than undoing it. This is the same mechanism the
- * comment "Jump" has always used (`jumpToCommentTransaction` above) — which
- * is precisely why Jump scrolls reliably in production and the anchor click
- * did not.
+ * ESTABLISHED, from prosemirror-view 1.42.0's own source: `updateStateInner`
+ * scrolls for a transaction ONLY when `state.scrollToSelection >
+ * prev.scrollToSelection` — that is, only when the transaction called
+ * `.scrollIntoView()`. Every other transaction, including the caret placement
+ * a click produces, is a "preserve" update in which PM does nothing to bring
+ * the new selection into view. A scroll issued behind PM's back therefore has
+ * no standing at all: the caret stays on the TOC link, and the surface is left
+ * free for whatever reveals that caret to move it.
+ *
+ * MEASURED IN CHROME: such a scroll loses whatever we do. `behavior: "smooth"`
+ * loses worst — it is an abortable animation running for hundreds of ms (1.5s
+ * over a long report), and any competing scroll on the same box abandons it
+ * permanently, leaving the box at the competitor's offset. An instant scroll is
+ * applied and then simply overridden. Deferring by more frames cannot help,
+ * because the caret never stops being somewhere else.
+ *
+ * NOT ESTABLISHED — deliberately left open rather than replaced with a second
+ * confident guess: WHICH mechanism performs the competing scroll. Two
+ * candidates were checked against the installed source and REFUTED, so neither
+ * should be repeated:
+ *
+ *  - `DOMObserver.flushSoon()`'s 20ms flush calling `view.scrollToSelection()`.
+ *    The only such call inside `flush()` is gated on `Math.max(lastTouch,
+ *    lastClick.time) < Date.now() - 300`, so it structurally cannot fire on
+ *    the click under test.
+ *  - `updateStateInner`'s preserve path (`storeScrollPos`/`resetScrollPos`)
+ *    restoring the pre-transaction offset. It is guarded by
+ *    `this.dom.style.overflowAnchor == null`, and Chrome supports
+ *    `overflow-anchor`, so that property reads `""` there and the guard is
+ *    false — the path never runs in the browser this was measured in.
+ *
+ * PM does re-sync its selection to the DOM about 20ms after a click
+ * (`flushSoon` → `flush` → `selectionToDOM`), so a browser-side reveal of the
+ * newly-set DOM selection fits the timeline; that is a description of WHEN,
+ * not a verified WHY, and it is left as one.
+ *
+ * THE FIX DOES NOT DEPEND ON KNOWING. It works by making the anchor the place
+ * the selection already is, and by putting `.scrollIntoView()` on the
+ * transaction — the one input that makes PM's own update path scroll at all.
+ * Once the caret is at the anchor, any later reveal of the caret RE-ASSERTS
+ * the anchor scroll rather than undoing it. This is the same mechanism the
+ * comment "Jump" has always used — structurally so: both go through
+ * `programmaticRevealTransaction` above.
  *
  * NOT EVERY TARGET CAN BE REVEALED THIS WAY, and `null` is the answer for the
  * ones that cannot. `TextSelection.near` is not a `TextSelection` factory —

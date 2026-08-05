@@ -244,11 +244,16 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
   // same scrolling box during that window ABANDONS it — the box is left
   // wherever the competitor put it, and the animation never resumes. Driving
   // a 290px anchor scroll and then issuing `scrollTo(0, 32)` (the shape of a
-  // caret reveal) produced a final `scrollY` of 32 for every competitor
-  // arrival from 0ms to 600ms, against 290 with no competitor at all. That
-  // 32 is the number the operator measured in production: the anchor scroll
-  // was issued and then silently abandoned, which is indistinguishable from
-  // "the click did nothing".
+  // scroll that reveals a caret elsewhere) produced a final `scrollY` of 32
+  // for every competitor arrival from 0ms to 600ms, against 290 with no
+  // competitor at all. That 32 is the number the operator measured in
+  // production: the anchor scroll was issued and then silently abandoned,
+  // which is indistinguishable from "the click did nothing".
+  //
+  // The measurement is about the ABORT, and stands on its own: it says what
+  // happens to a smooth scroll when anything else scrolls the same box. What
+  // that something else IS in the production case is not established — see
+  // `anchorScrollTransaction`'s doc comment in editor-state.ts.
   //
   // The DOM fallback therefore scrolls INSTANTLY. An instant scroll is
   // applied within its own task and has no in-flight window to abort.

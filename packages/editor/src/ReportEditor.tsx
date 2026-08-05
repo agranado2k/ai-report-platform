@@ -277,23 +277,30 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         //
         // This is what the original implementation was missing, and why the
         // feature shipped inert. A click leaves PM's selection ON THE TOC
-        // LINK. PM then re-syncs that selection to the DOM after the click —
-        // `DOMObserver` defers its flush on a 20ms timeout, i.e. strictly
-        // AFTER the 16ms animation frame the scroll was deferred to — and the
-        // browser reveals the caret, dragging the document straight back to
-        // the link. Measured in Chrome: that reveal wins whatever we do. A
-        // `behavior: "smooth"` scroll loses worst of all, because it is an
-        // abortable animation running for hundreds of milliseconds and any
-        // competing scroll abandons it permanently, leaving the box at the
-        // competitor's offset — the exact "scrollY stuck at the caret
-        // offset, unchanged after 4s" symptom that was reported.
+        // LINK, and PM scrolls for a transaction only when that transaction
+        // called `.scrollIntoView()` (`updateStateInner`'s `state
+        // .scrollToSelection > prev.scrollToSelection` test) — so a scroll
+        // issued behind PM's back has no standing, and whatever later reveals
+        // the caret drags the document straight back to the link. Measured in
+        // Chrome: that loses whatever we do. A `behavior: "smooth"` scroll
+        // loses worst of all, because it is an abortable animation running
+        // for hundreds of milliseconds and any competing scroll abandons it
+        // permanently, leaving the box at the competitor's offset — the exact
+        // "scrollY stuck at the caret offset, unchanged after 4s" symptom
+        // that was reported.
         //
-        // Deferring by MORE frames cannot fix this: the caret never stops
-        // being somewhere else. So don't out-run the competitor — remove it.
-        // Once the caret is at the anchor, PM's reveal targets the anchor
-        // too, and every later re-sync re-asserts the jump instead of undoing
-        // it. Same mechanism the comment "Jump" has always used, which is why
-        // Jump scrolls reliably and this did not.
+        // WHICH mechanism performs that competing scroll is NOT established;
+        // two plausible candidates were checked against prosemirror-view's
+        // source and refuted. `anchorScrollTransaction`'s doc comment
+        // (editor-state.ts) carries the full account — read it before
+        // repeating any causal story about this.
+        //
+        // Deferring by MORE frames cannot fix it either: the caret never
+        // stops being somewhere else. So don't out-run the competitor —
+        // remove it. Once the caret is at the anchor, any reveal of the caret
+        // re-asserts the jump instead of undoing it. Same mechanism the
+        // comment "Jump" has always used — literally the same builder,
+        // `programmaticRevealTransaction`.
         //
         // `posAtDOM` is the model-side lookup for a DOM node PM rendered; it
         // throws for a node PM does not own (an element from the shell),
@@ -313,13 +320,14 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         //
         // Step 1 alone is not the whole fix: PM's `scrollIntoView()` reveals
         // the selection MINIMALLY (`scrollRectIntoView` scrolls just far
-        // enough to make it visible), so the anchor lands against the bottom
-        // edge — measured at 597px down a 700px viewport — where "jump to
-        // this section" should put it at the top. So the DOM scroll still
-        // runs, deferred one frame on the PARENT window's clock and INSTANT
-        // rather than smooth (see `deferAnchorScroll`). It is safe now in a
-        // way it never was before: the caret is already at the anchor, so
-        // PM's later reveal finds it visible and scrolls nothing.
+        // enough to make it visible), which lands a below-the-fold anchor
+        // against the BOTTOM edge of the editing surface, where "jump to this
+        // section" should put it at the top. So the DOM scroll still runs,
+        // deferred one frame on the PARENT window's clock and INSTANT rather
+        // than smooth (see `deferAnchorScroll`). It is safe now in a way it
+        // never was before: the caret is already at the anchor, so any later
+        // reveal of it finds it visible and scrolls nothing. The browser tier
+        // asserts the resulting TOP alignment (tests/browser).
         //
         // This is also the only path when the id sits on something PM cannot
         // resolve to a document position — a plain DOM scroll still beats

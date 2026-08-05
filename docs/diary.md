@@ -3814,17 +3814,19 @@ worked: `scrollY` 32 → 1127.5.
 
 **Root cause: the deferral was a race, and it was always going to lose.**
 `deferAnchorScroll` scrolled the DOM behind ProseMirror's back, one animation
-frame after the click. But a click leaves PM's selection ON THE TOC LINK, and PM
-re-syncs that selection to the DOM afterwards — `DOMObserver.flushSoon()` defers
-on a **20ms timeout**, strictly after the 16ms frame — so the browser reveals the
-caret and drags the document straight back. Worse, the scroll was issued as
-`behavior: "smooth"`, and a smooth scroll is an **abortable animation**: measured
-in Chrome, it runs for hundreds of milliseconds (1.5s across a long report) and
-ANY competing scroll on the same box abandons it permanently, leaving the box at
-the competitor's offset. Driving a 290px anchor scroll and then a
-`scrollTo(0, 32)` produced a final `scrollY` of 32 for every competitor arrival
-from 0ms to 600ms, against 290 with no competitor at all. That 32 is the
-operator's number.
+frame after the click. But a click leaves PM's selection ON THE TOC LINK, and
+ProseMirror scrolls for a transaction **only** when that transaction called
+`.scrollIntoView()` — `updateStateInner`'s `state.scrollToSelection >
+prev.scrollToSelection` test; everything else is a "preserve" update in which PM
+does nothing to reveal the new selection. So the anchor scroll had no standing
+with PM at all, and whatever later revealed the caret dragged the document
+straight back. Worse, the scroll was issued as `behavior: "smooth"`, and a smooth
+scroll is an **abortable animation**: measured in Chrome, it runs for hundreds of
+milliseconds (1.5s across a long report) and ANY competing scroll on the same box
+abandons it permanently, leaving the box at the competitor's offset. Driving a
+290px anchor scroll and then a `scrollTo(0, 32)` produced a final `scrollY` of 32
+for every competitor arrival from 0ms to 600ms, against 290 with no competitor at
+all. That 32 is the operator's number.
 
 **Adding frames could not have fixed it** — the caret never stops being somewhere
 else. The fix removes the competitor instead of out-running it:
@@ -3832,11 +3834,11 @@ else. The fix removes the competitor instead of out-running it:
 collapsed programmatic selection + `tr.scrollIntoView()`), so PM's own reveal
 targets the anchor and every later re-sync re-asserts the jump. This is the
 mechanism the comment "Jump" has always used, which is exactly why Jump scrolled
-reliably while the anchor click did not. PM reveals *minimally* though (the
-anchor lands 597px down a 700px viewport), so an instant `{behavior:"auto",
-block:"start"}` DOM scroll still follows for top alignment — safe now in a way it
-never was alone, because the caret is already at the anchor and PM's later reveal
-finds it visible.
+reliably while the anchor click did not. PM reveals *minimally* though (a
+below-the-fold anchor lands against the bottom edge of the editing surface), so
+an instant `{behavior:"auto", block:"start"}` DOM scroll still follows for top
+alignment — safe now in a way it never was alone, because the caret is already at
+the anchor and a later reveal finds it visible.
 
 **Why this shipped: the planned `/ce-dogfood` browser pass (verification step 6)
 was never run.** Every unit test passed identically before and after the fix — the

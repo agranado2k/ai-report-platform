@@ -153,21 +153,25 @@ describe("jumpToCommentTransaction / reportableSelection", () => {
 });
 
 // THE ORDERING BUG, EXPRESSED AS AN INVARIANT (ADR-0062 Amendment 3,
-// Decision 7). An in-page anchor click used to be a RACE against
-// ProseMirror: the click left the selection on the TOC link, we scrolled the
-// document elsewhere a frame later, and PM's post-click DOM/selection re-sync
-// — which `DOMObserver.flushSoon()` defers on a 20ms timeout, i.e. AFTER a
-// 16ms animation frame — then revealed the caret again and pulled the
-// document straight back to the link. Measured in Chrome: whatever scroll the
-// caret reveal performs WINS, whether our scroll was smooth (abandoned
-// mid-animation) or instant (already applied, then overridden). No number of
-// extra frames fixes that, because the caret never stops being somewhere
-// else.
+// Decision 7). An in-page anchor click used to be a RACE against ProseMirror:
+// the click left the selection on the TOC link, and we scrolled the document
+// elsewhere a frame later. ProseMirror scrolls for a transaction only when
+// that transaction called `.scrollIntoView()`, so our scroll had no standing
+// with PM at all — and whatever later revealed the caret pulled the document
+// straight back to the link. Measured in Chrome: that competing scroll WINS,
+// whether ours was smooth (abandoned mid-animation) or instant (applied, then
+// overridden). No number of extra frames fixes it, because the caret never
+// stops being somewhere else.
 //
-// So don't race the caret — MOVE it. Once the selection is at the anchor,
-// PM's own reveal is the anchor scroll, and every later re-sync re-asserts it
-// instead of undoing it. Same mechanism the comment "Jump" already uses in
-// production (`jumpToCommentTransaction`), which is why that one never had
+// WHICH mechanism performs the competing scroll is not established — see
+// `anchorScrollTransaction`'s doc comment for the two candidates that were
+// checked against prosemirror-view's source and refuted. The invariant below
+// does not depend on the answer.
+//
+// So don't race the caret — MOVE it, and ask PM to do the scrolling. Once the
+// selection is at the anchor, revealing the caret IS the anchor scroll, and
+// every later re-sync re-asserts it instead of undoing it. Same mechanism the
+// comment "Jump" already uses in production, which is why that one never had
 // this bug.
 describe("anchorScrollTransaction — the anchor scroll PM performs, not one it fights", () => {
   it("puts the selection AT the anchor so a later caret reveal reveals the anchor", () => {
