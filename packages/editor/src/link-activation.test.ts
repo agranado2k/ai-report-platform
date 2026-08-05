@@ -189,15 +189,32 @@ describe("editorClickOutcome — link activation wins over comment focus", () =>
 });
 
 describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled", () => {
-  // The two realms are SEPARATE parameters on purpose. The scroll must be
-  // deferred a frame (PM re-syncs the selection after a click and scrolls the
-  // caret back), but the frame must be scheduled in the realm the handler
-  // runs in — the PARENT. The editing iframe is `sandbox="allow-same-origin"`
-  // with NO `allow-scripts`, i.e. scripting is DISABLED in that document, so
-  // a callback handed to its `requestAnimationFrame` is at best
-  // implementation-defined and at worst never runs — which presents as the
-  // anchor click doing nothing at all. The ELEMENT, by contrast, only exists
-  // in the iframe's document, so that is where the lookup must happen.
+  // The two realms are SEPARATE parameters on purpose, and the reason is
+  // ownership, not capability. THE FRAME is scheduled in the realm this code
+  // actually runs in — the PARENT window, where the click handler lives. THE
+  // ELEMENT only exists in the iframe's document, so the lookup has to cross
+  // the boundary the other way. Two different realms, two different
+  // directions, one parameter each.
+  //
+  // TWO EARLIER CLAIMS HERE WERE WRONG, and are corrected rather than deleted
+  // because both were load-bearing in the reasoning that shipped a broken
+  // anchor scroll:
+  //
+  //  - "the iframe has no `allow-scripts`, so a callback handed to ITS
+  //    `requestAnimationFrame` is at best implementation-defined and at worst
+  //    never runs." It runs. `allow-scripts` governs script the DOCUMENT
+  //    loads or contains; the iframe's own `requestAnimationFrame`, called
+  //    from the parent across a same-origin boundary, fires normally. Using
+  //    it would merely be scheduling on the wrong clock, which is a clarity
+  //    problem, not a correctness one.
+  //  - "the scroll must be deferred a frame because PM scrolls the caret
+  //    back." Deferring is not what wins that race — nothing does. This
+  //    PR's whole thesis is that a scroll performed behind ProseMirror's back
+  //    loses regardless of when it is issued, which is why the primary path
+  //    is now `anchorScrollTransaction` (editor-state.ts) and this function
+  //    is the FALLBACK plus the top-alignment pass. The deferral survives
+  //    because the alignment pass must run after PM has applied its own
+  //    reveal, not because one frame out-runs anything.
   const anchorSpy = () => {
     const calls: unknown[] = [];
     return { el: { scrollIntoView: (o?: unknown) => calls.push(o) }, calls };

@@ -201,8 +201,11 @@ export interface ScrollableLike {
 }
 
 export interface AnchorScrollDeps {
-  /** Defer one animation frame. MUST be the PARENT window's
-   *  `requestAnimationFrame`, never the iframe's — see below. */
+  /** Defer one animation frame, on the PARENT window's clock — the realm the
+   *  click handler runs in. (The iframe's own `requestAnimationFrame` would
+   *  also fire: `allow-scripts` governs script the DOCUMENT loads or
+   *  contains, not a same-origin call made from the parent. Scheduling there
+   *  would simply be the wrong clock for parent-realm code.) */
   readonly schedule: (callback: () => void) => void;
   /** Look the anchor up in the IFRAME's document — that is the only realm the
    *  element exists in. */
