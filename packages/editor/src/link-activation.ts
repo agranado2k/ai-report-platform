@@ -194,7 +194,10 @@ export function linkActivation({
  *  `HTMLElement`: the element comes from the IFRAME's realm, where
  *  `instanceof HTMLElement` against the parent's constructor is `false`. */
 export interface ScrollableLike {
-  scrollIntoView?: (options?: { readonly behavior?: ScrollBehavior }) => void;
+  scrollIntoView?: (options?: {
+    readonly behavior?: ScrollBehavior;
+    readonly block?: ScrollLogicalPosition;
+  }) => void;
 }
 
 export interface AnchorScrollDeps {
@@ -207,20 +210,29 @@ export interface AnchorScrollDeps {
 }
 
 /**
- * Scroll an in-page anchor into view, ONE ANIMATION FRAME LATE.
+ * The DOM FALLBACK for an in-page anchor: scroll the element into view one
+ * animation frame late.
  *
- * The deferral is load-bearing: ProseMirror re-syncs the selection to the DOM
- * after a click, and that re-sync scrolls the caret back into view, so a
- * synchronous scroll visibly happens and is then immediately undone — which
- * presents as "shipped it, still broken".
+ * This is no longer the primary path. The primary path moves ProseMirror's
+ * own selection to the anchor and lets PM scroll (`anchorScrollTransaction`,
+ * editor-state.ts) — because a scroll performed BEHIND PM's back is undone by
+ * PM's post-click caret reveal no matter how it is timed. This function is
+ * what runs when the anchor's `id` sits on something PM cannot resolve to a
+ * document position (an element in the shell, or a node the schema does not
+ * own), where a plain DOM scroll is still better than nothing.
  *
- * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame must be
- * scheduled in the realm this code actually runs in — the PARENT window. The
- * editing iframe is `sandbox="allow-same-origin"` with **no `allow-scripts`**,
- * so scripting is DISABLED in that document; a callback handed to *its*
- * `requestAnimationFrame` is at best implementation-defined and at worst never
- * runs. The parent's frame clock is strictly safer and is driven by the same
- * compositor, so it defers past PM's re-sync just as well. The ELEMENT,
+ * INSTANT, NEVER SMOOTH — measured in Chrome, not reasoned about. A
+ * `behavior: "smooth"` scroll is an abortable animation running for hundreds
+ * of milliseconds (1.5s across a long report), and ANY competing scroll on the
+ * same scrolling box during that window abandons it permanently, leaving the
+ * box at the competitor's offset. Driving a 290px anchor scroll and then a
+ * `scrollTo(0, 32)` produced a final `scrollY` of 32 for every competitor
+ * arrival from 0ms to 600ms — the exact symptom, and the exact number, the
+ * operator measured in production. `block: "start"` is stated rather than
+ * left to the default so the alignment is part of the contract.
+ *
+ * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame is scheduled
+ * in the realm this code actually runs in — the PARENT window. The ELEMENT,
  * conversely, only exists in the iframe's document, which is why the lookup is
  * the caller's job and crosses the boundary the other way.
  *
@@ -230,7 +242,7 @@ export interface AnchorScrollDeps {
  */
 export function deferAnchorScroll(targetId: string, deps: AnchorScrollDeps): void {
   deps.schedule(() => {
-    deps.findAnchor(targetId)?.scrollIntoView?.({ behavior: "smooth" });
+    deps.findAnchor(targetId)?.scrollIntoView?.({ behavior: "auto", block: "start" });
   });
 }
 

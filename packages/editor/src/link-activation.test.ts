@@ -203,6 +203,10 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     return { el: { scrollIntoView: (o?: unknown) => calls.push(o) }, calls };
   };
 
+  /** The one call shape the fallback may make — see the "scrolls instantly"
+   *  test below for the measurement that fixes it. */
+  const INSTANT_TOP = { behavior: "auto", block: "start" };
+
   it("does not scroll synchronously — it waits for the scheduled frame", () => {
     const { el, calls } = anchorSpy();
     let scheduled: (() => void) | null = null;
@@ -214,7 +218,27 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     });
     expect(calls).toEqual([]); // nothing yet — the frame has not run
     (scheduled as unknown as () => void)();
-    expect(calls).toEqual([{ behavior: "smooth" }]);
+    expect(calls).toEqual([INSTANT_TOP]);
+  });
+
+  // MEASURED IN CHROME, not reasoned about. A `behavior: "smooth"`
+  // `scrollIntoView` is an ABORTABLE ANIMATION: it runs for hundreds of
+  // milliseconds (1.5s over a long document), and ANY competing scroll on the
+  // same scrolling box during that window ABANDONS it — the box is left
+  // wherever the competitor put it, and the animation never resumes. Driving
+  // a 290px anchor scroll and then issuing `scrollTo(0, 32)` (the shape of a
+  // caret reveal) produced a final `scrollY` of 32 for every competitor
+  // arrival from 0ms to 600ms, against 290 with no competitor at all. That
+  // 32 is the number the operator measured in production: the anchor scroll
+  // was issued and then silently abandoned, which is indistinguishable from
+  // "the click did nothing".
+  //
+  // The DOM fallback therefore scrolls INSTANTLY. An instant scroll is
+  // applied within its own task and has no in-flight window to abort.
+  it("scrolls instantly, never as an abortable smooth animation", () => {
+    const { el, calls } = anchorSpy();
+    deferAnchorScroll("summary", { schedule: (cb) => cb(), findAnchor: () => el });
+    expect(calls).toEqual([{ behavior: "auto", block: "start" }]);
   });
 
   it("looks the anchor up in the iframe's own document, by the activation's targetId", () => {
@@ -228,7 +252,7 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
       },
     });
     expect(lookedUp).toEqual(["top-recommendation"]);
-    expect(calls).toEqual([{ behavior: "smooth" }]);
+    expect(calls).toEqual([INSTANT_TOP]);
   });
 
   it("is a no-op, never a throw, when the id matches nothing in the document", () => {

@@ -98,6 +98,50 @@ export function jumpToCommentTransaction(
     .scrollIntoView();
 }
 
+/**
+ * Build the in-page ANCHOR transaction (ADR-0062 Amendment 3, Decision 7):
+ * collapse the selection onto the anchor target's position and ask
+ * ProseMirror to scroll it into view. Returns `null` when `pos` is not a
+ * position the current doc can resolve.
+ *
+ * WHY THE SELECTION MOVES, rather than the anchor being scrolled to behind
+ * ProseMirror's back. A click on a TOC link leaves PM's selection ON THE
+ * LINK. PM then re-syncs that selection to the DOM after the click —
+ * `DOMObserver.flushSoon()` defers on a 20ms timeout, i.e. strictly AFTER the
+ * next animation frame — and the browser reveals the caret, scrolling the
+ * document back to the link. Measured in Chrome: the reveal wins whatever we
+ * do. A `behavior: "smooth"` scroll is ABANDONED mid-animation (it runs for
+ * hundreds of ms — 1.5s over a long report — and any competing scroll on the
+ * same box aborts it for good); an instant scroll is applied and then simply
+ * overridden. Deferring by more frames cannot help, because the caret never
+ * stops being somewhere else.
+ *
+ * Moving the selection removes the competitor instead of out-running it: PM's
+ * own reveal now targets the anchor, and every later re-sync RE-ASSERTS the
+ * anchor scroll rather than undoing it. This is the same mechanism the
+ * comment "Jump" has always used (`jumpToCommentTransaction` above) — which
+ * is precisely why Jump scrolls reliably in production and the anchor click
+ * did not.
+ *
+ * Flagged programmatic for the same reason Jump is: revealing a section must
+ * never open the new-comment composer. The selection it sets is collapsed, so
+ * `reportableSelection` would return `null` anyway; the flag states the
+ * intent rather than relying on that.
+ */
+export function anchorScrollTransaction(state: EditorState, pos: number): Transaction | null {
+  if (!Number.isInteger(pos) || pos < 0 || pos > state.doc.content.size) return null;
+  let $pos: ReturnType<EditorState["doc"]["resolve"]>;
+  try {
+    $pos = state.doc.resolve(pos);
+  } catch {
+    return null; // an unresolvable position is "no anchor", never a throw.
+  }
+  return state.tr
+    .setSelection(TextSelection.near($pos))
+    .setMeta(PROGRAMMATIC_SELECTION_META, true)
+    .scrollIntoView();
+}
+
 /** The selection a just-applied transaction should report to the caller as
  *  the PENDING (commentable) selection, or `null` — the pure gate behind
  *  ReportEditor's `onSelectionChange`. Null when the selection is collapsed

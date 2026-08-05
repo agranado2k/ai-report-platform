@@ -13,6 +13,7 @@ import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { TextSelection } from "prosemirror-state";
 import { describe, expect, it } from "vitest";
 import {
+  anchorScrollTransaction,
   createEditorState,
   docJson,
   jumpToCommentTransaction,
@@ -142,6 +143,67 @@ describe("jumpToCommentTransaction / reportableSelection", () => {
   });
 
   it("an ordinary user selection still reports {from,to,text}", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
+    const next = state.apply(tr);
+    expect(reportableSelection(tr, next)).toEqual({ from: 1, to: 6, text: "hello" });
+  });
+});
+
+// THE ORDERING BUG, EXPRESSED AS AN INVARIANT (ADR-0062 Amendment 3,
+// Decision 7). An in-page anchor click used to be a RACE against
+// ProseMirror: the click left the selection on the TOC link, we scrolled the
+// document elsewhere a frame later, and PM's post-click DOM/selection re-sync
+// — which `DOMObserver.flushSoon()` defers on a 20ms timeout, i.e. AFTER a
+// 16ms animation frame — then revealed the caret again and pulled the
+// document straight back to the link. Measured in Chrome: whatever scroll the
+// caret reveal performs WINS, whether our scroll was smooth (abandoned
+// mid-animation) or instant (already applied, then overridden). No number of
+// extra frames fixes that, because the caret never stops being somewhere
+// else.
+//
+// So don't race the caret — MOVE it. Once the selection is at the anchor,
+// PM's own reveal is the anchor scroll, and every later re-sync re-asserts it
+// instead of undoing it. Same mechanism the comment "Jump" already uses in
+// production (`jumpToCommentTransaction`), which is why that one never had
+// this bug.
+describe("anchorScrollTransaction — the anchor scroll PM performs, not one it fights", () => {
+  it("puts the selection AT the anchor so a later caret reveal reveals the anchor", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = anchorScrollTransaction(state, 6);
+    expect(tr).not.toBeNull();
+    if (!tr) throw new Error("unreachable");
+    const next = state.apply(tr);
+    // Collapsed AT the target: nothing is left pointing at the link, so
+    // there is no competing position for PM to scroll back to.
+    expect(next.selection.from).toBe(6);
+    expect(next.selection.empty).toBe(true);
+  });
+
+  it("asks ProseMirror to scroll — the reveal and the anchor scroll are one scroll", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = anchorScrollTransaction(state, 6);
+    if (!tr) throw new Error("unreachable");
+    expect(tr.scrolledIntoView).toBe(true);
+  });
+
+  it("is programmatic — jumping to a section must not open the comment composer", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = anchorScrollTransaction(state, 6);
+    if (!tr) throw new Error("unreachable");
+    expect(reportableSelection(tr, state.apply(tr))).toBeNull();
+  });
+
+  it("returns null for a position the current doc cannot resolve", () => {
+    const state = createEditorState(oneParagraphDoc);
+    expect(anchorScrollTransaction(state, 999)).toBeNull();
+    expect(anchorScrollTransaction(state, -1)).toBeNull();
+    expect(anchorScrollTransaction(state, Number.NaN)).toBeNull();
+  });
+});
+
+describe("editor-state misc", () => {
+  it("an ordinary user selection still reports {from,to,text} (regression guard)", () => {
     const state = createEditorState(oneParagraphDoc);
     const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
     const next = state.apply(tr);
