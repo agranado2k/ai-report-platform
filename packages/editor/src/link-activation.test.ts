@@ -188,17 +188,26 @@ describe("editorClickOutcome — link activation wins over comment focus", () =>
   });
 });
 
-describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled", () => {
-  // The two realms are SEPARATE parameters on purpose, and the reason is
-  // ownership, not capability. THE FRAME is scheduled in the realm this code
-  // actually runs in — the PARENT window, where the click handler lives. THE
-  // ELEMENT only exists in the iframe's document, so the lookup has to cross
-  // the boundary the other way. Two different realms, two different
-  // directions, one parameter each.
+describe("deferAnchorScroll — the parent window schedules, the iframe's document is scrolled", () => {
+  // The two dependencies are SEPARATE parameters on purpose, and the reason is
+  // ownership, not capability. THE FRAME is scheduled on the window this code
+  // actually runs on — the PARENT, where the click handler lives. THE ELEMENT
+  // is only in the iframe's document, so the lookup has to cross the boundary
+  // the other way. Two directions, one parameter each.
   //
-  // TWO EARLIER CLAIMS HERE WERE WRONG, and are corrected rather than deleted
-  // because both were load-bearing in the reasoning that shipped a broken
-  // anchor scroll:
+  // THREE EARLIER CLAIMS HERE WERE WRONG, and are corrected rather than
+  // deleted because all three were load-bearing in the reasoning that shipped
+  // a broken anchor scroll:
+  //
+  //  - "the element comes from the IFRAME's realm." It does not. Every node
+  //    ProseMirror renders — which is every node that can carry an anchor id,
+  //    since the srcdoc `<body>` ships empty — is built by the PARENT
+  //    document's `createElement` and merely ADOPTED into the iframe's
+  //    document, keeping the parent realm's prototypes. Measured, and pinned
+  //    by tests/browser/anchor-scroll.spec.ts. The mistake was not academic:
+  //    it is why a production trace instrumented
+  //    `iframe.contentWindow.Element.prototype.scrollIntoView`, recorded zero
+  //    calls, and concluded this function never runs. It runs.
   //
   //  - "the iframe has no `allow-scripts`, so a callback handed to ITS
   //    `requestAnimationFrame` is at best implementation-defined and at worst
@@ -317,7 +326,7 @@ describe("deferAnchorScroll — parent realm schedules, iframe realm is scrolled
     ).not.toThrow();
   });
 
-  it("survives an element with no scrollIntoView (a realm-crossing shape mismatch)", () => {
+  it("survives an element with no scrollIntoView (a structural-type shape mismatch)", () => {
     expect(() =>
       deferAnchorScroll("x", { schedule: (cb) => cb(), findAnchor: () => ({}) }),
     ).not.toThrow();

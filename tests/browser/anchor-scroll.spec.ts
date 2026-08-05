@@ -8,12 +8,23 @@
 // about a real browser and a mounted ProseMirror, which a node-tier test
 // cannot see at all.
 //
-// AND THIS TIER HAS NOT REPRODUCED IT EITHER, across three rounds. Every
+// AND THIS TIER HAS NOT REPRODUCED IT EITHER, across four rounds. Every
 // contract below passes on the shipped code as well as the fixed code; the one
 // test that goes red on the old design does so against a competitor this file
 // INVENTS (`armCaretReveal`). So read this suite as a regression net for the
 // behaviours it states, not as evidence about the production failure — and do
 // not treat a green run here as a diagnosis.
+//
+// WHAT ROUND FOUR DID ESTABLISH is negative and worth more than another
+// theory: the production trace that reported the top-alignment pass MISSING
+// ("`scrollIntoView` was never invoked") was wrapping
+// `iframe.contentWindow.Element.prototype.scrollIntoView`, and that prototype
+// is not on the call's lookup path — ProseMirror renders the report with the
+// PARENT window's constructors. Written the same way here, against a document
+// where the jump provably lands, the instrument is equally silent. Both facts
+// are now tests below ("the top-alignment pass really calls scrollIntoView on
+// the anchor" and "ProseMirror renders the report with the PARENT realm's
+// constructors"), so the mistake cannot be made a second time.
 //
 // It is hermetic: no deployment, no auth, no database. The harness page
 // (harness/build.mts) bundles the REAL `ReportEditor` over a report parsed by
@@ -256,6 +267,103 @@ async function armCaretReveal(page: Page) {
   });
 }
 
+/**
+ * Record every `scrollIntoView` call made on an element in the editing
+ * surface — instrumenting BOTH realms, and labelling which one saw it.
+ *
+ * ASSERTING THE CALL IS THE POINT. Every other scroll assertion in this file
+ * reads a final offset, and a final offset is satisfiable by accident: the
+ * suite passed three times over a product the operator was measuring as
+ * broken. "`deferAnchorScroll` reached `scrollIntoView` with these options"
+ * is a claim about the code path, and nothing but the code path satisfies it.
+ *
+ * BOTH REALMS, BECAUSE ONE OF THEM SEES NOTHING AND THAT IS NOT OBVIOUS.
+ * `packages/editor`'s source comments asserted for three rounds that nodes in
+ * the editing surface belong to the IFRAME's realm ("`instanceof HTMLElement`
+ * against the parent's constructor is `false`"). For ProseMirror-rendered
+ * nodes that is exactly backwards — see the realm test below — so patching
+ * `iframe.contentWindow.Element.prototype.scrollIntoView` records ZERO calls
+ * no matter how well the feature works. That is the instrumentation the
+ * operator ran against production, and its silence was read as "the
+ * top-alignment pass never executes". Written the same way here it is equally
+ * silent, on a document where the jump provably lands (see the offset tests
+ * above) — so the silence measures the instrument, not the product.
+ *
+ * Spying on the PARENT prototype alone would leave that trap intact for the
+ * next person; recording the realm makes it an assertion.
+ */
+async function armScrollIntoViewSpy(page: Page) {
+  await page.evaluate(() => {
+    const win = (document.querySelector("iframe") as HTMLIFrameElement | null)?.contentWindow;
+    if (!win) throw new Error("the editing surface has not mounted");
+    const calls: { realm: string; on: string; args: string }[] = [];
+    (window as unknown as { __sivCalls: typeof calls }).__sivCalls = calls;
+    const spyOn = (realm: string, ctor: { prototype: unknown }) => {
+      const proto = ctor.prototype as Record<string, unknown>;
+      const original = proto.scrollIntoView as (...a: unknown[]) => void;
+      proto.scrollIntoView = function (this: Element, ...args: unknown[]) {
+        calls.push({
+          realm,
+          on: `${this.tagName.toLowerCase()}#${this.id}`,
+          args: JSON.stringify(args),
+        });
+        return original.apply(this, args);
+      };
+    };
+    spyOn("iframe", (win as unknown as { Element: { prototype: unknown } }).Element);
+    spyOn("parent", Element);
+  });
+}
+
+/** Calls recorded on one element, in call order. */
+async function readScrollIntoViewCalls(page: Page, on: string) {
+  return await page.evaluate((id) => {
+    const calls = (window as unknown as { __sivCalls?: { on: string }[] }).__sivCalls ?? [];
+    return calls.filter((c) => c.on === id);
+  }, on);
+}
+
+/**
+ * Which realm's constructors built each part of the editing surface.
+ *
+ * The iframe's document has TWO populations of nodes and they do not share a
+ * realm: the shell (`<html>`, `<body>`, the report's and the editor's
+ * `<style>`) is parsed by the IFRAME's own HTML parser from `srcdoc`, while
+ * every node carrying report content — and therefore every anchor `id` a TOC
+ * link points at — is built by ProseMirror, which runs in the PARENT window
+ * and calls the PARENT document's `createElement`. Appending those nodes
+ * ADOPTS them (their `ownerDocument` becomes the iframe's), but adoption does
+ * not re-wrap them: they keep the parent realm's prototypes for life.
+ */
+async function readAnchorRealm(page: Page, targetId: string) {
+  return await page.evaluate((id) => {
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement | null;
+    const doc = iframe?.contentDocument;
+    const win = iframe?.contentWindow;
+    if (!doc || !win) throw new Error("the editing surface has not mounted");
+    const iframeElement = (win as unknown as { Element: typeof Element }).Element;
+    const target = doc.getElementById(id);
+    const style = doc.querySelector("style");
+    if (!target || !style) throw new Error(`the editing surface has no #${id} / no <style>`);
+    const realmOf = (node: Element) => ({
+      iframeRealm: node instanceof iframeElement,
+      parentRealm: node instanceof Element,
+    });
+    return {
+      // Parsed by the iframe from `srcdoc`.
+      documentElement: realmOf(doc.documentElement),
+      body: realmOf(doc.body),
+      style: realmOf(style),
+      // Rendered by ProseMirror, from the parent window.
+      anchorTarget: realmOf(target),
+      anchorTargetOwnerIsIframeDoc: target.ownerDocument === doc,
+      // The two realms really are distinct — otherwise the readings above
+      // would be trivially true and prove nothing.
+      realmsAreDistinct: (iframeElement as unknown) !== (Element as unknown),
+    };
+  }, targetId);
+}
+
 /** The two report documents this contract runs against. */
 const FIXTURES = [
   {
@@ -334,6 +442,58 @@ for (const fixture of FIXTURES) {
       await clickLinkInEditor(page, "#deep-section");
 
       await expectAnchorRevealed(page, "deep-section", before);
+    });
+
+    // THE ONE ASSERTION IN THIS FILE THAT IS ABOUT THE CALL RATHER THAN THE
+    // OUTCOME. It is here because a final-offset assertion cannot tell "the
+    // top-alignment pass ran" from "something else left the surface at the
+    // right offset", and because the production instrumentation that reported
+    // this pass missing was patching a prototype the call never goes through
+    // (`armScrollIntoViewSpy`). Exactly one call, on the anchor, instant and
+    // top-aligned — and the iframe realm records none of it.
+    test("the top-alignment pass really calls scrollIntoView on the anchor", async ({ page }) => {
+      await armScrollIntoViewSpy(page);
+
+      await clickLinkInEditor(page, "#deep-section");
+
+      await expect
+        .poll(async () => await readScrollIntoViewCalls(page, "section#deep-section"), {
+          timeout: ARRIVAL_MS,
+        })
+        .toEqual([
+          {
+            realm: "parent",
+            on: "section#deep-section",
+            args: JSON.stringify([{ behavior: "instant", block: "start" }]),
+          },
+        ]);
+
+      // And it STAYS one call: the pass is not re-issued by a later render.
+      await page.waitForTimeout(HOLD_MS);
+      expect(await readScrollIntoViewCalls(page, "section#deep-section")).toHaveLength(1);
+    });
+
+    // THE REALM FACT, PINNED, because getting it backwards cost three rounds of
+    // investigation: a production trace instrumented the iframe's
+    // `Element.prototype`, saw nothing, and concluded the top-alignment pass
+    // never executes. It executes; that prototype is simply not on its lookup
+    // path. This test is what makes the next instrumentation land in the right
+    // realm — and it fails loudly if a future ProseMirror ever starts rendering
+    // through the iframe's own `createElement`, which would move the path.
+    test("ProseMirror renders the report with the PARENT realm's constructors", async ({
+      page,
+    }) => {
+      const realm = await readAnchorRealm(page, "deep-section");
+
+      expect(realm.realmsAreDistinct).toBe(true);
+      // The shell — parsed by the iframe itself from `srcdoc`.
+      expect(realm.documentElement).toEqual({ iframeRealm: true, parentRealm: false });
+      expect(realm.body).toEqual({ iframeRealm: true, parentRealm: false });
+      expect(realm.style).toEqual({ iframeRealm: true, parentRealm: false });
+      // The report — rendered by ProseMirror from the parent window, then
+      // adopted into the iframe's document without being re-wrapped.
+      expect(realm.anchorTarget).toEqual({ iframeRealm: false, parentRealm: true });
+      expect(realm.anchorTargetOwnerIsIframeDoc).toBe(true);
     });
 
     // WHETHER THE EDITOR'S INJECTED CSS WINS THE CASCADE against the report's

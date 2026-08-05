@@ -335,7 +335,14 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         // This is also the only path when the id sits on something PM cannot
         // resolve to a document position — a plain DOM scroll still beats
         // doing nothing. The element lookup crosses into the iframe's
-        // document, because that is the only realm it exists in.
+        // DOCUMENT, because that is the only document it is in; whose realm
+        // built it is a separate question, answered on `AnchorScrollDeps`.
+        //
+        // THAT THIS CALL HAPPENS IS ASSERTED DIRECTLY, not inferred from where
+        // the surface ended up: tests/browser/anchor-scroll.spec.ts spies on
+        // the prototype the call actually resolves through. A production trace
+        // that spied on the iframe's prototype instead saw nothing and
+        // concluded this pass was missing; it is not.
         deferAnchorScroll(targetId, {
           schedule: (callback) =>
             typeof window.requestAnimationFrame === "function"
@@ -378,9 +385,13 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
               //
               // The link under the cursor is resolved through ProseMirror's
               // MODEL (`posAtCoords` → `linkMarkAtPos`), never
-              // `event.target.closest("a")`: this document lives in an
-              // iframe, a different JS realm, where `instanceof` checks
-              // against the parent's constructors are false.
+              // `event.target.closest("a")` — because a link here is a MARK on
+              // text rather than an element, and the mark set at the position
+              // is the authority on where it starts and ends. (This comment
+              // used to justify it with "the iframe is a different JS realm
+              // where `instanceof` against the parent's constructors is
+              // false". That is backwards for PM-rendered nodes and it is
+              // corrected on `AnchorScrollDeps` in link-activation.ts.)
               const found = clickedView.posAtCoords({ left: up.x, top: up.y });
               const outcome = editorClickOutcome(
                 linkActivation({

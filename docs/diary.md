@@ -4104,3 +4104,71 @@ is the hermetic Chromium tier plus source reading. ADR-0062 Amendment 3
 Decision 7 and ADR-0079 carry the corrected record.
 
 Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).
+
+---
+
+## 2026-08-05 — the anchor jump, round 5: the "step 2 never runs" trace was measuring the wrong prototype
+
+The operator brought a production trace from `c7ae920` that looked decisive. On
+a probe report with no `scroll-behavior` anywhere, with
+`Element.prototype.scrollIntoView`, `window.scrollBy` and `window.scrollTo`
+wrapped **inside the editing iframe**, a real mouse click on a TOC link
+produced: ProseMirror's caret landing inside the target (`H2#section-two`), one
+minimal reveal (`scrollBy(0, 77.9)`), a final `scrollY` of 78 — and **no
+`scrollIntoView` at all**. Reading: the top-alignment pass is simply absent in
+production, so all three previous theories (smooth-vs-instant, caret-reveal
+race, position restore) were moot, because they had each assumed step 2 ran and
+lost.
+
+**That instrument cannot observe the call.** Reproduced in the browser tier:
+patch the iframe realm's `Element.prototype.scrollIntoView`, click the same
+kind of link with a real mouse, on the fixture that copies the failing
+document's stylesheet byte for byte — **zero calls recorded**, on a run whose
+final offset lands exactly top-aligned on the anchor. Re-point the spy at the
+prototype the call actually resolves through and it records exactly one
+`scrollIntoView({behavior: "instant", block: "start"})` on the anchor element.
+
+**Why: the realm boundary is not where `packages/editor` said it was.** The
+iframe's document holds two populations of nodes. The shell — `<html>`,
+`<body>`, the report's `<style>`, the editor's injected one — is parsed by the
+*iframe's* HTML parser from `srcdoc` and is iframe-realm. Everything else is
+rendered by ProseMirror, which runs in the **parent** window and calls the
+*parent* document's `createElement`; `buildIframeDocument` deliberately emits an
+empty `<body>` for exactly that reason, so **every node that can carry an anchor
+`id` is parent-realm**. Appending adopts them (their `ownerDocument` becomes the
+iframe's) without re-wrapping them, so they keep the parent's prototypes for
+life. Measured on `#deep-section`: `instanceof parentWindow.Element` is `true`,
+`instanceof iframe.contentWindow.Element` is `false` — and for
+`documentElement` / `body` / `<style>`, the other way round.
+
+Three source comments asserted the opposite (`linkMarkAtPos`, `ScrollableLike`,
+the click handler: "the element comes from the IFRAME's realm, where
+`instanceof HTMLElement` against the parent's constructor is `false`"). That is
+what made the wrong instrumentation the obvious thing to write. All three are
+corrected in place, and the decisions they were justifying stand on their real
+reasons — the link lookup goes through the mark model because a link is a mark,
+not an element; `ScrollableLike` is structural so the module stays DOM-free and
+unit-testable.
+
+**No fix was shipped for the production symptom, deliberately.** The fourth
+theory joins the other three as unproven, and nothing here replaces it with a
+fifth. What the round bought: an instrument that would make the next production
+trace trustworthy, plus the first assertion in this suite that is about a
+**call** rather than a final offset — the offset assertions had passed three
+times over a product the operator was measuring as broken, which is exactly the
+failure mode a position assertion cannot rule out.
+
+**Still not verified against a deployed preview in a real browser** — not in any
+of the five rounds. Every "it works" reading comes from the hermetic Chromium
+tier; every "it fails" reading comes from the operator's own instrumentation of
+production, whose realm error is now known. Those two populations have never
+been taken on the same build with the same instrument, which is why they have
+been able to contradict each other for five rounds. Closing that gap — one
+preview pass with the realm-correct spy — is the highest-value next step, and it
+is not something the hermetic tier can do for itself.
+
+ADR-0062 Amendment 3 Decision 7 carries the fourth-round correction and the
+full withdrawal list; ADR-0079 records the tier's first genuine (negative)
+contribution to the investigation and the preview gap.
+
+Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).

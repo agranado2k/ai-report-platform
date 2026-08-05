@@ -47,12 +47,21 @@ export interface LinkActivationInput {
 /**
  * Find the `link` mark at a document position, using ProseMirror's own model.
  *
- * NOT `event.target.closest("a")`: the editor renders inside an `<iframe>`,
- * which is a DIFFERENT JavaScript realm. `instanceof Node` / `instanceof
- * HTMLElement` are `false` for nodes from that realm when tested against the
- * parent's constructors, so realm-crossing DOM introspection is a subtly
- * broken foundation to build on. The document model has no such problem —
- * the position from `posAtCoords` and the marks at it are plain data.
+ * NOT `event.target.closest("a")` — but NOT for the reason this comment gave
+ * for three rounds. It claimed the iframe is a different JavaScript realm in
+ * which `instanceof Node` / `instanceof HTMLElement` against the parent's
+ * constructors are `false`. For the nodes this code actually meets that is
+ * BACKWARDS, and the mistake was expensive: see the realm note on
+ * `AnchorScrollDeps` below, and the browser test that pins it
+ * (`tests/browser/anchor-scroll.spec.ts`, "ProseMirror renders the report with
+ * the PARENT realm's constructors").
+ *
+ * The real reason is the mark model. A link in ProseMirror is a MARK on text,
+ * not an element wrapping it, and the rendered `<a>` is an artefact of
+ * `toDOM`; the authority on "is there a link here" is the mark set at the
+ * position, which is also what the nodeBefore/nodeAfter walk below needs and
+ * what `closest("a")` cannot express. The position from `posAtCoords` and the
+ * marks at it are plain data, with no DOM introspection anywhere.
  *
  * Consults three mark sets, in order: the marks AT the position, then the
  * node BEFORE it, then the node after.
@@ -190,9 +199,14 @@ export function linkActivation({
   return { kind: "external", url: navigable };
 }
 
-/** The only shape the anchor scroll needs from an element. Deliberately not
- *  `HTMLElement`: the element comes from the IFRAME's realm, where
- *  `instanceof HTMLElement` against the parent's constructor is `false`. */
+/** The only shape the anchor scroll needs from an element. Deliberately a
+ *  STRUCTURAL type rather than `HTMLElement`, so this module stays free of the
+ *  DOM lib and every rule in it is unit-testable against a plain object.
+ *
+ *  It is NOT, as this comment claimed for three rounds, because the element
+ *  "comes from the IFRAME's realm, where `instanceof HTMLElement` against the
+ *  parent's constructor is `false`" — the opposite is true of the elements
+ *  this actually receives. See `AnchorScrollDeps` below. */
 export interface ScrollableLike {
   scrollIntoView?: (options?: {
     readonly behavior?: ScrollBehavior;
@@ -200,15 +214,49 @@ export interface ScrollableLike {
   }) => void;
 }
 
+/**
+ * THE REALM BOUNDARY, MEASURED — because this file described it wrongly for
+ * three rounds and the wrong description sent a production investigation to
+ * the wrong prototype.
+ *
+ * The editing iframe's document holds TWO populations of nodes:
+ *
+ *  - The SHELL — `<html>`, `<head>`, `<body>`, the report's `<style>` and the
+ *    editor's injected one — is parsed by the IFRAME's own HTML parser out of
+ *    `srcdoc`. Those nodes are iframe-realm: `node instanceof Element` against
+ *    the PARENT's constructor is `false` for them.
+ *  - The REPORT — everything ProseMirror renders, which is every node that can
+ *    carry an anchor `id`, because `buildIframeDocument` deliberately emits an
+ *    EMPTY `<body>` and PM populates it. ProseMirror runs in the PARENT window
+ *    and builds those nodes with the PARENT document's `createElement`.
+ *    Appending them ADOPTS them (their `ownerDocument` becomes the iframe's)
+ *    but does not re-wrap them: they keep the parent realm's prototypes for
+ *    life. So `node instanceof Element` against the parent's constructor is
+ *    `true`, and against `iframe.contentWindow.Element` it is `false`.
+ *
+ * CONSEQUENCE, and the reason this is written out at length: instrumenting
+ * `iframe.contentWindow.Element.prototype.scrollIntoView` records NOTHING when
+ * the code below runs, however well it works. A production trace did exactly
+ * that, saw nothing, and concluded the top-alignment pass never executes; the
+ * same instrumentation is equally silent in the browser tier on a document
+ * where the jump provably lands. Pinned by
+ * `tests/browser/anchor-scroll.spec.ts` ("ProseMirror renders the report with
+ * the PARENT realm's constructors") so it cannot rot back.
+ *
+ * None of this changes what the two dependencies below are for: they exist
+ * because the FRAME belongs to the window this code runs in and the ELEMENT
+ * belongs to the iframe's DOCUMENT — an ownership split, which is real, and
+ * which is orthogonal to whose constructor built the node.
+ */
 export interface AnchorScrollDeps {
-  /** Defer one animation frame, on the PARENT window's clock — the realm the
+  /** Defer one animation frame, on the PARENT window's clock — the window the
    *  click handler runs in. (The iframe's own `requestAnimationFrame` would
    *  also fire: `allow-scripts` governs script the DOCUMENT loads or
    *  contains, not a same-origin call made from the parent. Scheduling there
-   *  would simply be the wrong clock for parent-realm code.) */
+   *  would simply be the wrong clock for parent-window code.) */
   readonly schedule: (callback: () => void) => void;
-  /** Look the anchor up in the IFRAME's document — that is the only realm the
-   *  element exists in. */
+  /** Look the anchor up in the IFRAME's document — that is the only DOCUMENT
+   *  the element is in, whichever realm's constructor built it. */
   readonly findAnchor: (targetId: string) => ScrollableLike | null | undefined;
 }
 
@@ -253,10 +301,20 @@ export interface AnchorScrollDeps {
  * with `instant`. So the cause of that failure is still not established — see
  * ADR-0062 Amendment 3 Decision 7. Do not re-attach this fix to that symptom.
  *
- * THE TWO REALMS ARE SEPARATE PARAMETERS ON PURPOSE. The frame is scheduled
- * in the realm this code actually runs in — the PARENT window. The ELEMENT,
- * conversely, only exists in the iframe's document, which is why the lookup is
- * the caller's job and crosses the boundary the other way.
+ * NOR DOES "THIS CALL NEVER RUNS" EXPLAIN IT, and that reading is now
+ * withdrawn. A production trace wrapping
+ * `iframe.contentWindow.Element.prototype.scrollIntoView` recorded zero calls
+ * through a real anchor click and was read as proof that the top-alignment
+ * pass is absent in production. That instrument cannot observe this call at
+ * all — the anchor element carries the PARENT realm's prototypes (see the
+ * realm note on `AnchorScrollDeps` above) — and written the same way in the
+ * browser tier it is equally silent on a document where the jump lands
+ * correctly. The call fires; the observation measured the instrument.
+ *
+ * THE TWO DEPENDENCIES ARE SEPARATE PARAMETERS ON PURPOSE. The frame is
+ * scheduled on the window this code actually runs in — the PARENT. The
+ * ELEMENT, conversely, is only in the iframe's DOCUMENT, which is why the
+ * lookup is the caller's job and crosses the boundary the other way.
  *
  * Scroll only; `location.hash` is never assigned. The iframe is a sandboxed
  * srcdoc document, so a hash assignment there is meaningless for the user's
