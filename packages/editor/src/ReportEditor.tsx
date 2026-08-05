@@ -82,10 +82,10 @@ import {
 } from "./editor-state";
 import { buildIframeDocument } from "./iframe-document";
 import {
-  deferAnchorScroll,
   editorClickOutcome,
   linkActivation,
   linkMarkAtPos,
+  scrollAnchorIntoView,
 } from "./link-activation";
 
 // Re-exported for callers that import it from this module (the type moved to
@@ -273,27 +273,85 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         }
         const element = iframe?.contentDocument?.getElementById(targetId);
 
-        // STEP 1 — MOVE PROSEMIRROR'S CARET TO THE ANCHOR.
+        // STEP 1 — TOP-ALIGN THE ANCHOR, SYNCHRONOUSLY, BEFORE ANYTHING ELSE.
+        //
+        // THIS USED TO BE STEP 2, deferred an animation frame, re-resolving
+        // the anchor by `id` inside that frame. The operator's round-five
+        // production trace is why it is neither any more. Instrumented on the
+        // realm the call actually resolves through (the PARENT's
+        // `Element.prototype` — see the realm note in link-activation.ts), a
+        // real anchor click on the live `/edit` page reads:
+        //
+        //     caretHost:    "H2#section-two"
+        //     trace:        [ { kind: "scrollBy", args: "[0,77.9453125]", y: 0 } ]
+        //     finalScrollY: 78      targetTop: 609 (was 687)
+        //
+        // The caret transaction below lands, ProseMirror's own minimal reveal
+        // fires — and the alignment pass does not run at all. Running the same
+        // instrument over the browser tier's `plain-report.html` reads the
+        // same viewport (647), the same anchor position (687) and the same
+        // `scrollBy(0, 77.9)`, and then DOES record the alignment call. So the
+        // divergence is entirely between the dispatch below and this call.
+        //
+        // WHAT MAKES PRODUCTION SKIP IT IS STILL NOT ESTABLISHED. What IS
+        // established is that the old ordering gave it three ways to be
+        // skipped without leaving any trace, and this ordering has none:
+        //
+        //  - it no longer runs downstream of `view.dispatch(...)`.
+        //    prosemirror-view 1.42.0 wraps a `handleDOMEvents` handler in no
+        //    try/catch (`runCustomHandler`, dist/index.js:3145), so anything
+        //    throwing inside that dispatch — a caller's own
+        //    `onSelectionChange` included — would abort the click handler
+        //    after PM has applied the caret and scrolled, leaving exactly the
+        //    trace above. REFUTED IN PRODUCTION (round 6): with `error` and
+        //    `unhandledrejection` armed on the parent window and the console
+        //    reader running, the bug reproduced on the click and NOTHING was
+        //    captured — and with no try/catch to swallow it, a throw would
+        //    have surfaced. Kept as a removed surface, not as a candidate;
+        //  - it no longer waits on a parent-window animation frame that has
+        //    never been observed running in the production page — STILL LIVE;
+        //  - it no longer re-resolves an element already in hand, which could
+        //    return nothing, or (the same call, a different failure) the FIRST
+        //    element in document order with that id rather than the one the
+        //    handler resolved — STILL LIVE.
+        //
+        // Both properties are contracts in tests/browser/anchor-scroll.spec.ts
+        // ("does not depend on a later animation frame", "survives a caller
+        // callback that throws mid-dispatch"); both are RED against the
+        // previous ordering, and neither is a reproduction of the production
+        // failure. Since round 6 the second is a DEFENSIVE invariant — the
+        // missing try/catch is real and worth not depending on — rather than a
+        // candidate explanation. Do not read any of this as a diagnosis.
+        //
+        // ORDERING IT FIRST COSTS NOTHING. PM's reveal scrolls only as far as
+        // it must (`scrollRectIntoView`); with the anchor already top-aligned
+        // the caret is on screen, so PM computes a zero move and the surface
+        // is scrolled exactly once instead of twice. The element lookup
+        // crosses into the iframe's DOCUMENT because that is the only document
+        // it is in; whose realm built it is a separate question, answered on
+        // the realm note in link-activation.ts.
+        scrollAnchorIntoView(element);
+
+        // STEP 2 — MOVE PROSEMIRROR'S CARET TO THE ANCHOR.
         //
         // This is what the original implementation was missing, and why the
         // feature shipped inert. A click leaves PM's selection ON THE TOC
         // LINK, and PM scrolls for a transaction only when that transaction
         // called `.scrollIntoView()` (`updateStateInner`'s `state
         // .scrollToSelection > prev.scrollToSelection` test) — so a scroll
-        // issued behind PM's back has no standing, and whatever later reveals
-        // the caret drags the document straight back to the link. Measured in
-        // Chrome: that loses whatever we do. A `behavior: "smooth"` scroll
-        // loses worst of all, because it is an abortable animation running
-        // for hundreds of milliseconds and any competing scroll abandons it
-        // permanently, leaving the box at the competitor's offset — the exact
-        // "scrollY stuck at the caret offset, unchanged after 4s" symptom
-        // that was reported.
+        // issued behind PM's back has no standing, and anything that later
+        // reveals the caret is free to drag the document back to the link.
+        // Measured in Chrome against a modelled competitor: such a scroll
+        // loses whatever we do, and a `behavior: "smooth"` one loses worst,
+        // because it is an abortable animation running for hundreds of
+        // milliseconds and any competing scroll abandons it permanently.
         //
-        // WHICH mechanism performs that competing scroll is NOT established;
-        // two plausible candidates were checked against prosemirror-view's
-        // source and refuted. `anchorScrollTransaction`'s doc comment
-        // (editor-state.ts) carries the full account — read it before
-        // repeating any causal story about this.
+        // WHETHER SUCH A COMPETITOR EXISTS IN PRODUCTION, and if so WHICH
+        // mechanism it is, is NOT established — three candidates have been
+        // checked against prosemirror-view's source and refuted, and the
+        // browser tier has never reproduced the reported failure at all.
+        // `anchorScrollTransaction`'s doc comment (editor-state.ts) carries the
+        // full account; read it before repeating any causal story about this.
         //
         // Deferring by MORE frames cannot fix it either: the caret never
         // stops being somewhere else. So don't out-run the competitor —
@@ -310,36 +368,11 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
           try {
             pos = view.posAtDOM(element as unknown as Node, 0);
           } catch {
-            pos = null; // not a node ProseMirror rendered — step 2 still runs.
+            pos = null; // not a node ProseMirror rendered — step 1 already aligned it.
           }
           const tr = pos === null ? null : anchorScrollTransaction(view.state, pos);
           if (tr) view.dispatch(tr);
         }
-
-        // STEP 2 — TOP-ALIGN IT.
-        //
-        // Step 1 alone is not the whole fix: PM's `scrollIntoView()` reveals
-        // the selection MINIMALLY (`scrollRectIntoView` scrolls just far
-        // enough to make it visible), which lands a below-the-fold anchor
-        // against the BOTTOM edge of the editing surface, where "jump to this
-        // section" should put it at the top. So the DOM scroll still runs,
-        // deferred one frame on the PARENT window's clock and INSTANT rather
-        // than smooth (see `deferAnchorScroll`). It is safe now in a way it
-        // never was before: the caret is already at the anchor, so any later
-        // reveal of it finds it visible and scrolls nothing. The browser tier
-        // asserts the resulting TOP alignment (tests/browser).
-        //
-        // This is also the only path when the id sits on something PM cannot
-        // resolve to a document position — a plain DOM scroll still beats
-        // doing nothing. The element lookup crosses into the iframe's
-        // document, because that is the only realm it exists in.
-        deferAnchorScroll(targetId, {
-          schedule: (callback) =>
-            typeof window.requestAnimationFrame === "function"
-              ? window.requestAnimationFrame(callback)
-              : callback(),
-          findAnchor: (id) => iframe?.contentDocument?.getElementById(id),
-        });
       }
 
       const view = new EditorView(
@@ -375,9 +408,13 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
               //
               // The link under the cursor is resolved through ProseMirror's
               // MODEL (`posAtCoords` → `linkMarkAtPos`), never
-              // `event.target.closest("a")`: this document lives in an
-              // iframe, a different JS realm, where `instanceof` checks
-              // against the parent's constructors are false.
+              // `event.target.closest("a")` — because a link here is a MARK on
+              // text rather than an element, and the mark set at the position
+              // is the authority on where it starts and ends. (This comment
+              // used to justify it with "the iframe is a different JS realm
+              // where `instanceof` against the parent's constructors is
+              // false". That is backwards for PM-rendered nodes and it is
+              // corrected on `AnchorScrollDeps` in link-activation.ts.)
               const found = clickedView.posAtCoords({ left: up.x, top: up.y });
               const outcome = editorClickOutcome(
                 linkActivation({

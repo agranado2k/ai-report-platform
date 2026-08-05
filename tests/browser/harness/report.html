@@ -2,32 +2,71 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Anchor scroll fixture</title>
+    <title>Anchor scroll fixture — smooth</title>
     <style>
-      body { font-family: system-ui; margin: 0; padding: 24px; }
-      section { margin: 0 0 60vh; }
+      /* THE SCROLL-AFFECTING RULES BELOW ARE MIRRORED FROM A REAL REPORT, and
+         they are pinned mechanically: `harness/fixture-fidelity.test.ts` scans
+         `packages/report-html/src/fixtures/ai-readiness-report.html` (a
+         verbatim generated report) for every scroll-relevant declaration —
+         `scroll-behavior`, `scroll-margin*`, `scroll-padding*`, `overflow*`,
+         `position: sticky` — and fails if one of them is missing here. That
+         guard exists because ADR-0079's prose version of the same rule was
+         violated by its own commit: the real report styles
+         `section { scroll-margin-top: 1rem }` and a sticky, independently
+         scrollable sidebar, and this fixture had neither — so the browser tier
+         was asserting a landing position production does not produce.
+
+         WHAT THE `scroll-behavior: smooth` RULE IS AND IS NOT EVIDENCE FOR.
+         It is what ONE real generated report ships (that fixture, line 44). It
+         is NOT something the platform adds — a report is author/LLM-written
+         HTML stored and served verbatim (`shell.ts` is
+         `shell.pre + bodyHtml + shell.post`) — and no authoring guidance
+         requires it; `packages/report-html/src/fixtures/anchors-and-links.html`,
+         this repo's other report fixture, has none. So "a report MAY ship it"
+         is the claim, not "reports DO ship it", and `harness/plain-report.html`
+         is the sibling fixture carrying no `scroll-behavior` at all — matching
+         a real uploaded document that was measured FAILING in production. Keep
+         both: under `behavior: "auto"` the same code means different things on
+         the two, and only running both can show which meaning is under test. */
+      html { scroll-behavior: smooth; }
+      body { font-family: system-ui; margin: 0; padding: 0; }
+      .shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+      .sidebar {
+        position: sticky; top: 0; align-self: start;
+        height: 100vh; overflow-y: auto;
+        padding: 24px; border-right: 1px solid #ccc;
+      }
+      .main { min-width: 0; padding: 24px; }
+      .tablewrap { overflow-x: auto; }
+      section { margin: 0 0 70vh; scroll-margin-top: 1rem; }
       .spacer { height: 20vh; }
     </style>
   </head>
   <body>
-    <h1 id="top">Anchor scroll fixture</h1>
-    <p class="spacer" id="spacer">spacer</p>
-    <nav id="toc">
-      <a href="#deep-section">to section</a>
-      <a href="#section-two">to heading</a>
-      <a href="https://example.com/" target="_blank" rel="noopener noreferrer">external</a>
-    </nav>
-    <section id="filler"><h2 id="section-one">One</h2><p>commentable filler</p></section>
-    <section><h2 id="section-two">Two</h2></section>
-    <section id="deep-section"><h2>Deep</h2><p>bottom</p></section>
-    <!-- TRAILING RUNWAY, and it is load-bearing for the assertions. Without
-         content below it, `#deep-section` sits past the document's maximum
-         scroll offset and CANNOT be brought to the top of the viewport — which
-         makes "the target is somewhere near the top" satisfiable by scrolling
-         to the bottom of the document and says nothing about the anchor. With
-         the runway, top alignment is reachable, so the specs can assert the
-         exact scroll offset instead. -->
-    <section id="runway"><h2>Runway</h2><p>runway</p></section>
-    <section id="runway-two"><h2>Runway two</h2><p>runway</p></section>
+    <div class="shell">
+      <!-- The TOC lives in the sticky, independently scrollable sidebar the
+           real report puts it in, so it is still reachable after a jump. -->
+      <nav class="sidebar" id="toc">
+        <h1 id="top">Anchor scroll fixture</h1>
+        <a href="#deep-section">to section</a>
+        <a href="#section-two">to heading</a>
+        <a href="https://example.com/" target="_blank" rel="noopener noreferrer">external</a>
+      </nav>
+      <div class="main">
+        <p class="spacer" id="spacer">spacer</p>
+        <section id="filler"><h2 id="section-one">One</h2><p>commentable filler</p></section>
+        <section><h2 id="section-two">Two</h2></section>
+        <section id="deep-section"><h2>Deep</h2><p>bottom</p></section>
+        <!-- TRAILING RUNWAY, and it is load-bearing for the assertions. Without
+             content below it, `#deep-section` sits past the document's maximum
+             scroll offset and CANNOT be brought to the top of the viewport —
+             which makes "the target is somewhere near the top" satisfiable by
+             scrolling to the bottom of the document and says nothing about the
+             anchor. With the runway, top alignment is reachable, so the specs
+             can assert the exact scroll offset instead. -->
+        <section id="runway"><h2>Runway</h2><p>runway</p></section>
+        <section id="runway-two"><h2>Runway two</h2><p>runway</p></section>
+      </div>
+    </div>
   </body>
 </html>
