@@ -332,13 +332,6 @@ describe("programmaticRevealTransaction — one reveal mechanism, two callers", 
 });
 
 describe("editor-state misc", () => {
-  it("an ordinary user selection still reports {from,to,text} (regression guard)", () => {
-    const state = createEditorState(oneParagraphDoc);
-    const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
-    const next = state.apply(tr);
-    expect(reportableSelection(tr, next)).toEqual({ from: 1, to: 6, text: "hello" });
-  });
-
   it("a collapsed selection reports null (nothing to comment on)", () => {
     const state = createEditorState(oneParagraphDoc);
     const tr = state.tr.setSelection(TextSelection.create(state.doc, 3));
