@@ -3,6 +3,7 @@
 // (open a tab / scroll to an anchor) are injected as props by `ReportEditor`
 // rather than performed here.
 import { parseBody } from "arp-report-html";
+import type { EditorState } from "prosemirror-state";
 import { describe, expect, it } from "vitest";
 import type { ClickPoint } from "./click-gesture";
 import { createEditorState } from "./editor-state";
@@ -252,11 +253,62 @@ describe("linkMarkAtPos — resolved through the ProseMirror model, not the DOM"
   // tests pin the model-based lookup that replaces them.
   const stateFor = (html: string) => createEditorState(parseBody(html));
 
+  /** The link's REAL document range, walked out of the doc. Derived rather
+   *  than guessed: a text offset is not a document position (positions count
+   *  node boundaries too), and an assertion that only passes because the two
+   *  happen to coincide pins nothing. */
+  const linkRange = (state: EditorState): { from: number; to: number } => {
+    let range: { from: number; to: number } | null = null;
+    state.doc.descendants((node, pos) => {
+      if (node.isText && node.marks.some((mark) => mark.type.name === "link")) {
+        range = { from: pos, to: pos + node.nodeSize };
+      }
+    });
+    if (!range) throw new Error("fixture has no link mark");
+    return range;
+  };
+
+  const SENTENCE = '<p>before <a href="https://example.com/">link</a> after</p>';
+
   it("finds the link mark for a position inside the link text", () => {
-    const state = stateFor('<p>before <a href="https://example.com/">link</a> after</p>');
-    const linked = state.doc.textBetween(0, state.doc.content.size).indexOf("link");
-    const mark = linkMarkAtPos(state, linked + 3); // inside "link"
-    expect(mark?.attrs.href).toBe("https://example.com/");
+    const state = stateFor(SENTENCE);
+    const { from, to } = linkRange(state);
+    const middle = Math.floor((from + to) / 2);
+    expect(middle).toBeGreaterThan(from);
+    expect(middle).toBeLessThan(to);
+    expect(linkMarkAtPos(state, middle)?.attrs.href).toBe("https://example.com/");
+  });
+
+  // BOTH BOUNDARIES, EXPLICITLY. `link` is `inclusive: false`, which makes
+  // `$pos.marks()` deliberately drop the link at both of the link's own edges
+  // — that method answers "what would typing here inherit", and typing at
+  // either edge must not extend the link. But `posAtCoords` returns exactly
+  // those positions whenever the user clicks the LEFT half of the link's first
+  // character or the RIGHT half of its last, which is a routine click, not an
+  // edge case. Without the nodeBefore/nodeAfter legs a click on either end
+  // character of EVERY link silently does nothing.
+  it("BOUNDARY: the left half of the FIRST character — recovered via nodeAfter", () => {
+    const state = stateFor(SENTENCE);
+    const { from } = linkRange(state);
+    const $from = state.doc.resolve(from);
+    expect($from.marks()).toEqual([]); // inclusive:false — marks() alone fails here
+    expect($from.nodeBefore?.marks.some((m) => m.type.name === "link")).toBe(false);
+    expect(linkMarkAtPos(state, from)?.attrs.href).toBe("https://example.com/");
+  });
+
+  it("BOUNDARY: the right half of the LAST character — recovered via nodeBefore", () => {
+    const state = stateFor(SENTENCE);
+    const { to } = linkRange(state);
+    const $to = state.doc.resolve(to);
+    expect($to.marks()).toEqual([]); // inclusive:false — marks() alone fails here
+    expect($to.nodeAfter?.marks.some((m) => m.type.name === "link")).toBe(false);
+    expect(linkMarkAtPos(state, to)?.attrs.href).toBe("https://example.com/");
+  });
+
+  it("BOUNDARY: a link that starts the paragraph — nodeAfter with nothing before it", () => {
+    const state = stateFor('<p><a href="https://example.com/">link</a> after</p>');
+    const { from } = linkRange(state);
+    expect(linkMarkAtPos(state, from)?.attrs.href).toBe("https://example.com/");
   });
 
   it("returns null for a position in unlinked text", () => {
