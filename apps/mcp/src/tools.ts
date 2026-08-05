@@ -297,7 +297,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
             "The report's full HTML document. Served byte-for-byte — there is no " +
               "serve-time rewriting — so what you emit is what readers get. LINK " +
               "CONVENTIONS (ADR-0062 Amendment 3; nothing adds these for you): give the " +
-              "target an `id` and point in-page links at it (`<a href=\"#summary\">` → " +
+              'target an `id` and point in-page links at it (`<a href="#summary">` → ' +
               '`<section id="summary">`); put `target="_blank" rel="noopener noreferrer"` on ' +
               "every EXTERNAL link you want to open in a new tab. Anchor BLOCK elements only " +
               "(`section`, `h1`-`h6`, `p`, `div`, `li`, `td`, `blockquote`): editing a report " +
