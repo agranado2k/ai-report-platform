@@ -84,6 +84,7 @@ This repo IS NOT:
 | If you need to…                          | Skill / hook / doc                              |
 | ---------------------------------------- | ----------------------------------------------- |
 | Write code                               | `/tdd <task>` — red-green-refactor              |
+| Test a mounted editor / real-browser behaviour | `pnpm test:browser` — hermetic Chromium tier in `tests/browser/` (ADR-0079). Pure logic → `pnpm test`; needs a deployment → `pnpm e2e` |
 | Open a PR                                | `git worktree add worktree/<slug> -b feat/<slug>` |
 | Iterate on bot review + CI on an open PR | `/pr-iterate <PR#>` (one pass) · `/loop /pr-iterate <PR#>` (continuous) |
 | Land a batch of green PRs serially       | `/merge-train` (auto-discover + confirm) · `/merge-train <PR#> [<PR#>…]` — signed merge commits, migration-aware order, then `/worktree-cleanup` (ADR-0077) |

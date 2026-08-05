@@ -476,6 +476,15 @@ export default function EditReport() {
         onSave={onSave}
       />
 
+      {/* THE PANE GEOMETRY BELOW IS DUPLICATED, BY HAND, IN THE BROWSER TEST
+          HARNESS. `tests/browser/harness/build.mts` reproduces this layout in
+          plain CSS (a 53px topbar, a flexed document pane, a 320px = `w-80`
+          side panel) so the mounted editor is tested at the size it actually
+          renders at — the anchor-scroll assertions are stated in terms of the
+          editing surface's height, which is whatever this layout leaves it
+          (ADR-0079). Nothing links the two automatically: change the topbar
+          height, the panel width or the pane structure here and the harness
+          keeps testing the old layout silently. Update it in the same PR. */}
       <div className="flex min-h-0 flex-1 print:block">
         {/* The document pane fills the viewport height and scrolls on its OWN
             (the report iframe carries the scroll), edge-to-edge with no chrome

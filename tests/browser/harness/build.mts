@@ -1,4 +1,11 @@
-// Builds the harness page consumed by tests/browser/*.spec.ts.
+// Builds the harness page consumed by tests/browser/*.spec.ts (ADR-0079).
+//
+// THE PANE GEOMETRY IN THE <style> BELOW IS A HAND COPY of apps/view's
+// `/edit` route (`apps/view/app/routes/$slug_.edit.tsx`): a 53px topbar, a
+// flexed document pane, a 320px (`w-80`) side panel. Nothing links the two, so
+// a layout change there must be mirrored here in the same PR — a matching
+// comment sits on the route. The editing surface's height falls out of this
+// layout, and the anchor assertions are stated in terms of it.
 //
 // Bundled with esbuild rather than served by a dev server because the page has
 // no server side at all: it is `ReportEditor` plus a report, and the whole

@@ -13,8 +13,13 @@ import { defineConfig } from "vitest/config";
 // `createEditorState`/keymap-bound commands, plus the SSR-safety test for
 // `ReportEditor` itself, are cheap to unit-test — now live in
 // `packages/editor/src/**/*.test.ts` (ADR-0071), covered by the
-// `packages/*/src/**/*.test.ts` glob below; the mounted `EditorView` (real
-// DOM, real keyboard events) stays e2e-only like the rest of the Remix UI.
+// `packages/*/src/**/*.test.ts` glob below. The MOUNTED `EditorView` (real
+// DOM, real mouse input, real scrolling) is NOT covered here and is no longer
+// e2e-only either: it has its own hermetic browser tier, `tests/browser/`
+// (ADR-0079, `pnpm test:browser`), which runs in the same `unit` workflow.
+// Deciding where a new editor test goes: pure decision logic → here; needs
+// layout, scrolling, selection or native events → `tests/browser/`; needs a
+// deployment, auth or the database → `tests/e2e/` (ADR-0019).
 // `apps/view/app/server` is the SAME carve-out on the viewer app, added for
 // the GET /<slug>/edit deep-link's pure URL-building helper (ADR-0063
 // Decision 3) — apps/view otherwise has no unit-test tier at all (its Remix

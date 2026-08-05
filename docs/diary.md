@@ -3848,9 +3848,11 @@ Relying on remembering to dogfood is not a control, so `tests/browser/` now
 exists: its own hermetic Playwright config, a `file://` harness bundling the real
 `ReportEditor` over a report parsed by the real `parseBody`, no deployment, no
 auth, no database, wired into the `unit` workflow. Its regression case reproduces
-the production symptom against the shipped code (target still 1152px below the
-fold after the click) and passes after. That tier is the standing replacement for
-the pass that was skipped.
+the production symptom against the shipped code (the target left far below the
+fold after the click) and passes after. That tier is a **fast signal** for the
+pass that was skipped — not a control: no `required_status_checks` are set on
+this repo today, so the job is advisory in exactly the way the dogfood pass was.
+The tier is recorded as ADR-0079.
 
 Worth recording for the next person who investigates this: production was
 verified to be running `c9a1134` (Vercel `arp-view-prod`, deployment
@@ -3861,5 +3863,105 @@ survived review, CI, and a first round of local reproduction attempts.
 ADR-0062 Amendment 3 Decision 7 is amended in place (the superseded
 "deferred one animation frame" wording is kept, not quietly rewritten — the
 reasoning that produced the wrong answer is the part worth keeping).
+
+Worktree `worktree/anchor-scroll` (branch `fix/anchor-scroll`).
+
+---
+
+## 2026-08-05 — Two reviews of the anchor fix: a NodeSelection hazard, a test that proved nothing, and a causal story that was not true
+
+PR #245's own review pass found more than the bug it was opened to fix. Five
+things, in the order they matter.
+
+**1. The anchor transaction could arm a destructive edit.** `TextSelection.near`
+is not a `TextSelection` factory — `TextSelection` inherits `near` from
+`Selection`, so it returns whatever kind of selection is valid nearest to the
+position. For `<hr id="divider">` that is a `NodeSelection` over the rule
+itself: clicking a TOC link to `#divider` left the element carrying
+`.ProseMirror-selectednode`, and the user's next keystroke would have REPLACED
+it. The function's own doc comment claimed the selection was collapsed. A
+second, quieter case shares the cause: for a legal empty container
+(`<section id="landing"></section>`, `content: "block*"`) `near` walks OUT of
+the target to the following block, so PM would reveal one position while the DOM
+fallback top-aligns another — the original race, restored, for that class of
+anchor. Both are now refused, falling through to the DOM-scroll-only path.
+`horizontal_rule` is the only reachable block atom in `reportSchema` today, but
+`withId` is swept over every node with a `toDOM`, so any block atom added later
+would have inherited both the anchor and the hazard.
+
+**2. The new browser tier had the same defect it was built to catch.** Its
+assertions were satisfied by a completely wrong implementation. `targetTop` is a
+signed `getBoundingClientRect().top`, and `#deep-section` sat past the document's
+maximum scroll offset — it could not be top-aligned at all, so the state that
+passed was literally "scrolled to the bottom of the document". Replacing the
+anchor handler with `scrollTo(0, 1e6)` made all three scroll tests green. The
+fixture now carries a trailing runway so top alignment is reachable, the
+expected offset is derived from the target's own position in the document, and
+`targetTop >= 0` catches overshoot. Under the same impostor all three now fail
+by 725/1131/888 pixels, while the assertion they replace evaluated true
+(targetTop −725 < 315).
+
+**3. The stated ProseMirror mechanism is not supported by the source, and the
+obvious replacement is not either.** The narrative said `DOMObserver.flushSoon()`
+defers a 20ms flush that calls `view.scrollToSelection()`. In prosemirror-view
+1.42.0 the only such call inside `flush()` is gated on
+`Math.max(view.input.lastTouch, view.input.lastClick.time) < Date.now() - 300`,
+so it structurally cannot fire on a click. The natural alternative —
+`updateStateInner`'s preserve path (`storeScrollPos`/`resetScrollPos`) restoring
+the pre-transaction offset — is also refuted for Chrome: it is guarded by
+`this.dom.style.overflowAnchor == null`, and Chrome supports `overflow-anchor`,
+so that property reads `""` and the guard is false (verified in Chromium, not
+reasoned about). **So the true competitor is NOT determined**, and every site now
+says so instead of swapping one confident-but-unverified story for another. What
+is established, and is the load-bearing part: `updateStateInner` scrolls only
+when `state.scrollToSelection > prev.scrollToSelection`, i.e. only for a
+transaction that called `.scrollIntoView()` — which is why a scroll issued
+behind PM's back has no standing, and why the fix works regardless of what
+performs the competing scroll.
+
+**4. The tier is a fast signal, not a control — and it does not reproduce the
+bug on its own.** Only one of its six cases does, and only because
+`armCaretReveal` injects a synthetic competing scroll, so the guard protects
+against a regression of the MODELLED competitor rather than against ProseMirror
+changing its real behaviour — the same class of blind spot that let #243 ship.
+The mitigation is one assertion on the mechanism instead of the outcome: after
+the click, PM's own selection must resolve inside the anchor target. Separately,
+calling the tier "the standing replacement for relying on the browser pass being
+remembered" overclaimed: `infra/terraform/envs/shared/main.tf` sets no
+`required_status_checks`, so the module default `[]` applies and NO check gates
+merge today. The job is advisory in exactly the way the skipped dogfood pass
+was. (Making checks required is an operator decision about merge gating, raised
+separately — the Terraform is untouched here.)
+
+**5. The tier now has its own ADR.** A testing-taxonomy decision is repo-wide, so
+it does not belong as a consequence bullet inside an ADR about the editing model
+and the report-HTML schema, where nobody will find it. **ADR-0079** records what
+the tier is for, its boundary against the node and e2e tiers, why it lives in
+`unit.yml` rather than `e2e.yml`, that it is hermetic (`file://`, no
+deployment/auth/database), the Chromium-only limitation, and the honest
+statement about the modelled competitor. The precedent is exact: ADR-0046
+("two-tier adapter testing") is standalone for the same reason. ADR-0062
+Amendment 3's Decision 7 and its consequence bullet are corrected to match, and
+`docs/adr/INDEX.md` carries the 2026-08-05 correction note.
+
+Also in this pass: Jump and the anchor click were the same three-step
+transaction written twice, and are now one `programmaticRevealTransaction`, so
+"they use the same mechanism" is structural rather than narrative; the browser
+config's 1000x700 viewport was DEAD (a project's `use` replaces the top-level
+one, and the chromium project re-spread `devices["Desktop Chrome"]`), so every
+"700px viewport" number in the sources described a configuration that never ran;
+the four fixed `waitForTimeout` sleeps became a tight arrival deadline plus an
+explicit hold window; and the harness gained comment click-to-highlight, the last
+untested leg of a click-dispatch matrix whose other leg had already shipped
+broken once.
+
+Deferred, deliberately, and recorded on the PR rather than as issues:
+`tests/browser/**` is not typechecked (pre-existing and identical for
+`tests/e2e/**` — worth closing for both at once); the browser CI job has no pnpm
+or Playwright caches and no paths filter or concurrency-cancel; esbuild is
+declared independently at the root and in `apps/mcp`, where a catalog pin would
+prevent a silent dedupe split; and the `file://` harness inlines its `<script>`,
+so it cannot close the standing `frame-src 'self'` question in
+`packages/headers/src/view-headers.ts`.
 
 Worktree `worktree/anchor-scroll` (branch `fix/anchor-scroll`).
