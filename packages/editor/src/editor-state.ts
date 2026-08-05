@@ -9,7 +9,7 @@ import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { Node as PMNode, type ResolvedPos } from "prosemirror-model";
-import type { Plugin, Transaction } from "prosemirror-state";
+import type { Plugin, Selection, Transaction } from "prosemirror-state";
 import { EditorState, TextSelection } from "prosemirror-state";
 import {
   type CommentForHighlight,
@@ -79,23 +79,54 @@ export interface EditorSelection {
  *  see `reportableSelection` below. */
 const PROGRAMMATIC_SELECTION_META = "arp-editor$programmaticSelection";
 
+/**
+ * THE ONE WAY THIS EDITOR REVEALS A PLACE IN THE DOCUMENT: move the selection
+ * there, flag the move as programmatic, and ask ProseMirror to scroll.
+ *
+ * Both revealers below route through this — the comment "Jump" and the in-page
+ * anchor click — so "Jump and the anchor click use the same mechanism" is a
+ * structural fact about this module rather than a claim in a comment that a
+ * later edit can quietly falsify.
+ *
+ * Each of the three parts is load-bearing:
+ *
+ *  - `setSelection` is the reveal. A scroll performed behind ProseMirror's
+ *    back leaves the caret pointing somewhere else, and the browser reveals
+ *    the caret afterwards (see `anchorScrollTransaction` below) — so the only
+ *    durable way to scroll is to make the place you want revealed the place
+ *    the selection already is.
+ *  - `.scrollIntoView()` is what makes ProseMirror scroll AT ALL. Its
+ *    `updateStateInner` scrolls only when `state.scrollToSelection >
+ *    prev.scrollToSelection`; a transaction without this call is a "preserve"
+ *    update, and PM does nothing to bring the new selection into view.
+ *  - the programmatic flag keeps `reportableSelection` from reporting the
+ *    move as a pending comment selection: revealing must never start
+ *    authoring (2026-07-29 dogfood paper cut #1).
+ */
+export function programmaticRevealTransaction(
+  state: EditorState,
+  selection: Selection,
+): Transaction {
+  return state.tr
+    .setSelection(selection)
+    .setMeta(PROGRAMMATIC_SELECTION_META, true)
+    .scrollIntoView();
+}
+
 /** Build the "Jump" transaction (item B): resolve the comment against the
  *  CURRENT doc, select the anchored range (the visual "here it is" cue), and
  *  scroll it into view. Returns `null` when the comment's relative position
- *  no longer resolves (the degraded, version-pinned state — item D). The
- *  transaction is flagged as programmatic so the selection it sets does NOT
- *  open the new-comment composer (2026-07-29 dogfood paper cut #1 — Jump
- *  should reveal, never start authoring). */
+ *  no longer resolves (the degraded, version-pinned state — item D). */
 export function jumpToCommentTransaction(
   state: EditorState,
   comment: CommentForHighlight,
 ): Transaction | null {
   const target = jumpTargetForComment(state.doc.content.size, comment);
   if (!target) return null;
-  return state.tr
-    .setSelection(TextSelection.create(state.doc, target.from, target.to))
-    .setMeta(PROGRAMMATIC_SELECTION_META, true)
-    .scrollIntoView();
+  return programmaticRevealTransaction(
+    state,
+    TextSelection.create(state.doc, target.from, target.to),
+  );
 }
 
 /**
@@ -165,10 +196,7 @@ export function anchorScrollTransaction(state: EditorState, pos: number): Transa
   if (!selection.empty) return null;
   const target = anchorTargetRange($pos);
   if (selection.from < target.from || selection.from > target.to) return null;
-  return state.tr
-    .setSelection(selection)
-    .setMeta(PROGRAMMATIC_SELECTION_META, true)
-    .scrollIntoView();
+  return programmaticRevealTransaction(state, selection);
 }
 
 /** The document range the anchor's own node occupies — the only region a

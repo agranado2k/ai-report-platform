@@ -10,6 +10,7 @@
 
 import { type PMDocJson, parseBody, reportSchema, serializeBody } from "arp-report-html";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
+import type { Transaction } from "prosemirror-state";
 import { TextSelection } from "prosemirror-state";
 import { describe, expect, it } from "vitest";
 import {
@@ -17,6 +18,7 @@ import {
   createEditorState,
   docJson,
   jumpToCommentTransaction,
+  programmaticRevealTransaction,
   reportableSelection,
 } from "./editor-state";
 
@@ -284,6 +286,48 @@ describe("anchorScrollTransaction — only a caret INSIDE the target counts as a
     expect(next.selection.empty).toBe(true);
     expect(next.selection.from).toBeGreaterThan(pos);
     expect(next.selection.from).toBeLessThan(pos + size);
+  });
+});
+
+// "Jump and the anchor click use the same mechanism" was, until now, a claim
+// in a comment. These pin it as a property of the code: both callers are
+// `programmaticRevealTransaction` with a different selection, and nothing
+// else. A future edit that gives either one its own bespoke transaction
+// (dropping `.scrollIntoView()`, say, which is the ONLY thing that makes
+// ProseMirror scroll) fails here rather than shipping and being discovered in
+// production a second time.
+describe("programmaticRevealTransaction — one reveal mechanism, two callers", () => {
+  const state = createEditorState(oneParagraphDoc);
+
+  /** The three properties that make a transaction a REVEAL rather than an
+   *  ordinary selection change. */
+  function revealShape(tr: Transaction) {
+    return {
+      scrollsIntoView: tr.scrolledIntoView,
+      suppressesTheComposer: reportableSelection(tr, state.apply(tr)) === null,
+      from: tr.selection.from,
+      to: tr.selection.to,
+    };
+  }
+
+  it("Jump is the shared reveal over the comment's anchored range", () => {
+    const jump = jumpToCommentTransaction(state, {
+      id: "comment_1",
+      anchor: { relative: { from: 1, to: 6 } },
+      intent: "note",
+    });
+    if (!jump) throw new Error("unreachable");
+    expect(revealShape(jump)).toEqual(
+      revealShape(programmaticRevealTransaction(state, TextSelection.create(state.doc, 1, 6))),
+    );
+  });
+
+  it("the anchor click is the shared reveal over the anchor's position", () => {
+    const anchor = anchorScrollTransaction(state, 6);
+    if (!anchor) throw new Error("unreachable");
+    expect(revealShape(anchor)).toEqual(
+      revealShape(programmaticRevealTransaction(state, TextSelection.near(state.doc.resolve(6)))),
+    );
   });
 });
 
