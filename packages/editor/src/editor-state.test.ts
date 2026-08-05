@@ -21,7 +21,10 @@ import {
 
 // `attrs` mirrors what `reportSchema`'s paragraph spec (generic class/style
 // retention + the `.desc`/`.lede`/`.sub` variant attr, ADR-0062 §3) fills in
-// by default — the exact shape `Node#toJSON()` round-trips to.
+// by default. Deliberately carries NO `id` key: this is the shape of a
+// sidecar written BEFORE `withId` widened the retention set (ADR-0062
+// Amendment 3), i.e. what every already-saved report's `_source.json` looks
+// like on disk in R2 today.
 const oneParagraphDoc = {
   type: "doc",
   content: [
@@ -33,10 +36,28 @@ const oneParagraphDoc = {
   ],
 };
 
+// The same document as `Node#toJSON()` round-trips it TODAY — every node now
+// also carries `id`, defaulting to null.
+const oneParagraphDocJson = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      attrs: { class: null, id: null, style: null, variant: null },
+      content: [{ type: "text", text: "hello world" }],
+    },
+  ],
+};
+
 describe("createEditorState / docJson", () => {
-  it("round-trips a PM doc JSON with no edits applied", () => {
+  // Doubles as the FORWARD-COMPATIBILITY guarantee for ADR-0062 Amendment 3:
+  // a pre-Amendment-3 sidecar (no `id` key anywhere) must still open in the
+  // editor, with `id` defaulting to null rather than throwing on a missing
+  // attr. Every report saved before this change is exactly that shape, so a
+  // regression here would break opening ALL of them.
+  it("round-trips a legacy (pre-id) PM doc JSON, defaulting the new id attr to null", () => {
     const state = createEditorState(oneParagraphDoc);
-    expect(docJson(state)).toEqual(oneParagraphDoc);
+    expect(docJson(state)).toEqual(oneParagraphDocJson);
   });
 });
 

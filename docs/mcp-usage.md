@@ -68,6 +68,45 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 
 Reports are served on the separate viewer origin: `https://view.centaurspec.com/<slug>`.
 
+## Authoring the report HTML
+
+The uploaded HTML **is** the artifact (ADR-0062 §4). **On the read path it is served
+byte-for-byte** — there is no serve-time sanitization pass, and there is no save-time link
+rewriting either, by design (ADR-0062 Amendment 3: the author decides). So a generated
+report's links behave like links only if the generator emits them that way.
+
+| You want | Emit |
+|---|---|
+| An in-page anchor / table of contents | `<a href="#summary">` plus a matching `id` on a **block** target: `<section id="summary">` |
+| An external link that opens a new tab | `<a href="https://…" target="_blank" rel="noopener noreferrer">` |
+
+**Anchor block elements only.** `id` survives an edit-and-save round trip on any element
+the schema models as a *node* — `<section>`, `<h1>`–`<h6>`, `<p>`, `<div>`, `<li>`,
+`<td>`/`<th>`, `<blockquote>`, … — and is **dropped** on the inline elements it models as
+*marks*: `<span>`, `<a>`, `<code>`, `<strong>`, `<em>`. That is deliberate (ADR-0062
+Amendment 3, Decision 1: marks split and merge by attribute equality, so an `id` on a mark
+would multiply into duplicates), but it means `<span id="x">` is a dead anchor after the
+first save. Ids must also be unique — on a duplicate, only the first element in document
+order keeps it (`dedupeElementIds`).
+
+Two link attributes are **normalized** rather than preserved verbatim, both for security:
+
+- `target` is retained only when it is `_blank`. `_top` / `_parent` / a named frame are
+  frame-escape primitives and are dropped.
+- `rel` is allowlisted (unrecognized tokens are dropped) and `opener` is stripped
+  unconditionally (it undoes the tabnabbing mitigation). When `target="_blank"`, the
+  emitted `rel` is always the union of your tokens with `noopener noreferrer`.
+
+A `javascript:`, `vbscript:` or `data:text/html` `href` causes the entire `<a>` to be
+dropped (its text survives, unlinked).
+
+**The edit round trip normalizes; it does not preserve bytes.** Bespoke classes, inline
+styles and ordinary document structure survive under the generic attr-retention rule
+(ADR-0062 §3), but a save also sanitizes `style`, coerces or unwraps a tag the schema does
+not support (`<figure>`, `<marquee>`, …), wraps inline content that is not inside a block
+in `<p>`, and does not preserve attribute order. "Byte-identical" is a guarantee the read
+path gives; the editor's is fidelity of *meaning*, not of bytes.
+
 ## Agent onboarding (ADR-0072)
 
 The server ships a short `instructions` string (set once, at connect, via the MCP `initialize`

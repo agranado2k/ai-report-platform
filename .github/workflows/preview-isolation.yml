@@ -303,6 +303,20 @@ jobs:
       head_sha: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
 
+  # ── Security headers: assert what the EDGE serves matches the source ─────────
+  # The `security-headers` gate docs/spec.html's CI table has always promised
+  # (ADR-013). Invoked from here for the same reason as `smoke` above: this
+  # workflow is the only place that knows which deployment is the isolated,
+  # READY one, and a `workflow_call` job runs in the PR's own context so a
+  # change to the gate is exercised by the PR that makes it.
+  security-headers:
+    needs: isolate
+    if: github.event.action != 'closed'
+    name: Security headers
+    uses: ./.github/workflows/security-headers.yml
+    with:
+      view_base_url: ${{ needs.isolate.outputs.view_url }}
+
   # ── Teardown: delete the branch, env vars, and R2 objects on PR close ─────────
   teardown:
     if: github.event.action == 'closed'

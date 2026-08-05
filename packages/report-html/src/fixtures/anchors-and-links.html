@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Anchors &amp; Links fixture</title>
+    <style>
+      :root { --now: #c33; }
+      .sec { font-weight: 700; }
+      .toc a { text-decoration: none; }
+    </style>
+  </head>
+  <body class="report">
+    <nav class="toc" id="toc">
+      <ul>
+        <li id="toc-summary"><p><a href="#summary">Summary</a></p></li>
+        <li id="toc-findings"><p><a href="#findings-heading">Findings</a></p></li>
+        <li id="toc-detail"><p><a href="#detail-para">Detail</a></p></li>
+      </ul>
+    </nav>
+
+    <section id="summary">
+      <h2 class="sec" id="summary-heading"><span class="secnum">01</span>Summary</h2>
+      <p class="desc" id="summary-desc" style="color:var(--now)">
+        A paragraph that carries an id, a recognized variant class, and a style.
+      </p>
+      <blockquote id="summary-quote"><p>Anchors must survive a save.</p></blockquote>
+    </section>
+
+    <section id="findings">
+      <h2 id="findings-heading">Findings</h2>
+      <h3 class="sub" id="findings-sub">Sub-heading with an id</h3>
+      <div class="card" id="findings-card">
+        <p id="detail-para">
+          External links:
+          <a href="https://example.com/blank" target="_blank" rel="noopener noreferrer">already correct</a>,
+          <a href="https://example.com/bare" target="_blank">gains rel</a>,
+          <a href="https://example.com/top" target="_top">frame escape</a>,
+          <a href="https://example.com/opener" rel="opener">tabnabbing</a>,
+          <a href="https://example.com/nofollow" rel="nofollow">nofollow kept</a>,
+          <a href="mailto:hello@example.com">mail</a>,
+          <a href="#summary">back to summary</a>.
+        </p>
+      </div>
+      <div class="tablewrap" id="findings-table">
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td id="cell-item">Anchor target</td>
+              <td id="cell-note">A table cell carrying an id</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </body>
+</html>

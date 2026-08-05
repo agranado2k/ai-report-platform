@@ -4,6 +4,7 @@ import { Transform } from "prosemirror-transform";
 import type { PMDocJson } from "./body.js";
 import { diffSchema } from "./diff-schema.js";
 import { getDomEnvironmentDocument } from "./dom-environment.js";
+import { dedupeElementIds } from "./schema/ids.js";
 import { reportSchema } from "./schema.js";
 
 /**
@@ -116,5 +117,10 @@ export function diffRendered(oldDocJson: PMDocJson, newDocJson: PMDocJson): stri
   const fragment = serializer.serializeFragment(tr.doc.content, { document });
   const container = document.createElement("div");
   container.appendChild(fragment);
+  // Same first-wins dedupe as `serializeBody` (ADR-0062 Amendment 3) — the
+  // rendered diff is HTML shown in a browser, and it is built from TWO doc
+  // versions, so it is if anything MORE likely to carry a duplicate id than
+  // either version alone.
+  dedupeElementIds(container);
   return container.innerHTML;
 }

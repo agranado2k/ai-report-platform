@@ -1,9 +1,27 @@
-// Characterization tests for the viewer origin's security headers (ADR-013),
+// SPECIFICATION tests for the viewer origin's security headers (ADR-013),
 // plus the second, edit-route-only CSP profile added by ADR-0063 Phase 3
 // (`editViewHeaders`). These pin the CURRENT header values exactly; a failing
 // test here means a header changed, which is a decision to make deliberately,
 // not a surprise. SECURITY-SENSITIVE — assertions written before the
 // `editViewHeaders` implementation (TDD).
+//
+// PROMOTED from characterization to specification (ADR-0062 Amendment 3): the
+// sandbox CSP's four granted tokens were written in a single commit (c04de5c,
+// 2026-06-02) with no itemised rationale and were never revisited, so the only
+// thing pinning them was one exact-string assertion — which says WHAT the
+// value is but never WHY, and says nothing at all about what is withheld. The
+// `sandbox CSP token grants` block below names each granted token with the
+// capability it buys, and asserts the withheld ones NEGATIVELY, so widening
+// the sandbox becomes an explicit, reviewable act rather than an invisible
+// string edit.
+//
+// This mattered concretely: the "links don't work in reports" investigation
+// first suspected these tokens. A real-browser reproduction under the
+// byte-identical production sandbox CSP proved otherwise — fragment
+// navigation, self-navigation and `target="_blank"` all work under it (see
+// ADR-0062 Amendment 3) — so NOTHING here was widened for that fix. The
+// negative assertions are what keep the next investigation from "fixing" it
+// the wrong way.
 import { describe, expect, it } from "vitest";
 import { editViewHeaders, viewHeaders } from "./view-headers";
 
@@ -48,6 +66,81 @@ describe("viewHeaders", () => {
 
   it("pins the report-only CSP (stricter: no 'unsafe-inline' on script/style)", () => {
     expect(viewHeaders().get("Content-Security-Policy-Report-Only")).toBe(REPORT_ONLY_CSP);
+  });
+
+  describe("sandbox CSP token grants — each token named for what it buys", () => {
+    const sandbox = () =>
+      (viewHeaders().get("Content-Security-Policy") ?? "")
+        .split(", ")
+        .find((value) => value.startsWith("sandbox")) ?? "";
+
+    it("grants allow-scripts — reports are self-contained documents whose own JS must run", () => {
+      expect(sandbox()).toContain("allow-scripts");
+    });
+
+    it("grants allow-forms — a report may carry a form (e.g. a survey link submit)", () => {
+      expect(sandbox()).toContain("allow-forms");
+    });
+
+    it("grants allow-popups — this is what lets target=_blank open a new tab at all", () => {
+      // ADR-0062 Amendment 3's "author-decides" new-tab behavior depends on
+      // this token: the schema retains `target="_blank"`, and the browser can
+      // only honor it because the sandboxed viewer document may open popups.
+      expect(sandbox()).toContain("allow-popups");
+    });
+
+    it("grants allow-popups-to-escape-sandbox — the opened tab is a normal page, not a sandboxed one", () => {
+      // Without it, a link to a third-party site opens INSIDE this sandbox:
+      // the destination would silently lose scripts/forms/its own origin and
+      // appear broken, and users would blame the report.
+      expect(sandbox()).toContain("allow-popups-to-escape-sandbox");
+    });
+
+    it("WITHHOLDS allow-same-origin — the opaque origin is the whole isolation model", () => {
+      // Granting it would give untrusted report JS the viewer origin's
+      // storage/cookies/DOM — it would undo ADR-002/ADR-013 entirely. This is
+      // the single most important negative assertion in this file.
+      expect(sandbox()).not.toContain("allow-same-origin");
+    });
+
+    it("WITHHOLDS allow-top-navigation and its user-activation variant", () => {
+      // A report must never be able to navigate the tab it is served in to an
+      // attacker's page. Self-navigation (a link to another page of the same
+      // report) is EXEMPT from the sandbox navigation check by spec, so this
+      // token buys nothing legitimate — verified in a real browser during the
+      // ADR-0062 Amendment 3 investigation, which is why the "links don't
+      // work" fix did NOT widen the sandbox.
+      expect(sandbox()).not.toContain("allow-top-navigation");
+      expect(sandbox()).not.toContain("allow-top-navigation-by-user-activation");
+      expect(sandbox()).not.toContain("allow-top-navigation-to-custom-protocols");
+    });
+
+    it("WITHHOLDS allow-downloads — a linked third-party payload is never scanned", () => {
+      // ADR-012's scan gate covers what is UPLOADED, not what a report links
+      // to. Accepted, documented product limitation (ADR-0062 Amendment 3).
+      expect(sandbox()).not.toContain("allow-downloads");
+    });
+
+    it("WITHHOLDS allow-modals, allow-pointer-lock, allow-presentation, allow-orientation-lock", () => {
+      // UI-hijacking / attention-capture primitives with no report use case.
+      for (const token of [
+        "allow-modals",
+        "allow-pointer-lock",
+        "allow-presentation",
+        "allow-orientation-lock",
+      ]) {
+        expect(sandbox()).not.toContain(token);
+      }
+    });
+
+    it("grants EXACTLY four tokens — a fifth is a decision, not a diff", () => {
+      expect(sandbox().split(/\s+/).slice(1).sort()).toEqual([
+        "allow-forms",
+        "allow-popups",
+        "allow-popups-to-escape-sandbox",
+        "allow-scripts",
+      ]);
+    });
   });
 
   it("pins COOP same-origin, CORP same-site, and Origin-Agent-Cluster", () => {

@@ -150,12 +150,88 @@ export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
   } as T;
 }
 
-/** Merge extra attributes into a DOMOutputSpec array of the form [tag, attrs?, ...children]. */
-function mergeAttrsIntoOutputSpec(
+/**
+ * Retain the `id` attribute on a NODE spec (ADR-0062 Amendment 3). This is
+ * the anchor half of "links behave like links": before this, `id` survived
+ * only on `<section>` (`report-blocks.ts`), so `<h2 id="summary">` became a
+ * bare `<h2>` after one edit-save and every `#summary` TOC entry became a
+ * dead anchor — squarely the regression ADR-0062's own decision driver
+ * forbids ("any class or attribute silently dropped by the editor is a
+ * product regression").
+ *
+ * NODE-ONLY, never a mark. Marks split and merge by attribute EQUALITY, so
+ * an `id` carried on a mark would be copied onto every run the mark is split
+ * into — one `id` silently becoming N duplicate ids across N fragmented
+ * `<a>` elements. A node has exactly one DOM element, which is the only
+ * shape an `id` is meaningful on.
+ *
+ * `validate: "string|null"` is load-bearing, not decoration: `Node.fromJSON`
+ * — how `diffRendered`/`diffDocs` build docs from the CLIENT-SUPPLIED
+ * `_source.json` sidecar — bypasses `getAttrs` entirely (the PR #156
+ * lesson), so a sidecar could otherwise set `id` to an object/array and hand
+ * it straight to `toDOM`. The validator rejects the doc outright; `toDOM`'s
+ * merge additionally only ever emits STRING values, so both ends are closed.
+ *
+ * ORDERING (silent-failure trap): this wrapper must be applied LAST, on top
+ * of every other wrapper. `withParagraphVariant.toDOM` (paragraph.ts) rebuilds
+ * its output spec from scratch rather than delegating to the spec it wraps —
+ * anything applied UNDER it is erased without a word. Applying `withId` as
+ * the outermost sweep (schema.ts) is what keeps `<p id class style>` whole.
+ */
+export function withId<T extends NodeSpec>(spec: T): T {
+  const originalToDOM = spec.toDOM as ((n: never) => DOMOutputSpec) | undefined;
+  if (!originalToDOM) return spec;
+  return {
+    ...spec,
+    attrs: { ...(spec.attrs ?? {}), id: { default: null, validate: "string|null" } },
+    parseDOM: ((spec.parseDOM as TagParseRule[] | undefined) ?? []).map((rule) => ({
+      ...rule,
+      getAttrs: (dom: HTMLElement): Attrs | false => {
+        const base = rule.getAttrs ? rule.getAttrs(dom) : (rule.attrs ?? null);
+        if (base === false) return false;
+        return {
+          ...(base || {}),
+          id: dom.getAttribute ? dom.getAttribute("id") : null,
+        };
+      },
+    })),
+    toDOM: (node: never) =>
+      mergeAttrsIntoOutputSpec(originalToDOM(node), {
+        id: (node as unknown as { attrs: { readonly id?: unknown } }).attrs.id,
+      }),
+  } as T;
+}
+
+/**
+ * Merge extra attributes into a `DOMOutputSpec`, whichever of its forms the
+ * wrapped `toDOM` produced.
+ *
+ * SILENT-FAILURE TRAP (ADR-0062 Amendment 3): this used to `return spec`
+ * unchanged for any NON-ARRAY spec — which is exactly the form `secNode`
+ * (`sec.ts`) returns, `{dom, contentDOM}`, because a declarative array spec
+ * cannot express "static prefix content, then a content hole". Every attr
+ * merged onto `<h2 class="sec">` was therefore eaten without an error, and a
+ * wrapper built on this helper would have shipped green while doing nothing
+ * for that node. The non-array forms now set the attributes straight onto
+ * the element the spec is built around.
+ *
+ * Only STRING values are ever written: a non-string that reached here from a
+ * `Node.fromJSON`-built doc would otherwise be stringified into a real DOM
+ * attribute.
+ */
+export function mergeAttrsIntoOutputSpec(
   spec: DOMOutputSpec,
   extra: Record<string, unknown>,
 ): DOMOutputSpec {
-  if (!Array.isArray(spec)) return spec;
+  if (!Array.isArray(spec)) {
+    const element = outputSpecElement(spec);
+    if (element) {
+      for (const [k, v] of Object.entries(extra)) {
+        if (typeof v === "string" && v !== "") element.setAttribute(k, v);
+      }
+    }
+    return spec;
+  }
   const [tag, ...rest] = spec as unknown[];
   const hasAttrsObj =
     rest.length > 0 && typeof rest[0] === "object" && rest[0] !== null && !Array.isArray(rest[0]);
@@ -164,7 +240,20 @@ function mergeAttrsIntoOutputSpec(
     : {};
   const children = hasAttrsObj ? rest.slice(1) : rest;
   for (const [k, v] of Object.entries(extra)) {
-    if (v != null && v !== "") attrs[k] = v;
+    if (typeof v === "string" && v !== "") attrs[k] = v;
   }
   return [tag, attrs, ...children] as unknown as DOMOutputSpec;
+}
+
+/** The element a non-array `DOMOutputSpec` is built around: the `dom` of a
+ *  `{dom, contentDOM}` pair, or a bare DOM node handed back directly. `null`
+ *  for anything without a `setAttribute` (e.g. a plain string spec). */
+function outputSpecElement(
+  spec: DOMOutputSpec,
+): { setAttribute(name: string, value: string): void } | null {
+  if (!spec || typeof spec !== "object") return null;
+  const candidate = (spec as { readonly dom?: unknown }).dom ?? spec;
+  return typeof (candidate as { setAttribute?: unknown })?.setAttribute === "function"
+    ? (candidate as { setAttribute(name: string, value: string): void })
+    : null;
 }

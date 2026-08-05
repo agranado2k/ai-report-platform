@@ -274,6 +274,39 @@ describe("onboarding-sharpened tool descriptions (ADR-0072, Layer 0)", () => {
     expect(d).toMatch(/same|unchanged/i);
   });
 
+  // ADR-0062 Amendment 3: the platform RETAINS `id`/`target`/`rel` through
+  // editing but never adds them for you (the deliberate "author decides"
+  // choice — no serve-time or save-time HTML rewriting, ever). So the only
+  // thing that makes a generated report's links behave like links is the
+  // generator emitting them, and the `html` parameter's own description is
+  // the one piece of guidance that reaches EVERY client — including hosts
+  // that ignore the server `instructions` string entirely.
+  it("the html parameter teaches the anchor + new-tab link conventions", () => {
+    const html = (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description;
+    expect(html).toMatch(/target="_blank"/);
+    expect(html).toMatch(/noopener noreferrer/);
+    expect(html).toMatch(/href="#/);
+    expect(html).toMatch(/\bid\b/);
+  });
+
+  // The correctness half of that guidance, pinned separately because getting
+  // it WRONG is worse than omitting it: `id` is node-only (ADR-0062
+  // Amendment 3, Decision 1), so telling a generator it can "anchor whatever
+  // you need" teaches it to emit `<span id>` — a dead anchor after the first
+  // save, i.e. exactly the regression class the amendment exists to close.
+  it("the html parameter says anchors must target BLOCK elements, not marks", () => {
+    const html = (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description;
+    expect(html).toMatch(/block/i);
+    expect(html).toMatch(/span/); // the mark elements are named, not implied
+    expect(html).not.toMatch(/any element/i);
+  });
+
   it("folders_create points to reports_move for organizing reports", () => {
     expect(descriptionOf("folders_create")).toMatch(/reports_move/);
   });

@@ -3698,3 +3698,103 @@ ADR-0076 reversed two days earlier, and omitted `folder_shares` entirely.
 
 **Migration 0020** adds `report_org_write_grants` — purely additive, no backfill,
 no behavior change until the application layer consults it.
+
+---
+
+## 2026-08-04 — Links in reports now behave like links (ADR-0062 Amendment 3)
+
+The operator reported that links in a report don't behave like links: an external
+link should open a new tab, an in-page anchor should jump to its section, neither
+did. They asked whether it was deliberate.
+
+**It was not — nobody had ever decided.** `target="_blank"`, `noopener`,
+`allow-top-navigation` and "anchor link" appear **zero times** across every ADR,
+`docs/spec.html`, this diary, the glossary, and every test. ADR-002/013/014 are
+one-sentence inline ADRs that never mention links; the four sandbox tokens in
+`view-headers.ts` were written in a single commit (`c04de5c`, 2026-06-02) with no
+itemised rationale and never revisited.
+
+**The first suspect was wrong, and proving that mattered more than fixing it.**
+The obvious theory was the viewer's sandbox CSP. Rather than reason from the
+spec, a reproduction served a top-level document under the byte-identical
+production policy (`sandbox allow-forms allow-scripts allow-popups
+allow-popups-to-escape-sandbox`, opaque origin, inline scripts running) and
+exercised it with real clicks in Chrome: the fragment link navigated and
+scrolled (`scrollY` 0 → 2403.5), the bare external link navigated the tab, the
+`target="_blank"` link opened a new tab. Self-navigation is exempt from the
+sandbox navigation check entirely, so `allow-top-navigation` is never consulted.
+**No sandbox token was touched.** Widening it would have weakened security and
+fixed nothing — and that is now pinned: `view-headers.test.ts` was promoted from
+characterization to specification, naming each granted token for the capability
+it buys and asserting the withheld ones absent (`allow-same-origin`,
+`allow-top-navigation` + variants, `allow-downloads`, `allow-modals`, …) plus an
+exact-arity check, so a fifth token is a decision rather than a diff.
+
+**The two real causes**, both in the editor (the surface the operator was using):
+
+1. **The editing surface makes links inert by construction.** PM mounts on the
+   iframe `<body>` with no `editable` prop, so the body is `contenteditable`, and
+   browsers never activate an anchor there — a click just places a caret. Fixed by
+   handling the click ourselves, resolving the link through the ProseMirror MODEL
+   (`posAtCoords` → `linkMarkAtPos`), never `event.target.closest("a")`: the iframe
+   is a different JS realm where `instanceof` against the parent's constructors is
+   false.
+2. **The round-trip destroyed the attributes links need.** `withClassStyle`
+   retained only `class`/`style`, so the `link` mark carried only `href`/`title`
+   (`target`/`rel` erased on every save) and `id` survived on `<section>` only —
+   `<h2 id="summary">` became `<h2>`, and `#summary` became a dead anchor after
+   ONE save. That contradicts ADR-0062's own decision driver in as many words:
+   *"any class or attribute silently dropped by the editor is a product
+   regression."*
+
+**Three traps, each of which would have shipped green while doing nothing.**
+(a) The existing fidelity fixture cannot reproduce the bug at all — every one of
+its 9 ids is on `<section>`, which was already retained, so a suite built on it
+passes identically before and after; a new fixture with ids on the element types
+that resolve to *different* node specs was mandatory, and 18 of the 29 new tests
+were red before the fix. (b) `withId` had to be applied LAST: `withParagraphVariant.toDOM`
+rebuilds its output spec from scratch and discards anything a lower wrapper added,
+so every `<p id>` would still have been dropped. (c) `mergeAttrsIntoOutputSpec`
+returned any non-array `DOMOutputSpec` unchanged — which is exactly the
+`{dom, contentDOM}` form `secNode` returns — silently eating every merged attr.
+Each of (b) and (c) is now a named test.
+
+**Decisions worth remembering** (full record: ADR-0062 Amendment 3). `id` is
+node-only, never on a mark — marks split by attribute equality, so an id there
+would multiply into duplicates across the split runs. `target`/`rel` are
+NORMALIZED, not verbatim: only `_blank` survives, `rel="opener"` is stripped
+unconditionally (it exists to undo the tabnabbing mitigation), and `_blank`
+forces the `noopener noreferrer` union — idempotently, which is what the pinned
+`serialize(parse(serialize(parse(h))))` guard is for. Duplicate ids resolve
+first-wins at serialize time, so an existing `#summary` keeps pointing where it
+always did. **Author-decides for new-tab behavior**: the pipeline stops
+destroying the attributes and the MCP authoring guidance teaches generators to
+emit them — no rewriting at save time or serve time, recorded as a standing
+non-goal. **The read path is unchanged**; ADR-0038 and ADR-013 stand untouched.
+
+**Also closed: a false claim in the contract document.** `docs/spec.html`'s CI
+table has always listed a required `security-headers` check — the only row with
+no workflow behind it. Built rather than deleted, as a reusable workflow invoked
+by `preview-isolation.yml` with the same isolated `view_url` the e2e smoke uses.
+It asserts the SERVED headers against `viewHeaders()`'s own exported constants
+(importing them, not restating them in a shell script), closing a gap the unit
+suite structurally cannot: an edge layer collapsing the viewer's two
+deliberately-separate CSP header values into one is invisible to a unit test. Two
+further inaccuracies in that section were corrected rather than left standing —
+the "Required check?" column records intent (`var.required_status_checks` is
+still its default empty list), and the workflows are split per file, not the
+single `ci.yml` the section names.
+
+**Data-loss note for the operator:** reports already saved through the editor
+have permanently lost their non-`<section>` ids, in both the HTML and the
+`_source.json` sidecar. The fix is forward-only. Recovery is possible only from
+version history (pre-edit blobs are immutable in R2) and may warrant a one-off
+for specific reports. Pre-Amendment-3 sidecars still open fine — `id` defaults to
+`null`, pinned by a test.
+
+**Caveat:** the browser verification was Chrome-only. Safari and Firefox have
+historically diverged on CSP-sandbox behavior for top-level documents; a WebKit
+project on the e2e tier is worth adding before relying on that reproduction
+cross-browser.
+
+Worktree `worktree/link-fidelity` (branch `fix/link-fidelity`).

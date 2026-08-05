@@ -57,6 +57,38 @@ exact — call them as written.
    grant view access, and vice versa. `folders_apply_sharing_to_reports` reaches the
    reports INSIDE a folder: sharing the folder itself only shows its name.
 
+## Authoring the HTML
+
+Your HTML **is** the artifact. On the READ path it is stored as you sent it and served
+**byte-for-byte** — there is no serve-time rewriting or sanitization pass at all. What you
+emit is what readers get, so links only behave like links if you author them that way.
+
+Editing a report in the browser and saving is the one path that **normalizes** the HTML:
+the document is re-serialized from the editor's model, so author for that round trip.
+
+- **In-page anchors** — give the target an `id` and point the link at it:
+  `<a href="#summary">Summary</a>` → `<section id="summary">`. A table of contents is just
+  a list of those. **Anchor BLOCK elements only.** `id` survives on `<section>`,
+  `<h1>`–`<h6>`, `<p>`, `<div>`, `<li>`, `<td>`/`<th>` and `<blockquote>`. It does **NOT**
+  survive on inline formatting elements — `<span>`, `<a>`, `<code>`, `<strong>`, `<em>` —
+  because the editor models those as text marks rather than elements, and a mark cannot
+  carry an id; `<span id="x">` becomes a dead anchor after the first save. Keep ids
+  unique: on a duplicate, only the first element in document order keeps it.
+- **External links** — add `target="_blank" rel="noopener noreferrer"` to every link you
+  want to open in a new tab. Nothing adds this for you.
+- **`target`/`rel` are normalized, for security** — a `target` other than `_blank` is
+  dropped and `rel="opener"` is stripped (frame-escape and tabnabbing primitives), an
+  unrecognized `rel` token is dropped, and `target="_blank"` always ends up carrying
+  `noopener noreferrer` whether or not you wrote it.
+- **What is refused outright** — a `javascript:`, `vbscript:` or `data:text/html` `href`
+  drops the whole link (the text survives, unlinked).
+
+A save can also change other things: `style` is sanitized, a tag the schema does not
+support (`<figure>`, `<marquee>`, …) is coerced or unwrapped, inline content not inside a
+block is wrapped in `<p>`, and attribute order is not preserved. Classes, inline styles
+and ordinary document structure survive — but "byte-identical" is a guarantee the read
+path gives you, not the edit round trip.
+
 ## When to use which tool
 
 | Need | Tool |

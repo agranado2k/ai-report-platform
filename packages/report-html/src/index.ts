@@ -16,6 +16,14 @@ export {
   FALLBACK_INS_CLASS,
   STRUCTURAL_DIFF_UNAVAILABLE_LABEL,
 } from "./html-fallback.js";
+// Exported so the editor's link-activation gate can reuse the SAME
+// dangerous-URL predicate the schema enforces at parse/serialize time
+// (ADR-0062 Amendment 3), rather than growing a second copy of it.
+export { isDangerousUrl } from "./schema/attrs.js";
+export {
+  normalizeLinkRel,
+  normalizeLinkTarget,
+} from "./schema/link.js";
 export { reportSchema } from "./schema.js";
 export type { Shell, SplitShellResult } from "./shell.js";
 export { reinjectShell, splitShell } from "./shell.js";
