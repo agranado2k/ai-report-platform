@@ -152,6 +152,36 @@ describe("link target/rel normalization (ADR-0062 Amendment 3)", () => {
 });
 
 describe("idempotency — the strongest guard against rel double-appending", () => {
+  // WHY THE MULTISET ASSERTION BELOW EXISTS, and why the two `roundTrip(once)
+  // === once` tests are NOT sufficient on their own: the forced-token append
+  // in `normalizeLinkRel` runs on BOTH sides of the round trip, and the
+  // parse-side allowlist loop dedupes on the way IN. Delete the
+  // `tokens.includes(forced)` guard and `rel` doubles to `"noopener
+  // noreferrer noopener noreferrer"` on the FIRST save — and then STAYS
+  // there, because the next parse collapses the four tokens back to two
+  // before the (unguarded) append re-doubles them. Both stability tests stay
+  // green through that mutation; only counting the tokens after ONE round
+  // trip catches it. Verified by mutation, not by inspection.
+  const relTokensAfterOneRoundTrip = (html: string): string[] => {
+    const out = roundTrip(html);
+    return (/rel="([^"]*)"/.exec(out)?.[1] ?? "").split(/\s+/).filter(Boolean);
+  };
+
+  it("emits each forced rel token EXACTLY ONCE after a single save", () => {
+    const tokens = relTokensAfterOneRoundTrip(
+      '<p><a href="https://example.com/" target="_blank">x</a></p>',
+    );
+    expect(tokens).toEqual(["noopener", "noreferrer"]);
+  });
+
+  it("does not repeat a forced token the author already wrote, after a single save", () => {
+    const tokens = relTokensAfterOneRoundTrip(
+      '<p><a href="https://example.com/" target="_blank" rel="nofollow noopener">x</a></p>',
+    );
+    expect(tokens).toEqual(["nofollow", "noopener", "noreferrer"]);
+    expect(new Set(tokens).size).toBe(tokens.length); // no repeats, stated outright
+  });
+
   it("serialize(parse(serialize(parse(h)))) is byte-identical to serialize(parse(h))", () => {
     const once = roundTrip(fixtureBody());
     expect(roundTrip(once)).toBe(once);
