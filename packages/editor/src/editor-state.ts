@@ -8,7 +8,7 @@ import { type PMDocJson, reportSchema } from "arp-report-html";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { Node as PMNode } from "prosemirror-model";
+import { Node as PMNode, type ResolvedPos } from "prosemirror-model";
 import type { Plugin, Transaction } from "prosemirror-state";
 import { EditorState, TextSelection } from "prosemirror-state";
 import {
@@ -123,23 +123,67 @@ export function jumpToCommentTransaction(
  * is precisely why Jump scrolls reliably in production and the anchor click
  * did not.
  *
+ * NOT EVERY TARGET CAN BE REVEALED THIS WAY, and `null` is the answer for the
+ * ones that cannot. `TextSelection.near` is not a `TextSelection` factory —
+ * `TextSelection` inherits `near` from `Selection`, which returns whatever
+ * kind of selection is valid NEAREST to the position. Two of its three
+ * outcomes are wrong here and are refused:
+ *
+ *  - A **non-empty** selection: a `NodeSelection` over a block-level atom
+ *    (`<hr id="divider">` is the only one `reportSchema` can reach today, but
+ *    `withId` is swept over every node with a `toDOM`, so any block atom added
+ *    later inherits this), or an `AllSelection` when nothing resolves at all.
+ *    Dispatching either would leave the element carrying
+ *    `.ProseMirror-selectednode` — and the user's next keystroke would REPLACE
+ *    it. A scroll must never arm a destructive edit.
+ *  - A caret that lands **outside the target's own node range**: an empty but
+ *    legal container (`<section id="landing"></section>`) has no selectable
+ *    position inside it, so `near` walks out to the following block. PM would
+ *    then reveal a position past the anchor while the DOM fallback top-aligns
+ *    the anchor itself — the original race, restored, for that class of
+ *    target.
+ *
+ * Both refusals fall through to `deferAnchorScroll`'s plain DOM scroll
+ * (link-activation.ts), which is the correct behavior for a target PM cannot
+ * put a caret in.
+ *
  * Flagged programmatic for the same reason Jump is: revealing a section must
- * never open the new-comment composer. The selection it sets is collapsed, so
- * `reportableSelection` would return `null` anyway; the flag states the
- * intent rather than relying on that.
+ * never open the new-comment composer. Every selection this function actually
+ * returns is collapsed — guaranteed by the emptiness refusal above, not merely
+ * hoped for — so `reportableSelection` would return `null` anyway; the flag
+ * states the intent rather than relying on that.
  */
 export function anchorScrollTransaction(state: EditorState, pos: number): Transaction | null {
   if (!Number.isInteger(pos) || pos < 0 || pos > state.doc.content.size) return null;
-  let $pos: ReturnType<EditorState["doc"]["resolve"]>;
+  let $pos: ResolvedPos;
   try {
     $pos = state.doc.resolve(pos);
   } catch {
     return null; // an unresolvable position is "no anchor", never a throw.
   }
+  const selection = TextSelection.near($pos);
+  if (!selection.empty) return null;
+  const target = anchorTargetRange($pos);
+  if (selection.from < target.from || selection.from > target.to) return null;
   return state.tr
-    .setSelection(TextSelection.near($pos))
+    .setSelection(selection)
     .setMeta(PROGRAMMATIC_SELECTION_META, true)
     .scrollIntoView();
+}
+
+/** The document range the anchor's own node occupies — the only region a
+ *  caret may land in and still be "at the anchor".
+ *
+ *  `view.posAtDOM(element, 0)` reports one of two positions, both handled
+ *  here: the position immediately BEFORE the node (ProseMirror's
+ *  `localPosFromDOM` falls back to `posAtStart` for a leaf/atom, and for a
+ *  wrapper whose `contentDOM` is not its `dom`), in which case `nodeAfter` IS
+ *  the target; or a position just inside the node's own content, in which case
+ *  the enclosing node is the target and its content range bounds the reveal. */
+function anchorTargetRange($pos: ResolvedPos): { readonly from: number; readonly to: number } {
+  const after = $pos.nodeAfter;
+  if (after) return { from: $pos.pos, to: $pos.pos + after.nodeSize };
+  return { from: $pos.start(), to: $pos.end() };
 }
 
 /** The selection a just-applied transaction should report to the caller as
