@@ -72,9 +72,18 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
   # which IS the reported bug; the owner then applies `org_edit` to the folder's
   # reports; and the third identity must then LIST it, be able to OPEN it
   # (single-report GET), and be able to EDIT it (PATCH rename — the canWrite
-  # seam's new org-write leg, exercised through the real HTTP door). The same
-  # response must SKIP the already-org-shared report by name with a reason,
-  # which is the honest-partial-result contract this surface exists for.
+  # seam's new org-write leg, exercised through the real HTTP door).
+  # THE ESCALATION IS A CHANGE, NOT A SKIP. The same apply also covers the
+  # report that was already `org_view`: `org_view` and `org_edit` share an Acl
+  # mode and differ only in the org-write row, so a candidate rule reading the
+  # mode alone skipped that report as "already shared with your org" — 200,
+  # nothing granted, reported as success. It must now be CHANGED, and the proof
+  # is that the third identity can subsequently RENAME it and reads its
+  # composed `sharing` back as `org_edit` (ADR-0078 §13) — neither of which is
+  # true of a report the apply merely claimed to have handled.
+  # THE HONEST SKIP is then proved where it is real: applying `org_edit` a
+  # SECOND time must change nothing and name both reports back with the domain's
+  # own reason, which says WHICH org state they are already in.
   @run-scoped
   Scenario: Two same-domain identities share one team org
     Given a first run-scoped team-domain identity is signed in
@@ -93,3 +102,6 @@ Feature: Team-org JIT join-or-create smoke (ADR-0068, ADR-0074)
     Then the third run-scoped identity cannot see the private report inside the shared folder
     When the first run-scoped identity shares the folder's reports for viewing and editing
     Then the third run-scoped identity can list, open and edit the once-private report
+    And the third run-scoped identity can edit the escalated report, whose sharing reads org_edit
+    When the first run-scoped identity applies the same sharing to the folder's reports again
+    Then every report in the folder is skipped as already shared with your org to view and edit
