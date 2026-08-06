@@ -2,7 +2,7 @@
 // the access question is unit-testable next to the keystone it delegates to
 // (same pattern as open-report.server.ts).
 //
-// THE 2026-08-06 OWNER LOCKOUT. This page used to 403 every visitor to a
+// THE 2026-08-06 OWNER LOCKOUT. This page used to deny every visitor to a
 // private report, with the comment "the owner reaches it via the dashboard's
 // owner-open, not this page". That was false twice over:
 //   1. the raw `view.<domain>/{slug}` URL an owner naturally copies and shares
@@ -26,7 +26,7 @@
 //   and the viewer can bounce straight back (e.g. a token this origin mints
 //   that the view origin can't validate — the PR #185 secret-misalignment
 //   class). An automatic redirect would turn that into a tight infinite loop
-//   where today it terminates in a 403. A user-activated link cannot loop.
+//   where today it terminates in a 404. A user-activated link cannot loop.
 import {
   type CanWriteDeps,
   loadWritableReport,
@@ -39,12 +39,20 @@ export type PrivateUnlockDecision =
   /** The visitor may write this report: offer them the owner-open route. */
   | { readonly kind: "offer-owner-open"; readonly to: string }
   /** Everyone else — including anonymous visitors — so the page can render ONE
-   *  byte-identical 403 and never act as an existence oracle for private
-   *  reports (ADR-0056). NOTE: an unknown slug never reaches this function; the
-   *  route resolves the report first and answers `privateDenied()` itself, with
-   *  the SAME status and bytes this `deny` produces. That composition is what
-   *  actually holds the indistinguishability property, so it is asserted at the
-   *  ROUTE level (`unlock-route.test.ts`), not here (review #247 H-2). */
+   *  byte-identical 404 and never act as an existence oracle for private
+   *  reports (ADR-0056).
+   *
+   *  A 404, not a 403 (operator decision, 2026-08-06): a 403 whose copy reads
+   *  "this report is private — only its owner can view it" still CONFIRMS the
+   *  report exists, so it leaks the very bit a uniform status was meant to
+   *  hide. The route's `denied()` answers exactly what a never-created slug
+   *  answers, in EVERY sharing mode, on GET and on POST.
+   *
+   *  NOTE: an unknown slug never reaches this function; the route resolves the
+   *  report first and answers `denied()` itself, with the SAME status and bytes
+   *  this `deny` produces. That composition is what actually holds the
+   *  indistinguishability property, so it is asserted at the ROUTE level
+   *  (`unlock-route.test.ts`), not here (review #247 H-2). */
   | { readonly kind: "deny" };
 
 export interface PrivateUnlockDeps {

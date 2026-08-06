@@ -1,14 +1,20 @@
-// ROUTE-level tests for `/unlock/{slug}` in `private` mode — the COMPOSED
-// loader/action, not just `decidePrivateUnlock`.
+// ROUTE-level tests for `/unlock/{slug}` — the COMPOSED loader/action, not just
+// `decidePrivateUnlock`.
 //
 // Why these exist (review #247 H-2): the unit tests for `decidePrivateUnlock`
 // assert that an unknown slug is denied identically to a non-owner — but the
 // composed route can NEVER reach that branch, because it resolves the report
 // FIRST and short-circuits when there isn't one. So that unit test was false
 // assurance for the property five places (this route, the server module,
-// ADR-0056, ADR-0063 and the diary) actually claim: the denial is
-// BYTE-IDENTICAL for "not entitled", "not signed in" and "no such report".
-// Only a route-level test can hold that claim honest.
+// ADR-0056, ADR-0063 and the diary) actually claim. Only a route-level test can
+// hold that claim honest.
+//
+// THE PROPERTY, as the operator settled it on 2026-08-06: EVERY denial this
+// page issues — in ANY sharing mode, on GET and on POST — is a byte-identical
+// `404`. Not a `403`: a 403 saying "this report is private" still CONFIRMS the
+// report exists, so a uniform 404 is the only answer that leaks nothing. The
+// `it.each` matrix below enumerates every denial class and compares status,
+// body AND headers against one baseline.
 //
 // They live under `app/server/` rather than `app/routes/` on purpose: any file
 // in the Remix flat-routes directory becomes a ROUTE (`unlock.$slug.test.ts`
@@ -20,6 +26,7 @@ import {
   createReport,
   folderId,
   makeSlug,
+  type OrgId,
   orgId,
   type Report,
   reportId,
@@ -31,27 +38,38 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SLUG = "aaaaaaaaaa";
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
+const OTHER_ORG = orgId("00000000-0000-7000-8000-0000000000a2");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
 const STRANGER = userId("00000000-0000-7000-8000-0000000000d2");
 
 const state = vi.hoisted(() => ({
   reports: null as unknown as InMemoryReportRepository,
   actor: null as { readonly orgId: unknown; readonly userId: unknown } | null,
+  /** What Clerk reports for the session — drives the `org` mode handshake. */
+  auth: { userId: null as string | null, orgId: null as string | null },
+  /** What `findOrgByClerkOrgId` maps the session's Clerk org to. */
+  memberOrgId: null as unknown,
 }));
 
 vi.mock("./auth.server", () => ({
-  getAuth: async () => ({ userId: null, orgId: null }),
+  getAuth: async () => state.auth,
   resolveActorForRead: async () => ({ ok: true as const, value: state.actor }),
 }));
 
-// Only the collaborators the `private` branch actually touches are real; the
-// password/allowlist/org wiring is stubbed, since those branches have their own
+// Only the collaborators the denial branches actually touch are real; the
+// password/allowlist wiring is stubbed, since those branches have their own
 // coverage and would otherwise drag the whole composition root in.
 vi.mock("./container.server", async () => {
   const testing = await import("arp-application/testing");
   const writeGrants = new testing.InMemoryWriteGrantStore();
-  const identities = new testing.InMemoryIdentityStore();
   const orgWriteGrants = new testing.InMemoryOrgWriteGrantStore();
+  // `loadWritableReport` only needs `findEmailByUserId`; the `org` handshake
+  // only needs `findOrgByClerkOrgId` — driven from `state` so a test can put
+  // the session in or out of the report's org.
+  const identities = {
+    findEmailByUserId: async () => ({ ok: true as const, value: null }),
+    findOrgByClerkOrgId: async () => ({ ok: true as const, value: state.memberOrgId }),
+  };
   return {
     accessTokenSecret: () => "unlock-route-test-secret",
     appOrigin: () => "https://app.example.test",
@@ -76,10 +94,13 @@ function slug(s: string): Slug {
   return r.value;
 }
 
-function buildReport(acl: Acl, opts: { readonly deleted?: boolean } = {}): Report {
+function buildReport(
+  acl: Acl,
+  opts: { readonly deleted?: boolean; readonly org?: OrgId } = {},
+): Report {
   const { report } = createReport({
     id: reportId("00000000-0000-7000-8000-0000000000c1"),
-    orgId: ORG,
+    orgId: opts.org ?? ORG,
     folderId: folderId("00000000-0000-7000-8000-0000000000f1"),
     slug: slug(SLUG),
     title: "T",
@@ -105,17 +126,41 @@ const args = (rawSlug: string, method = "GET") =>
     context: {},
   }) as never;
 
-/** Status + full body text — the two things "byte-identical" has to mean. */
-async function shape(res: Response): Promise<{ status: number; body: string }> {
-  return { status: res.status, body: await res.text() };
+/** Status + full body text + every response header — the three things
+ *  "byte-identical" has to mean for a response that must not be a side channel.
+ *  Headers are sorted so ordering can't make two identical answers compare
+ *  unequal (nor mask a difference). */
+async function shape(
+  res: Response,
+): Promise<{ status: number; body: string; headers: readonly string[] }> {
+  return {
+    status: res.status,
+    body: await res.text(),
+    headers: [...res.headers].map(([k, v]) => `${k}: ${v}`).sort(),
+  };
 }
 
 const PRIVATE: Acl = { mode: "private" };
+const ORG_MODE: Acl = { mode: "org" };
+
+/** The baseline every denial must match: a signed-in, same-org NON-OWNER
+ *  asking for a `private` report that genuinely exists. */
+async function baselineDenial(): Promise<Awaited<ReturnType<typeof shape>>> {
+  await seed(buildReport(PRIVATE));
+  state.actor = { orgId: ORG, userId: STRANGER };
+  state.auth = { userId: "clerk_stranger", orgId: "clerk_org_1" };
+  state.memberOrgId = ORG;
+  return shape((await loader(args(SLUG))) as Response);
+}
+
+function resetSession(): void {
+  state.actor = null;
+  state.auth = { userId: null, orgId: null };
+  state.memberOrgId = null;
+}
 
 describe("/unlock/{slug} loader — private mode (route level)", () => {
-  beforeEach(() => {
-    state.actor = null;
-  });
+  beforeEach(resetSession);
 
   it("THE LOCKOUT FIX: the OWNER gets a 200 page linking to the ONE mint", async () => {
     await seed(buildReport(PRIVATE));
@@ -125,19 +170,24 @@ describe("/unlock/{slug} loader — private mode (route level)", () => {
     await expect(res.text()).resolves.toContain(`href="/reports/${SLUG}/open"`);
   });
 
-  it("a non-owner gets the 403 private denial", async () => {
+  it("a non-owner gets a 404 — NOT a 403 that would confirm the report exists", async () => {
     await seed(buildReport(PRIVATE));
     state.actor = { orgId: ORG, userId: STRANGER };
     const res = (await loader(args(SLUG))) as Response;
-    expect(res.status).toBe(403);
-    await expect(res.text()).resolves.toContain("This report is private");
+    expect(res.status).toBe(404);
+    await expect(res.text()).resolves.not.toContain("private");
   });
+});
 
-  // THE EXISTENCE-ORACLE GUARD. Every one of these must be indistinguishable
-  // from "you are not entitled to this private report" — otherwise
-  // `/unlock/{slug}` reports whether a private slug exists to anyone who asks.
+// THE EXISTENCE-ORACLE GUARD, over EVERY denial class this page can produce.
+// Each must be indistinguishable — same status, same bytes, same headers —
+// from "you are a signed-in non-owner of a private report that exists".
+// Otherwise `/unlock/{slug}` reports whether a slug exists to anyone who asks.
+describe("/unlock/{slug} — every denial is a byte-identical 404", () => {
+  beforeEach(resetSession);
+
   it.each<[string, () => Promise<void>]>([
-    ["not signed in", async () => seed(buildReport(PRIVATE))],
+    ["signed-out, private report", async () => seed(buildReport(PRIVATE))],
     [
       "no such report",
       async () => {
@@ -152,35 +202,120 @@ describe("/unlock/{slug} loader — private mode (route level)", () => {
         state.actor = { orgId: ORG, userId: OWNER };
       },
     ],
-  ])("%s is denied byte-identically to a signed-in non-owner", async (_n, setup) => {
-    await seed(buildReport(PRIVATE));
-    state.actor = { orgId: ORG, userId: STRANGER };
-    const baseline = await shape((await loader(args(SLUG))) as Response);
-
-    state.actor = null;
+    [
+      "same-org non-owner",
+      async () => {
+        await seed(buildReport(PRIVATE));
+        state.actor = { orgId: ORG, userId: STRANGER };
+      },
+    ],
+    [
+      // NB the actor here is a STRANGER, not the owner: `loadOwnedReport` is
+      // deliberately org-AGNOSTIC ("ownership, not tenancy, decides"), so an
+      // owner reaching their own report from a different session org is a
+      // supported flow, not a denial. The denial is a non-owner in another org.
+      "cross-org visitor",
+      async () => {
+        await seed(buildReport(PRIVATE, { org: OTHER_ORG }));
+        state.actor = { orgId: ORG, userId: STRANGER };
+      },
+    ],
+    [
+      // Previously `403 "You need to be a member of this report's
+      // organization to view it."` — itself an existence oracle: it confirmed
+      // both that the slug exists AND which sharing mode it uses.
+      "org-mode report, signed-in NON-member",
+      async () => {
+        await seed(buildReport(ORG_MODE, { org: OTHER_ORG }));
+        state.auth = { userId: "clerk_stranger", orgId: "clerk_org_1" };
+        state.memberOrgId = ORG;
+      },
+    ],
+    [
+      "org-mode report, signed in with no active org",
+      async () => {
+        await seed(buildReport(ORG_MODE));
+        state.auth = { userId: "clerk_stranger", orgId: null };
+      },
+    ],
+    [
+      "org-mode report, session org maps to no internal org",
+      async () => {
+        await seed(buildReport(ORG_MODE));
+        state.auth = { userId: "clerk_stranger", orgId: "clerk_unknown" };
+        state.memberOrgId = null;
+      },
+    ],
+  ])("GET: %s", async (_name, setup) => {
+    const baseline = await baselineDenial();
+    resetSession();
     await setup();
-    const actual = await shape((await loader(args(SLUG))) as Response);
-
-    expect(actual).toEqual(baseline);
+    expect(await shape((await loader(args(SLUG))) as Response)).toEqual(baseline);
   });
 
-  it("an invalid slug SHAPE is denied byte-identically too", async () => {
+  it("GET: an invalid slug SHAPE is denied byte-identically too", async () => {
+    const baseline = await baselineDenial();
+    resetSession();
     await seed(buildReport(PRIVATE));
-    state.actor = { orgId: ORG, userId: STRANGER };
-    const baseline = await shape((await loader(args(SLUG))) as Response);
-    const actual = await shape((await loader(args("bad!chars!"))) as Response);
-    expect(actual).toEqual(baseline);
+    expect(await shape((await loader(args("bad!chars!"))) as Response)).toEqual(baseline);
+  });
+
+  // The POST side is the same oracle: someone who cannot distinguish two slugs
+  // on GET just POSTs to them instead.
+  it.each<[string, string, () => Promise<void>]>([
+    ["a private report", SLUG, async () => seed(buildReport(PRIVATE))],
+    ["no such report", SLUG, async () => seed()],
+    ["a soft-deleted report", SLUG, async () => seed(buildReport(PRIVATE, { deleted: true }))],
+    ["an invalid slug shape", "bad!chars!", async () => seed(buildReport(PRIVATE))],
+  ])("POST: %s is denied byte-identically to the GET baseline", async (_n, raw, setup) => {
+    const baseline = await baselineDenial();
+    resetSession();
+    await setup();
+    expect(await shape((await action(args(raw, "POST"))) as Response)).toEqual(baseline);
   });
 });
 
-describe("/unlock/{slug} action — private mode (route level)", () => {
-  // The POST side is the same oracle: without this, someone who cannot
-  // distinguish two slugs on GET just POSTs to them instead.
-  it("an unknown slug's POST is denied byte-identically to a private report's POST", async () => {
-    await seed(buildReport(PRIVATE));
-    const baseline = await shape((await action(args(SLUG, "POST"))) as Response);
-    await seed();
-    const actual = await shape((await action(args(SLUG, "POST"))) as Response);
-    expect(actual).toEqual(baseline);
+// The denials are uniform; the NON-denials must not have been swept up with
+// them. Each of these is a legitimate forward path, and each one necessarily
+// looks different from the 404 — that asymmetry is intended and bounded: it
+// reveals only what the visitor is already entitled to act on.
+describe("/unlock/{slug} — flows that are NOT denials still work", () => {
+  beforeEach(resetSession);
+
+  it("a public report still redirects to the viewer", async () => {
+    await seed(buildReport({ mode: "public" }));
+    const res = (await loader(args(SLUG))) as Response;
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`https://view.example.test/${SLUG}`);
+  });
+
+  it("a password report still renders its form", async () => {
+    await seed(buildReport({ mode: "password", passwordHash: "x" }));
+    const res = (await loader(args(SLUG))) as Response;
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toContain('name="password"');
+  });
+
+  it("an allowlist report still renders its email form", async () => {
+    await seed(buildReport({ mode: "allowlist", allowedEmails: [], accessTtlSeconds: 900 }));
+    const res = (await loader(args(SLUG))) as Response;
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toContain('name="email"');
+  });
+
+  it("an ANONYMOUS visitor to an org report is still bounced to sign-in", async () => {
+    await seed(buildReport(ORG_MODE));
+    const res = (await loader(args(SLUG))) as Response;
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain("/sign-in?redirect_url=");
+  });
+
+  it("an actual org MEMBER still completes the handshake", async () => {
+    await seed(buildReport(ORG_MODE));
+    state.auth = { userId: "clerk_member", orgId: "clerk_org_1" };
+    state.memberOrgId = ORG;
+    const res = (await loader(args(SLUG))) as Response;
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain(`https://view.example.test/${SLUG}?access=`);
   });
 });
