@@ -158,14 +158,19 @@ export function createApp(injectedOAuth?: OAuthDeps) {
     res.status(405).json({ error: "Method Not Allowed — use POST for the MCP endpoint" });
   });
 
-  // Over-limit bodies would otherwise fall through to Express's default HTML
+  // Parser rejections would otherwise fall through to Express's default HTML
   // error page — this endpoint is JSON-only (see the hardening note above), so
-  // translate the parser's rejection into the app's error shape.
+  // translate them into the app's error shape.
   app.use(((err, _req, res, next) => {
-    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+    const type = (err as { type?: string } | null)?.type;
+    if (type === "entity.too.large") {
       res.status(413).json({
         error: `payload too large: the JSON-RPC request body is capped at ${MAX_JSON_BODY_BYTES} bytes`,
       });
+      return;
+    }
+    if (type === "entity.parse.failed") {
+      res.status(400).json({ error: "invalid JSON in the request body" });
       return;
     }
     next(err);
