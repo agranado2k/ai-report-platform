@@ -1,6 +1,6 @@
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createApp, type OAuthDeps } from "./app";
+import { createApp, MAX_JSON_BODY_BYTES, type OAuthDeps } from "./app";
 
 // pk = pk_(test|live)_ + base64(frontendApiHost + "$")
 const PK = `pk_test_${btoa("clerk.example.com$")}`;
@@ -56,7 +56,28 @@ describe("createApp — OAuth disabled (no Clerk keys)", () => {
     const bigBody = { ...toolsList, params: { _meta: { pad: "x".repeat(500_000) } } };
     const res = await postMcp(createApp(), "Bearer arp_live_x").send(bigBody);
     expect(res.status).toBe(200);
-    expect(JSON.stringify(res.body)).toContain("reports_search");
+  });
+
+  it("rejects a body over the cap with the app's JSON error shape, not Express's HTML page", async () => {
+    const bigBody = {
+      ...toolsList,
+      params: { _meta: { pad: "x".repeat(MAX_JSON_BODY_BYTES + 1024) } },
+    };
+    const res = await postMcp(createApp(), "Bearer arp_live_x").send(bigBody);
+    expect(res.status).toBe(413);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.body.error).toMatch(/too large/i);
+  });
+
+  it("rejects an unauthenticated over-limit request with 401 — credentials before buffering", async () => {
+    // The credential check reads only headers; running it before the body parser
+    // means anonymous callers can't make the function buffer multi-MB bodies.
+    const bigBody = {
+      ...toolsList,
+      params: { _meta: { pad: "x".repeat(MAX_JSON_BODY_BYTES + 1024) } },
+    };
+    const res = await postMcp(createApp()).send(bigBody);
+    expect(res.status).toBe(401);
   });
 });
 

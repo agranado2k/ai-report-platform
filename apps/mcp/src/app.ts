@@ -17,6 +17,16 @@ import { buildMcpServer } from "./server";
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp";
 
 /**
+ * Cap on the JSON-RPC request body. 4mb, not the express default 100kb:
+ * reports_upload carries the report's whole HTML inside the JSON-RPC body (with
+ * JSON-escaping overhead), and the default 413'd real uploads at ~85-100KB of
+ * HTML. Vercel caps serverless request bodies at 4.5MB, so this is the ceiling
+ * minus headroom — and it matches the MCP SDK's own transport maximum
+ * (MAXIMUM_MESSAGE_SIZE = '4mb' in the SSE transport).
+ */
+export const MAX_JSON_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
  * The OAuth dependencies the server needs when the Clerk-OAuth path is enabled.
  * Built from env for production (`buildClerkOAuth`); injected directly in tests so
  * the resource-server paths (metadata, 401/`WWW-Authenticate`, dual-mode auth) are
@@ -54,11 +64,6 @@ export function createApp(injectedOAuth?: OAuthDeps) {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
-  // 4mb, not the express default 100kb: reports_upload carries the report's whole
-  // HTML inside the JSON-RPC body (with JSON-escaping overhead), and the default
-  // 413'd real uploads at ~85-100KB of HTML. Vercel caps request bodies at 4.5MB,
-  // so 4mb is the ceiling minus headroom.
-  app.use(express.json({ limit: "4mb" }));
 
   // OAuth 2.1 is enabled only when Clerk keys are configured (fail-closed): without
   // them the OAuth path stays off and only the `arp_` API-key path works. Tests
@@ -83,7 +88,10 @@ export function createApp(injectedOAuth?: OAuthDeps) {
     });
   }
 
-  app.post("/mcp", async (req, res) => {
+  // Credentials resolve from headers alone, so this runs BEFORE the body parser:
+  // anonymous callers get their 401 without the function ever buffering a
+  // (up to MAX_JSON_BODY_BYTES) request body.
+  const requireAuth: express.RequestHandler = async (req, res, next) => {
     const origin = originOf(req);
     const resourceUrl = `${origin}/mcp`;
 
@@ -104,11 +112,34 @@ export function createApp(injectedOAuth?: OAuthDeps) {
           `Bearer resource_metadata="${origin}${PROTECTED_RESOURCE_METADATA_PATH}"`,
         );
       }
-      res.status(401).json({ error: "unauthorized: present an API key or authenticate via OAuth" });
+      // Drain (not buffer) any body still arriving, and only respond once it has
+      // fully landed: a 401 sent mid-upload makes Node tear down the socket while
+      // the client is still writing, so the client sees a connection reset instead
+      // of the WWW-Authenticate challenge. Draining keeps memory O(1) either way.
+      const respond = () =>
+        res
+          .status(401)
+          .json({ error: "unauthorized: present an API key or authenticate via OAuth" });
+      if (req.readableEnded) {
+        respond();
+      } else {
+        req.once("end", respond);
+        req.resume();
+      }
       return;
     }
 
-    const client = new ApiClient({ baseUrl: env.APP_ORIGIN, authorization });
+    res.locals.authorization = authorization;
+    next();
+  };
+
+  // The JSON parser is scoped to POST /mcp — the only route with a body — and
+  // sits after the credential check (see MAX_JSON_BODY_BYTES for the cap's why).
+  app.post("/mcp", requireAuth, express.json({ limit: MAX_JSON_BODY_BYTES }), async (req, res) => {
+    const client = new ApiClient({
+      baseUrl: env.APP_ORIGIN,
+      authorization: res.locals.authorization as string,
+    });
     const server = buildMcpServer(client);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless (ADR-0051) — no sessions, serverless-safe
@@ -126,6 +157,19 @@ export function createApp(injectedOAuth?: OAuthDeps) {
   app.all("/mcp", (_req, res) => {
     res.status(405).json({ error: "Method Not Allowed — use POST for the MCP endpoint" });
   });
+
+  // Over-limit bodies would otherwise fall through to Express's default HTML
+  // error page — this endpoint is JSON-only (see the hardening note above), so
+  // translate the parser's rejection into the app's error shape.
+  app.use(((err, _req, res, next) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({
+        error: `payload too large: the JSON-RPC request body is capped at ${MAX_JSON_BODY_BYTES} bytes`,
+      });
+      return;
+    }
+    next(err);
+  }) as express.ErrorRequestHandler);
 
   return app;
 }
