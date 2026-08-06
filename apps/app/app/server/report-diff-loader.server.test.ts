@@ -37,7 +37,8 @@ const V2_DOC = {
   content: [{ type: "paragraph", content: [{ type: "text", text: "hello there world" }] }],
 };
 
-async function twoVersionHarness(opts: { withSidecars: boolean }) {
+async function twoVersionHarness(opts: { withSidecars: boolean; v2Html?: string }) {
+  const v2Html = opts.v2Html ?? V2_HTML;
   const { deps, reports, bundles, blobs, grants, identities } = makeAppTestHarness();
   const actor: UploadActor = {
     userId: OWNER,
@@ -67,16 +68,16 @@ async function twoVersionHarness(opts: { withSidecars: boolean }) {
   bundles.setResult(
     ok({
       files: [
-        { path: "index.html", contentType: "text/html", bytes: new TextEncoder().encode(V2_HTML) },
+        { path: "index.html", contentType: "text/html", bytes: new TextEncoder().encode(v2Html) },
       ],
       entryDocument: "index.html",
       contentHash: "hash-v2",
-      sizeBytes: V2_HTML.length,
+      sizeBytes: v2Html.length,
     }),
   );
   const updated = await uploadReport(deps, {
     actor,
-    upload: { filename: "index.html", bytes: new TextEncoder().encode(V2_HTML) },
+    upload: { filename: "index.html", bytes: new TextEncoder().encode(v2Html) },
     updateSlug: reportSlug,
     ...(opts.withSidecars ? { sourceDoc: V2_DOC } : {}),
   });
@@ -221,5 +222,41 @@ describe("loadReportDiff", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.mode).toBe("structural");
+  });
+});
+
+// The exact `document-unsplittable` document the view origin now names and
+// degrades on (apps/view/app/edit/load-document.ts) still reached an UNGUARDED
+// `splitShell` here, and this endpoint is what the editor's Versions/Compare
+// panel calls — so the same report that "views fine, won't edit" also 500'd
+// Compare, by a thrown Error escaping the loader (review #247 M-1).
+describe("loadReportDiff — an unsplittable version", () => {
+  it("returns a structured error instead of throwing (the Compare panel gets a 4xx/5xx, not a crash)", async () => {
+    const {
+      deps,
+      slug: reportSlug,
+      v1,
+      v2,
+    } = await twoVersionHarness({
+      withSidecars: false,
+      v2Html: "<h1>A fragment with no body, stored verbatim</h1>",
+    });
+
+    const result = await loadReportDiff(
+      {
+        reports: deps.reports,
+        blobs: deps.blobs,
+        grants: deps.grants,
+        orgWriteGrants: deps.orgWriteGrants,
+        identities: deps.identities,
+      },
+      { orgId: ORG, userId: OWNER },
+      reportSlug,
+      { fromVersionId: v1.id, toVersionId: v2.id },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ kind: "Unexpected" });
   });
 });

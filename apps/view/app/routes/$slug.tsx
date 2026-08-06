@@ -74,7 +74,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       // address bar / history).
       const headers = viewHeaders();
       headers.set("location", decision.to);
-      headers.set("set-cookie", decision.cookie);
+      // APPEND, never set — the gate may hand back more than one capability
+      // cookie for a single hand-off (see Decision.cookies).
+      for (const cookie of decision.cookies) headers.append("set-cookie", cookie);
       headers.set("cache-control", "no-store");
       return new Response(null, { status: 303, headers });
     }

@@ -79,8 +79,22 @@ export async function loadReportDiff(
     return err({ kind: "Unexpected", message: "a version's HTML is missing" });
   }
 
-  const fromBodyHtml = splitShell(new TextDecoder().decode(fromHtmlR.value.bytes)).bodyHtml;
-  const toBodyHtml = splitShell(new TextDecoder().decode(toHtmlR.value.bytes)).bodyHtml;
+  // `splitShell` THROWS on a document with no/unclosed `<body>`, and uploads
+  // are stored VERBATIM (HtmlBundleProcessor) — so a report that "views fine
+  // but won't edit" (the view origin's `document-unsplittable` degrade) also
+  // crashed THIS loader, and with it the editor's Versions/Compare panel, which
+  // calls it. Same degrade-don't-throw posture as `computeReportDiff` below and
+  // as the neighbouring "a version's HTML is missing" guard above: an
+  // unusable version body is a structured error, never an escaping Error.
+  //
+  // (The third `splitShell` site, `reassembleEditedHtml` in
+  // save-edited-version.server.ts, stays unguarded on purpose: it only ever
+  // runs on a document the editor already OPENED, which means it already split.)
+  const fromBodyHtml = bodyHtmlOf(fromHtmlR.value.bytes);
+  const toBodyHtml = bodyHtmlOf(toHtmlR.value.bytes);
+  if (fromBodyHtml === null || toBodyHtml === null) {
+    return err({ kind: "Unexpected", message: "a version's HTML has no splittable <body>" });
+  }
   const fromSidecar = fromSidecarR.ok ? fromSidecarR.value : null;
   const toSidecar = toSidecarR.ok ? toSidecarR.value : null;
 
@@ -98,4 +112,14 @@ export async function loadReportDiff(
     fromVersionNo: fromVersion.versionNo,
     toVersionNo: toVersion.versionNo,
   });
+}
+
+/** The editable body of a stored document, or `null` when it has no splittable
+ *  `<body>` at all. */
+function bodyHtmlOf(bytes: Uint8Array): string | null {
+  try {
+    return splitShell(new TextDecoder().decode(bytes)).bodyHtml;
+  } catch {
+    return null;
+  }
 }

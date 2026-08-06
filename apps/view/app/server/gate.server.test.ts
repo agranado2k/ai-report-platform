@@ -34,7 +34,7 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it, vi } from "vitest";
-import { type Decision, decideServe, type GateDeps } from "./gate.server";
+import { type Decision, decideServe, degradeTargetFor, type GateDeps } from "./gate.server";
 
 const SECRET = "view-access-secret";
 const APP_ORIGIN = "https://app.example.test";
@@ -176,6 +176,13 @@ const accessToken = (extra: Parameters<typeof mintAccessToken>[4] = {}, ttl = 90
   mintAccessToken(SLUG, ttl, SECRET, now, extra);
 const editToken = (ttl = 900, now = NOW, slug = SLUG) =>
   mintEditToken(slug, "user_1", ttl, SECRET, now);
+/** A GENUINE `oa=` fallback — the exact shape `ownerOpenLocation` mints, at its
+ *  real `OWNER_TTL_SECONDS` (24h, deliberately outliving the 15-min edit
+ *  capability it backs up). The gate now verifies `oa` (signature, slug,
+ *  expiry, `owner:true`) before honoring it, so an arbitrary string is no
+ *  longer an owner fallback and these tests must mint the real thing. */
+const ownerAccess = (ttl = 86_400, now = NOW, slug = SLUG) =>
+  mintAccessToken(slug, ttl, SECRET, now, { owner: true });
 
 // ---------------------------------------------------------------------------
 // Slug validation — shared by both purposes (the routes' makeSlug guard).
@@ -362,7 +369,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -426,7 +433,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -458,7 +465,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${query}; Path=/${SLUG}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${query}; Path=/${SLUG}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -556,7 +563,7 @@ describe("decideServe view — interstitial sits BEHIND the ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -612,7 +619,7 @@ describe("decideServe edit — token/cookie decision", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}/edit`,
     });
   });
@@ -658,7 +665,9 @@ describe("decideServe edit — token/cookie decision", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${fresh}; Path=/${SLUG}/edit; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [
+        `arp_edit=${fresh}; Path=/${SLUG}/edit; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      ],
       to: `/${SLUG}/edit`,
     });
   });
@@ -724,44 +733,119 @@ describe("decideServe edit — token/cookie decision", () => {
 describe("decideServe edit — degrade paths for a valid capability", () => {
   const withCookie = { cookie: `arp_edit=${mintEditToken(SLUG, "user_1", 900, SECRET, NOW)}` };
 
-  it("no appOrigin configured → redirect (never render the editor without a Save target)", async () => {
-    expect(
-      await decideEdit(buildReport({ verdict: "clean" }), { ...withCookie, appOrigin: undefined }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
-  });
-
-  it.each<[string, () => Report | undefined]>([
-    ["missing report", () => undefined],
-    ["scanning (no clean live)", () => buildReport()],
-    ["flagged", () => buildReport({ verdict: "flagged" })],
-    ["blocked", () => buildReport({ verdict: "blocked" })],
-    ["deleted", () => buildReport({ verdict: "clean", deleted: true })],
-  ])("%s → redirect to the public viewer (it owns that state machine)", async (_n, reportOf) => {
-    expect(await decideEdit(reportOf(), withCookie)).toEqual({
+  // Destination AND log line in ONE assertion per case. They were two separate
+  // it.each blocks over the same fixtures and the same call, and the second one
+  // silently covered three of the first one's five cases — so "missing report"
+  // and "blocked" had their redirect asserted but never their warn.
+  //
+  // OBSERVABILITY (the 2026-08-06 owner-lockout incident): EVERY degrade off
+  // /edit must leave a log line. Before the fix only the `oa`-carrying denied
+  // branch warned, so a real owner lockout produced a 302 with ZERO signal on
+  // the view origin — the incident was only inferable from the user report.
+  it.each<[string, () => Report | undefined, string]>([
+    ["missing report", () => undefined, "no-servable-version"],
+    ["scanning (no clean live)", () => buildReport(), "no-servable-version"],
+    ["flagged", () => buildReport({ verdict: "flagged" }), "no-servable-version"],
+    ["blocked", () => buildReport({ verdict: "blocked" }), "no-servable-version"],
+    ["deleted", () => buildReport({ verdict: "clean", deleted: true }), "no-servable-version"],
+  ])("%s → redirect to the public viewer, with one edit-degraded-to-view line", async (_n, reportOf, reason) => {
+    const warn = vi.fn();
+    expect(await decideEdit(reportOf(), { ...withCookie, warn })).toEqual({
       kind: "redirect",
       to: `/${SLUG}`,
     });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason,
+    });
   });
 
-  it("repository failure → redirect (degrade, not 500 — the edit route never errors)", async () => {
-    expect(await decideEdit(undefined, { ...withCookie, reports: failingRepo })).toEqual({
+  it("repository failure → redirect, warned with its OWN reason (not merged into no-version)", async () => {
+    const warn = vi.fn();
+    expect(await decideEdit(undefined, { ...withCookie, reports: failingRepo, warn })).toEqual({
       kind: "redirect",
       to: `/${SLUG}`,
+    });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "lookup-failed",
+    });
+  });
+
+  it("no appOrigin → redirect (never render the editor without a Save target), warned", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        ...withCookie,
+        appOrigin: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "app-origin-unset",
     });
   });
 });
 
 describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-E)", () => {
-  it("denied + oa present → redirect through the viewer's ?access= owner flow, URL-encoded", async () => {
-    const oa = "owner.token.with/special+chars";
+  // REORDERED 2026-08-06. `deniedEdit` used to answer `if (oa)` BEFORE the
+  // funnel, so an owner holding a fallback ALWAYS went to read-only. That was
+  // safe while `oa` could only arrive on a query — it was present exactly once,
+  // on the request that had just been minted. Now that it is cookie-carried,
+  // an `arp_edit` that is REJECTED rather than absent (secret rotation,
+  // tampering, clock skew) hits the same branch and sends the owner to
+  // read-only instead of back through the mint that would have fixed them —
+  // removing the recovery path in precisely the secret-rotation scenario Phase
+  // 5-E exists for. A REJECTION now funnels first; the `oa` degrade is what
+  // happens when the funnel itself is unavailable.
+  it("REJECTED token + oa present → funnel to the mint, which is what can fix it", async () => {
+    const oa = ownerAccess();
     const warn = vi.fn();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    // The funnel is the happy path for a writer whose token simply needs
+    // re-minting — not a degrade, so nothing to warn about.
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("REJECTED token + oa, but NO appOrigin → the oa degrade (there is no mint to funnel to)", async () => {
+    const oa = ownerAccess();
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
+        appOrigin: undefined,
+        warn,
+      }),
     ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+
+  // ABSENCE is the other cause, and it keeps the old order: there was no token
+  // to reject, so nothing suggests the mint round-trip is what broke, and the
+  // verified `oa` in hand is a WORKING capability for the read-only view.
+  it("ABSENT token + oa present → the oa degrade (unchanged — nothing was rejected)", async () => {
+    const oa = ownerAccess();
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: `arp_edit_oa=${encodeURIComponent(oa)}`,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
       event: "owner-edit-degraded-to-view",
       slug: SLUG,
@@ -780,30 +864,285 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("oa is IGNORED when the edit token is valid (only the denied branch consults it)", async () => {
+  it("a valid ?et= ALSO persists oa as its own cookie (it must survive the 303's query strip)", async () => {
     const et = editToken();
+    const oa = ownerAccess();
     const warn = vi.fn();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
-        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&oa=some-owner-token`,
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [
+        `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `arp_edit_oa=${encodeURIComponent(oa)}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
       to: `/${SLUG}/edit`,
     });
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("oa does NOT rescue a post-auth degrade (missing appOrigin) — only the denied branch", async () => {
+  // NOTE: "a valid ?et= with NO oa sets only the edit cookie (a write-grantee
+  // has no fallback)" used to live here as a byte-identical copy of the
+  // "valid ?et= → setCookieAndRedirect" case above — same token, same expected
+  // `cookies` array. Deleted; the surviving one covers it.
+});
+
+// ---------------------------------------------------------------------------
+// THE 2026-08-06 OWNER-LOCKOUT REGRESSION GUARD.
+//
+// An owner's round-trip is TWO requests: `?et=…&oa=…` → 303 (query stripped,
+// arp_edit cookie set) → the clean `/slug/edit` carrying only cookies. Every
+// degrade that fires on that SECOND request had no `oa` in hand — it was
+// delivered once, on the query, and thrown away by the 303 — so it sent a
+// PRIVATE report's owner to the bare public viewer, which 302s them to the
+// app's /unlock/{slug}, which 403s "only its owner can view it". The owner is
+// locked out of their own report, silently.
+//
+// The fix: `oa` is persisted as its own scoped cookie at 303 time and is read
+// back on the cookie request, so EVERY degrade — not just the denied branch —
+// routes an owner through the viewer's `?access=` flow.
+// ---------------------------------------------------------------------------
+describe("decideServe edit — the owner fallback survives the 303 (cookie-carried oa)", () => {
+  const OA = ownerAccess();
+  const cookiesWith = (et: string, oa = OA) =>
+    `arp_edit=${et}; arp_edit_oa=${encodeURIComponent(oa)}`;
+
+  it.each<[string, () => Report | undefined, string]>([
+    ["missing report", () => undefined, "no-servable-version"],
+    ["scanning (no clean live)", () => buildReport(), "no-servable-version"],
+    ["flagged", () => buildReport({ verdict: "flagged" }), "no-servable-version"],
+    ["blocked", () => buildReport({ verdict: "blocked" }), "no-servable-version"],
+    ["deleted", () => buildReport({ verdict: "clean", deleted: true }), "no-servable-version"],
+  ])("%s on the cookie request → the OWNER degrades through ?access=, not to the unlock wall", async (_n, reportOf, reason) => {
+    const warn = vi.fn();
+    expect(await decideEdit(reportOf(), { cookie: cookiesWith(editToken()), warn })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}?access=${encodeURIComponent(OA)}`,
+    });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason,
+    });
+  });
+
+  it("no appOrigin on the cookie request → the owner still degrades through ?access=", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        appOrigin: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(OA)}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "app-origin-unset",
+    });
+  });
+
+  // An EXPIRED `arp_edit` is a REJECTION, not an absence — a token was
+  // presented and did not verify — so it funnels rather than degrading. This
+  // is the case the reorder is really for: the owner's cookie has aged out (or
+  // the secret rotated under it), and the mint is what restores them. Degrading
+  // here would drop a still-entitled owner into read-only for the rest of the
+  // fallback's 24h life, with no way back except guessing at the dashboard.
+  it("an EXPIRED arp_edit cookie alongside the oa cookie funnels to the mint, not to read-only", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        now: NOW + 901,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // …but the unlock wall still has to be unreachable when the funnel is gone.
+  it("an EXPIRED arp_edit cookie with NO appOrigin still degrades the owner through ?access=", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        now: NOW + 901,
+        appOrigin: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(OA)}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+
+  // The route's OWN post-gate degrades (the blob read / the shell split — the
+  // two lines that actually fired in the incident) need the same destination,
+  // and they only ever see the Decision. So `serve` carries it.
+  it("a served editor carries the owner degrade target for the route's post-gate failures", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: cookiesWith(editToken()),
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}?access=${encodeURIComponent(OA)}`);
+      expect(decision.ownerFallback).toBe(true);
+    }
+  });
+
+  it("a served editor WITHOUT an owner fallback degrades to the bare viewer (grantee — unchanged)", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}`,
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}`);
+      expect(decision.ownerFallback).toBe(false);
+    }
+  });
+
+  // NOTE: "an empty arp_edit_oa cookie is treated as absent" used to live here.
+  // It PASSED against `main` — where nothing reads `arp_edit_oa` at all — so it
+  // could not distinguish "treated as absent" from "never read", and it is now
+  // subsumed by the rejection matrix below (an empty value is just one more
+  // value that doesn't verify as an owner token).
+
+  it("a query oa= still wins over a stale cookie oa (a fresh mint always supersedes)", async () => {
+    const fresh = ownerAccess(3600);
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      path: `/${SLUG}/edit?oa=${encodeURIComponent(fresh)}`,
+      cookie: cookiesWith(editToken(), ownerAccess(900)),
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}?access=${encodeURIComponent(fresh)}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE OWNER FALLBACK IS VERIFIED, NOT TRUSTED (review #247 H-1).
+//
+// `oa` used to be taken straight off the query, written verbatim into a
+// Set-Cookie, and used as `ownerFallback: oa !== undefined` — the flag that
+// selects the `owner-edit-degraded-to-view` event. So ANY visitor holding a
+// valid `et=` (a write-grantee, for whom `ownerOpenLocation` deliberately never
+// mints an `oa`) could append `&oa=anything` and forge the exact incident
+// signal this PR exists to create, and park unbounded bytes in the cookie jar.
+// No privilege escalation — redemption is verified downstream by
+// resolveAccessDecision — but an untrustworthy signal is worse than no signal.
+//
+// The gate now honors `oa` only when it verifies as an owner Access token FOR
+// THIS SLUG: correct HMAC, unexpired, `owner === true`, and within a length cap.
+// ---------------------------------------------------------------------------
+describe("decideServe edit — an unverified oa= is not an owner fallback", () => {
+  const forged = [
+    ["arbitrary text", () => "owner.token.with/special+chars"],
+    ["an empty value", () => ""],
+    ["a non-owner access token (mode-bound)", () => accessToken({ mode: "password" })],
+    ["an owner token for ANOTHER slug", () => ownerAccess(900, NOW, OTHER_SLUG)],
+    ["an EXPIRED owner token", () => ownerAccess(900, NOW - 1000)],
+    ["an edit token presented as oa", () => editToken()],
+    ["a token over the length cap", () => `${ownerAccess()}${"A".repeat(4096)}`],
+  ] as const;
+
+  it.each(
+    forged,
+  )("%s on ?et=garbage → the app mint funnel, NOT an owner degrade", async (_n, oaOf) => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oaOf())}`,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(forged)("%s is never persisted into arp_edit_oa on the 303", async (_n, oaOf) => {
     const et = editToken();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
-        path: `/${SLUG}/edit?oa=some-owner-token`,
-        cookie: `arp_edit=${et}`,
-        appOrigin: undefined,
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oaOf())}`,
+      }),
+    ).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
+      to: `/${SLUG}/edit`,
+    });
+  });
+
+  it.each(forged)("%s in the cookie cannot forge the owner incident signal", async (_n, oaOf) => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport(), {
+        cookie: `arp_edit=${editToken()}; arp_edit_oa=${encodeURIComponent(oaOf())}`,
+        warn,
       }),
     ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view", // NOT owner-…
+      slug: SLUG,
+      reason: "no-servable-version",
+    });
+  });
+
+  it("with no secret configured, even a genuine oa is not honored (fail closed)", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(ownerAccess())}`,
+        secret: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// degradeTargetFor — the ONE place a route asks "if I can't render, where do I
+// send them, and is this an owner?". The /edit route had TWO answers: it read
+// `decision.degradeTo` for its document-load failures but hard-coded
+// `/${params.slug}` in its defensive-narrowing branch (review #247 M-2) — the
+// same "one branch left untouched" shape ADR-0063 criticises Phase 5-E for.
+// ---------------------------------------------------------------------------
+describe("degradeTargetFor", () => {
+  it("a served editor with an owner fallback → the ?access= target, flagged as owner", async () => {
+    const oa = ownerAccess();
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}; arp_edit_oa=${encodeURIComponent(oa)}`,
+    });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}?access=${encodeURIComponent(oa)}`,
+      ownerFallback: true,
+    });
+  });
+
+  it("a served editor without one → the bare viewer, not flagged", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}`,
+    });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+  });
+
+  // The decision kinds the edit purpose cannot produce, but whose types the
+  // route still has to narrow past — the branch that used to answer silently.
+  it.each<[string, Decision]>([
+    ["interstitial", { kind: "interstitial" }],
+    ["error", { kind: "error", status: 404, message: "Not found" }],
+    ["redirect", { kind: "redirect", to: "/elsewhere" }],
+    ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
+  ])("%s → the bare viewer for this slug, not flagged", (_n, decision) => {
+    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
   });
 });

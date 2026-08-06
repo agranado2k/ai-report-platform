@@ -43,6 +43,7 @@ import {
   makeSlug,
   type Report,
   type ReportVersion,
+  readAccessToken,
   readEditToken,
   type Slug,
 } from "arp-domain";
@@ -60,6 +61,48 @@ export const UNLOCK_COOKIE = "arp_unlock";
 // report. HttpOnly + Secure + SameSite=Lax, same posture as the unlock cookie
 // (never readable by report-embedded JS, never sent cross-site).
 export const EDIT_COOKIE = "arp_edit";
+
+// The `arp_edit_oa` cookie — the OWNER-fallback companion to `arp_edit`
+// (2026-08-06 owner-lockout incident). `ownerOpenLocation` mints the `oa=`
+// owner access token ONCE, in the query string alongside `et=`; the 303 that
+// redeems `et=` into a cookie STRIPS the query, so every degrade that fires on
+// the following (cookie-only) request used to have no fallback in hand and
+// dumped a private report's OWNER on the public viewer → /unlock → 403. The
+// fallback is therefore persisted at the same moment, under the same
+// Path=/${slug}/edit scoping and the same Max-Age as the edit cookie — so it
+// never outlives the edit session, and it is never sent on the public
+// GET /<slug> read.
+//
+// THIS IS A DELIBERATE, BOUNDED WIDENING OF THE TOKEN'S EXPOSURE — not a
+// reduction (an earlier draft of this comment claimed "strictly REDUCES";
+// that was false, review #247 H-3). Nothing was removed: `ownerOpenLocation`
+// still appends `&oa=` to the query exactly as before, so the address-bar /
+// history / referer hop is unchanged. What this adds is (a) an HttpOnly COPY
+// of the token in the cookie jar, and (b) five further reachable occasions on
+// which the 24h `owner:true` token is emitted into a URL as `?access=`
+// (app-origin-unset, lookup-failed, no-servable-version, the route's
+// document-load failures, and — defensively, unreachable today —
+// gate-decision-unusable), where before only the `denied` branch of the FIRST
+// request could do it. Redeeming paths go from one to six. Each of those
+// redemptions mints an `arp_unlock` cookie at the BROADER Path=/${slug} with
+// Max-Age = claims.exp - now, i.e. up to the token's full 24h — so the
+// practical redemption window widens from one request to the whole edit
+// session and beyond.
+//
+// That trade is worth making — the alternative is an owner locked out of
+// their own report — and it is bounded by five mitigations:
+//   1. VERIFIED, not trusted: `acceptOwnerFallback` requires a valid HMAC,
+//      this slug, an unexpired token and `owner === true`, plus a length cap.
+//   2. Path=/${slug}/edit — never sent on the public GET /<slug> read.
+//   3. Max-Age tied to the EDIT token's remaining life (≤15 min), so the
+//      cookie copy dies with the edit session even though the token itself
+//      lives 24h.
+//   4. HttpOnly + Secure + SameSite=Lax — unreadable by report-embedded JS,
+//      never sent cross-site.
+//   5. Percent-encoded, so the value can never split the Set-Cookie header.
+// Shortening OWNER_TTL_SECONDS is the lever if this window is judged too wide
+// (ADR-0056 already notes the 24h is re-minted on every dashboard click).
+export const EDIT_OWNER_COOKIE = "arp_edit_oa";
 
 /** Parse a named cookie's value out of a raw `Cookie` request header. */
 function readCookieValue(cookieHeader: string | null, cookieName: string): string | undefined {
@@ -86,19 +129,116 @@ function editCookie(slug: string, token: string, maxAgeSeconds: number): string 
   return `${EDIT_COOKIE}=${token}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
 }
 
+/** The owner-fallback cookie. The value is percent-encoded (and decoded on
+ *  read) so a token containing a `;`, `,` or space can never split the header
+ *  — `searchParams.get("oa")` hands us the DECODED token. */
+function ownerFallbackCookie(slug: string, oa: string, maxAgeSeconds: number): string {
+  return `${EDIT_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+}
+
 /**
- * HOTFIX carried over from edit-session.ts (Phase 5-E, PR #185): when an
- * OWNER's edit-token round-trip is denied, degrade through the viewer's
- * existing `?access=` owner flow (HttpOnly unlock cookie, URL cleaned by the
- * public route's grant → 303) instead of the bare viewer — otherwise a
- * private report's owner lands on their own report's unlock wall. Same
- * exposure the pre-Phase-5 owner-view flow already had for this exact token
- * shape (an owner token in `?access=`) — not a new surface. When `oa` is
- * absent (a write-grantee's failed round-trip, or no fallback was minted),
- * behavior is unchanged: the bare public viewer.
+ * HOTFIX carried over from edit-session.ts (Phase 5-E, PR #185), generalised
+ * by the 2026-08-06 owner-lockout fix: whenever an OWNER's route into the
+ * editor fails — at ANY point, not only at token validation — degrade through
+ * the viewer's existing `?access=` owner flow (HttpOnly unlock cookie, URL
+ * cleaned by the public route's grant → 303) instead of the bare viewer.
+ * Otherwise a private report's owner lands on their own report's unlock wall,
+ * which 403s them. Same exposure the pre-Phase-5 owner-view flow already had
+ * for this exact token shape (an owner token in `?access=`) — not a new
+ * surface. When `oa` is absent (a write-grantee's failed round-trip, or no
+ * fallback was minted), behavior is unchanged: the bare public viewer.
  */
 function degradeLocation(slug: string, oa: string | undefined): string {
   return oa ? `/${slug}?access=${encodeURIComponent(oa)}` : `/${slug}`;
+}
+
+/** Why an /edit request could not render the editor. Every value is a DISTINCT
+ *  production failure mode — the incident that motivated this enum was
+ *  indistinguishable from four other causes precisely because nothing logged
+ *  a reason.
+ *
+ *  The first five degrade to the viewer (`editDegradeLine`). The three
+ *  `document-*` reasons no longer do: they fire AFTER the capability is proven,
+ *  so `/edit` renders its own explanatory page and logs `editUnopenableLine`.
+ *  They share this enum because they share the `reason` vocabulary — one
+ *  taxonomy of "why the editor didn't open" across both outcomes — and because
+ *  `DocumentDegradeReason` (edit/load-document.ts) is `Extract`ed from it, so
+ *  the two cannot drift. */
+export type EditDegradeReason =
+  /** No/invalid/expired edit capability (query token or cookie). */
+  | "edit-token-denied"
+  /** `APP_ORIGIN` unset on the view deployment — env, not report, at fault. */
+  | "app-origin-unset"
+  /** The report has no clean live version (missing/scanning/flagged/deleted). */
+  | "no-servable-version"
+  /** The report lookup itself failed (infra). */
+  | "lookup-failed"
+  /** The live version's entry document could not be read from the blob store. */
+  | "document-unreadable"
+  /** The entry document could not be split into shell + body (no `<body>`). */
+  | "document-unsplittable"
+  /** The body HTML defeated the ProseMirror parse (e.g. nesting deep enough to
+   *  overflow the recursive DOM walk). Views fine, will not open in the editor. */
+  | "document-unparsable"
+  /** The route could not use the Decision it was handed — a shape the edit
+   *  purpose is not supposed to be able to produce (an `interstitial`, a
+   *  `serve` with no edit capability). Unreachable by construction today; it
+   *  exists so that if it ever DOES fire it is named rather than silent. */
+  | "gate-decision-unusable";
+
+/** The ONE structured log line for an /edit degrade — built here so the gate
+ *  and the route (whose own post-gate failures degrade the same way) emit the
+ *  identical shape. `owner-edit-degraded-to-view` is kept as the event name
+ *  for the owner case: it is the signal ADR-0063 Phase 5-E introduced so "the
+ *  secret-misalignment class of incident is visible in logs rather than only
+ *  inferable from user reports", and it is what incident queries look for. */
+export function editDegradeLine(
+  slug: string,
+  ownerFallback: boolean,
+  reason: EditDegradeReason,
+): string {
+  return JSON.stringify({
+    event: ownerFallback ? "owner-edit-degraded-to-view" : "edit-degraded-to-view",
+    slug,
+    reason,
+  });
+}
+
+/** The line for a document failure, which no longer degrades to the view at
+ *  all — `/edit` renders its own explanatory page instead (`edit/unopenable.ts`).
+ *  A DISTINCT event on purpose: `*-degraded-to-view` naming an outcome that
+ *  never reaches the view is exactly the kind of drift this fix exists to
+ *  remove, and the two are operationally different — a degrade is the incident
+ *  class (an owner silently stranded, possibly at the unlock wall), while this
+ *  is a handled outcome the user was actually told about. `reason` keeps the
+ *  same three values, so ADR-0063's open question (WHICH of the three fires in
+ *  production) is still answerable off this line. */
+export function editUnopenableLine(slug: string, reason: EditDegradeReason): string {
+  return JSON.stringify({ event: "edit-document-unopenable", slug, reason });
+}
+
+/**
+ * Where a route should send a visitor it cannot render for, and whether that
+ * target carries an owner fallback (which selects the log event).
+ *
+ * ONE answer for every Decision shape, including the ones purpose "edit" can't
+ * actually produce but whose types the route still has to narrow past. The
+ * /edit loader used to have two answers: `decision.degradeTo` for its
+ * document-load failures, and a hard-coded `/${params.slug}` — silently, with
+ * no log line — in its defensive-narrowing branch (review #247 M-2). That is
+ * the same "left one branch untouched" shape ADR-0063 criticises Phase 5-E for,
+ * and it is how an owner ends up at the unlock wall.
+ */
+export function degradeTargetFor(
+  decision: Decision,
+  slug: string,
+): { readonly to: string; readonly ownerFallback: boolean } {
+  return decision.kind === "serve"
+    ? {
+        to: decision.degradeTo ?? `/${slug}`,
+        ownerFallback: decision.ownerFallback ?? false,
+      }
+    : { to: `/${slug}`, ownerFallback: false };
 }
 
 export type Purpose = "view" | "edit";
@@ -129,6 +269,21 @@ export type Decision =
       readonly report: Report;
       readonly version: ReportVersion;
       readonly edit?: { readonly token: string; readonly claims: EditClaims };
+      /** purpose "edit" only — where the route must send the visitor if IT
+       *  cannot render after all. Carries the owner `?access=` fallback when
+       *  one is in play, so a route-side failure can't strand an owner at the
+       *  unlock wall the way the gate's own degrades no longer can.
+       *
+       *  As of 2026-08-06 the route's DOCUMENT failures (the blob read, the
+       *  shell split, the ProseMirror parse) no longer consume this: they
+       *  render an explanatory page instead of redirecting at all
+       *  (`edit/unopenable.ts`), which is why the unlock wall is unreachable
+       *  from them by construction rather than by carrying the right token.
+       *  The remaining consumer is the route's defensive-narrowing branch,
+       *  which cannot render and has nowhere of its own to go. */
+      readonly degradeTo?: string;
+      /** Whether `degradeTo` carries an owner fallback — selects the log event. */
+      readonly ownerFallback?: boolean;
     }
   /** Access granted but the report is mid-scan → the ADR-0038 §2 holding page. */
   | { readonly kind: "interstitial" }
@@ -136,9 +291,16 @@ export type Decision =
   | { readonly kind: "error"; readonly status: number; readonly message: string }
   /** 302: the app unlock hand-off (view) or the degrade-to-public-viewer (edit). */
   | { readonly kind: "redirect"; readonly to: string }
-  /** 303: a valid query-token hand-off → set the capability cookie and bounce to
-   *  the clean URL, dropping the token out of the address bar/history/referer. */
-  | { readonly kind: "setCookieAndRedirect"; readonly cookie: string; readonly to: string };
+  /** 303: a valid query-token hand-off → set the capability cookie(s) and bounce
+   *  to the clean URL, dropping the token out of the address bar/history/referer.
+   *  A LIST because the edit hand-off persists two capabilities in one response:
+   *  the edit cookie and — for an owner — the `oa` fallback that would otherwise
+   *  die with the stripped query. The route must APPEND each, never `set`. */
+  | {
+      readonly kind: "setCookieAndRedirect";
+      readonly cookies: readonly string[];
+      readonly to: string;
+    };
 
 /** The one viewer gate: decide what the origin should do for `rawSlug` under
  *  `purpose`, given the request's query/cookie capabilities. Pure over `deps`
@@ -228,7 +390,7 @@ async function decideView(
     // and redirect to the clean URL (drops the token from the address bar/history).
     return {
       kind: "setCookieAndRedirect",
-      cookie: unlockCookie(slug, decision.token, decision.maxAgeSeconds),
+      cookies: [unlockCookie(slug, decision.token, decision.maxAgeSeconds)],
       to: `/${slug}`,
     };
   }
@@ -256,12 +418,21 @@ async function decideEdit(
   slug: Slug,
   deps: GateDeps,
 ): Promise<Decision> {
+  const cookieHeader = request.headers.get("cookie");
   const queryToken = url.searchParams.get("et") ?? undefined;
-  // Hotfix fallback (see `degradeLocation`): the fallback owner access token
-  // `ownerOpenLocation` mints alongside `et=` for actual owners, ONLY
-  // consulted when the edit-token round-trip below is denied.
-  const oa = url.searchParams.get("oa") ?? undefined;
-  const cookieToken = readCookieValue(request.headers.get("cookie"), EDIT_COOKIE);
+  // The fallback owner access token `ownerOpenLocation` mints alongside `et=`
+  // for actual owners. It arrives ONCE, on the query — and the 303 below
+  // strips the query. So it is read from the query OR from the cookie the 303
+  // persisted it into: without that, every degrade on the post-303 request was
+  // blind to the fact that it was stranding an OWNER (the 2026-08-06 lockout).
+  // A fresh query `oa=` always supersedes a cookie-carried one. Both are
+  // VERIFIED before they count as a fallback (acceptOwnerFallback) — see there.
+  const oa = acceptOwnerFallback(
+    url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader),
+    slug,
+    deps,
+  );
+  const cookieToken = readCookieValue(cookieHeader, EDIT_COOKIE);
 
   // Fail closed (denied) when `secret` is unset — same posture as the view
   // path's resolveAccessDecision. The query token takes precedence when both
@@ -273,12 +444,18 @@ async function decideEdit(
   // loaders, kept intact behind the purpose parameter.
   if (deps.secret && queryToken) {
     const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
-    if (!claims) return deniedEdit(slug, oa, deps);
+    // A token was PRESENTED and did not verify — a rejection, not an absence.
+    if (!claims) return deniedEdit(slug, oa, "rejected", deps);
+    const maxAge = Math.max(0, claims.exp - deps.nowSeconds);
     return {
       kind: "setCookieAndRedirect",
-      cookie: editCookie(slug, queryToken, Math.max(0, claims.exp - deps.nowSeconds)),
-      // Mint the arp_edit cookie and 303 to the clean URL — drops the token out
-      // of the address bar/history/referer, exactly like the view path's grant.
+      // Mint the arp_edit cookie — plus the owner fallback, so it SURVIVES the
+      // clean-URL bounce — and 303. Drops both tokens out of the address
+      // bar/history/referer, exactly like the view path's grant.
+      cookies: [
+        editCookie(slug, queryToken, maxAge),
+        ...(oa ? [ownerFallbackCookie(slug, oa, maxAge)] : []),
+      ],
       to: `/${slug}/edit`,
     };
   }
@@ -286,12 +463,18 @@ async function decideEdit(
     deps.secret && cookieToken
       ? readEditToken(cookieToken, slug, deps.secret, deps.nowSeconds)
       : null;
-  if (!claims || !cookieToken) return deniedEdit(slug, oa, deps);
+  if (!claims || !cookieToken) {
+    // A cookie that WAS present and failed to verify (expired, tampered,
+    // minted under a rotated secret) is a rejection; no cookie at all — or no
+    // secret with which to judge one — is an absence. The distinction decides
+    // whether `deniedEdit` funnels or degrades; see there.
+    return deniedEdit(slug, oa, cookieToken && deps.secret ? "rejected" : "absent", deps);
+  }
 
   // A valid, already-redeemed arp_edit cookie. Never render the editor without
   // a configured app origin — editViewHeaders REQUIRES it for connect-src, and
   // there would be nowhere for Save to POST to anyway (fail closed).
-  if (!deps.appOrigin) return { kind: "redirect", to: degradeLocation(slug, undefined) };
+  if (!deps.appOrigin) return degradedEdit(slug, oa, "app-origin-unset", deps);
 
   // Any non-"serve" outcome (not found / deleted / flagged / still scanning)
   // or a lookup failure degrades to the public viewer, which already renders
@@ -300,50 +483,141 @@ async function decideEdit(
   // "render the editor" on top of the one state with a document to edit.
   // Deliberately NO ?v= here — the editor always opens the live version.
   const outcome = await resolveViewableReport(slug, deps.reports);
-  if (!outcome.ok || outcome.value.kind !== "serve") {
-    return { kind: "redirect", to: degradeLocation(slug, undefined) };
-  }
+  if (!outcome.ok) return degradedEdit(slug, oa, "lookup-failed", deps);
+  if (outcome.value.kind !== "serve") return degradedEdit(slug, oa, "no-servable-version", deps);
   return {
     kind: "serve",
     report: outcome.value.report,
     version: outcome.value.version,
     edit: { token: cookieToken, claims },
+    degradeTo: degradeLocation(slug, oa),
+    ownerFallback: oa !== undefined,
   };
 }
 
-/** The edit purpose's denied branch. With an `oa=` fallback present (an OWNER
- *  whose round-trip failed): degrade through the viewer's `?access=` owner
- *  flow, with the observability signal — unchanged. Otherwise (no token,
- *  expired/invalid token or cookie): funnel to the app's ONE edit-token mint,
- *  `GET {appOrigin}/reports/{slug}/open` — the app re-authenticates the
- *  session and re-mints `et=` for canWrite users (owner or write-grantee),
- *  and bounces everyone else to its home ("/" → sign-in for anonymous
- *  visitors), so a grantee's road into /edit no longer dead-ends at the
- *  read-only viewer.
+/** A generous ceiling on an accepted `oa=`. A real owner Access token is a
+ *  couple of hundred bytes; anything past this is someone trying to park bulk
+ *  in the cookie jar (the value is echoed into `Set-Cookie` verbatim). Checked
+ *  BEFORE the HMAC so an oversized string is never even hashed. */
+const MAX_OWNER_FALLBACK_LENGTH = 1024;
+
+/**
+ * VERIFY the owner fallback before it counts as one (review #247 H-1).
+ *
+ * `oa` used to be taken straight off the query/cookie: written verbatim into a
+ * `Set-Cookie`, and used as `ownerFallback: oa !== undefined` — the flag that
+ * selects the `owner-edit-degraded-to-view` event. So anyone holding a valid
+ * `et=` (notably a write-grantee, for whom `ownerOpenLocation` deliberately
+ * never mints an `oa`, open-report.server.ts) could append `&oa=anything` and
+ * forge the exact incident signal this seam exists to produce — and plant
+ * unbounded bytes in the cookie jar while they were at it.
+ *
+ * There was never a privilege escalation: redemption is verified downstream by
+ * `resolveAccessDecision` (`claims.owner === true` off a signature-checked,
+ * slug-bound, unexpired token), so a forged `oa` only ever bought a redirect to
+ * a `?access=` the viewer then rejects. But the whole value of this change is
+ * OBSERVABILITY, and a forgeable signal is worse than no signal.
+ *
+ * So the gate now applies the same check the redeemer applies, up front: honor
+ * `oa` only when it parses as an owner Access token for THIS slug. Fails closed
+ * on an unset secret, exactly like both token paths above.
+ */
+function acceptOwnerFallback(
+  raw: string | undefined,
+  slug: Slug,
+  deps: GateDeps,
+): string | undefined {
+  if (!raw || raw.length > MAX_OWNER_FALLBACK_LENGTH || !deps.secret) return undefined;
+  const claims = readAccessToken(raw, slug, deps.secret, deps.nowSeconds);
+  return claims?.owner === true ? raw : undefined;
+}
+
+/** Read the owner fallback back out of its cookie, undoing the percent-encoding
+ *  `ownerFallbackCookie` applied. A malformed encoding is treated as absent
+ *  rather than thrown — a corrupt cookie must never 500 the edit route. */
+function readOwnerFallbackCookie(cookieHeader: string | null): string | undefined {
+  const raw = readCookieValue(cookieHeader, EDIT_OWNER_COOKIE);
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Degrade an /edit request to the viewer — through the owner `?access=` flow
+ *  when a fallback is in hand — and ALWAYS leave a log line saying why. */
+function degradedEdit(
+  slug: string,
+  oa: string | undefined,
+  reason: EditDegradeReason,
+  deps: GateDeps,
+): Decision {
+  (deps.warn ?? console.warn)(editDegradeLine(slug, oa !== undefined, reason));
+  return { kind: "redirect", to: degradeLocation(slug, oa) };
+}
+
+/** Why the edit capability was refused. The two are NOT interchangeable — see
+ *  `deniedEdit`, which routes them differently.
+ *
+ *  - `rejected`: a token WAS presented (query or cookie) and did not verify —
+ *    expired, tampered with, or minted under a since-rotated secret.
+ *  - `absent`: no token at all, or no secret with which to judge one. */
+type EditDenialCause = "rejected" | "absent";
+
+/** The edit purpose's denied branch — the funnel to the app's ONE edit-token
+ *  mint, `GET {appOrigin}/reports/{slug}/open`. The app re-authenticates the
+ *  session and re-mints `et=` for canWrite users (owner or write-grantee), and
+ *  bounces everyone else to its home ("/" → sign-in for anonymous visitors), so
+ *  a grantee's road into /edit doesn't dead-end at the read-only viewer.
+ *
+ *  ORDERING (reordered 2026-08-06 — this used to answer `if (oa)` FIRST):
+ *
+ *  - `rejected`, and the funnel is available → FUNNEL, even for an owner
+ *    holding a verified `oa`. A rejection says the capability round-trip is
+ *    what broke, and the mint is the thing that repairs it. Answering `oa`
+ *    first was safe only while `oa` could arrive on the query alone — it was
+ *    then present exactly once, on the request that had just been minted. Now
+ *    that it is cookie-carried it survives the whole edit session, so it also
+ *    catches every LATER rejection: an expired cookie, a rotated secret, clock
+ *    skew. Degrading those to read-only removes the recovery path in exactly
+ *    the secret-rotation scenario Phase 5-E exists for, and leaves a
+ *    still-entitled owner read-only for the fallback's remaining 24h.
+ *  - `absent`, with a verified `oa` → the `oa` degrade, unchanged. Nothing was
+ *    rejected, so nothing points at the mint round-trip; and the `oa` in hand
+ *    is a WORKING capability for the read-only view rather than a gamble on
+ *    another hop.
+ *  - anything, with no funnel available (no secret / no appOrigin) → the `oa`
+ *    degrade if one is in hand, else the bare public viewer. This is what keeps
+ *    the unlock wall unreachable for an owner even when the app origin is
+ *    unset.
  *
  *  Loop safety: /open → /edit?et=… → arp_edit cookie → served; a non-writer
  *  exits at the app home, never bouncing back here. The funnel is guarded on
  *  BOTH secret and appOrigin: with no secret this origin can never validate
  *  any token /open mints (funnelling would guarantee /edit → /open → /edit),
- *  and with no appOrigin there is nowhere to send anyone — both keep today's
- *  degrade to the public viewer. The residual loop (both secrets SET but
- *  misaligned, a non-owner grantee) is the PR #185 incident class — the
- *  browser's redirect-loop breaker surfaces it instead of a silent read-only
- *  degrade. */
-function deniedEdit(slug: string, oa: string | undefined, deps: GateDeps): Decision {
-  if (oa) {
-    // Observability (claude-review #187): when an OWNER's edit-token round-trip
-    // is denied and we degrade them to a read-only view (`oa` present), emit a
-    // structured signal — the secret-misalignment class of incident is then
-    // visible in logs rather than only inferable from user reports. Never logs
-    // the token.
-    (deps.warn ?? console.warn)(
-      JSON.stringify({ event: "owner-edit-degraded-to-view", slug, reason: "edit-token-denied" }),
-    );
-    return { kind: "redirect", to: degradeLocation(slug, oa) };
-  }
-  if (deps.secret && deps.appOrigin) {
+ *  and with no appOrigin there is nowhere to send anyone. The residual loop
+ *  (both secrets SET but misaligned, a non-owner grantee) is the PR #185
+ *  incident class — the browser's redirect-loop breaker surfaces it instead of
+ *  a silent read-only degrade. The reorder deliberately EXTENDS that residual
+ *  loop to owners: a loud loop the operator can see beats an owner quietly
+ *  parked in read-only, which is how the 2026-08-06 incident stayed invisible. */
+function deniedEdit(
+  slug: string,
+  oa: string | undefined,
+  cause: EditDenialCause,
+  deps: GateDeps,
+): Decision {
+  const canFunnel = Boolean(deps.secret && deps.appOrigin);
+  if (canFunnel && (cause === "rejected" || !oa)) {
+    // NOT a degrade — the funnel is the happy path for a writer whose token
+    // simply needs re-minting. It re-enters through the mint, so no warning.
     return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
   }
-  return { kind: "redirect", to: degradeLocation(slug, undefined) };
+  // Observability (claude-review #187): when an OWNER's edit-token round-trip
+  // is denied and we degrade them to a read-only view (`oa` present), emit a
+  // structured signal — the secret-misalignment class of incident is then
+  // visible in logs rather than only inferable from user reports. Never logs
+  // the token.
+  return degradedEdit(slug, oa, "edit-token-denied", deps);
 }
