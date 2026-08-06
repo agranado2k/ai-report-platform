@@ -726,43 +726,27 @@ describe("decideServe edit — token/cookie decision", () => {
 describe("decideServe edit — degrade paths for a valid capability", () => {
   const withCookie = { cookie: `arp_edit=${mintEditToken(SLUG, "user_1", 900, SECRET, NOW)}` };
 
-  it("no appOrigin configured → redirect (never render the editor without a Save target)", async () => {
-    expect(
-      await decideEdit(buildReport({ verdict: "clean" }), { ...withCookie, appOrigin: undefined }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
-  });
-
-  it.each<[string, () => Report | undefined]>([
-    ["missing report", () => undefined],
-    ["scanning (no clean live)", () => buildReport()],
-    ["flagged", () => buildReport({ verdict: "flagged" })],
-    ["blocked", () => buildReport({ verdict: "blocked" })],
-    ["deleted", () => buildReport({ verdict: "clean", deleted: true })],
-  ])("%s → redirect to the public viewer (it owns that state machine)", async (_n, reportOf) => {
-    expect(await decideEdit(reportOf(), withCookie)).toEqual({
-      kind: "redirect",
-      to: `/${SLUG}`,
-    });
-  });
-
-  it("repository failure → redirect (degrade, not 500 — the edit route never errors)", async () => {
-    expect(await decideEdit(undefined, { ...withCookie, reports: failingRepo })).toEqual({
-      kind: "redirect",
-      to: `/${SLUG}`,
-    });
-  });
-
+  // Destination AND log line in ONE assertion per case. They were two separate
+  // it.each blocks over the same fixtures and the same call, and the second one
+  // silently covered three of the first one's five cases — so "missing report"
+  // and "blocked" had their redirect asserted but never their warn.
+  //
   // OBSERVABILITY (the 2026-08-06 owner-lockout incident): EVERY degrade off
   // /edit must leave a log line. Before the fix only the `oa`-carrying denied
   // branch warned, so a real owner lockout produced a 302 with ZERO signal on
   // the view origin — the incident was only inferable from the user report.
   it.each<[string, () => Report | undefined, string]>([
+    ["missing report", () => undefined, "no-servable-version"],
     ["scanning (no clean live)", () => buildReport(), "no-servable-version"],
     ["flagged", () => buildReport({ verdict: "flagged" }), "no-servable-version"],
+    ["blocked", () => buildReport({ verdict: "blocked" }), "no-servable-version"],
     ["deleted", () => buildReport({ verdict: "clean", deleted: true }), "no-servable-version"],
-  ])("%s warns edit-degraded-to-view with a reason", async (_n, reportOf, reason) => {
+  ])("%s → redirect to the public viewer, with one edit-degraded-to-view line", async (_n, reportOf, reason) => {
     const warn = vi.fn();
-    await decideEdit(reportOf(), { ...withCookie, warn });
+    expect(await decideEdit(reportOf(), { ...withCookie, warn })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}`,
+    });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
       event: "edit-degraded-to-view",
@@ -771,9 +755,12 @@ describe("decideServe edit — degrade paths for a valid capability", () => {
     });
   });
 
-  it("a repository failure warns with its own reason (not silently identical to no-version)", async () => {
+  it("repository failure → redirect, warned with its OWN reason (not merged into no-version)", async () => {
     const warn = vi.fn();
-    await decideEdit(undefined, { ...withCookie, reports: failingRepo, warn });
+    expect(await decideEdit(undefined, { ...withCookie, reports: failingRepo, warn })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}`,
+    });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
       event: "edit-degraded-to-view",
       slug: SLUG,
@@ -781,13 +768,15 @@ describe("decideServe edit — degrade paths for a valid capability", () => {
     });
   });
 
-  it("no appOrigin warns too (its own reason — the env, not the report, is at fault)", async () => {
+  it("no appOrigin → redirect (never render the editor without a Save target), warned", async () => {
     const warn = vi.fn();
-    await decideEdit(buildReport({ verdict: "clean" }), {
-      ...withCookie,
-      appOrigin: undefined,
-      warn,
-    });
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        ...withCookie,
+        appOrigin: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
       event: "edit-degraded-to-view",
       slug: SLUG,
@@ -845,18 +834,10 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("a valid ?et= with NO oa sets only the edit cookie (a write-grantee has no fallback)", async () => {
-    const et = editToken();
-    expect(
-      await decideEdit(buildReport({ verdict: "clean" }), {
-        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}`,
-      }),
-    ).toEqual({
-      kind: "setCookieAndRedirect",
-      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
-      to: `/${SLUG}/edit`,
-    });
-  });
+  // NOTE: "a valid ?et= with NO oa sets only the edit cookie (a write-grantee
+  // has no fallback)" used to live here as a byte-identical copy of the
+  // "valid ?et= → setCookieAndRedirect" case above — same token, same expected
+  // `cookies` array. Deleted; the surviving one covers it.
 });
 
 // ---------------------------------------------------------------------------
@@ -955,11 +936,11 @@ describe("decideServe edit — the owner fallback survives the 303 (cookie-carri
     }
   });
 
-  it("an empty arp_edit_oa cookie is treated as absent (no `?access=` with an empty token)", async () => {
-    expect(
-      await decideEdit(buildReport(), { cookie: `arp_edit=${editToken()}; arp_edit_oa=` }),
-    ).toEqual({ kind: "redirect", to: `/${SLUG}` });
-  });
+  // NOTE: "an empty arp_edit_oa cookie is treated as absent" used to live here.
+  // It PASSED against `main` — where nothing reads `arp_edit_oa` at all — so it
+  // could not distinguish "treated as absent" from "never read", and it is now
+  // subsumed by the rejection matrix below (an empty value is just one more
+  // value that doesn't verify as an owner token).
 
   it("a query oa= still wins over a stale cookie oa (a fresh mint always supersedes)", async () => {
     const decision = await decideEdit(buildReport({ verdict: "clean" }), {
