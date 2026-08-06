@@ -7,7 +7,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { getReportAcl, redeemMagicLink, sendMagicLink } from "arp-application";
 import { makeSlug, mintAccessToken, type Report, type Slug } from "arp-domain";
-import { getAuth } from "../server/auth.server";
+import { getAuth, resolveActorForRead } from "../server/auth.server";
 import {
   accessTokenSecret,
   appOrigin,
@@ -17,9 +17,12 @@ import {
   grantStore,
   identityStore,
   nonceStore,
+  orgWriteGrantStore,
   passwordHasher,
   viewOrigin,
+  writeGrantStore,
 } from "../server/container.server";
+import { decidePrivateUnlock } from "../server/private-unlock.server";
 
 const ACCESS_TTL_SECONDS = 900; // 15 min (password + org modes)
 
@@ -117,10 +120,23 @@ export async function loader(args: LoaderFunctionArgs) {
   if (report.acl.mode === "public") {
     return redirectToView(slug.value, undefined, request); // nothing to authorize
   }
-  // private = owner-only: there's nothing a non-owner can do here (the owner reaches it via
-  // the dashboard's owner-open, not this page). Show a plain notice — no form (ADR-0056).
+  // private = owner-only. This page USED TO assert that an owner never lands
+  // here ("they reach it via the dashboard's owner-open") and 403 everyone
+  // unconditionally. That was false in two ways, and the second one locked a
+  // real owner out of their own report on 2026-08-06:
+  //   1. the raw `view.<domain>/{slug}` link an owner naturally copies and
+  //      shares lands exactly here, via the viewer's unlock hand-off; and
+  //   2. ANY failure of the edit-token round-trip on the view origin degrades
+  //      to the public viewer, which sends a private report straight here.
+  // Unlike the credential-free view origin, this app HOLDS the Clerk session,
+  // so it CAN resolve the actor. It asks the same canWrite question
+  // `/reports/{slug}/open` asks (ADR-0059 §4 / ADR-0060 §4) and hands anyone it
+  // admits a link to that ONE mint — no capability is minted or duplicated
+  // here. Everyone else gets the unchanged 403, with no new signal about
+  // whether the report exists: `deny` is returned identically for "not
+  // entitled", "not signed in" and "no such report".
   if (report.acl.mode === "private") {
-    return notice("This report is private — only its owner can view it.", 403);
+    return privateUnlock(args, slug.value);
   }
   if (report.acl.mode === "password") return passwordForm(slug.value);
   if (report.acl.mode === "allowlist") return allowlistLoader(slug.value, request);
@@ -130,6 +146,41 @@ export async function loader(args: LoaderFunctionArgs) {
   // before its branch does.
   return notice("This sharing mode isn’t available yet.");
 }
+
+// `private` mode: ask decidePrivateUnlock (../server/private-unlock.server.ts)
+// whether this session may write the report, and offer an entitled visitor the
+// ONE owner-open route. Anonymous visitors are denied exactly like non-owners
+// — NOT bounced to sign-in: a sign-in prompt for one slug and a flat 403 for
+// another would turn this page into an existence oracle for private reports.
+async function privateUnlock(args: LoaderFunctionArgs, slug: Slug): Promise<Response> {
+  const actor = await resolveActorForRead(args);
+  const decision = await decidePrivateUnlock(
+    {
+      reports: deps().reports,
+      writeGrant: {
+        grants: writeGrantStore(),
+        orgWriteGrants: orgWriteGrantStore(),
+        identities: identityStore(),
+      },
+    },
+    { actor: actor.ok ? actor.value : null, slug },
+  );
+  if (decision.kind === "deny") {
+    return notice("This report is private — only its owner can view it.", 403);
+  }
+  return ownerOpenPage(decision.to);
+}
+
+// A one-click way back in, NOT an automatic redirect (see private-unlock.server.ts:
+// /unlock is reached BY a redirect from the viewer and the viewer can bounce
+// straight back here, so an auto-redirect could loop where today it terminates).
+// `to` is built from a validated slug by decidePrivateUnlock — never raw input.
+const ownerOpenPage = (to: string): Response =>
+  html(
+    `<h1>This report is private</h1>
+<p>You have access to it. Open it below.</p>
+<p><a href="${escapeAttr(to)}">Open as owner</a></p>`,
+  );
 
 // `org` mode (ADR-0056 P2): no form — a redirect handshake. Anonymous → /sign-in
 // (preserving the return URL, same convention as root.tsx's app-wide gate and
