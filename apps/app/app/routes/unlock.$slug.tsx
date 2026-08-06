@@ -7,7 +7,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { getReportAcl, redeemMagicLink, sendMagicLink } from "arp-application";
 import { makeSlug, mintAccessToken, type Report, type Slug } from "arp-domain";
-import { getAuth } from "../server/auth.server";
+import { getAuth, resolveActorForRead } from "../server/auth.server";
 import {
   accessTokenSecret,
   appOrigin,
@@ -17,9 +17,12 @@ import {
   grantStore,
   identityStore,
   nonceStore,
+  orgWriteGrantStore,
   passwordHasher,
   viewOrigin,
+  writeGrantStore,
 } from "../server/container.server";
+import { decidePrivateUnlock } from "../server/private-unlock.server";
 
 const ACCESS_TTL_SECONDS = 900; // 15 min (password + org modes)
 
@@ -56,6 +59,30 @@ function html(body: string, status = 200): Response {
 }
 
 const notice = (msg: string, status = 200) => html(`<h1>Not available</h1><p>${msg}</p>`, status);
+
+// THE ONE DENIAL. Every visitor this page will not open a report for — in ANY
+// sharing mode, on GET and on POST — gets exactly these bytes and exactly this
+// status.
+//
+// It is a 404, not a 403 (operator decision, 2026-08-06). A 403 reading "this
+// report is private — only its owner can view it" still CONFIRMS that a report
+// exists at this slug, which is the oracle the uniformity is supposed to close;
+// it just moves the leak from the status line into the copy. `private` is the
+// DEFAULT mode (ADR-0056), so an existence oracle here covers essentially every
+// report on the platform. The only answer that leaks nothing is the one a
+// never-created slug would get.
+//
+// So the wording is deliberately neutral — it presupposes no report, names no
+// sharing mode, and is equally true for a slug that was never minted, a
+// soft-deleted report, a private report belonging to someone else, and an `org`
+// report belonging to another organization. The sign-in hint is the one
+// affordance kept, because it is the same sentence for all of them and
+// therefore distinguishes none of them.
+const denied = () =>
+  notice(
+    "No report is available at this address. If you believe you should have access, sign in with the account it was shared with and try again.",
+    404,
+  );
 
 function passwordForm(slug: string, opts: { error?: boolean } = {}): Response {
   return html(
@@ -110,17 +137,31 @@ async function loadAcl(slug: Slug) {
 export async function loader(args: LoaderFunctionArgs) {
   const { params, request } = args;
   const slug = makeSlug(String(params.slug ?? ""));
-  if (!slug.ok) return notice("Report not found.");
+  if (!slug.ok) return denied();
   const report = await loadAcl(slug.value);
-  if (!report || report.deletedAt !== null) return notice("Report not found.");
+  if (!report || report.deletedAt !== null) return denied();
 
   if (report.acl.mode === "public") {
     return redirectToView(slug.value, undefined, request); // nothing to authorize
   }
-  // private = owner-only: there's nothing a non-owner can do here (the owner reaches it via
-  // the dashboard's owner-open, not this page). Show a plain notice — no form (ADR-0056).
+  // private = owner-only. This page USED TO assert that an owner never lands
+  // here ("they reach it via the dashboard's owner-open") and 403 everyone
+  // unconditionally. That was false in two ways, and the second one locked a
+  // real owner out of their own report on 2026-08-06:
+  //   1. the raw `view.<domain>/{slug}` link an owner naturally copies and
+  //      shares lands exactly here, via the viewer's unlock hand-off; and
+  //   2. ANY failure of the edit-token round-trip on the view origin degrades
+  //      to the public viewer, which sends a private report straight here.
+  // Unlike the credential-free view origin, this app HOLDS the Clerk session,
+  // so it CAN resolve the actor. It asks the same canWrite question
+  // `/reports/{slug}/open` asks (ADR-0059 §4 / ADR-0060 §4) and hands anyone it
+  // admits a link to that ONE mint — no capability is minted or duplicated
+  // here. Everyone else gets `denied()` — the SAME status and the SAME
+  // bytes this route returns for a malformed slug, an unknown slug and a
+  // soft-deleted report, so "not entitled", "not signed in" and "no such
+  // report" are genuinely indistinguishable from outside.
   if (report.acl.mode === "private") {
-    return notice("This report is private — only its owner can view it.", 403);
+    return privateUnlock(args, slug.value);
   }
   if (report.acl.mode === "password") return passwordForm(slug.value);
   if (report.acl.mode === "allowlist") return allowlistLoader(slug.value, request);
@@ -131,16 +172,59 @@ export async function loader(args: LoaderFunctionArgs) {
   return notice("This sharing mode isn’t available yet.");
 }
 
+// `private` mode: ask decidePrivateUnlock (../server/private-unlock.server.ts)
+// whether this session may write the report, and offer an entitled visitor the
+// ONE owner-open route. Anonymous visitors are denied exactly like non-owners
+// — NOT bounced to sign-in: a sign-in prompt for one slug and a flat 404 for
+// another would turn this page into an existence oracle for private reports.
+async function privateUnlock(args: LoaderFunctionArgs, slug: Slug): Promise<Response> {
+  // `resolveActorForRead` passes this route's own `:slug`, so door 4 (the
+  // slug-bound edit token, resolve-actor.server.ts) is live here — DELIBERATELY:
+  // a caller holding a valid edit token for THIS report has already passed the
+  // same canWrite gate `/reports/{slug}/open` runs, so admitting them adds no
+  // capability they don't already hold.
+  const actor = await resolveActorForRead(args);
+  const decision = await decidePrivateUnlock(
+    {
+      reports: deps().reports,
+      writeGrant: {
+        grants: writeGrantStore(),
+        orgWriteGrants: orgWriteGrantStore(),
+        identities: identityStore(),
+      },
+    },
+    { actor: actor.ok ? actor.value : null, slug },
+  );
+  if (decision.kind === "deny") return denied();
+  return ownerOpenPage(decision.to);
+}
+
+// A one-click way back in, NOT an automatic redirect (see private-unlock.server.ts:
+// /unlock is reached BY a redirect from the viewer and the viewer can bounce
+// straight back here, so an auto-redirect could loop where today it terminates).
+// `to` is built from a validated slug by decidePrivateUnlock — never raw input.
+// The wording is deliberately role-NEUTRAL: `decidePrivateUnlock` admits every
+// canWrite visitor, which is the owner OR a write-grantee (ADR-0060 §4), and a
+// grantee reading "Open as owner" would be told they are something they aren't.
+const ownerOpenPage = (to: string): Response =>
+  html(
+    `<h1>This report is private</h1>
+<p>You have access to it. Open it below.</p>
+<p><a href="${escapeAttr(to)}">Open this report</a></p>`,
+  );
+
 // `org` mode (ADR-0056 P2): no form — a redirect handshake. Anonymous → /sign-in
 // (preserving the return URL, same convention as root.tsx's app-wide gate and
-// reports.$slug.open.tsx). Signed in but the session's active org doesn't match
-// the report's org → a plain 403 notice (no cross-org detail leaked beyond "you
-// need to be a member"). Same org → mint the mode-bound ~15-min access token,
-// like `password`, and redirect to the viewer.
+// reports.$slug.open.tsx). That bounce is NOT a denial — it is the sign-in this
+// mode requires before it can decide anything, and it happens for every `org`
+// slug alike, so it distinguishes none of them. Signed in but the session's org
+// isn't the report's org → `denied()`, the same 404 as every other denial. Same
+// org → mint the mode-bound ~15-min access token, like `password`, and redirect
+// to the viewer.
 async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Response> {
   const { userId: clerkUserId, orgId: clerkOrgId } = await getAuth(args);
   if (!clerkUserId) return signInRedirect(args.request);
-  if (!clerkOrgId) return orgMembershipNotice();
+  if (!clerkOrgId) return denied();
 
   // Membership is asserted by the Clerk-VERIFIED session org — we only map it
   // to our internal OrgId. Do NOT require a mirrored users row here: that row
@@ -148,7 +232,7 @@ async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Resp
   // who have only ever viewed (review #150 H-1).
   const memberOrg = await identityStore().findOrgByClerkOrgId(clerkOrgId);
   if (!memberOrg.ok) return notice("Something went wrong — try again.", 500);
-  if (!memberOrg.value || memberOrg.value !== report.orgId) return orgMembershipNotice();
+  if (!memberOrg.value || memberOrg.value !== report.orgId) return denied();
 
   const secret = accessTokenSecret();
   if (!secret) return notice("Private viewing is not configured.");
@@ -163,12 +247,16 @@ async function orgUnlock(report: Report, args: LoaderFunctionArgs): Promise<Resp
   return redirectToView(report.slug, token, args.request);
 }
 
-// ADR-0068 §1: a user belongs to exactly ONE org (keyed by their email domain),
-// so there is no "switch your active organization and retry" under this model —
-// the session's org IS the user's only org. A 403 here means the visitor's
-// (single) org genuinely isn't this report's org.
-const orgMembershipNotice = () =>
-  notice("You need to be a member of this report's organization to view it.", 403);
+// The `org`-mode non-member notice USED TO live here: `403 "You need to be a
+// member of this report's organization to view it."` It was removed on
+// 2026-08-06 in favour of `denied()`, because that sentence is itself an
+// existence oracle — it confirms both that a report exists at this slug AND
+// that it is shared in `org` mode, to any signed-in stranger who guesses a
+// slug. ADR-0068 §1 gives a user exactly ONE org (keyed by their email domain),
+// so the copy could never have said anything actionable anyway: there is no
+// "switch your active organization and retry" under that model, and a member of
+// the wrong org has no route to the right one. Losing it costs a genuine
+// mistyped-slug visitor nothing they could have acted on, and closes the leak.
 
 // Preserve the intended destination via `redirect_url`, which Clerk's <SignIn>
 // honours post-auth (same convention as root.tsx's app-wide gate).
@@ -192,9 +280,14 @@ function allowlistLoader(slug: Slug, request: Request): Response {
 
 export async function action({ params, request }: ActionFunctionArgs) {
   const slug = makeSlug(String(params.slug ?? ""));
-  if (!slug.ok) return notice("Report not found.");
+  if (!slug.ok) return denied();
   const report = await loadAcl(slug.value);
-  if (!report || report.deletedAt !== null) return notice("Report not found.");
+  if (!report || report.deletedAt !== null) return denied();
+  // The POST side is the SAME oracle as the loader's: a `private` report has no
+  // form to submit, so without this it fell through to "this sharing mode isn't
+  // available yet" (200) while an unknown slug answered "Report not found."
+  // (200) — two distinguishable answers reachable without ever issuing a GET.
+  if (report.acl.mode === "private") return denied();
 
   const secret = accessTokenSecret();
   if (!secret) return notice("Private viewing is not configured.");
