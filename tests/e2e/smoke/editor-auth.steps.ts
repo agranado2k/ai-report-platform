@@ -281,27 +281,29 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
     headers: { Cookie: editCookieHeader },
     maxRedirects: 0,
   });
-  const loc = res.headers().location ?? "";
 
-  // THE POINT: an un-editable document must DEGRADE, not crash and not vanish.
-  // `loadEditableDocument` catches the `splitShell` throw and redirects to the
-  // read-only viewer — the contract PR #247 formalizes as the
-  // `document-unsplittable` reason. A 5xx here means the loader crashed on a
-  // document the viewer serves perfectly, which is the failure this asserts away.
+  // THE POINT: an un-editable document must be EXPLAINED, not crash and not
+  // vanish. PR #247 landed the contract this step was written against and
+  // improved on it: rather than a silent 302 into an unexplained read-only
+  // viewer, the route renders its own page naming the reason. 409 — not 200
+  // (which would tell every probe and log query that editing worked) and not
+  // 3xx (the silent bounce that made the original incident invisible).
+  const body = await res.text();
   expect(
     res.status(),
-    `expected a degrade redirect, got ${res.status()} → "${loc}" — a 5xx means the /edit loader crashed on a document it is contracted to degrade on`,
-  ).toBe(302);
-  expect(
-    loc.startsWith(`/${slug}`),
-    `expected a redirect to the report's own viewer; got "${loc}"`,
-  ).toBe(true);
+    `expected the unopenable-document page, got ${res.status()} — a 5xx means the /edit loader crashed on a document it is contracted to degrade on, a 3xx means it silently bounced`,
+  ).toBe(409);
 
-  // TODO(#247 — fix/owner-lockout): once that PR lands, tighten this to the
-  // OWNER-specific degrade it defines — the redirect carries `?access=<oa>`
-  // (redeemed from the persisted `arp_edit_oa` cookie) so a private report's
-  // owner reaches their own content instead of the unlock wall, and the view
-  // origin logs `reason: "document-unsplittable"`. Asserting the bare `/${slug}`
-  // prefix is what MAIN does today; it stays true after #247, so this coupling
-  // is additive, not a rewrite.
+  // The capability was already verified (the gate returned `serve` for a valid
+  // arp_edit cookie), so this page is the route's own first-party document —
+  // it must name WHY and offer the read-only route out.
+  // NB: the shipped copy uses a TYPOGRAPHIC apostrophe (can’t). Matching a
+  // straight one here would never fire and the assertion would be decorative.
+  expect(body, "the page must say the editor could not open this report").toMatch(
+    /can[’']t be opened in the editor/i,
+  );
+  expect(body, "the page must name the fragment cause — this fixture has no <body>").toMatch(
+    /fragment/i,
+  );
+  expect(body, "the page must offer the read-only view").toContain(`/${slug}`);
 });
