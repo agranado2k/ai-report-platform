@@ -48,6 +48,16 @@ describe("createApp — OAuth disabled (no Clerk keys)", () => {
     expect(res.status).toBe(200);
     expect(JSON.stringify(res.body)).toContain("reports_search");
   });
+
+  it("accepts a JSON body well above Express's 100kb default (large reports_upload html)", async () => {
+    // A reports_upload call carries the whole HTML document inside the JSON-RPC
+    // body; Express's default json() limit (100kb) 413'd real uploads at ~85-100KB
+    // of HTML. Pad a tools/list request past that threshold to pin the raised limit.
+    const bigBody = { ...toolsList, params: { _meta: { pad: "x".repeat(500_000) } } };
+    const res = await postMcp(createApp(), "Bearer arp_live_x").send(bigBody);
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).toContain("reports_search");
+  });
 });
 
 describe("createApp — OAuth enabled (injected deps)", () => {

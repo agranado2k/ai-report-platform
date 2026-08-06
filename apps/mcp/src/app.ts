@@ -54,7 +54,11 @@ export function createApp(injectedOAuth?: OAuthDeps) {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
-  app.use(express.json());
+  // 4mb, not the express default 100kb: reports_upload carries the report's whole
+  // HTML inside the JSON-RPC body (with JSON-escaping overhead), and the default
+  // 413'd real uploads at ~85-100KB of HTML. Vercel caps request bodies at 4.5MB,
+  // so 4mb is the ceiling minus headroom.
+  app.use(express.json({ limit: "4mb" }));
 
   // OAuth 2.1 is enabled only when Clerk keys are configured (fail-closed): without
   // them the OAuth path stays off and only the `arp_` API-key path works. Tests
