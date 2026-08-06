@@ -4888,3 +4888,58 @@ this entry rather than quietly rewritten. `worktree/mcp-body-limit` remains on d
 **only** because it holds uncommitted changes — `/worktree-cleanup` is conservative by
 design and never force-removes — and it needs an operator decision rather than another
 automated pass.
+
+## 2026-08-06 — a retro on five green-CI defects, and four things that make green mean more
+
+Five defects shipped through green CI this week. The retro found four distinct
+mechanisms, not five instances of one, and this worktree
+(`worktree/e2e-hardening`, branch `test/e2e-hardening`) addresses all four.
+
+**1. The suite asserted intermediate hops.** `editor-auth.steps.ts` asserted the
+`303` off `/{slug}/edit?et=…` and stopped. BOTH the #188 re-nested-route P0 and
+the ADR-0080 owner lockout happened on the *next* request — twice through the
+same untested hop. `tests/e2e/support/follow.ts` now walks a chain to its
+terminal state, across origins, carrying cookies forward, capping hops and
+failing loudly on a loop. The existing `303` assertion stays (it is the direct
+#188 guard); a terminal assertion is added after it, on the status **and the
+body** — a bare `200` proved insufficient, since the public viewer, the
+unopenable-document page and the editor all answer with HTML and only one
+carries `data-testid="unified-editor"`.
+
+**2. Silent skips reported as success.** Seven `test.skip(...)` guards key on
+`PLAYWRIGHT_VIEW_BASE_URL` / `E2E_SCAN_DRAIN_SECRET`, both produced by
+`preview-isolation.yml` and threaded through `e2e.yml`. If either arrived empty
+the scenario skipped and the job went green over exactly the coverage that
+caught two incidents. A reporter now fails the run in CI on any unallowlisted
+skip — and on a run that collected **zero tests**, which is the shape a
+too-wide `grepInvert` produces and which no per-test rule can see. Locally it
+stays silent. `clerk-auth.setup.ts` is deliberately **not** allowlisted: a Clerk
+creds outage in CI must fail rather than warn.
+
+**3. A fixture different in kind from a real report.** The anchor-jump defect
+took three rounds partly because the browser harness had no `scroll-behavior`
+and its assertions were satisfiable by a wrong implementation (a reviewer showed
+`scrollTo(0, 1e6)` passing them). ADR-0079's fixture rule is now enforced by a
+second Playwright project, `real-report`, running the same spec file over the
+verbatim 86KB generated report. One contract is excluded **explicitly** — "an id
+on a heading scrolls too" has no subject on a document that puts all nine anchor
+ids on `<section>` elements — rather than by narrowing the project silently.
+
+**4. Coverage theatre: 33 `.feature` files, 1 of which ran.** `docs-conformance`
+validated a catalog↔file bijection, which is a fact about file names and says
+nothing about execution. All 32 non-running files were resolved with evidence:
+**23 deleted** (behaviour genuinely verified elsewhere — tombstones in
+`config.mjs` name the tests), **1 wired** (`block-service-worker`, whose ADR-0014
+edge refusal had *zero* tests in any tier), **8 kept as declared gaps** (seven of
+which are simply not implemented). A new `feature-executes` validator plus
+`bddgen` in `unit.yml` is the mechanical guard against regression.
+
+Test counts: vitest 2406 → 2427, browser tier 22 → 32, docs-conformance harness
+33 → 41.
+
+**A fifth item ships as a separate PR, deliberately merged after this one:**
+`required_status_checks.contexts` on `main` is `[]`, so nothing gates merge
+today — a genuinely red check cannot block a merge, and an infrastructure blip
+(of which this week had two) is indistinguishable from a real defect. Splitting
+it keeps the "make checks required" change reviewable on its own and lets the
+new checks prove themselves green on this PR first.
