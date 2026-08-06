@@ -43,6 +43,7 @@ import {
   makeSlug,
   type Report,
   type ReportVersion,
+  readAccessToken,
   readEditToken,
   type Slug,
 } from "arp-domain";
@@ -337,8 +338,13 @@ async function decideEdit(
   // strips the query. So it is read from the query OR from the cookie the 303
   // persisted it into: without that, every degrade on the post-303 request was
   // blind to the fact that it was stranding an OWNER (the 2026-08-06 lockout).
-  // A fresh query `oa=` always supersedes a cookie-carried one.
-  const oa = url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader);
+  // A fresh query `oa=` always supersedes a cookie-carried one. Both are
+  // VERIFIED before they count as a fallback (acceptOwnerFallback) — see there.
+  const oa = acceptOwnerFallback(
+    url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader),
+    slug,
+    deps,
+  );
   const cookieToken = readCookieValue(cookieHeader, EDIT_COOKIE);
 
   // Fail closed (denied) when `secret` is unset — same posture as the view
@@ -393,6 +399,43 @@ async function decideEdit(
     degradeTo: degradeLocation(slug, oa),
     ownerFallback: oa !== undefined,
   };
+}
+
+/** A generous ceiling on an accepted `oa=`. A real owner Access token is a
+ *  couple of hundred bytes; anything past this is someone trying to park bulk
+ *  in the cookie jar (the value is echoed into `Set-Cookie` verbatim). Checked
+ *  BEFORE the HMAC so an oversized string is never even hashed. */
+const MAX_OWNER_FALLBACK_LENGTH = 1024;
+
+/**
+ * VERIFY the owner fallback before it counts as one (review #247 H-1).
+ *
+ * `oa` used to be taken straight off the query/cookie: written verbatim into a
+ * `Set-Cookie`, and used as `ownerFallback: oa !== undefined` — the flag that
+ * selects the `owner-edit-degraded-to-view` event. So anyone holding a valid
+ * `et=` (notably a write-grantee, for whom `ownerOpenLocation` deliberately
+ * never mints an `oa`, open-report.server.ts) could append `&oa=anything` and
+ * forge the exact incident signal this seam exists to produce — and plant
+ * unbounded bytes in the cookie jar while they were at it.
+ *
+ * There was never a privilege escalation: redemption is verified downstream by
+ * `resolveAccessDecision` (`claims.owner === true` off a signature-checked,
+ * slug-bound, unexpired token), so a forged `oa` only ever bought a redirect to
+ * a `?access=` the viewer then rejects. But the whole value of this change is
+ * OBSERVABILITY, and a forgeable signal is worse than no signal.
+ *
+ * So the gate now applies the same check the redeemer applies, up front: honor
+ * `oa` only when it parses as an owner Access token for THIS slug. Fails closed
+ * on an unset secret, exactly like both token paths above.
+ */
+function acceptOwnerFallback(
+  raw: string | undefined,
+  slug: Slug,
+  deps: GateDeps,
+): string | undefined {
+  if (!raw || raw.length > MAX_OWNER_FALLBACK_LENGTH || !deps.secret) return undefined;
+  const claims = readAccessToken(raw, slug, deps.secret, deps.nowSeconds);
+  return claims?.owner === true ? raw : undefined;
 }
 
 /** Read the owner fallback back out of its cookie, undoing the percent-encoding
