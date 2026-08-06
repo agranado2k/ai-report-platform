@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/diary-round2-close` (this housekeeping entry — Current-state refresh + the #204/#205/#206 log entry, branch `docs/diary-round2-close`). All editing-epic worktrees are merged and cleaned up: `adr-editing-epic`, `comments`, `editor-mvp`, `visual-diff`, `comment-ui`, `phase5-cutover`, and the round-1/round-2 feature worktrees (#189–#205). No feature worktree is open — the next build (intent agent-action pipeline, PRD #198) starts design-first. |
+| **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/diary-worktree-sync` (this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -4854,3 +4854,37 @@ ADR-0080 records the decision, including the four rejected options (reject at
 upload; compute lazily on read; a cheap regex; log-only).
 
 Worktree `worktree/editable-invariant` (branch `feat/editable-invariant`).
+
+## 2026-08-06 — merge train #248, and the Active-worktrees row had been stale for weeks
+
+`/merge-train 248` landed `feat/editable-invariant` (ADR-0080) as `f83ed59`; `migrate-db`
+(migration 0021) and `release` both succeeded on `main`, and all three prod projects
+deployed. `/worktree-cleanup` then pruned **16** merged worktrees — the entire
+2026-08 arc from folder visibility (#230) through the owner lockout (#247/#248).
+
+Three things happened during the train that are worth recording, because each is a
+different failure class and only one was ours:
+
+1. **A real conflict.** #247 merged while #248 was in flight and both had appended
+   dated diary entries. Resolved by merging `origin/main` INTO the feature branch and
+   keeping both entries in chronological order — deliberately not a rebase, which
+   would have stripped the GPG signatures off all eight commits and been rejected by
+   branch protection (ADR-0044).
+2. **A real cross-PR interaction.** #248's new e2e asserted the `302` degrade that
+   `main` did before #247, and #247 had just replaced it with the 409
+   unopenable-document page. The product was right and the assertion was stale — the
+   step even carried a `TODO(#247)` predicting it. This is exactly what serialized
+   merging with re-validation between merges exists to catch.
+3. **Two GitHub Actions infrastructure failures** (`Failed to resolve action download
+   info` → Service Unavailable / Internal Server Error / Bad Gateway) that killed
+   `claude-review` and `Preview data isolation` before either reached our code.
+   Re-running cleared both. Worth naming because every other red check this week
+   pointed at a genuine defect; these did not.
+
+**The Current-state "Active worktrees" row was stale**, not merely out of date: it
+still described `worktree/diary-round2-close` and the editing-epic cleanup from before
+the round-1/round-2 work, and had survived every worktree created since. Refreshed in
+this entry rather than quietly rewritten. `worktree/mcp-body-limit` remains on disk
+**only** because it holds uncommitted changes — `/worktree-cleanup` is conservative by
+design and never force-removes — and it needs an operator decision rather than another
+automated pass.
