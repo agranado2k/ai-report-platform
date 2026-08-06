@@ -49,6 +49,46 @@ caller's contract held and giving a cold/suspended Neon branch a bounded warm-up
 grace window — not the primary mechanism for telling two racing deployments
 apart, since there aren't two anymore.
 
+## Driving the scan drain on a preview (ADR-0045 / ADR-0080)
+
+A report only becomes **servable** once its version scans `clean` (ADR-0037 §8).
+In production a Cloudflare Cron Trigger Worker calls `POST /internal/scan-drain`
+every ~minute; that Worker targets **prod only**, so on a PR preview *nothing*
+promotes an upload past `scan_status: pending`. Any scenario that needs a
+servable report therefore has to drive the drain itself.
+
+That is why `editor-auth.feature` stopped at the `303` for so long: the request
+after it — the one carrying the `arp_edit` cookie, and the one on which **both**
+production incidents (#188's re-nested route, and the ADR-0080 owner lockout)
+actually happened — can only ever redirect while the report is unservable.
+
+**How the secret is wired.** Terraform provisions a `SCAN_DRAIN_SECRET` on the
+Vercel `preview` target, but CI cannot know its value (it lives in the prod
+Terraform state), and it cannot be passed between jobs either — the runner
+redacts registered secrets out of job outputs, so a freshly generated masked
+value arrives at the smoke job empty. So both jobs **derive the same value
+independently**:
+
+```
+HMAC-SHA256( key = VERCEL_AUTOMATION_BYPASS_SECRET, msg = <this PR's head branch ref> )
+```
+
+- `preview-isolation.yml` computes it and upserts it as a **git-branch-scoped**
+  Vercel env var on both projects, before the redeploy that makes it take
+  effect. Branch-scoped, so it overrides the Terraform value for this PR's
+  previews only and never touches production; teardown deletes it with every
+  other branch-scoped var on PR close.
+- `e2e.yml` computes the identical expression into `E2E_SCAN_DRAIN_SECRET`.
+
+The two expressions must stay **byte-identical**. If they drift, the drain
+answers `401` and the scenario fails loudly — the route is fail-closed (`503`
+when unset, `401` on mismatch), so a broken wiring can never degrade into a
+silent skip. **No new repo secret and no operator action are required.**
+
+Absent the bypass secret (a plain local `pnpm e2e`), `E2E_SCAN_DRAIN_SECRET` is
+unset and the drain-dependent steps skip cleanly, the same way
+`PLAYWRIGHT_VIEW_BASE_URL` gates the cross-origin half.
+
 ## Fixture 1 — the primary test user
 
 | | |

@@ -38,6 +38,23 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
   # view degrades to the public viewer/`/unlock` and THIS scenario fails —
   # exactly the class of regression that shipped uncaught (PR #185/#187).
   #
+  # (3) THE SECOND HOP (ADR-0080). This scenario used to stop at the 303. Every
+  # step of BOTH production incidents — #188's re-nested /edit route and the
+  # ADR-0080 owner lockout — happened on the request AFTER it: the one carrying
+  # the `arp_edit` cookie. It stopped there because reaching that hop needs a
+  # SERVABLE report, i.e. a clean scan, and Cloudflare's scan-cron Worker only
+  # targets prod — so a preview's upload stays `pending` forever and `/edit` can
+  # only ever redirect. That follow-up was tracked across both incidents without
+  # advancing. It is wired now: e2e.yml and preview-isolation.yml derive the
+  # same per-PR SCAN_DRAIN_SECRET, the scenario drives POST /internal/scan-drain
+  # itself, and then asserts 200 — not 302 — on the cookie-carrying request.
+  #
+  # (4) THE NEGATIVE (ADR-0080). A report the editor cannot open — a bare HTML
+  # fragment, which is an ordinary thing for an agent to upload — must be
+  # ACCEPTED, must view, must read back as `editability: "unsplittable"` on the
+  # API, and must DEGRADE off `/edit` rather than 500 or vanish. "Views fine,
+  # won't edit" is a legitimate state; this proves it is a legible one.
+  #
   # STILL NOT COVERED (out of scope here): the mismatched-secret DEGRADE path
   # itself (fix/owner-open-degrade's `oa=` fallback) has local-boot/unit
   # coverage only (apps/view/app/server/edit-session.test.ts) — this scenario
@@ -57,11 +74,20 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
   # via @clerk/clerk-js, which needs the publishable key to initialize). Absent
   # any of the three, playwright.config.ts grep-excludes @browser entirely — it
   # never runs half-configured (see the `chromium` project's grepInvert there).
-  Background:
-    Given a report I own exists
-
   Scenario: Opening the report authenticates its owner and hands off toward the unified editor
+    Given a report I own exists
+    And that report has been scanned clean
     When I open that report
     Then I am not redirected to sign-in
     And I am redirected to an edit-shaped location for that report
     And the view edit route accepts the edit token instead of falling back to the public viewer
+    And the cookie-carrying request opens the editor instead of redirecting
+
+  Scenario: A report the editor cannot open is accepted, legible, and degrades cleanly
+    Given a report I own that the editor cannot open exists
+    And that report has been scanned clean
+    Then the report reads back as un-editable over the API
+    When I open that report
+    Then I am redirected to an edit-shaped location for that report
+    And the view edit route accepts the edit token instead of falling back to the public viewer
+    And the view edit route degrades to a read-only view instead of failing

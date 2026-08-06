@@ -142,6 +142,11 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           DATABASE_URL: ${{ steps.branch.outputs.database_url }}
+          # Key material for this PR's scan-drain secret — see the derivation
+          # below. An EXISTING CI-only secret that both this job and e2e.yml
+          # already hold, so making the drain drivable needs no new repo secret
+          # and no operator action.
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail
           # Upsert a git-branch-scoped env var (target=preview, gitBranch=this PR's ref).
@@ -157,6 +162,37 @@ jobs:
             code=$(printf '%s' "$resp" | tail -n1)
             case "$code" in 200|201) echo "  set $key on $proj";; *) echo "::error::set $key on $proj → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
           }
+          # ── Per-PR scan-drain secret (ADR-0045; unblocks the editor-auth
+          # second hop — ADR-0080) ──────────────────────────────────────────
+          #
+          # WHY IT EXISTS. Cloudflare's scan-cron Worker only targets PROD, so
+          # nothing ever drives POST /internal/scan-drain on a preview: an
+          # uploaded report stays `scan_status: pending` forever, is never
+          # servable, and the `/edit` cookie hop can therefore only ever
+          # redirect. That is why the editor-auth scenario stopped at the 303 —
+          # across TWO production incidents (#188, and the ADR-0080 owner
+          # lockout), both of which happened on the hop it could not reach.
+          #
+          # WHY DERIVED, NOT PASSED. Terraform already provisions a
+          # SCAN_DRAIN_SECRET on the `preview` target, but CI cannot know its
+          # value — it lives in the prod Terraform state. A job OUTPUT cannot
+          # carry a freshly generated one either: the runner redacts registered
+          # secrets out of job outputs, so a masked random value would reach the
+          # smoke job empty. Both jobs therefore DERIVE the same value
+          # independently — HMAC-SHA256 over this PR's branch ref, keyed by a
+          # secret they both already hold. e2e.yml computes the identical
+          # expression; if the two ever drift, the drain answers 401 and the
+          # scenario fails loudly instead of skipping.
+          #
+          # SCOPE. Branch-scoped, so it overrides the Terraform-provisioned
+          # value for THIS PR's previews only and never touches production. It
+          # authorizes exactly one thing: draining scan jobs on an ephemeral
+          # preview whose database is an isolated Neon branch. Teardown deletes
+          # it along with every other gitBranch-scoped var on PR close.
+          drain_secret=$(printf '%s' "$BRANCH_REF" \
+            | openssl dgst -sha256 -hmac "$BYPASS_SECRET" -r | cut -d' ' -f1)
+          echo "::add-mask::$drain_secret"
+
           for proj in "$APP_PROJECT" "$VIEW_PROJECT"; do
             set_env "$proj" DATABASE_URL "$DATABASE_URL"
             set_env "$proj" SCAN_QUEUE_DATABASE_URL "$DATABASE_URL"
@@ -171,6 +207,9 @@ jobs:
             # Same branch name already computed above for the Neon branch itself
             # ($NEON_BRANCH, workflow-level env).
             set_env "$proj" NEON_BRANCH "$NEON_BRANCH"
+            # Set on BOTH projects so the pair stays symmetrical, even though
+            # only the app serves /internal/scan-drain.
+            set_env "$proj" SCAN_DRAIN_SECRET "$drain_secret"
           done
 
       - name: Redeploy previews so the isolated env takes effect
