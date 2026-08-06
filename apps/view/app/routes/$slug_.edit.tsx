@@ -129,7 +129,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // like $slug.tsx's `grant` → unlock-cookie flow.
     const headers = viewHeaders();
     headers.set("location", decision.to);
-    headers.set("set-cookie", decision.cookie);
+    // APPEND: the edit hand-off persists BOTH the edit cookie and (for an
+    // owner) the `oa` fallback that the stripped query would otherwise lose.
+    for (const cookie of decision.cookies) headers.append("set-cookie", cookie);
     headers.set("cache-control", "no-store");
     headers.set("x-robots-tag", "noindex, nofollow");
     return new Response(null, { status: 303, headers });

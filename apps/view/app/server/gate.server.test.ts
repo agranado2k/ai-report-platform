@@ -362,7 +362,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -426,7 +426,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -458,7 +458,7 @@ describe("decideServe view — ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${query}; Path=/${SLUG}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${query}; Path=/${SLUG}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -556,7 +556,7 @@ describe("decideServe view — interstitial sits BEHIND the ACL gate", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_unlock=${token}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}`,
     });
   });
@@ -612,7 +612,7 @@ describe("decideServe edit — token/cookie decision", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
       to: `/${SLUG}/edit`,
     });
   });
@@ -658,7 +658,9 @@ describe("decideServe edit — token/cookie decision", () => {
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${fresh}; Path=/${SLUG}/edit; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [
+        `arp_edit=${fresh}; Path=/${SLUG}/edit; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+      ],
       to: `/${SLUG}/edit`,
     });
   });
@@ -749,6 +751,49 @@ describe("decideServe edit — degrade paths for a valid capability", () => {
       to: `/${SLUG}`,
     });
   });
+
+  // OBSERVABILITY (the 2026-08-06 owner-lockout incident): EVERY degrade off
+  // /edit must leave a log line. Before the fix only the `oa`-carrying denied
+  // branch warned, so a real owner lockout produced a 302 with ZERO signal on
+  // the view origin — the incident was only inferable from the user report.
+  it.each<[string, () => Report | undefined, string]>([
+    ["scanning (no clean live)", () => buildReport(), "no-servable-version"],
+    ["flagged", () => buildReport({ verdict: "flagged" }), "no-servable-version"],
+    ["deleted", () => buildReport({ verdict: "clean", deleted: true }), "no-servable-version"],
+  ])("%s warns edit-degraded-to-view with a reason", async (_n, reportOf, reason) => {
+    const warn = vi.fn();
+    await decideEdit(reportOf(), { ...withCookie, warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason,
+    });
+  });
+
+  it("a repository failure warns with its own reason (not silently identical to no-version)", async () => {
+    const warn = vi.fn();
+    await decideEdit(undefined, { ...withCookie, reports: failingRepo, warn });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "lookup-failed",
+    });
+  });
+
+  it("no appOrigin warns too (its own reason — the env, not the report, is at fault)", async () => {
+    const warn = vi.fn();
+    await decideEdit(buildReport({ verdict: "clean" }), {
+      ...withCookie,
+      appOrigin: undefined,
+      warn,
+    });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "app-origin-unset",
+    });
+  });
 });
 
 describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-E)", () => {
@@ -780,30 +825,150 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("oa is IGNORED when the edit token is valid (only the denied branch consults it)", async () => {
+  it("a valid ?et= ALSO persists oa as its own cookie (it must survive the 303's query strip)", async () => {
     const et = editToken();
+    const oa = "owner.token.with/special+chars";
     const warn = vi.fn();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
-        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&oa=some-owner-token`,
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
     ).toEqual({
       kind: "setCookieAndRedirect",
-      cookie: `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      cookies: [
+        `arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `arp_edit_oa=${encodeURIComponent(oa)}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
       to: `/${SLUG}/edit`,
     });
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("oa does NOT rescue a post-auth degrade (missing appOrigin) — only the denied branch", async () => {
+  it("a valid ?et= with NO oa sets only the edit cookie (a write-grantee has no fallback)", async () => {
     const et = editToken();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
-        path: `/${SLUG}/edit?oa=some-owner-token`,
-        cookie: `arp_edit=${et}`,
-        appOrigin: undefined,
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}`,
       }),
+    ).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
+      to: `/${SLUG}/edit`,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE 2026-08-06 OWNER-LOCKOUT REGRESSION GUARD.
+//
+// An owner's round-trip is TWO requests: `?et=…&oa=…` → 303 (query stripped,
+// arp_edit cookie set) → the clean `/slug/edit` carrying only cookies. Every
+// degrade that fires on that SECOND request had no `oa` in hand — it was
+// delivered once, on the query, and thrown away by the 303 — so it sent a
+// PRIVATE report's owner to the bare public viewer, which 302s them to the
+// app's /unlock/{slug}, which 403s "only its owner can view it". The owner is
+// locked out of their own report, silently.
+//
+// The fix: `oa` is persisted as its own scoped cookie at 303 time and is read
+// back on the cookie request, so EVERY degrade — not just the denied branch —
+// routes an owner through the viewer's `?access=` flow.
+// ---------------------------------------------------------------------------
+describe("decideServe edit — the owner fallback survives the 303 (cookie-carried oa)", () => {
+  const OA = "owner.token.with/special+chars";
+  const cookiesWith = (et: string, oa = OA) =>
+    `arp_edit=${et}; arp_edit_oa=${encodeURIComponent(oa)}`;
+
+  it.each<[string, () => Report | undefined, string]>([
+    ["missing report", () => undefined, "no-servable-version"],
+    ["scanning (no clean live)", () => buildReport(), "no-servable-version"],
+    ["flagged", () => buildReport({ verdict: "flagged" }), "no-servable-version"],
+    ["blocked", () => buildReport({ verdict: "blocked" }), "no-servable-version"],
+    ["deleted", () => buildReport({ verdict: "clean", deleted: true }), "no-servable-version"],
+  ])("%s on the cookie request → the OWNER degrades through ?access=, not to the unlock wall", async (_n, reportOf, reason) => {
+    const warn = vi.fn();
+    expect(await decideEdit(reportOf(), { cookie: cookiesWith(editToken()), warn })).toEqual({
+      kind: "redirect",
+      to: `/${SLUG}?access=${encodeURIComponent(OA)}`,
+    });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason,
+    });
+  });
+
+  it("no appOrigin on the cookie request → the owner still degrades through ?access=", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        appOrigin: undefined,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(OA)}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "app-origin-unset",
+    });
+  });
+
+  it("an EXPIRED arp_edit cookie alongside the oa cookie degrades the owner (never the unlock wall)", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        now: NOW + 901,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(OA)}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+
+  // The route's OWN post-gate degrades (the blob read / the shell split — the
+  // two lines that actually fired in the incident) need the same destination,
+  // and they only ever see the Decision. So `serve` carries it.
+  it("a served editor carries the owner degrade target for the route's post-gate failures", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: cookiesWith(editToken()),
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}?access=${encodeURIComponent(OA)}`);
+      expect(decision.ownerFallback).toBe(true);
+    }
+  });
+
+  it("a served editor WITHOUT an owner fallback degrades to the bare viewer (grantee — unchanged)", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}`,
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}`);
+      expect(decision.ownerFallback).toBe(false);
+    }
+  });
+
+  it("an empty arp_edit_oa cookie is treated as absent (no `?access=` with an empty token)", async () => {
+    expect(
+      await decideEdit(buildReport(), { cookie: `arp_edit=${editToken()}; arp_edit_oa=` }),
     ).toEqual({ kind: "redirect", to: `/${SLUG}` });
+  });
+
+  it("a query oa= still wins over a stale cookie oa (a fresh mint always supersedes)", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      path: `/${SLUG}/edit?oa=${encodeURIComponent("fresh-oa")}`,
+      cookie: cookiesWith(editToken(), "stale-oa"),
+    });
+    expect(decision.kind).toBe("serve");
+    if (decision.kind === "serve") {
+      expect(decision.degradeTo).toBe(`/${SLUG}?access=fresh-oa`);
+    }
   });
 });
