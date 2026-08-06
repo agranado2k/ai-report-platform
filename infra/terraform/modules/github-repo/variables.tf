@@ -23,11 +23,26 @@ variable "visibility" {
 variable "required_status_checks" {
   type        = list(string)
   description = <<-EOT
-    CI job names required to pass before a PR can merge. Each name must
-    match an existing workflow job name EXACTLY, otherwise the branch
-    becomes unmergeable (the rule waits for checks that never arrive).
-    Default is an empty list — Phase 0c will populate it as ci.yml /
-    cd.yml workflows come online and prove they actually run.
+    Check names required to pass before a PR can merge into `main`.
+
+    Each string must match what GITHUB REPORTS, exactly — which is the job's
+    `name:` (not its key), and for a job that calls a REUSABLE workflow, the
+    composite "<calling job name> / <called job name>". Verify against a real
+    check run before adding one:
+
+      gh api repos/<owner>/<repo>/commits/<sha>/check-runs \
+        -q '.check_runs[].name'
+
+    A name that never arrives is NOT a no-op: the rule stays pending forever
+    and `main` becomes unmergeable — including for the PR correcting the
+    mistake, since `enforce_admins = true`. docs/ops.md carries the recovery
+    procedure.
+
+    Do not list a check whose workflow is PATH-FILTERED: it reports nothing on
+    PRs that miss the filter, which is indistinguishable from "still running".
+
+    Set in envs/shared (2026-08-06); the default stays empty so a fresh
+    environment is never bricked by a list it has no workflows for.
   EOT
   default     = []
 }
