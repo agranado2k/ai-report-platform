@@ -51,7 +51,7 @@ import {
   type ReportEditorHandle,
 } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
-import { type PMDocJson, parseBody, reinjectShell, type Shell, splitShell } from "arp-report-html";
+import { type PMDocJson, reinjectShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
@@ -60,6 +60,7 @@ import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
 import { EXPIRED_MESSAGE } from "../edit/http";
+import { loadEditableDocument } from "../edit/load-document";
 import { buildEditLoaderExtras } from "../edit/loader-data";
 import {
   closePanel,
@@ -74,7 +75,7 @@ import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import { decideServe } from "../server/gate.server";
+import { decideServe, editDegradeLine } from "../server/gate.server";
 
 function notFoundResponse(): Response {
   const headers = viewHeaders();
@@ -149,28 +150,28 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const { report, version } = decision;
   const { token: editToken, claims: editClaims } = decision.edit;
   const slug = report.slug;
+  // Where to send them if THIS loader still can't render: the gate's own
+  // degrade target, which carries the owner `?access=` fallback when one is in
+  // play. Hard-coding `/${slug}` here was half of the 2026-08-06 owner lockout
+  // — a private report's owner was handed to the public viewer, which
+  // unlock-walls them, from a route that had just verified their capability.
+  const degradeTo = decision.degradeTo ?? `/${slug}`;
+  const ownerFallback = decision.ownerFallback ?? false;
 
-  const blob = await blobs.readObject(report.id, version.id, version.manifest.entryDocument);
-  if (!blob.ok || !blob.value) return redirectToPublicViewer(`/${slug}`);
-
-  let shell: Shell;
-  let bodyHtml: string;
-  try {
-    ({ shell, bodyHtml } = splitShell(new TextDecoder().decode(blob.value.bytes)));
-  } catch {
-    // Malformed content (shouldn't happen for anything that passed the
-    // upload pipeline) — never crash the edit route; fall back to read-only.
-    return redirectToPublicViewer(`/${slug}`);
+  const loaded = await loadEditableDocument({
+    blobs,
+    reportId: report.id,
+    versionId: version.id,
+    entryDocument: version.manifest.entryDocument,
+  });
+  if (loaded.kind === "degraded") {
+    // The other half: these two failures used to be SILENT. A real owner
+    // lockout produced a bare 302 with no log line anywhere on the view
+    // origin, so the cause was only inferable from the user's report.
+    console.warn(editDegradeLine(slug, ownerFallback, loaded.reason));
+    return redirectToPublicViewer(degradeTo);
   }
-
-  // Lossless reopen when a prior editor save left a `_source.json` sidecar;
-  // otherwise a best-effort HTML→PM parse (ADR-0062 §4) — mirrors
-  // apps/app/app/routes/reports.$slug.edit.tsx's loader exactly.
-  const sidecar = await blobs.readObject(report.id, version.id, "_source.json");
-  const doc: PMDocJson =
-    sidecar.ok && sidecar.value
-      ? (JSON.parse(new TextDecoder().decode(sidecar.value.bytes)) as PMDocJson)
-      : parseBody(bodyHtml);
+  const { doc, shell } = loaded;
 
   // Comments + Versions (unified-experience epic): loaded SERVER-SIDE, via
   // the SAME Bearer edit token, against the app-origin REST API — this is a
