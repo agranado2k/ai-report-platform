@@ -34,7 +34,16 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // `no-silent-skip` is always registered and only ever acts when `CI` is set
+  // (tests/e2e/support/skip-guard.ts): in CI a skipped scenario FAILS the job,
+  // because the two things the smoke's `test.skip(...)` guards key on —
+  // PLAYWRIGHT_VIEW_BASE_URL and E2E_SCAN_DRAIN_SECRET — are produced by
+  // preview-isolation.yml and threaded through e2e.yml, so a skip there means
+  // the wiring broke and the coverage that caught two production incidents is
+  // silently gone. Locally the same guards are correct and stay quiet.
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }], ["./tests/e2e/support/skip-guard.ts"]]
+    : [["list"], ["./tests/e2e/support/skip-guard.ts"]],
   use: {
     // Set by CI from the Vercel preview deployment_status.target_url; defaults
     // to a locally-served app for `pnpm e2e` on a dev box.

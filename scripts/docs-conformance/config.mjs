@@ -64,10 +64,16 @@ export const events = [
  *  `@browser` gate on which Clerk credentials are configured, `@run-scoped`
  *  binds a scenario to the fixture-cleanup hook. They were previously legal
  *  only in tests/e2e/smoke/ (which this validator doesn't scan); a catalogued
- *  use-case feature that actually RUNS needs them too. */
+ *  use-case feature that actually RUNS needs them too.
+ *
+ *  `@allow-skip` opts a scenario OUT of the CI skip guard
+ *  (tests/e2e/support/skip-guard.ts), which otherwise fails the job when a
+ *  scenario skips in CI. It lives in this reviewed vocabulary rather than being
+ *  a free-floating string precisely because silencing a coverage alarm should
+ *  be a decision someone signs off on. Nothing uses it today. */
 export const featureTags = {
   phases: ["@phase-1", "@phase-1.5", "@phase-2", "@phase-2.5", "@phase-3", "@phase-4"],
-  extra: ["@wip", "@security", "@smoke", "@auth", "@browser", "@run-scoped"],
+  extra: ["@wip", "@security", "@smoke", "@auth", "@browser", "@run-scoped", "@allow-skip"],
 };
 
 /**

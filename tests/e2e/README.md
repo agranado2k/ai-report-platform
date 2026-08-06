@@ -49,6 +49,65 @@ caller's contract held and giving a cold/suspended Neon branch a bounded warm-up
 grace window — not the primary mechanism for telling two racing deployments
 apart, since there aren't two anymore.
 
+## A skip in CI FAILS the job (`tests/e2e/support/skip-guard.ts`)
+
+Silence is not success. This suite guards its most valuable scenarios behind
+`test.skip(!process.env.X, …)`: `PLAYWRIGHT_VIEW_BASE_URL` for the cross-origin
+owner-open hand-off, `E2E_SCAN_DRAIN_SECRET` for the scan drain that makes a
+preview's upload servable at all. Those guards are **right locally** — a dev box
+has no preview to follow to, and a suite that exploded there would simply get run
+less. In CI they are the opposite: both variables are produced by
+`preview-isolation.yml` and threaded through `e2e.yml`, so if either arrives
+empty (a renamed job output, a `secrets:` block that stopped inheriting, a
+dropped workflow input) the scenario skips, the job reports **green**, and
+exactly the coverage that exists because two production incidents shipped through
+that hop is gone with no signal at all.
+
+So a custom reporter — registered in `playwright.config.ts`, active **only when
+`CI` is set** — fails the run when:
+
+- any collected test ends with outcome `skipped` and has not opted in; or
+- the run collected **zero tests**. A `grep`/`grepInvert` combination wide
+  enough to exclude the whole suite produces no skipped tests and a green run
+  over no coverage, which the per-test rule cannot see.
+
+**Opting a skip out.** Tag the scenario `@allow-skip` in its `.feature` (the tag
+is in docs-conformance's `featureTags` vocabulary, so it is a reviewed decision,
+not a stray string), or, for a plain `@playwright/test` spec with no Gherkin tags:
+
+```ts
+test.info().annotations.push({ type: "allow-skip", description: "why" });
+```
+
+**Nothing uses either today, and that is deliberate.** In particular
+`clerk-auth.setup.ts` is *not* allowlisted: if the Clerk staging credentials ever
+go missing in CI, that setup skips, `@auth`/`@browser` are grep-excluded, and the
+run would otherwise be green over zero authenticated coverage. `e2e.yml` already
+emits a `::warning::` for that case; the guard now makes it a failure. A scenario
+that legitimately cannot run in CI is usually a scenario whose precondition
+should be fixed instead.
+
+## Assert the TERMINAL state (`tests/e2e/support/follow.ts`)
+
+`editor-auth.feature` asserted the `303` off `/{slug}/edit?et=…` and stopped
+there — through **two** production incidents (#188's re-nested `/edit` route and
+the ADR-0080 owner lockout) that both happened on the request *after* it.
+
+`followToTerminal(request, url, { headers })` walks a redirect chain to whatever
+finally answers a non-redirect and returns `{ status, url, body, hops }`. It
+carries cookies forward **across origins** (deliberately unscoped by domain: the
+credential under test is the cross-origin `arp_edit` cookie), caps the hop count,
+and throws with the whole chain on a loop rather than hanging.
+
+Two rules go with it:
+
+1. **Never assert only an intermediate hop.** Keep the intermediate assertion if
+   it guards something specific — the `303` is the direct guard for #188 — and
+   add a terminal one after it.
+2. **Assert the body, not just the status.** A `200` alone proved insufficient
+   this week: the public viewer, the unopenable-document page and the editor all
+   answer with HTML, and only the editor carries `data-testid="unified-editor"`.
+
 ## Driving the scan drain on a preview (ADR-0045 / ADR-0080)
 
 A report only becomes **servable** once its version scans `clean` (ADR-0037 §8).
