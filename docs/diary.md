@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/diary-worktree-sync` (this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
+| **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/unopenable-readonly` (branch `fix/unopenable-readonly` — the last hop of the owner lockout; this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -4888,3 +4888,80 @@ this entry rather than quietly rewritten. `worktree/mcp-body-limit` remains on d
 **only** because it holds uncommitted changes — `/worktree-cleanup` is conservative by
 design and never force-removes — and it needs an operator decision rather than another
 automated pass.
+
+---
+
+## 2026-08-06 — the read-only link had no key: the owner could learn why, and still not read
+
+Measured in production on `f83ed59`, with **both** #247 and #248 merged and deployed.
+The operator's own report `isK1rs7pL4` — `acl: private`, owned by them,
+`editability: "unsplittable"` (an HTML fragment with no `<body>`, exactly the class
+ADR-0080 exists to make legible) — reached both of that day's improvements and they
+both worked:
+
+- `/reports/isK1rs7pL4/open` → `view…/isK1rs7pL4/edit` rendered the new **409
+  unopenable page**, naming the fragment cause in plain language.
+- `/unlock/isK1rs7pL4` recognised the owner: *"This report is private — You have
+  access to it. Open it below."*
+
+And the composition of the two was a **cycle**. The 409 page's one forward action,
+"Open the read-only view", was `href="/isK1rs7pL4"` — bare. For a private report that
+link cannot work: the plain viewer sees private with no token → `app/unlock/{slug}` →
+"Open this report" → `/reports/{slug}/open` → `/edit` → the same 409 page → the same
+bare link. Every hop an improvement; the loop never reaches the content.
+
+So the owner of a private, unopenable report could read a clear explanation of why
+they could not **edit** it and still could not **read** it. That is the original
+complaint — *"my own reports are private for myself"* — in its last remaining form,
+and it is the same failure shape #247 was written about: **the fallback dies at one
+hop and nobody notices.** #247 fixed the redirects. Nobody checked the anchor.
+
+**The fix is a pass-through, not a mint.** The route already held the answer:
+`degradeTargetFor(decision, slug).to`, which is `/{slug}?access=<oa>` when the gate
+verified an owner fallback and `/{slug}` when it did not. The page now carries it.
+The view origin stays credential-free (ADR-0056's keystone: the app authorizes, the
+viewer verifies) — the `oa` is the one the visitor themselves presented, on this
+request, that `acceptOwnerFallback` already verified (HMAC, this slug, unexpired,
+`owner === true`). An unverified `oa` never becomes a `degradeTo`, so it can never
+become an `href`. A write-grantee keeps the bare link, which is right for them: they
+never get an `oa`, and the unlock page recognises write access.
+
+Worth stating plainly, because it is the reusable lesson: a `Location` the browser
+follows and an `href` the user clicks want the **identical** answer to "where do I
+send someone I cannot render for?". #247 introduced `degradeTargetFor` precisely to
+stop that question having two answers, and this page had quietly become the second
+one — while `degradeTo`'s own doc comment claimed the document failures no longer
+consumed it.
+
+**Decided, and recorded rather than left implicit: an unopenable report gets no
+special routing.** The obvious shortcut was to send an owner of an
+`editability: "unsplittable"` report straight to the read-only view and skip an
+editor hand-off that cannot succeed. Rejected — ADR-0080 §4 already forbids gating on
+that column, and three more reasons are specific to routing: `editability` is `null`
+for the entire pre-ADR-0080 corpus (so the rule would fix nothing that already
+exists); the verdict is computed at write time while the question is asked at read
+time (any drift becomes a wrong routing decision, whereas the 409 page fires only
+because the editor *actually* failed just now); and `/reports/{slug}/open` is the one
+edit-token mint (ADR-0059 §4), which should not also be adjudicating document shape.
+The general rule this leaves standing: **Editability is read by things that explain,
+never by things that decide.** With the link fixed the cycle terminates on its own —
+one extra hop, always terminating, and the user is told why on the way through.
+
+**Sibling-gap sweep**, because one untouched branch is how this class survives: every
+other builder of a viewer URL was checked and none holds a verified `oa` it fails to
+carry — `ownerOpenLocation`'s no-secret fall-through has no token by design, `/unlock`'s
+public-mode redirect needs none, and `view_url` on the `201` upload response is a
+deliberately credential-free permanent share link (embedding a 24h `owner:true` token
+there would be a real leak, not a fix). The 409 page was the only one.
+
+Also closed two of ADR-0080's open follow-ups, one of them by this change: the
+explanatory page (#247) and tightening the e2e negative to assert the owner-specific
+`?access=` degrade, which now runs against real infrastructure on the exact hop both
+production incidents happened on. `editUnopenableLine` gained an `ownerFallback`
+boolean (never the token) so that hop finally says whether the fallback survived it.
+
+**Docs**: ADR-0063 Phase 5-H (the fix, the sweep, and the routing decision),
+ADR-0080 §4 (reaffirmed with the concrete case) + its follow-up list.
+**Process**: worktree `worktree/unopenable-readonly` (branch `fix/unopenable-readonly`),
+off `main`. Strict TDD — red at the two tiers #247 established (the page's own pure
+tier, the gate's log line), then green, then the e2e assertion.
