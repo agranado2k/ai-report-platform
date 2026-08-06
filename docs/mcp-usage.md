@@ -68,7 +68,7 @@ Best for **scripts, CI, Claude Desktop via config**. Mint a key at `https://app.
 
 Reports are served on the separate viewer origin: `https://view.centaurspec.com/<slug>`.
 
-**Upload size over MCP:** the server caps the whole JSON-RPC request body at **4 MB**
+**Upload size over MCP:** the server caps the whole JSON-RPC request body at **4 MiB**
 (Vercel's serverless ceiling minus headroom; also the MCP SDK's own transport maximum).
 JSON escaping inflates the HTML in transit, so the practical ceiling is **~3.5 MB of
 HTML** — above that `reports_upload` fails with HTTP 413. This is deliberately stricter

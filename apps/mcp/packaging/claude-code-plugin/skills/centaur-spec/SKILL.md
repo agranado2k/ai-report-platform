@@ -31,7 +31,7 @@ exact — call them as written.
 
 1. **Publish** — `reports_upload` with `html` creates a new report and returns a `slug`
    and a permanent, shareable `view_url`. Keep the HTML under ~3.5MB: the MCP transport
-   caps the whole request at 4MB (larger → HTTP 413; use the web upload instead).
+   caps the whole request at 4 MiB (larger → HTTP 413; use the web upload instead).
 2. **Re-publish (new version, same link)** — call `reports_upload` again, this time
    passing `update_slug` set to the existing slug. This publishes a new version; the
    `view_url` **does not change**. This is the single most important relationship in the
