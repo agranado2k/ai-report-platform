@@ -63,6 +63,7 @@ const reportResource = (title: string, folder = F1) => ({
   title,
   is_published: true,
   folder_id: folderIdToWire(folderId(folder)),
+  editability: null,
   mode: "prod",
   owner: userIdToWire(userId(U1)),
   acl: { mode: "public" },
@@ -479,5 +480,67 @@ describe("applyFolderSharingToReportsToHttp (ADR-0078 §5)", () => {
       CTX,
     );
     expect(res.status).toBe(422);
+  });
+});
+
+describe("Editability on the report resource (ADR-0080)", () => {
+  const V2 = "00000000-0000-7000-8000-0000000000c2";
+  const version = (
+    id: string,
+    no: number,
+    editability: Report["versions"][number]["editability"],
+  ) =>
+    ({
+      id: versionId(id),
+      versionNo: no,
+      contentHash: `h${no}`,
+      uploadedBy: userId(U1),
+      scanStatus: "clean" as const,
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 1,
+      origin: "upload" as const,
+      editability,
+    }) satisfies Report["versions"][number];
+
+  it("reports the LIVE version's verdict, not the newest version's", () => {
+    // A newer, still-scanning upload must not change what "can I edit this
+    // report?" answers — the editor opens the LIVE version.
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, "editable"), version(V2, 2, "unsplittable")],
+    };
+    const body = getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) })
+      .body as { editability: unknown };
+    expect(body.editability).toBe("editable");
+  });
+
+  it("names WHY editing is unavailable when the live version cannot be opened", () => {
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, "unsplittable")],
+    };
+    const body = getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) })
+      .body as { editability: unknown };
+    expect(body.editability).toBe("unsplittable");
+  });
+
+  it("is null for an unpublished report — nothing is live to edit", () => {
+    const r: Report = { ...report("T"), liveVersionId: null, versions: [] };
+    const body = getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) })
+      .body as { editability: unknown };
+    expect(body.editability).toBeNull();
+  });
+
+  it("is null when the live version predates the probe (UNKNOWN, not un-editable)", () => {
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, null)],
+    };
+    const body = getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) })
+      .body as { editability: unknown };
+    expect(body.editability).toBeNull();
   });
 });

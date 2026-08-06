@@ -14,6 +14,7 @@ const base: VersionWire = {
   scan_status: "clean",
   size_bytes: 1234,
   origin: "upload",
+  editability: null,
   mode: "prod",
 };
 

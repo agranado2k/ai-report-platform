@@ -12,6 +12,7 @@ const VERSION: VersionWire = {
   scan_status: "clean",
   size_bytes: 4096,
   origin: "editor",
+  editability: null,
   mode: "prod",
 };
 

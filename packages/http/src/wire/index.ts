@@ -9,7 +9,8 @@
 // Server-only concerns (encoders, mappers, WireContext) stay in the package
 // root; anything importable from `arp-http/wire` must keep that property.
 //
-// Enum vocabularies (AclMode, Intent, ScanStatus, VersionOrigin) are IMPORTED
+// Enum vocabularies (AclMode, Intent, ScanStatus, VersionOrigin,
+// VersionEditability) are IMPORTED
 // from arp-domain, never re-declared (ADR-0036 "one name per concept"). The
 // encoders in ../resource.ts, ../diff-response.ts, and ../write-response.ts
 // are return-typed against these shapes, and src/wire/index.test.ts locks the
@@ -21,6 +22,7 @@ import type {
   Intent,
   ReportSharingState,
   ScanStatus,
+  VersionEditability,
   VersionOrigin,
 } from "arp-domain";
 
@@ -64,6 +66,17 @@ export interface ReportWire {
   readonly title: string;
   readonly is_published: boolean;
   readonly folder_id: string;
+  /** The LIVE version's **Editability** (ADR-0080) — whether the editor can open
+   *  what this report currently serves, and if not, why: `unsplittable` (no
+   *  usable `<body>` boundary) or `unparsable` (the body defeats the schema
+   *  parser).
+   *
+   *  `null` means UNKNOWN — no live version yet, or a version written before
+   *  ADR-0080. ALWAYS present, never omitted: a client that could not tell
+   *  UNKNOWN from `editable` would be back to guessing, which is the state this
+   *  field exists to end. Advisory: an un-editable report still uploads, still
+   *  versions, and still serves byte-for-byte (ADR-0038). */
+  readonly editability: VersionEditability | null;
   readonly mode: WireMode;
 }
 
@@ -183,6 +196,10 @@ export interface VersionWire {
   readonly scan_status: ScanStatus;
   readonly size_bytes: number;
   readonly origin: VersionOrigin;
+  /** THIS version's Editability (ADR-0080), recorded when its bytes were
+   *  written; `null` = never probed. Per-version, so version history shows
+   *  exactly which save broke — or fixed — the editor. */
+  readonly editability: VersionEditability | null;
   readonly mode: WireMode;
 }
 

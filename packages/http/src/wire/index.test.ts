@@ -69,6 +69,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       title: "T",
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
+      editability: "unsplittable",
       mode: "prod",
     };
     expect(
@@ -79,10 +80,29 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
           title: "T",
           isPublished: true,
           folderId: folderId(F1),
+          editability: "unsplittable",
         },
         CTX,
       ),
     ).toEqual(expected);
+  });
+
+  it("reportBody emits `editability: null` for the UNKNOWN state, never omits it", () => {
+    // ADR-0080: a client must be able to tell "nobody probed this" apart from
+    // "this is editable". Omitting the key would collapse the two.
+    const body = reportBody(
+      {
+        id: reportId(R1),
+        slug: "aaaaaaaaaa" as Report["slug"],
+        title: "T",
+        isPublished: true,
+        folderId: folderId(F1),
+        editability: null,
+      },
+      CTX,
+    );
+    expect("editability" in body).toBe(true);
+    expect(body.editability).toBeNull();
   });
 
   it("commentBody ALWAYS emits `author` and `edited_at` (null-filled, never omitted)", () => {
@@ -125,6 +145,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       scanStatus: "clean",
       sizeBytes: 4096,
       origin: "upload",
+      editability: "editable",
     };
     const expected: VersionWire = {
       object: "version",
@@ -136,6 +157,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       scan_status: "clean",
       size_bytes: 4096,
       origin: "upload",
+      editability: "editable",
       mode: "prod",
     };
     expect(versionBody(summary, CTX)).toEqual(expected);
@@ -200,6 +222,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       title: "T",
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
+      editability: null,
       mode: "prod",
       owner: userIdToWire(userId(U1)),
       acl: { mode: "allowlist", allowed_emails: ["a@example.com"], access_ttl_seconds: 604_800 },

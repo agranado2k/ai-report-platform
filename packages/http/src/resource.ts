@@ -6,7 +6,7 @@
 // declaration of these shapes) — the compile-time link that keeps the catalog
 // honest about what actually goes on the wire.
 import type { ReportVersionSummary } from "arp-application";
-import type { Comment, Folder, FolderId, ReportId, Slug } from "arp-domain";
+import type { Comment, Folder, FolderId, ReportId, Slug, VersionEditability } from "arp-domain";
 import {
   commentIdToWire,
   folderIdToWire,
@@ -46,6 +46,8 @@ export function reportBody(
     readonly title: string;
     readonly isPublished: boolean;
     readonly folderId: FolderId;
+    /** The LIVE version's Editability (ADR-0080); `null` = unknown. */
+    readonly editability: VersionEditability | null;
   },
   ctx: WireContext,
 ): ReportWire {
@@ -56,6 +58,10 @@ export function reportBody(
     title: r.title,
     is_published: r.isPublished,
     folder_id: folderIdToWire(r.folderId),
+    // ADR-0080 — emitted unconditionally, `null` for UNKNOWN. `ReportSummary`
+    // carries it off a 1:1 join on `live_version_id`, so listing a page of
+    // reports costs no extra round-trip.
+    editability: r.editability,
     mode: ctx.mode,
   };
 }
@@ -106,6 +112,8 @@ export function versionBody(
     scan_status: v.scanStatus,
     size_bytes: v.sizeBytes,
     origin: v.origin,
+    // ADR-0080 — this version's own recorded verdict; null when never probed.
+    editability: v.editability,
     mode: ctx.mode,
   };
 }

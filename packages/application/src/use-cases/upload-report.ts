@@ -107,6 +107,11 @@ export interface UploadResult {
   readonly slug: string;
   readonly version: number;
   readonly scanStatus: ScanStatus;
+  /** This version's recorded Editability (ADR-0080); `null` when nothing could
+   *  be probed. Returned on the upload response so an agent — MCP is this
+   *  product's primary write surface — learns immediately that what it just
+   *  published views fine and will not open in the editor. */
+  readonly editability: VersionEditability | null;
 }
 
 export interface UploadOutcome {
@@ -223,6 +228,7 @@ export async function uploadReport(
     slug: report.slug,
     version: newVersion.versionNo,
     scanStatus: newVersion.scanStatus,
+    editability: newVersion.editability,
   };
   const committed = await deps.uow.run(async () => {
     const saved = await deps.reports.save(report);
@@ -291,14 +297,22 @@ function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
     !b ||
     typeof b.slug !== "string" ||
     typeof b.version !== "number" ||
-    typeof b.scanStatus !== "string"
+    typeof b.scanStatus !== "string" ||
+    // Present-but-nullable: a replayed record stored before ADR-0080 has no
+    // `editability` key at all, and rejecting it would turn every pre-existing
+    // in-flight idempotency record into a 500. `undefined` is normalized to
+    // `null` (UNKNOWN) below — the same honest answer the column gives.
+    (b.editability !== undefined && b.editability !== null && typeof b.editability !== "string")
   ) {
     return err({
       kind: "Unexpected",
       message: "stored idempotency response is not a valid UploadResult",
     });
   }
-  return ok(b as unknown as UploadResult);
+  return ok({
+    ...(b as unknown as UploadResult),
+    editability: (b.editability ?? null) as VersionEditability | null,
+  });
 }
 
 /** The version manifest persisted with the row: entry document + file paths.
