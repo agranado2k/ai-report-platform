@@ -4537,10 +4537,19 @@ report rather than the broken one:
   the 12:31 UTC edit attempt, so nothing was mid-scan), the gate's own branches
   are excluded.
 
-Which leaves exactly two lines: the entry-document blob read and the
-`splitShell` call in `$slug_.edit.tsx`'s loader. Both per-report, both
-producing the observed bare `302 → /{slug}`, both **completely silent**. The
-broken report's live version is 46,984 bytes; the working one's is 126.
+Which leaves the document-load step of `$slug_.edit.tsx`'s loader: the
+entry-document blob read, the `splitShell` call — and, as review #247 pointed
+out, the `parseBody` call after it, which was equally unguarded and is the line
+every report with no `_source.json` sidecar takes. All three are per-report, all
+three produced the observed bare `302 → /{slug}`, all three were **completely
+silent**. The broken report's live version is 46,984 bytes; the working one's is
+126.
+
+One correction to the exclusion argument above, made in the same review: the
+working report's `200` proves `APP_ORIGIN` is set and the secret is aligned, but
+shared code alone would NOT exclude a *per-report* `no-servable-version`
+outcome. What excludes the gate's own branches for the report that actually
+failed is its OWN follow-up hop — `GET /{slug}` returned `302`, not `404`.
 
 ### The three defects
 
@@ -4552,9 +4561,19 @@ broken report's live version is 46,984 bytes; the working one's is 126.
    `degradeLocation(slug, oa)` only ever protected an owner on the FIRST
    request: the one hop where the round-trip was least likely to fail. It is
    now persisted as its own `arp_edit_oa` cookie (same `Path=/{slug}/edit`
-   scoping, same Max-Age as the edit cookie), which strictly *reduces* the
-   token's exposure — it previously rode the address bar, history and referer
-   for the whole `?et=` hop, and its own TTL is 24h against the cookie's ≤15 min.
+   scoping, same Max-Age as the edit cookie). **That WIDENS the token's
+   exposure, deliberately and boundedly** — I first wrote "strictly reduces"
+   here, and review #247 was right that it is false. Nothing was removed:
+   `ownerOpenLocation` still appends `&oa=` to the query, so the address-bar /
+   history / referer hop is unchanged. What is added is an HttpOnly cookie COPY
+   plus five further reachable occasions on which the 24h `owner:true` token is
+   emitted into a URL as `?access=` — redeeming paths go from one to six — and
+   each such redemption mints an `arp_unlock` cookie at the broader
+   `Path=/{slug}` with `Max-Age = claims.exp - now`, up to the full 24h. The
+   trade buys an owner back into their own report, and it is fenced by five
+   mitigations (the fallback is now signature/slug/expiry/`owner`-verified and
+   length-capped; `Path=/{slug}/edit`; Max-Age tied to the ≤15-min edit token;
+   HttpOnly/Secure/SameSite=Lax; percent-encoded). See ADR-0063 Phase 5-G.
 2. **Phase 5-E scoped the rescue to one branch, and the failure took another.**
    That ADR is explicit: the `oa` thread was added on the `denied` branch only,
    "matching the reported failure mode exactly", leaving the blob-read and
@@ -4573,12 +4592,54 @@ broken report's live version is 46,984 bytes; the working one's is 126.
 
 ### Honest limit
 
-**Not established: WHICH of `document-unreadable` / `document-unsplittable`
-fired.** They are indistinguishable from outside — same 302, same target, no
-log — and I will not ship a guess about it (four theories were retired on the
-anchor-jump bug this week by doing exactly that). The `reason` field is the
-instrument that names it on the next occurrence. The measurement that would
-settle it now is in the PR body. Worth noting the mechanism that makes
+**Not established: WHICH of `document-unreadable` / `document-unsplittable` /
+`document-unparsable` fired.** They are indistinguishable from outside — same
+302, same target, no log — and I will not ship a guess about it (four theories
+were retired on the anchor-jump bug this week by doing exactly that). The
+`reason` field is the instrument that names it on the next occurrence.
+
+The measurement that settles it now runs the REAL `splitShell` + `parseBody`
+over the fetched bytes. An earlier version of this snippet used
+`grep -c '<body'`, which does not match `splitShell`'s predicate
+(`/<body[^>]*>/i` + `lastIndexOf("</body>")` + the `bodyCloseIndex <
+bodyContentStart` guard): a `</body>` inside an earlier script string, or a
+`<body` whose tag never closes, both produce grep hits and still throw.
+
+```bash
+# 1. Fetch the report as its owner. A 404/500 here IS `document-unreadable`.
+curl -sS -D - -o /tmp/report.html \
+  "https://view.centaurspec.com/isK1rs7pL4?access=<a fresh oa token>" | head -1
+wc -c /tmp/report.html
+
+# 2. Classify it with the actual production code (repo root, this branch).
+cat > apps/view/app/edit/__probe.test.ts <<'PROBE'
+import { readFileSync } from "node:fs";
+import { parseBody, splitShell } from "arp-report-html";
+import { it } from "vitest";
+
+it("classify the fetched document", () => {
+  const html = readFileSync(process.env.PROBE_FILE ?? "/tmp/report.html", "utf8");
+  let bodyHtml: string;
+  try {
+    ({ bodyHtml } = splitShell(html));
+  } catch (e) {
+    console.log("RESULT: UNSPLITTABLE —", (e as Error).message);
+    return;
+  }
+  try {
+    parseBody(bodyHtml);
+    console.log("RESULT: SPLITTABLE + PARSABLE — neither candidate holds");
+  } catch (e) {
+    console.log("RESULT: UNPARSABLE —", (e as Error).message);
+  }
+});
+PROBE
+npx vitest run apps/view/app/edit/__probe.test.ts
+rm apps/view/app/edit/__probe.test.ts
+```
+
+It prints exactly one of `UNSPLITTABLE` / `UNPARSABLE` / `SPLITTABLE +
+PARSABLE`, with the thrown message — verified against all three inputs. Worth noting the mechanism that makes
 `document-unsplittable` plausible at all: uploads are stored VERBATIM
 (`HtmlBundleProcessor`) and the read-only viewer just streams bytes, so an HTML
 fragment with no `<body>` VIEWS perfectly and cannot be opened by the editor —
@@ -4596,6 +4657,54 @@ redirect** — /unlock is reached BY a redirect from the viewer and can be bounc
 straight back to, so an auto-redirect would loop where today it terminates.
 Denials stay byte-identical for "not entitled", "not signed in" and "no such
 report", so the page never becomes an existence oracle.
+
+### Review round #247 — five things the first pass got wrong
+
+Two independent reviews ran against the above. Both reconstructed and confirmed
+the load-bearing deduction (the working report's `200` proves `appOrigin` is set
+and the secret aligned, so cookie rejection is out and the denial is
+post-capability). What they did not confirm was the *claims* around it.
+
+1. **I asserted away an existence oracle instead of closing it.** Five places —
+   the route, the server module, ADR-0056, ADR-0063 and this diary — said the
+   `/unlock/{slug}` denial is byte-identical for "not entitled", "not signed in"
+   and "no such report". At the ROUTE that was FALSE: `notice()` defaults to
+   `200`, so an unknown / malformed / soft-deleted slug answered
+   `200 "Report not found."` **before** `privateUnlock` ran, while a private
+   non-owner got `403 "This report is private…"`. Different status, different
+   body — and `private` is the DEFAULT mode, so that told anyone who asked
+   whether a private slug exists. The oracle is pre-existing on `main`; what
+   this branch added was the assertion that it wasn't there. Worse, the unit
+   test *"an unknown slug is denied identically"* exercised a
+   `decidePrivateUnlock` branch the composed route can never reach — false
+   assurance. Closed with one `privateDenied()` helper on both the GET and the
+   POST side, and asserted against the real route module in
+   `apps/app/app/server/unlock-route.test.ts`.
+2. **The audit signal this work exists to create was forgeable.** `oa` was read
+   straight off the query, written verbatim into `Set-Cookie`, and
+   `ownerFallback: oa !== undefined` selected the `owner-edit-degraded-to-view`
+   event — so any write-grantee could append `&oa=anything` and forge the exact
+   incident signal, and park unbounded bytes in the cookie jar. My own test
+   demonstrated it, passing `"owner.token.with/special+chars"` and asserting the
+   gate persisted it. Now verified (HMAC, slug, expiry, `owner === true`) and
+   length-capped.
+3. **"Exposure strictly DECREASES" was false** — corrected above and in
+   ADR-0063; it is a bounded WIDENING.
+4. **One silent-500 path remained, and it was the incident's own profile.**
+   `parseBody` was the only unguarded call left in a function whose contract is
+   "never crash" — and it is the path every uploaded-never-edited report takes.
+   New reason `document-unparsable`. The version-diff loader still called
+   `splitShell` unguarded too, so the same document that "views fine, won't
+   edit" also 500'd the editor's Versions/Compare panel.
+5. **The test claim was inflated.** "23 gate tests red against `main`" is
+   numerically true and substantively misleading: about eight of them carried no
+   behavioural content — six were pre-existing tests that went red only because
+   `Decision.cookie: string` became `cookies: readonly string[]`, one was a
+   byte-identical duplicate of another, and one was self-described as
+   "grantee — unchanged". Roughly eleven genuinely encode the lockout and five
+   more assert the new `reason` field. The duplicate, the redundant one, and a
+   third that passed against `main` (so could not distinguish "treated as
+   absent" from "never read") have been deleted.
 
 ADR-0063 Phase 5-G and an amendment to ADR-0056 carry the decisions.
 

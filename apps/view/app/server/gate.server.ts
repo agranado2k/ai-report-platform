@@ -71,10 +71,37 @@ export const EDIT_COOKIE = "arp_edit";
 // fallback is therefore persisted at the same moment, under the same
 // Path=/${slug}/edit scoping and the same Max-Age as the edit cookie — so it
 // never outlives the edit session, and it is never sent on the public
-// GET /<slug> read. This STRICTLY REDUCES the token's exposure versus the
-// status quo: it was previously in the address bar, history and referer for
-// the whole `?et=` hop, and its own TTL is 24h (OWNER_TTL_SECONDS) against
-// this cookie's ≤15 min.
+// GET /<slug> read.
+//
+// THIS IS A DELIBERATE, BOUNDED WIDENING OF THE TOKEN'S EXPOSURE — not a
+// reduction (an earlier draft of this comment claimed "strictly REDUCES";
+// that was false, review #247 H-3). Nothing was removed: `ownerOpenLocation`
+// still appends `&oa=` to the query exactly as before, so the address-bar /
+// history / referer hop is unchanged. What this adds is (a) an HttpOnly COPY
+// of the token in the cookie jar, and (b) five further reachable occasions on
+// which the 24h `owner:true` token is emitted into a URL as `?access=`
+// (app-origin-unset, lookup-failed, no-servable-version, the route's
+// document-load failures, and — defensively, unreachable today —
+// gate-decision-unusable), where before only the `denied` branch of the FIRST
+// request could do it. Redeeming paths go from one to six. Each of those
+// redemptions mints an `arp_unlock` cookie at the BROADER Path=/${slug} with
+// Max-Age = claims.exp - now, i.e. up to the token's full 24h — so the
+// practical redemption window widens from one request to the whole edit
+// session and beyond.
+//
+// That trade is worth making — the alternative is an owner locked out of
+// their own report — and it is bounded by five mitigations:
+//   1. VERIFIED, not trusted: `acceptOwnerFallback` requires a valid HMAC,
+//      this slug, an unexpired token and `owner === true`, plus a length cap.
+//   2. Path=/${slug}/edit — never sent on the public GET /<slug> read.
+//   3. Max-Age tied to the EDIT token's remaining life (≤15 min), so the
+//      cookie copy dies with the edit session even though the token itself
+//      lives 24h.
+//   4. HttpOnly + Secure + SameSite=Lax — unreadable by report-embedded JS,
+//      never sent cross-site.
+//   5. Percent-encoded, so the value can never split the Set-Cookie header.
+// Shortening OWNER_TTL_SECONDS is the lever if this window is judged too wide
+// (ADR-0056 already notes the 24h is re-minted on every dashboard click).
 export const EDIT_OWNER_COOKIE = "arp_edit_oa";
 
 /** Parse a named cookie's value out of a raw `Cookie` request header. */
