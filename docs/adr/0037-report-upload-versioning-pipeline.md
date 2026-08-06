@@ -70,6 +70,8 @@ Two tiers of limit:
 
 These numbers are tunable config; their *basis* is benchmarked against Cloudflare Pages (25 MiB/file, 20k files), GitHub Pages (1 GB site), and zip-bomb research (DEFLATE ~1032:1 ceiling; multi-threshold + depth + sandbox).
 
+> **Transport note (2026-08-06):** the remote MCP server (ADR-0051) additionally caps the whole JSON-RPC request body at **4 MB** (`MAX_JSON_BODY_BYTES` in `apps/mcp/src/app.ts` — Vercel's 4.5 MB serverless ceiling minus headroom, matching the MCP SDK's own transport maximum). Since `reports_upload` carries the HTML JSON-escaped inside that body, the MCP path accepts ~3.5 MB of HTML — intentionally stricter than the 25 MiB per-file cap above. Larger uploads use the web/API multipart path, which is bounded only by the caps in this section.
+
 ### Consequences
 
 **Positive**

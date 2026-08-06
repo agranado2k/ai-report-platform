@@ -306,7 +306,10 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
               "becomes a dead anchor. That save also normalizes: a `target` other than " +
               '`_blank` and `rel="opener"` are dropped as frame-escape/tabnabbing ' +
               "primitives, unrecognized `rel` tokens are dropped, `style` is sanitized, and " +
-              "attribute order is not preserved.",
+              "attribute order is not preserved. SIZE: the MCP transport caps the whole " +
+              "JSON-RPC request at 4MB, and JSON escaping inflates the HTML in transit — " +
+              "keep the document under ~3.5MB or the call fails with HTTP 413. Bigger " +
+              "files go through the web upload instead (per-file cap 25 MiB).",
           ),
         update_slug: z
           .string()
