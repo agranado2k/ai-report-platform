@@ -4492,3 +4492,111 @@ the negative result, the cumulative retirement list, the narrowed rationale for
 defence.
 
 Worktree `worktree/anchor-jump-2` (branch `fix/anchor-jump-2`, PR #246).
+
+---
+
+## 2026-08-06 — the owner lockout: the `oa=` fallback never survived its own 303, and every post-capability degrade was silent
+
+A second production owner lockout in the same seam as PR #185, with the
+sharpest possible control: **two PRIVATE reports, same owner, same Clerk
+session, same two deployments, minutes apart.** One opened in the editor; the
+other 403'd its own owner. The operator measured it end-to-end (I have no
+production access, ADR-0069) and handed over the traces.
+
+| step | `AVOlHuOksa` (works) | `isK1rs7pL4` (broken) |
+|---|---|---|
+| `GET /reports/{slug}/open` (app) | 302, `ownerFallbackMinted: true` | 302, `ownerFallbackMinted: true` |
+| `GET /{slug}/edit?et=…&oa=…` (view) | 303 | 303 |
+| `GET /{slug}/edit` (cookie) | **200 — serves** | **302 — denied** |
+| then | — | `/{slug}` 302 → `app/unlock/{slug}` **403** |
+
+`owner-edit-degraded-to-view` was never emitted for the broken one. Zero log
+lines on the view origin for a total lockout.
+
+### What the evidence establishes, before touching any code
+
+The app side is provably correct — same userId, same orgId, both tokens minted.
+The interesting deduction is on the view side, and it comes from the *working*
+report rather than the broken one:
+
+- The working report reached `200`. That return requires passing the gate's
+  `if (!deps.appOrigin)` guard AND `editViewHeaders({ appOrigin })` in the
+  loader. **So `APP_ORIGIN` is configured on the view app** — which retires the
+  operator's leading hypothesis (that `deps.secret && deps.appOrigin` had
+  evaluated falsy) and, with it, the theory that the edit COOKIE was rejected:
+  a cookie-less request with `appOrigin` set funnels to
+  `${appOrigin}/reports/{slug}/open`, and the observed next hop was the plain
+  viewer instead.
+- Both reports got a `303`, which requires `readEditToken` to have ACCEPTED a
+  freshly minted token. **So the secret is aligned too** — this is not the PR
+  #185 class.
+- The follow-up `GET /{slug}` returned `302`, not `404`. For the public route
+  that means `resolveViewableReport` returned `serve` or `scanning`, never
+  `notfound`. Combined with `is_published: true` and both versions
+  `scan_status: clean` at measurement time (v1 19:33, v2 19:36 — ~14h before
+  the 12:31 UTC edit attempt, so nothing was mid-scan), the gate's own branches
+  are excluded.
+
+Which leaves exactly two lines: the entry-document blob read and the
+`splitShell` call in `$slug_.edit.tsx`'s loader. Both per-report, both
+producing the observed bare `302 → /{slug}`, both **completely silent**. The
+broken report's live version is 46,984 bytes; the working one's is 126.
+
+### The three defects
+
+1. **The `oa=` owner fallback dies at the 303.** `ownerOpenLocation` delivers it
+   ONCE, on the query string; the 303 that redeems `et=` into the `arp_edit`
+   cookie deliberately strips the query. So on the second, cookie-only request
+   `oa` is *structurally* absent, and every degrade there resolved to the bare
+   `/{slug}` — which, for a private report, is the unlock wall. Phase 5-E's
+   `degradeLocation(slug, oa)` only ever protected an owner on the FIRST
+   request: the one hop where the round-trip was least likely to fail. It is
+   now persisted as its own `arp_edit_oa` cookie (same `Path=/{slug}/edit`
+   scoping, same Max-Age as the edit cookie), which strictly *reduces* the
+   token's exposure — it previously rode the address bar, history and referer
+   for the whole `?et=` hop, and its own TTL is 24h against the cookie's ≤15 min.
+2. **Phase 5-E scoped the rescue to one branch, and the failure took another.**
+   That ADR is explicit: the `oa` thread was added on the `denied` branch only,
+   "matching the reported failure mode exactly", leaving the blob-read and
+   malformed-shell degrades untouched. That deliberate narrowness is precisely
+   what this incident walked through. Every degrade now routes an owner through
+   `?access=`, and `Decision.serve` carries `degradeTo` so the route's own
+   post-gate failures land in the same place.
+3. **The observability signal could not fire on the path that failed.** The
+   `owner-edit-degraded-to-view` warn lived INSIDE `if (oa)` — so on the one
+   request where `oa` was unavailable by construction, nothing logged. It exists
+   "so the secret-misalignment class of incident is visible in logs rather than
+   only inferable from user reports", and this incident was inferable only from
+   a user report. Every degrade off `/edit` now emits a line with a `reason`
+   (`edit-token-denied` / `app-origin-unset` / `no-servable-version` /
+   `lookup-failed` / `document-unreadable` / `document-unsplittable`).
+
+### Honest limit
+
+**Not established: WHICH of `document-unreadable` / `document-unsplittable`
+fired.** They are indistinguishable from outside — same 302, same target, no
+log — and I will not ship a guess about it (four theories were retired on the
+anchor-jump bug this week by doing exactly that). The `reason` field is the
+instrument that names it on the next occurrence. The measurement that would
+settle it now is in the PR body. Worth noting the mechanism that makes
+`document-unsplittable` plausible at all: uploads are stored VERBATIM
+(`HtmlBundleProcessor`) and the read-only viewer just streams bytes, so an HTML
+fragment with no `<body>` VIEWS perfectly and cannot be opened by the editor —
+"views fine, won't edit" is an expected state, not an impossible one.
+
+### And the dead end at the end of it
+
+`/unlock/{slug}` 403'd every visitor to a private report, with a comment
+asserting the owner "reaches it via the dashboard's owner-open, not this page".
+False twice: the raw `view.<domain>/{slug}` link an owner naturally copies lands
+there, and so does every failed round-trip. The app holds the Clerk session, so
+`decidePrivateUnlock` now asks `loadWritableReport` the same canWrite question
+`/reports/{slug}/open` asks and offers a link to that ONE mint. A **link, not a
+redirect** — /unlock is reached BY a redirect from the viewer and can be bounced
+straight back to, so an auto-redirect would loop where today it terminates.
+Denials stay byte-identical for "not entitled", "not signed in" and "no such
+report", so the page never becomes an existence oracle.
+
+ADR-0063 Phase 5-G and an amendment to ADR-0056 carry the decisions.
+
+Worktree `worktree/owner-lockout` (branch `fix/owner-lockout`).
