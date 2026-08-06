@@ -20,6 +20,7 @@ import {
 } from "arp-domain";
 import {
   AppHeader,
+  Badge,
   Button,
   buttonClass,
   cx,
@@ -38,6 +39,7 @@ import {
 } from "../components";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
+import { editabilityNotice } from "../server/editability-notice.server";
 import {
   applyFolderVisibility,
   cascadeIsPartial,
@@ -305,6 +307,10 @@ export async function loader(args: LoaderFunctionArgs) {
         title: r.title,
         isPublished: r.isPublished,
         folderId,
+        // ADR-0080 — the server's own sentence for "why can't I edit this?",
+        // or null when there is nothing to say. A conclusion, not the verdict
+        // itself: the component renders it, it never re-decides it.
+        editabilityNotice: editabilityNotice(r.editability),
         sharing: {
           slug: r.slug,
           title: r.title,
@@ -812,6 +818,21 @@ export default function Index() {
                     </div>
                   </div>
                   <StatusBadge isPublished={r.isPublished} />
+                  {/* ADR-0080 — why the Edit affordance won't work, said BEFORE
+                      the user clicks it and gets bounced back to read-only. The
+                      row still links to /open: this explains, it does not gate
+                      (the editor's own attempt-and-degrade stays the authority).
+                      `relative z-10` so the tooltip target isn't swallowed by
+                      the stretched-link overlay. */}
+                  {r.editabilityNotice ? (
+                    <Badge
+                      tone="neutral"
+                      className="relative z-10"
+                      title={r.editabilityNotice.title}
+                    >
+                      {r.editabilityNotice.label}
+                    </Badge>
+                  ) : null}
                   {/* Sharing (ADR-0078 §12). Its own kebab, next to the actions
                       one, because "who can see this" is a different decision
                       from "rename / move / delete" and folding them together

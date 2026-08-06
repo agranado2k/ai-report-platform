@@ -1376,7 +1376,7 @@ components:
     UploadResult:
       description: The created `report` resource (ADR-0053).
       type: object
-      required: [object, slug, view_url, version, scan_status, mode]
+      required: [object, slug, view_url, version, scan_status, editability, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -1400,6 +1400,19 @@ components:
           type: string
           enum: [pending, clean, flagged, blocked]
           description: Always `pending` at upload; the verdict arrives asynchronously.
+        editability:
+          type: string
+          nullable: true
+          enum: [editable, unsplittable, unparsable]
+          description: >
+            **Editability** (ADR-0080) — the editor's own open-time precondition,
+            recorded when these bytes were written. `editable`; `unsplittable`
+            (no usable `<body>` boundary — an HTML fragment, the most common
+            accidental agent upload); `unparsable` (the body defeats the report
+            schema parser). `null` means UNKNOWN — nobody probed it — and is
+            NEVER equivalent to un-editable.
+            Advisory only: an un-editable document still uploads, still versions,
+            and is still served byte-for-byte by the viewer (ADR-0038).
         mode:
           type: string
           enum: [prod, dev]
@@ -1421,7 +1434,7 @@ components:
     ReportSummary:
       description: A `report` resource — summary projection (ADR-0036, ADR-0053).
       type: object
-      required: [object, id, slug, title, is_published, folder_id, mode]
+      required: [object, id, slug, title, is_published, folder_id, editability, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -1440,6 +1453,15 @@ components:
           type: string
           pattern: '^folder_[0-9A-Za-z]{22}$'
           description: The Folder the report is currently placed in.
+        editability:
+          type: string
+          nullable: true
+          enum: [editable, unsplittable, unparsable]
+          description: >
+            The **LIVE** version's Editability (ADR-0080) — whether the editor
+            can open what this report currently serves, and if not, why.
+            `null` when the report has no live version yet, or when that version
+            predates the probe (UNKNOWN — not un-editable).
         mode:
           type: string
           enum: [prod, dev]
@@ -1492,7 +1514,18 @@ components:
       description: A `version` resource — the ReportVersionSummary projection (ADR-0065).
       type: object
       required:
-        [object, id, version_no, uploaded_by, uploaded_at, scan_status, size_bytes, origin, mode]
+        [
+          object,
+          id,
+          version_no,
+          uploaded_by,
+          uploaded_at,
+          scan_status,
+          size_bytes,
+          origin,
+          editability,
+          mode,
+        ]
       properties:
         object: { type: string, enum: [version] }
         id:
@@ -1529,6 +1562,19 @@ components:
             produced by `POST /api/v1/reports/{slug}/versions`, which the
             unified in-viewer editing experience's save action calls
             (ADR-0063); `upload` — every other create/re-upload path.
+        editability:
+          type: string
+          nullable: true
+          enum: [editable, unsplittable, unparsable]
+          description: >
+            **Editability** (ADR-0080) — the editor's own open-time precondition,
+            recorded when these bytes were written. `editable`; `unsplittable`
+            (no usable `<body>` boundary — an HTML fragment, the most common
+            accidental agent upload); `unparsable` (the body defeats the report
+            schema parser). `null` means UNKNOWN — nobody probed it — and is
+            NEVER equivalent to un-editable.
+            Advisory only: an un-editable document still uploads, still versions,
+            and is still served byte-for-byte by the viewer (ADR-0038).
         mode:
           type: string
           enum: [prod, dev]

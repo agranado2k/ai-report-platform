@@ -199,7 +199,34 @@ jobs:
           # (publishable keys are meant to reach the browser). Absent → @browser
           # is grep-excluded the same way @auth is (playwright.config.ts).
           E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
-        run: pnpm e2e
+          # Through `env:`, never inlined into the script body — a branch name
+          # is attacker-controllable on a fork PR (same rule the readiness step
+          # above follows).
+          BRANCH_REF: ${{ github.event.pull_request.head.ref }}
+        # Per-PR scan-drain secret (ADR-0045 / ADR-0080). Cloudflare's cron
+        # Worker only targets prod, so on a preview NOTHING promotes an upload
+        # past `scan_status: pending` — and an unservable report can only ever
+        # redirect off `/edit`. That is why the editor-auth scenario stopped at
+        # the 303, through two production incidents that both happened on the
+        # NEXT hop. Driving the drain from the test itself is what lets it
+        # follow that hop and assert 200.
+        #
+        # DERIVED, not passed: see the long note in preview-isolation.yml's
+        # "Inject branch-scoped Vercel env" step. The two expressions must stay
+        # byte-identical — a mismatch surfaces as a loud 401 from the drain, not
+        # as a silent skip.
+        #
+        # Absent locally (no bypass secret) → the drain step self-skips and the
+        # scenario stops where it does today, exactly like PLAYWRIGHT_VIEW_BASE_URL.
+        run: |
+          set -euo pipefail
+          if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ] && [ -n "${BRANCH_REF:-}" ]; then
+            E2E_SCAN_DRAIN_SECRET=$(printf '%s' "$BRANCH_REF" \
+              | openssl dgst -sha256 -hmac "$VERCEL_AUTOMATION_BYPASS_SECRET" -r | cut -d' ' -f1)
+            echo "::add-mask::$E2E_SCAN_DRAIN_SECRET"
+            export E2E_SCAN_DRAIN_SECRET
+          fi
+          pnpm e2e
 
       - name: Upload Playwright report
         if: steps.readiness.outputs.ready == 'true' && !cancelled()

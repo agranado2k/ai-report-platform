@@ -19,6 +19,7 @@
     "arp-application": "workspace:*",
     "arp-db": "workspace:*",
     "arp-domain": "workspace:*",
+    "arp-report-html": "workspace:*",
     "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.2",
     "nanoid": "^5.0.9",

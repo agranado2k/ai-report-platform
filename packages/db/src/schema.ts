@@ -54,6 +54,19 @@ export const commentIntentEnum = pgEnum("comment_intent", ["note", "enhancement"
 // so the #127 drizzle-kit ADD-VALUE one-transaction gotcha does not apply
 // (same precedent as org_kind, migration 0014).
 export const folderVisibilityEnum = pgEnum("folder_visibility", ["private", "org"]);
+// Editability (ADR-0080): the editor's own open-time verdict on a version's
+// stored bytes, recorded at write time. `unsplittable` = no usable <body>
+// boundary (splitShell); `unparsable` = the body defeats the reportSchema
+// parser (parseBody). UNKNOWN is the column's NULL, never a value here — a
+// version nobody probed must not be readable as a verdict. Brand-new enum type
+// created in the same migration as its column, so the #127 drizzle-kit
+// ADD-VALUE one-transaction gotcha does not apply (precedent: org_kind 0014,
+// folder_visibility 0019).
+export const versionEditabilityEnum = pgEnum("version_editability", [
+  "editable",
+  "unsplittable",
+  "unparsable",
+]);
 
 // timestamptz at millisecond precision (db-design.md → Conventions).
 const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
@@ -258,6 +271,12 @@ export const reportVersions = pgTable(
     // How this version was produced (ADR-0062 §6, surfaced by ADR-0065). Every row
     // is 'upload' today — the in-app editor doesn't exist yet (slice 3 writes 'editor').
     origin: versionOriginEnum("origin").notNull().default("upload"),
+    // Whether the editor can open THESE bytes (ADR-0080). Nullable with NO
+    // default: NULL means "never probed", which is every row written before
+    // ADR-0080 and the only honest value a migration can give them — it cannot
+    // read R2. Metadata ABOUT the stored bytes; the viewer still streams them
+    // verbatim (ADR-0038) whatever this says.
+    editability: versionEditabilityEnum("editability"),
   },
   (t) => [
     index("report_versions_report_id_idx").on(t.reportId),

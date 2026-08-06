@@ -27,6 +27,7 @@ import type {
   Slug,
   TerminalScanStatus,
   UserId,
+  VersionEditability,
   VersionId,
   VersionOrigin,
 } from "arp-domain";
@@ -77,6 +78,14 @@ export interface ReportSummary {
    *  a roster on a listing row would put other people's emails into a payload
    *  that is not about them. */
   readonly allowedEmailCount: number;
+  /** The LIVE version's Editability (ADR-0080), or `null` when the report has no
+   *  live version yet or that version was never probed.
+   *
+   *  Rides a 1:1 left join on `reports.live_version_id`, so it costs one join
+   *  and never fans out. It is here so the dashboard's Edit affordance can say
+   *  WHY editing is unavailable instead of handing the user a silent redirect —
+   *  which is the whole user-visible point of recording the verdict. */
+  readonly editability: VersionEditability | null;
 }
 
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC
@@ -135,6 +144,9 @@ export interface ReportVersionSummary {
   readonly scanStatus: ScanStatus;
   readonly sizeBytes: number;
   readonly origin: VersionOrigin;
+  /** The editor's recorded open-time verdict on this version's bytes
+   *  (ADR-0080); `null` = never probed. */
+  readonly editability: VersionEditability | null;
 }
 export type VersionPage = CursorPage<ReportVersionSummary>;
 
@@ -470,6 +482,30 @@ export interface BundleProcessor {
    * The real (zip/sniff) implementation is an adapter; the use case stays pure.
    */
   process(filename: string, bytes: Uint8Array): Promise<Result<ProcessedBundle, AppError>>;
+}
+
+// ── Editability probe (ADR-0080) ──────────────────────────────────────────
+/**
+ * Runs the EDITOR's own open-time precondition against a version's entry
+ * document, so the answer can be recorded at write time instead of discovered
+ * by a user at open time.
+ *
+ * A port rather than an inline call because the real implementation is
+ * `arp-report-html`'s `probeEditability` — ProseMirror + linkedom — and this
+ * package stays free of that dependency (ADR-024): the same reason `sourceDoc`
+ * is an opaque `Record<string, unknown>` here. Adapters supply the real one;
+ * it is deliberately NOT a second predicate, it CALLS `splitShell`/`parseBody`.
+ *
+ * Total by contract: it answers, it never throws and never rejects an upload.
+ */
+export interface EditabilityProbe {
+  /**
+   * @param entryDocument the entry document's bytes, exactly as they will be stored
+   * @param hasSourceDoc whether a `_source.json` sidecar will accompany this
+   *   version — the editor loads it INSTEAD of parsing the body, so the parse
+   *   leg cannot stop it (ADR-0062 §4)
+   */
+  probe(entryDocument: Uint8Array, hasSourceDoc: boolean): VersionEditability;
 }
 
 // ── Idempotency (ADR-0039) ────────────────────────────────────────────────

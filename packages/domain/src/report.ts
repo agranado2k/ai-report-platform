@@ -11,7 +11,7 @@ import type { ReportVersion, VersionManifest } from "./report-version";
 import type { Result } from "./result";
 import { err, ok } from "./result";
 import type { Slug } from "./slug";
-import type { TerminalScanStatus, VersionOrigin } from "./value-objects";
+import type { TerminalScanStatus, VersionEditability, VersionOrigin } from "./value-objects";
 
 export interface Report {
   readonly id: ReportId;
@@ -52,6 +52,9 @@ export interface CreateReportParams {
   /** How this version was produced (ADR-0065). Defaults to `upload` — every call
    *  site today is a plain upload; the editor (ADR-0062) will pass `editor`. */
   readonly origin?: VersionOrigin;
+  /** The editor's open-time verdict on these bytes (ADR-0080). Omitted ⇒ `null`
+   *  (UNKNOWN) — the domain never invents a verdict it did not run. */
+  readonly editability?: VersionEditability | null;
 }
 
 /** Create a new Report with its first ReportVersion (version 1, pending scan). */
@@ -65,6 +68,7 @@ export function createReport(p: CreateReportParams): Emission {
     manifest: p.manifest,
     sizeBytes: p.sizeBytes,
     origin: p.origin ?? "upload",
+    editability: p.editability ?? null,
   };
   const report: Report = {
     id: p.id,
@@ -96,6 +100,10 @@ export interface AddVersionParams {
   readonly sizeBytes: number;
   /** How this version was produced (ADR-0065). Defaults to `upload`. */
   readonly origin?: VersionOrigin;
+  /** The editor's open-time verdict on these bytes (ADR-0080). Omitted ⇒ `null`
+   *  (UNKNOWN). Recorded per version — a re-upload never rewrites its
+   *  predecessor's verdict. */
+  readonly editability?: VersionEditability | null;
 }
 
 /**
@@ -116,6 +124,7 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     manifest: p.manifest,
     sizeBytes: p.sizeBytes,
     origin: p.origin ?? "upload",
+    editability: p.editability ?? null,
   };
   const updated: Report = { ...report, versions: [...report.versions, version] };
   const event: ReportVersionUploaded = {

@@ -6,7 +6,7 @@ import { uploadResultToHttp } from "./upload-response";
 const OPTS = { viewBaseUrl: "https://view.example", mode: "prod" as const };
 
 const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => ({
-  result: { slug: "abcde12345", version: 1, scanStatus: "clean", ...over },
+  result: { slug: "abcde12345", version: 1, scanStatus: "clean", editability: "editable", ...over },
   replayed: false,
 });
 
@@ -23,9 +23,26 @@ describe("uploadResultToHttp — success", () => {
       view_url: "https://view.example/abcde12345",
       version: 1,
       scan_status: "clean",
+      editability: "editable",
       mode: "prod",
     });
     expect(res.headers?.Location).toBe("https://view.example/abcde12345");
+  });
+
+  it("tells the uploader its report cannot be edited, and why (ADR-0080)", () => {
+    // The MCP tools are this product's primary WRITE surface: an agent that just
+    // uploaded must be able to learn, from the upload's own response, that what
+    // it published views fine and will not open in the editor.
+    const res = uploadResultToHttp(ok(outcome({ editability: "unsplittable" })), OPTS);
+    expect(res.status).toBe(201);
+    expect((res.body as { editability?: unknown }).editability).toBe("unsplittable");
+  });
+
+  it("emits editability: null (never omitted) when nothing could be probed", () => {
+    const res = uploadResultToHttp(ok(outcome({ editability: null })), OPTS);
+    const body = res.body as Record<string, unknown>;
+    expect("editability" in body).toBe(true);
+    expect(body.editability).toBeNull();
   });
 
   it("returns the report_ External Id when the upload created a report (ADR-0052)", () => {

@@ -3,6 +3,7 @@ import {
   err,
   folderId,
   makeSlug,
+  ok,
   orgId,
   reportId,
   userId,
@@ -386,5 +387,107 @@ describe("uploadReport — initial sharing inherits the destination folder (ADR-
     expect(again.ok).toBe(true);
     const after = await h.reports.findBySlug(sv(slugStr));
     expect(after.ok && after.value?.acl.mode).toBe("private");
+  });
+});
+
+describe("uploadReport — Editability (ADR-0080)", () => {
+  it("records the probe's verdict on the created version", async () => {
+    const { deps, reports, editability } = makeDeps();
+    editability.setVerdict("unsplittable");
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.editability).toBe("unsplittable");
+  });
+
+  it("ACCEPTS an un-editable upload — views-fine-won't-edit is a state, not a rejection", async () => {
+    const { deps, blobs, editability } = makeDeps();
+    editability.setVerdict("unsplittable");
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.result.version).toBe(1);
+    // …and the bytes are stored regardless, so the viewer still serves it.
+    const blob = await blobs.readObject(reportId("r1"), versionId("v1"), "index.html");
+    expect(blob.ok && blob.value?.path).toBe("index.html");
+  });
+
+  it("probes the ENTRY DOCUMENT's bytes, verbatim", async () => {
+    const { deps, editability } = makeDeps();
+    await uploadReport(deps, cmd());
+    // The default FakeBundleProcessor's canned entry document.
+    expect(editability.probed).toEqual([{ html: "<h1>ok</h1>", hasSourceDoc: false }]);
+  });
+
+  it("tells the probe a _source.json sidecar will be written (editor saves)", async () => {
+    const { deps, editability } = makeDeps();
+    await uploadReport(deps, cmd({ sourceDoc: { type: "doc", content: [] } }));
+    expect(editability.probed[0]?.hasSourceDoc).toBe(true);
+  });
+
+  it("records a fresh verdict per re-upload, leaving the prior version's alone", async () => {
+    const { deps, reports, editability } = makeDeps();
+    editability.setVerdict("editable");
+    await uploadReport(deps, cmd());
+    editability.setVerdict("unparsable");
+    const again = await uploadReport(deps, cmd({ updateSlug: "slug000001" }));
+    expect(again.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions.map((v) => v.editability)).toEqual([
+      "editable",
+      "unparsable",
+    ]);
+  });
+
+  it("leaves editability UNKNOWN when the bundle has no entry-document bytes to probe", async () => {
+    const { deps, reports, bundles, editability } = makeDeps();
+    bundles.setResult(
+      ok({
+        files: [
+          { path: "other.html", contentType: "text/html", bytes: new TextEncoder().encode("x") },
+        ],
+        entryDocument: "index.html",
+        contentHash: "hash-default",
+        sizeBytes: 1,
+      }),
+    );
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.editability).toBeNull();
+    expect(editability.probed).toEqual([]);
+  });
+});
+
+describe("uploadReport — Editability on an idempotent replay (ADR-0080)", () => {
+  it("replays the recorded verdict rather than re-probing", async () => {
+    const { deps, editability } = makeDeps();
+    editability.setVerdict("unparsable");
+    const first = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
+    editability.setVerdict("editable"); // the probe would now disagree
+    const second = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
+    expect(first.ok && first.value.result.editability).toBe("unparsable");
+    expect(second.ok && second.value.replayed).toBe(true);
+    expect(second.ok && second.value.result.editability).toBe("unparsable");
+  });
+
+  it("reads a record stored BEFORE ADR-0080 as UNKNOWN, not as a 500", async () => {
+    // In-flight idempotency records written by the previous deploy have no
+    // `editability` key at all. Rejecting them would turn every one of them
+    // into an Unexpected error on replay.
+    const { deps, idempotency } = makeDeps();
+    const ref = { actingUserId: userId("u1"), route: "POST /api/v1/reports", key: "legacy" };
+    // The same fingerprint the use case derives — content hash + target — so
+    // the replay branch is reached rather than the 422 reuse-conflict branch.
+    await idempotency.begin(ref, "hash-default:folder:f1");
+    await idempotency.complete(ref, {
+      responseStatus: 201,
+      responseBody: { slug: "slug000001", version: 1, scanStatus: "clean" },
+    });
+    const r = await uploadReport(deps, cmd({ idempotencyKey: "legacy" }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.replayed).toBe(true);
+      expect(r.value.result.editability).toBeNull();
+    }
   });
 });

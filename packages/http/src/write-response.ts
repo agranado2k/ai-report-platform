@@ -10,7 +10,16 @@ import {
   sharingApplyIsPartial,
   type WriteGrant,
 } from "arp-application";
-import type { Acl, AppError, Comment, Folder, Report, Result, UserId } from "arp-domain";
+import type {
+  Acl,
+  AppError,
+  Comment,
+  Folder,
+  Report,
+  Result,
+  UserId,
+  VersionEditability,
+} from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import {
@@ -57,6 +66,14 @@ export interface ReportViewer {
  *  (ADR-0059 §3), so org members (and future ADR-0060 write-grantees) never
  *  receive it. No viewer ⇒ fail closed (no acl). List summaries carry neither
  *  (ADR-0056). */
+/** The Editability recorded for the report's LIVE version (ADR-0080), or null
+ *  when there is none / it was never probed. Read off the aggregate's own
+ *  versions — no extra query. */
+function liveEditability(r: Report): VersionEditability | null {
+  if (r.liveVersionId === null) return null;
+  return r.versions.find((v) => v.id === r.liveVersionId)?.editability ?? null;
+}
+
 function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer): ReportDetailWire {
   const base = {
     ...reportBody(
@@ -66,6 +83,10 @@ function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer): Rep
         title: r.title,
         isPublished: r.liveVersionId !== null,
         folderId: r.folderId,
+        // ADR-0080 — the LIVE version's verdict, which is what "can I edit this
+        // report?" actually means. Null when nothing is live yet, or when that
+        // version predates the probe.
+        editability: liveEditability(r),
       },
       ctx,
     ),

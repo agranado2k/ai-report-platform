@@ -557,3 +557,47 @@ describe("report sharing tools (ADR-0078)", () => {
     ).toBe(false);
   });
 });
+
+describe("Editability is legible to an agent (ADR-0080)", () => {
+  const readDescriptionOf = (name: string) =>
+    (
+      collectTools(registerReadTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+  const writeDescriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  // MCP is this product's primary WRITE surface. An agent that just published
+  // a document the editor cannot open must be able to learn that from the
+  // response it already reads, not from a human clicking Edit days later.
+  it("reports_upload names `editability` and what an un-editable upload means", () => {
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).toMatch(/editability/);
+    expect(d).toMatch(/unsplittable/);
+    // The honest framing: it is not a failure — the report still views.
+    expect(d).toMatch(/still (views|serves)|views fine/i);
+  });
+
+  it("reports_get names `editability` as a field it returns", () => {
+    expect(readDescriptionOf("reports_get")).toMatch(/editability/);
+  });
+
+  it("reports_list_versions names `editability` per version", () => {
+    expect(readDescriptionOf("reports_list_versions")).toMatch(/editability/);
+  });
+
+  it("never tells an agent that null means un-editable", () => {
+    for (const d of [
+      writeDescriptionOf("reports_upload"),
+      readDescriptionOf("reports_get"),
+      readDescriptionOf("reports_list_versions"),
+    ]) {
+      if (d.includes("editability")) expect(d).toMatch(/null|unknown/i);
+    }
+  });
+});

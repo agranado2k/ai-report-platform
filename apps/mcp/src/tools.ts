@@ -131,7 +131,10 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an " +
         "org write grant the acl cannot express. null means an advanced mode " +
         "(password/allowlist/public) — use reports_get_acl for that. The acl block itself is " +
-        "included only when you are the report's owner. Read-only. Use it to confirm a report " +
+        "included only when you are the report's owner. Also returns editability: 'editable' | " +
+        "'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the " +
+        "editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. " +
+        "Read-only. Use it to confirm a report " +
         "exists / check its title, folder or sharing before an update, move, or delete. A " +
         "missing slug returns not-found; a report outside your org returns forbidden.",
       inputSchema: {
@@ -150,7 +153,9 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list " +
         "({object:'list', data, has_more}), newest-created first; each item has id " +
         "(version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, " +
-        "size_bytes, and origin ('upload' | 'editor'). Read-only. Page with starting_after.",
+        "size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' " +
+        "| 'unparsable' | null — whether THAT version's bytes can be opened in the editor, " +
+        "ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.",
       inputSchema: {
         slug: SLUG_INPUT,
         ...cursorInputs("version"),
@@ -289,7 +294,13 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "(after edits/re-generation), call this again with `update_slug` set to its slug: " +
         "the `view_url` stays exactly the same, only the content and version number change " +
         "(re-upload requires write access, ADR-0059/0060 — the report's owner or a write " +
-        "grantee). To set/change the title afterwards use reports_update. Title is not set here.",
+        "grantee). To set/change the title afterwards use reports_update. Title is not set here. " +
+        "The response also carries editability: 'editable' | 'unsplittable' | 'unparsable' | " +
+        "null (ADR-0080) — whether what you just published can be opened in the editor. " +
+        "'unsplittable' means your HTML had no usable <body> (you sent a fragment); " +
+        "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
+        "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
+        "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
       inputSchema: {
         html: z
           .string()

@@ -4781,3 +4781,76 @@ budget (it costs ~6s to build and parse — over vitest's 5s default — and shr
 the fixture would make it fast and make it prove nothing).
 
 ADR-0056's unlock bullet and ADR-0063 Phase 5-G carry all three decisions.
+
+## 2026-08-06 — ADR-0080: "views fine, won't edit" becomes a state the system knows
+
+PR #247 (`fix/owner-lockout`) fixes the mechanics of the owner lockout. This is the
+other half: the condition that made it possible, which is a class problem rather
+than an incident.
+
+**The gap.** Uploads are stored VERBATIM — `HtmlBundleProcessor.process` hashes the
+bytes and wraps them, validating nothing about their structure, deliberately,
+because ADR-0038's byte-for-byte serving depends on exactly that. But the editor
+has a precondition on those same bytes that nothing ever checked: `splitShell`
+must find a `<body>` boundary, and (absent a `_source.json` sidecar — i.e. for
+every uploaded-never-edited report) `parseBody` must turn the result into a
+`reportSchema` document. So an HTML **fragment**, which is a perfectly normal
+thing for an agent to upload, views perfectly and cannot be edited. The user
+discovered it as a silent redirect; nobody could query it; and during the
+incident, telling `document-unsplittable` from `document-unparsable` needed a
+manual `curl` plus a throwaway test file, because the system had never recorded
+which one it was.
+
+**What shipped.** `Editability` (glossary, this PR) is now recorded on the
+`ReportVersion` at write time — `report_versions.editability`, nullable
+`version_editability` enum (`editable`/`unsplittable`/`unparsable`), migration
+`0021`. It is computed by CALLING the editor's own `splitShell`/`parseBody`
+through one exported `probeEditability`, never by re-deriving their conditions:
+a second implementation is the drift this repo keeps paying for, and PR #247 had
+already had to correct one such approximation in its own diagnostic snippet. The
+application layer reaches it through a new `EditabilityProbe` port so it stays
+ProseMirror-free (ADR-0024); `saveEditedVersion` inherits it for free, being a
+wrapper over `uploadReport` rather than a second pipeline.
+
+**Two decisions worth remembering.**
+
+1. **No backfill, and that is the point.** A migration cannot read R2, so any
+   default it wrote would be a verdict nobody ran — `editable` asserts exactly
+   the thing this ADR exists to stop assuming, `unsplittable` makes the whole
+   existing corpus announce itself as broken. `null` means UNKNOWN, nothing gates
+   on the column, the dashboard says nothing for it, and the editor keeps
+   attempting and degrading. Net behavioural change for every report that exists
+   today: **zero**. A sweep that probes every live version's stored bytes is a
+   named follow-up, not part of this.
+2. **The read path is an explicit NON-GOAL.** This is metadata about the bytes,
+   never a transformation of them. Pinned by a regression test asserting
+   byte-identity of the stored bytes across an editable, an unsplittable and an
+   unparsable document — the three inputs on which a well-meaning "fixer" would
+   be most tempted to intervene. And it does not gate the editor either: the
+   dashboard's "Not editable" badge EXPLAINS, the row still links to `/open`, so
+   a stale verdict can never lock anyone out from the other side.
+
+Surfaced on `VersionWire` (per version), `ReportWire` (the LIVE version's verdict,
+off a 1:1 join on `live_version_id`), the `201` upload response, and in MCP
+`reports_upload` / `reports_get` / `reports_list_versions` — MCP being this
+product's primary write surface, an agent that just published a fragment now
+learns so in the response it already reads.
+
+**The e2e finally follows the hop.** `editor-auth.feature` asserted the 303 from
+`/{slug}/edit?et=…` and stopped. Every step of BOTH production incidents (#188's
+re-nested route and this lockout) happened on the request AFTER it. It stopped
+because that hop needs a servable report and Cloudflare's scan-drain cron targets
+prod only — a follow-up tracked across two incidents without advancing. Wired
+now, with **no new repo secret and no operator action**: `preview-isolation.yml`
+and `e2e.yml` each derive the same per-PR `SCAN_DRAIN_SECRET` (HMAC-SHA256 of the
+PR branch ref, keyed by the existing `VERCEL_AUTOMATION_BYPASS_SECRET`), set
+branch-scoped on the previews so production is untouched. A job output could not
+have carried it — the runner redacts registered secrets out of job outputs. The
+scenario drives the drain, follows the 303, and asserts **200, not 302**; a second
+scenario proves a fragment is accepted, reads back as `editability: "unsplittable"`
+over the API, and degrades off `/edit` rather than crashing.
+
+ADR-0080 records the decision, including the four rejected options (reject at
+upload; compute lazily on read; a cheap regex; log-only).
+
+Worktree `worktree/editable-invariant` (branch `feat/editable-invariant`).

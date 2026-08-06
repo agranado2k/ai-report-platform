@@ -38,6 +38,7 @@ import {
   type ScanStatus,
   type Slug,
   userId,
+  type VersionEditability,
   type VersionId,
   type VersionManifest,
   type VersionOrigin,
@@ -81,6 +82,7 @@ function versionToRow(reportRowId: string, v: ReportVersion): typeof reportVersi
     uploadedByUser: v.uploadedBy,
     scanStatus: v.scanStatus,
     origin: v.origin,
+    editability: v.editability,
   };
 }
 
@@ -94,6 +96,7 @@ function rowToVersion(row: VersionRow): ReportVersion {
     manifest: row.manifestJson as VersionManifest,
     sizeBytes: row.sizeBytes,
     origin: row.origin as VersionOrigin,
+    editability: (row.editability ?? null) as VersionEditability | null,
   };
 }
 
@@ -108,6 +111,7 @@ function rowToVersionSummary(row: VersionRow): ReportVersionSummary {
     scanStatus: row.scanStatus as ScanStatus,
     sizeBytes: row.sizeBytes,
     origin: row.origin as VersionOrigin,
+    editability: (row.editability ?? null) as VersionEditability | null,
   };
 }
 
@@ -274,10 +278,18 @@ export class DrizzleReportRepository implements ReportRepository {
           // is already on the joined `acls` row, so counting it is free.
           // COALESCE covers both "no acls row" and a null/non-allowlist column.
           allowedEmailCount: sql<number>`COALESCE(jsonb_array_length(${acls.allowedEmails}), 0)`,
+          // ADR-0080 — the LIVE version's recorded Editability, so the Edit
+          // affordance can say WHY editing is unavailable instead of handing
+          // the user a silent redirect. NULL for an unpublished report (no live
+          // version) and for every version written before ADR-0080.
+          editability: reportVersions.editability,
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.
         .leftJoin(acls, eq(acls.reportId, reports.id))
+        // Keyed on the report's OWN live_version_id, so this is 1:1 too — never
+        // the version history, which would fan every row out by its version count.
+        .leftJoin(reportVersions, eq(reportVersions.id, reports.liveVersionId))
         .where(and(...filters))
         .orderBy(back ? asc(reports.id) : desc(reports.id))
         .limit(q.limit + 1); // +1 to detect has_more
@@ -298,6 +310,7 @@ export class DrizzleReportRepository implements ReportRepository {
           aclMode: (r.aclMode ?? "private") as AclMode,
           hasOrgWrite: r.hasOrgWrite === true,
           allowedEmailCount: Number(r.allowedEmailCount ?? 0),
+          editability: (r.editability ?? null) as VersionEditability | null,
         })),
         hasMore,
       });

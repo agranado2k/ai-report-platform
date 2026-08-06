@@ -32,6 +32,7 @@ import {
   type Slug,
   type TerminalScanStatus,
   type UserId,
+  type VersionEditability,
   type VersionId,
   validationError,
 } from "arp-domain";
@@ -50,6 +51,7 @@ import type {
   CommentPage,
   CommentRepository,
   CursorParams,
+  EditabilityProbe,
   EmailMessage,
   EmailSender,
   EventOutbox,
@@ -308,6 +310,9 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
         // 0 in every non-allowlist mode, mirroring the adapter's
         // COALESCE(jsonb_array_length(...), 0).
         allowedEmailCount: r.acl.mode === "allowlist" ? r.acl.allowedEmails.length : 0,
+        // ADR-0080 — the LIVE version's verdict, mirroring the adapter's 1:1
+        // left join on `reports.live_version_id`: null when nothing is live.
+        editability: r.versions.find((v) => v.id === r.liveVersionId)?.editability ?? null,
       });
     }
     return ok({ items: summaries, hasMore });
@@ -360,6 +365,7 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       scanStatus: v.scanStatus,
       sizeBytes: v.sizeBytes,
       origin: v.origin,
+      editability: v.editability,
     }));
     return ok(keysetPage(summaries, q));
   }
@@ -744,6 +750,28 @@ export class TransactionalInMemoryUnitOfWork implements UnitOfWork {
         message: `unitOfWork: ${e instanceof Error ? e.message : String(e)}`,
       });
     }
+  }
+}
+
+/** A scripted {@link EditabilityProbe} (ADR-0080). Records every call so a test
+ *  can assert WHAT was probed, not just what came back. Defaults to `editable`
+ *  — the state of an ordinary report — so tests that don't care are unaffected.
+ *
+ *  Deliberately NOT the real `probeEditability`: this package must stay free of
+ *  the ProseMirror/linkedom dependency (ADR-024), and the real predicate is
+ *  covered by `packages/report-html/src/editability.test.ts` plus the adapter's
+ *  own test. */
+export class FakeEditabilityProbe implements EditabilityProbe {
+  private verdict: VersionEditability = "editable";
+  readonly probed: { html: string; hasSourceDoc: boolean }[] = [];
+
+  setVerdict(verdict: VersionEditability): void {
+    this.verdict = verdict;
+  }
+
+  probe(entryDocument: Uint8Array, hasSourceDoc: boolean): VersionEditability {
+    this.probed.push({ html: new TextDecoder().decode(entryDocument), hasSourceDoc });
+    return this.verdict;
   }
 }
 

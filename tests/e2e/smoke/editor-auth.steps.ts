@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type APIResponse, expect, test } from "@playwright/test";
+import { type APIRequestContext, type APIResponse, expect, test } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import { mintTestSession, type TestSession } from "../support/clerk-session";
 
@@ -15,11 +15,24 @@ const { Given, When, Then } = createBdd();
 // per step).
 const VIEW_BASE_URL = process.env.PLAYWRIGHT_VIEW_BASE_URL;
 
+// The per-PR scan-drain secret (ADR-0045 / ADR-0080), derived identically by
+// e2e.yml and preview-isolation.yml. Cloudflare's cron Worker only targets
+// PROD, so on a preview NOTHING promotes an upload past `scan_status: pending`
+// — and an unservable report can only ever redirect off `/edit`. Driving the
+// drain from the test is what lets the scenario follow the 303 to the hop where
+// both production incidents (#188 and the ADR-0080 owner lockout) actually
+// happened. Absent (a plain local `pnpm e2e`) → the second-hop steps skip
+// cleanly, exactly like VIEW_BASE_URL above.
+const SCAN_DRAIN_SECRET = process.env.E2E_SCAN_DRAIN_SECRET;
+
 // Module state — workers: 1 makes this safe (see playwright.config.ts). Distinct
 // step phrasing from the other smoke files so the global registry has no clashes.
 let session: TestSession;
 let slug: string;
 let response: APIResponse;
+/** The `arp_edit` (and, post-#247, `arp_edit_oa`) cookies the 303 handed back —
+ *  the credential the SECOND hop carries. */
+let editCookieHeader: string;
 
 // The REAL ai-readiness-report.html fixture (also exercised by
 // packages/report-html/src/shell.test.ts) — a genuine presentation shell
@@ -145,11 +158,152 @@ Then(
       .join("; ");
     expect(setCookie).toContain("arp_edit");
 
-    // NOTE: this is a LOADER-level guard (token round-trip + routing). A full
-    // browser-render assertion (`getByTestId("unified-editor")` visible) needs a
-    // SERVABLE report — a clean scan — which previews don't produce without
-    // driving `POST /internal/scan-drain`; wiring `SCAN_DRAIN_SECRET` into CI to
-    // enable that is a tracked follow-up (the `data-testid="unified-editor"` on
-    // the render branch is left in place for it).
+    // Carried to the SECOND hop below — the request that actually decides
+    // whether the editor opens, and the one both production incidents happened
+    // on. `Set-Cookie` values are `name=value; Path=…; HttpOnly; …`; the cookie
+    // header wants just the `name=value` pairs.
+    editCookieHeader = setCookie
+      .split(/,(?=\s*arp_[a-z_]+=)/)
+      .map((c) => c.split(";")[0]?.trim() ?? "")
+      .filter(Boolean)
+      .join("; ");
   },
 );
+
+// ── The scan drain: what makes a preview's upload SERVABLE ──────────────────
+//
+// `POST /internal/scan-drain` is the async scan worker's HTTP trigger
+// (ADR-0045). In production a Cloudflare Cron Trigger calls it every ~minute;
+// on a preview nothing does, which is why an uploaded report sits at
+// `scan_status: pending` forever and `/edit` can only redirect. The route is
+// fail-closed: 503 when the secret is unset, 401 on a mismatch — so a broken
+// wiring is loud, never a silent skip.
+async function drainUntilClean(api: APIRequestContext, targetSlug: string): Promise<void> {
+  const auth = { Authorization: `Bearer ${session.jwt}` };
+  // Bounded: the drain claims a batch per tick and the stub scanner promotes
+  // synchronously, so one tick normally suffices. A few more cover a cold
+  // Neon branch and pg-boss's own first-run bootstrap.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const drained = await api.post("/internal/scan-drain", {
+      headers: { Authorization: `Bearer ${SCAN_DRAIN_SECRET}` },
+    });
+    expect(
+      drained.status(),
+      `POST /internal/scan-drain answered ${drained.status()} — 503 means SCAN_DRAIN_SECRET is unset on the preview, 401 means e2e.yml and preview-isolation.yml derived DIFFERENT values (they must stay byte-identical)`,
+    ).toBe(200);
+
+    const versions = await api.get(`/api/v1/reports/${targetSlug}/versions`, { headers: auth });
+    expect(versions.status()).toBe(200);
+    const body = (await versions.json()) as { data?: { scan_status?: string }[] };
+    if (body.data?.[0]?.scan_status === "clean") return;
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+  throw new Error(
+    `report ${targetSlug} never reached scan_status: clean after 10 drain ticks — the scan pipeline, not the editor, is what failed here`,
+  );
+}
+
+Given("that report has been scanned clean", async ({ page }) => {
+  test.skip(
+    !SCAN_DRAIN_SECRET,
+    "E2E_SCAN_DRAIN_SECRET not set — the scan drain cannot be driven, so the report never becomes servable",
+  );
+  await drainUntilClean(page.request, slug);
+});
+
+// THE HOP THAT MATTERED. Every step of BOTH production incidents happened here:
+// the request AFTER the 303, carrying the `arp_edit` cookie. #188 was the
+// /edit route re-nesting under the public viewer; the ADR-0080 lockout was the
+// owner-access fallback dying at this exact boundary. Both showed up as a 302
+// off `/edit` — the one status this step exists to reject.
+Then("the cookie-carrying request opens the editor instead of redirecting", async ({ page }) => {
+  test.skip(!VIEW_BASE_URL, "PLAYWRIGHT_VIEW_BASE_URL not set — no view origin to follow to");
+  test.skip(!SCAN_DRAIN_SECRET, "E2E_SCAN_DRAIN_SECRET not set — report is not servable");
+
+  const res = await page.request.get(`${VIEW_BASE_URL}/${slug}/edit`, {
+    headers: { Cookie: editCookieHeader },
+    maxRedirects: 0,
+  });
+  const loc = res.headers().location ?? "";
+  expect(
+    res.status(),
+    `expected 200 from the cookie-carrying /edit request; got ${res.status()} → "${loc}". A 302 here is the owner-lockout shape (ADR-0080): the gate accepted the token on hop 1 and refused the cookie on hop 2, or the document could not be opened. A 5xx is worse — the loader crashed where it is contracted never to.`,
+  ).toBe(200);
+  expect(loc).toBe("");
+});
+
+// ── The negative: a report the editor CANNOT open ───────────────────────────
+Given("a report I own that the editor cannot open exists", async ({ request }) => {
+  session = await mintTestSession();
+  // A bare fragment — no <body> — which is a perfectly ordinary thing for an
+  // agent to upload, views fine, and defeats `splitShell` (ADR-0080).
+  const uploadResponse = await request.post("/api/v1/reports", {
+    headers: { Authorization: `Bearer ${session.jwt}` },
+    multipart: {
+      file: {
+        name: "fragment.html",
+        mimeType: "text/html",
+        buffer: Buffer.from("<h1>Findings</h1><p>An HTML fragment, not a document.</p>", "utf8"),
+      },
+    },
+  });
+  const body = (await uploadResponse.json()) as Record<string, unknown>;
+  expect(uploadResponse.status(), JSON.stringify(body)).toBe(201);
+  slug = body.slug as string;
+
+  // ADR-0080's own contract, asserted against real infrastructure: the upload
+  // is ACCEPTED (201 above), and the response itself tells the uploader — an
+  // agent, on the product's primary write surface — that it is not editable.
+  expect(
+    body.editability,
+    "the upload response must name the editability verdict for the bytes just stored",
+  ).toBe("unsplittable");
+});
+
+Then("the report reads back as un-editable over the API", async ({ page }) => {
+  const res = await page.request.get(`/api/v1/reports/${slug}`, {
+    headers: { Authorization: `Bearer ${session.jwt}` },
+  });
+  expect(res.status()).toBe(200);
+  const body = (await res.json()) as { editability?: unknown; is_published?: unknown };
+  // The LIVE version's verdict — which is only populated once the scan promoted
+  // it, so this also proves the recorded value survives the round-trip through
+  // Postgres rather than living only in the upload response.
+  expect(body.is_published).toBe(true);
+  expect(body.editability).toBe("unsplittable");
+});
+
+Then("the view edit route degrades to a read-only view instead of failing", async ({ page }) => {
+  test.skip(!VIEW_BASE_URL, "PLAYWRIGHT_VIEW_BASE_URL not set — no view origin to follow to");
+  test.skip(!SCAN_DRAIN_SECRET, "E2E_SCAN_DRAIN_SECRET not set — report is not servable");
+
+  const res = await page.request.get(`${VIEW_BASE_URL}/${slug}/edit`, {
+    headers: { Cookie: editCookieHeader },
+    maxRedirects: 0,
+  });
+
+  // THE POINT: an un-editable document must be EXPLAINED, not crash and not
+  // vanish. PR #247 landed the contract this step was written against and
+  // improved on it: rather than a silent 302 into an unexplained read-only
+  // viewer, the route renders its own page naming the reason. 409 — not 200
+  // (which would tell every probe and log query that editing worked) and not
+  // 3xx (the silent bounce that made the original incident invisible).
+  const body = await res.text();
+  expect(
+    res.status(),
+    `expected the unopenable-document page, got ${res.status()} — a 5xx means the /edit loader crashed on a document it is contracted to degrade on, a 3xx means it silently bounced`,
+  ).toBe(409);
+
+  // The capability was already verified (the gate returned `serve` for a valid
+  // arp_edit cookie), so this page is the route's own first-party document —
+  // it must name WHY and offer the read-only route out.
+  // NB: the shipped copy uses a TYPOGRAPHIC apostrophe (can’t). Matching a
+  // straight one here would never fire and the assertion would be decorative.
+  expect(body, "the page must say the editor could not open this report").toMatch(
+    /can[’']t be opened in the editor/i,
+  );
+  expect(body, "the page must name the fragment cause — this fixture has no <body>").toMatch(
+    /fragment/i,
+  );
+  expect(body, "the page must offer the read-only view").toContain(`/${slug}`);
+});

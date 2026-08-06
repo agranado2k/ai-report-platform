@@ -129,6 +129,7 @@ describe("versionNoForPin", () => {
       scan_status: "clean",
       size_bytes: 10,
       origin: "upload",
+      editability: null,
       mode: "prod",
     },
     {
@@ -141,6 +142,7 @@ describe("versionNoForPin", () => {
       scan_status: "clean",
       size_bytes: 12,
       origin: "editor",
+      editability: null,
       mode: "prod",
     },
   ];
