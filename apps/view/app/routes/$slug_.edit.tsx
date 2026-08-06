@@ -18,9 +18,15 @@
 // unlock-cookie flow, swapped for the edit token: a `?et=` hand-off sets a
 // scoped cookie and 303s to the clean URL (keeping the token out of
 // history/referer); a redeemed `arp_edit` cookie renders the unified editor;
-// anything else (missing/invalid/expired token, no configured secret/app
-// origin, or no editable document) degrades to the public, read-only viewer —
-// this route NEVER renders the editor without a live, valid capability.
+// a missing/invalid/expired token or an unconfigured secret/app origin
+// degrades to the public, read-only viewer — this route NEVER renders the
+// editor without a live, valid capability.
+//
+// The one "can't render" case that does NOT degrade is a document the editor
+// cannot open (2026-08-06). By then the gate has already accepted the
+// capability, so the route renders its OWN explanatory page
+// (`../edit/unopenable.ts` + `UnopenableDocument`) rather than a silent 302
+// that, for a private report, walked the OWNER onward into the unlock wall.
 //
 // Does NOT touch `$slug.tsx` (the public `GET /<slug>` route) — same disjoint
 // Remix flat-route path as before (`/:slug/edit` vs `/:slug`), so the public
@@ -40,7 +46,7 @@
 // `srcDoc` iframe built by `buildReadOnlyIframeDocument` — arp-editor) — never
 // `dangerouslySetInnerHTML`, never on the app origin (F-1, claude-review #183 /
 // ADR-0063's "4c client" note).
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { versionIdToWire } from "arp-domain";
@@ -58,6 +64,7 @@ import { CommentsPanel } from "../edit/components/CommentsPanel";
 import { PanelHeader, PanelToggle } from "../edit/components/PanelChrome";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
+import { UnopenableDocument } from "../edit/components/UnopenableDocument";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
 import { EXPIRED_MESSAGE } from "../edit/http";
 import { loadEditableDocument } from "../edit/load-document";
@@ -72,10 +79,16 @@ import {
 } from "../edit/panel";
 import { isEditTokenExpired, nextRefreshDelayMs, refreshEditToken } from "../edit/refresh-token";
 import { saveEdit } from "../edit/save-edit";
+import { UNOPENABLE_STATUS, unopenableDocument } from "../edit/unopenable";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import { decideServe, degradeTargetFor, editDegradeLine } from "../server/gate.server";
+import {
+  decideServe,
+  degradeTargetFor,
+  editDegradeLine,
+  editUnopenableLine,
+} from "../server/gate.server";
 
 function notFoundResponse(): Response {
   const headers = viewHeaders();
@@ -93,10 +106,11 @@ function notFoundResponse(): Response {
 // content or the edit token, so it gets the stricter, unauthenticated-route
 // header set.
 //
-// `to` is either the gate's degrade location — which routes an OWNER through
-// the viewer's `?access=` flow when the `oa=` fallback token is present
-// (Phase 5-E hotfix, see gate.server.ts's degradeLocation) — or the bare
-// `/${slug}` for the post-gate can't-render cases below (blob/shell load).
+// `to` is the gate's own degrade location — which routes an OWNER through the
+// viewer's `?access=` flow when the `oa=` fallback token is present (Phase 5-E
+// hotfix, see gate.server.ts's degradeLocation). Every caller now takes it from
+// `degradeTargetFor`; the post-gate DOCUMENT failures no longer redirect at all
+// (they render the unopenable page), so nothing hard-codes `/${slug}` any more.
 function redirectToPublicViewer(to: string): Response {
   const headers = viewHeaders();
   headers.set("location", to);
@@ -158,12 +172,6 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const { report, version } = decision;
   const { token: editToken, claims: editClaims } = decision.edit;
   const slug = report.slug;
-  // Where to send them if THIS loader still can't render: the gate's own
-  // degrade target, which carries the owner `?access=` fallback when one is in
-  // play. Hard-coding `/${slug}` here was half of the 2026-08-06 owner lockout
-  // — a private report's owner was handed to the public viewer, which
-  // unlock-walls them, from a route that had just verified their capability.
-  const { to: degradeTo, ownerFallback } = degradeTargetFor(decision, slug);
 
   const loaded = await loadEditableDocument({
     blobs,
@@ -173,11 +181,29 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     slug,
   });
   if (loaded.kind === "degraded") {
-    // The other half: these two failures used to be SILENT. A real owner
-    // lockout produced a bare 302 with no log line anywhere on the view
-    // origin, so the cause was only inferable from the user's report.
-    console.warn(editDegradeLine(slug, ownerFallback, loaded.reason));
-    return redirectToPublicViewer(degradeTo);
+    // NOT a redirect. These three failures fire AFTER the gate returned
+    // `serve` against a valid `arp_edit` cookie — the capability is already
+    // proven, and this route is entitled to render its own page on the view
+    // origin. The old `302` to `/${slug}` was half of the 2026-08-06 owner
+    // lockout: for a PRIVATE report the public viewer bounces to
+    // `${appOrigin}/unlock/{slug}`, which denied the owner, so the person
+    // entitled to the report clicked Edit, was silently redirected, and
+    // clicking again just repeated it. Rendering a page removes the route to
+    // the unlock wall rather than guarding it — there is no `Location` to
+    // follow — and finally tells the user WHY (edit/unopenable.ts).
+    //
+    // Same route, so the SAME ADR-013 header stack as the editor render below
+    // (`editViewHeaders`): this is the first-party Remix document, and it
+    // carries strictly less than the editor does — no report bytes, no edit
+    // token. `viewHeaders()` would be wrong here; its top-level `sandbox` CSP
+    // is for the untrusted report on `GET /<slug>`, not for this app's own UI.
+    console.warn(editUnopenableLine(slug, loaded.reason));
+    const unopenableHeaders = editViewHeaders({ appOrigin });
+    unopenableHeaders.set("x-robots-tag", "noindex, nofollow");
+    return json(unopenableDocument({ reason: loaded.reason, slug, docTitle: report.title }), {
+      status: UNOPENABLE_STATUS,
+      headers: unopenableHeaders,
+    });
   }
   const { doc, shell } = loaded;
 
@@ -268,7 +294,20 @@ const REFRESH_SKEW_MS = 120_000; // 2 min
 // inside REFRESH_SKEW_MS's 2-min margin for a few attempts before expiry.
 const REFRESH_RETRY_MS = 30_000; // 30s
 
+// The loader has TWO shapes now (see its `loaded.kind === "degraded"` branch):
+// the editor payload, and the unopenable-document payload for a report whose
+// stored HTML the editor cannot open. `unopenable` is the discriminant. The
+// split has to happen HERE, before any hook runs — `UnifiedEditor` below owns a
+// dozen of them, and an early return past a hook is a rules-of-hooks violation.
+type EditLoaderData = SerializeFrom<typeof loader>;
+type EditorData = Extract<EditLoaderData, { readonly editToken: string }>;
+
 export default function EditReport() {
+  const data = useLoaderData<typeof loader>();
+  return "unopenable" in data ? <UnopenableDocument data={data} /> : <UnifiedEditor data={data} />;
+}
+
+function UnifiedEditor({ data }: { readonly data: EditorData }) {
   const {
     doc,
     shell,
@@ -282,7 +321,7 @@ export default function EditReport() {
     versions: initialVersions,
     commentsHasMore,
     versionsHasMore: initialVersionsHasMore,
-  } = useLoaderData<typeof loader>();
+  } = data;
 
   const docRef = useRef<PMDocJson>(doc as PMDocJson);
   const [status, setStatus] = useState<SaveStatus>("idle");

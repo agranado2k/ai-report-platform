@@ -152,10 +152,18 @@ function degradeLocation(slug: string, oa: string | undefined): string {
   return oa ? `/${slug}?access=${encodeURIComponent(oa)}` : `/${slug}`;
 }
 
-/** Why an /edit request degraded to the viewer. Every value is a DISTINCT
+/** Why an /edit request could not render the editor. Every value is a DISTINCT
  *  production failure mode — the incident that motivated this enum was
  *  indistinguishable from four other causes precisely because nothing logged
- *  a reason. */
+ *  a reason.
+ *
+ *  The first five degrade to the viewer (`editDegradeLine`). The three
+ *  `document-*` reasons no longer do: they fire AFTER the capability is proven,
+ *  so `/edit` renders its own explanatory page and logs `editUnopenableLine`.
+ *  They share this enum because they share the `reason` vocabulary — one
+ *  taxonomy of "why the editor didn't open" across both outcomes — and because
+ *  `DocumentDegradeReason` (edit/load-document.ts) is `Extract`ed from it, so
+ *  the two cannot drift. */
 export type EditDegradeReason =
   /** No/invalid/expired edit capability (query token or cookie). */
   | "edit-token-denied"
@@ -194,6 +202,19 @@ export function editDegradeLine(
     slug,
     reason,
   });
+}
+
+/** The line for a document failure, which no longer degrades to the view at
+ *  all — `/edit` renders its own explanatory page instead (`edit/unopenable.ts`).
+ *  A DISTINCT event on purpose: `*-degraded-to-view` naming an outcome that
+ *  never reaches the view is exactly the kind of drift this fix exists to
+ *  remove, and the two are operationally different — a degrade is the incident
+ *  class (an owner silently stranded, possibly at the unlock wall), while this
+ *  is a handled outcome the user was actually told about. `reason` keeps the
+ *  same three values, so ADR-0063's open question (WHICH of the three fires in
+ *  production) is still answerable off this line. */
+export function editUnopenableLine(slug: string, reason: EditDegradeReason): string {
+  return JSON.stringify({ event: "edit-document-unopenable", slug, reason });
 }
 
 /**
@@ -249,10 +270,17 @@ export type Decision =
       readonly version: ReportVersion;
       readonly edit?: { readonly token: string; readonly claims: EditClaims };
       /** purpose "edit" only — where the route must send the visitor if IT
-       *  cannot render after all (the blob read / the shell split). Carries the
-       *  owner `?access=` fallback when one is in play, so a route-side failure
-       *  can't strand an owner at the unlock wall the way the gate's own
-       *  degrades no longer can. */
+       *  cannot render after all. Carries the owner `?access=` fallback when
+       *  one is in play, so a route-side failure can't strand an owner at the
+       *  unlock wall the way the gate's own degrades no longer can.
+       *
+       *  As of 2026-08-06 the route's DOCUMENT failures (the blob read, the
+       *  shell split, the ProseMirror parse) no longer consume this: they
+       *  render an explanatory page instead of redirecting at all
+       *  (`edit/unopenable.ts`), which is why the unlock wall is unreachable
+       *  from them by construction rather than by carrying the right token.
+       *  The remaining consumer is the route's defensive-narrowing branch,
+       *  which cannot render and has nowhere of its own to go. */
       readonly degradeTo?: string;
       /** Whether `degradeTo` carries an owner fallback — selects the log event. */
       readonly ownerFallback?: boolean;
