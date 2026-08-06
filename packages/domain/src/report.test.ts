@@ -85,6 +85,29 @@ describe("createReport", () => {
     expect(report.versions[0]?.origin).toBe("editor");
     expect(events[0]?.type === "ReportVersionUploaded" && events[0]?.origin).toBe("editor");
   });
+
+  it("leaves editability UNKNOWN (null) when the caller did not probe (ADR-0080)", () => {
+    // The domain never invents a verdict: `null` means "nobody asked", which is
+    // exactly the state every version written before ADR-0080 is in.
+    expect(newReport().versions[0]?.editability).toBeNull();
+  });
+
+  it("records an explicit editability verdict on the first version", () => {
+    const { report } = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      editability: "unsplittable",
+    });
+    expect(report.versions[0]?.editability).toBe("unsplittable");
+  });
 });
 
 describe("addVersion", () => {
@@ -119,6 +142,50 @@ describe("addVersion", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe("NotFound");
+  });
+
+  it("records editability per version — a re-upload's verdict never rewrites v1's", () => {
+    // Editability is a fact about ONE version's bytes (ADR-0080). Re-uploading
+    // an un-editable document must not retro-label the editable version that
+    // preceded it, and vice versa.
+    const r = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      editability: "editable",
+    }).report;
+    const result = addVersion(r, {
+      versionId: versionId("v2"),
+      contentHash: "hash-2",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      editability: "unsplittable",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.report.versions[0]?.editability).toBe("editable");
+      expect(result.value.report.versions[1]?.editability).toBe("unsplittable");
+    }
+  });
+
+  it("leaves an added version's editability UNKNOWN (null) when not probed", () => {
+    const result = addVersion(newReport(), {
+      versionId: versionId("v2"),
+      contentHash: "hash-2",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.report.versions[1]?.editability).toBeNull();
   });
 });
 

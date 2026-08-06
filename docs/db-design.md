@@ -63,6 +63,7 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `version_origin` | `upload`, `editor` (ADR-0062 §6, ADR-0065; default `upload`) |
+| `version_editability` | `editable`, `unsplittable`, `unparsable` (ADR-0080; migration `0021`). The UNKNOWN state is the column's NULL, deliberately **not** a value — a version nobody probed must not read as a verdict |
 | `scan_job_status` | `queued`, `running`, `done`, `failed` |
 | `acl_mode` | `private`, `public`, `password`, `org`, `allowlist` |
 | `idempotency_state` | `in_flight`, `completed` |
@@ -196,8 +197,16 @@ making `live_version_id` nullable and set after the first version commits.
 | `scan_status` | `scan_status` | default `pending`; **denormalized cache** of the `ScanJob` verdict, updated on `ReportVersionScanned` |
 | `uploaded_at` | timestamptz | |
 | `origin` | `version_origin` | `upload` \| `editor` (ADR-0062 §6, ADR-0065); default `upload`, NOT NULL. Every row is `upload` today — the in-app editor doesn't exist yet (migration 0011) |
+| `editability` | `version_editability` NULL | **Editability** (ADR-0080): the editor's own open-time precondition (`splitShell`, then `parseBody` when there is no `_source.json` sidecar) run against THESE bytes at write time. NULL = UNKNOWN (never probed) — no default, so migration `0021` asserts nothing about the rows it cannot read. Immutable per version: `upsertVersions` refreshes only `scan_status` on conflict |
 
 Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
+
+`editability` is metadata **about** the stored bytes, never a transformation
+**of** them: the viewer keeps streaming the entry document verbatim (ADR-0038)
+whatever the verdict says, and an un-editable upload is accepted, stored and
+served exactly like any other. Nothing gates on the column — the editor still
+attempts and degrades — so UNKNOWN and `editable` are behaviourally identical
+today.
 
 > **Rev-8 change:** `scan_findings` and `scanned_at` are **removed** from this
 > table — the detailed findings now live on `scan_jobs`, and `scan_status` is

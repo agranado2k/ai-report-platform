@@ -55,6 +55,15 @@ describe("db schema", () => {
     expect(schema.idempotencyStateEnum.enumValues).toEqual(["in_flight", "completed"]);
     expect(schema.abuseStatusEnum.enumValues).toEqual(["open", "actioned", "dismissed"]);
     expect(schema.outboxStatusEnum.enumValues).toEqual(["pending", "delivered", "failed"]);
+    expect(schema.versionOriginEnum.enumValues).toEqual(["upload", "editor"]);
+    // ADR-0080 — the editor's open-time verdict, recorded per version. The
+    // UNKNOWN state is the column's NULLability, deliberately NOT a value here:
+    // a `null` cannot be mistaken for a verdict anybody ran.
+    expect(schema.versionEditabilityEnum.enumValues).toEqual([
+      "editable",
+      "unsplittable",
+      "unparsable",
+    ]);
   });
 
   it("maps domain columns to snake_case", () => {
@@ -70,6 +79,11 @@ describe("db schema", () => {
     expect(schema.folderCollaborators.granteeUserId.notNull).toBe(false);
     expect(schema.reportVersions.reportId.notNull).toBe(true);
     expect(schema.folders.orgId.notNull).toBe(true);
+    // ADR-0080 backfill policy: nullable with NO default, so every pre-existing
+    // row reads UNKNOWN rather than being asserted editable or un-editable by a
+    // migration that never looked at its bytes.
+    expect(schema.reportVersions.editability.notNull).toBe(false);
+    expect(schema.reportVersions.editability.hasDefault).toBe(false);
   });
 
   it("applies ON DELETE CASCADE only on the three documented FKs", () => {
