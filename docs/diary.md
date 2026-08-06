@@ -4656,7 +4656,9 @@ there, and so does every failed round-trip. The app holds the Clerk session, so
 redirect** — /unlock is reached BY a redirect from the viewer and can be bounced
 straight back to, so an auto-redirect would loop where today it terminates.
 Denials stay byte-identical for "not entitled", "not signed in" and "no such
-report", so the page never becomes an existence oracle.
+report", so the page never becomes an existence oracle. *(That first pass made
+them uniform in status only; see the operator round below — they are now one
+byte-identical `404`, and the helper is `denied()`, not `privateDenied()`.)*
 
 ### Review round #247 — five things the first pass got wrong
 
@@ -4709,3 +4711,73 @@ post-capability). What they did not confirm was the *claims* around it.
 ADR-0063 Phase 5-G and an amendment to ADR-0056 carry the decisions.
 
 Worktree `worktree/owner-lockout` (branch `fix/owner-lockout`).
+
+### Operator round — 2026-08-06: a uniform status is not a uniform answer
+
+The review round above closed the `/unlock/{slug}` oracle by making every denial
+the same **403**. The operator overrode that: **404, in every case.** The
+reasoning is short and correct. A 403 whose body reads *"This report is private
+— only its owner can view it"* still confirms a report exists at that slug. The
+status line stopped leaking; the copy carried on leaking. Since `private` is the
+DEFAULT mode, that covers essentially every report on the platform. The only
+answer that leaks nothing is the one a never-created slug gets.
+
+So `denied()` (renamed from `privateDenied()` — it is no longer about `private`
+mode) answers a `404` with one neutral body and one header set, on GET and POST,
+for: a malformed slug, an unknown slug, a soft-deleted report, `private` +
+signed-out, `private` + same-org non-owner, `private` + cross-org non-owner,
+`org` + signed-in non-member, `org` + no active org, and `org` + a session org
+that maps to no internal org.
+
+The `org`-mode notice — `403 "You need to be a member of this report's
+organization to view it."` — is **gone, not restyled**. It told any signed-in
+stranger who guessed a slug both that a report exists there and that it is
+shared in `org` mode. Under ADR-0068 §1 a user belongs to exactly one org, so it
+could never have been actionable either: there is no other org to switch to.
+
+Non-denials deliberately stay distinguishable, because each reveals only what
+the visitor can already act on: `public` redirects, `password`/`allowlist` render
+forms, an anonymous visitor to an `org` report is bounced to `/sign-in` (which
+happens for every `org` slug alike), a member completes the handshake, a canWrite
+visitor gets the owner-open page. `unlock-route.test.ts` now compares **status,
+body AND headers** across the whole denial matrix against one baseline — the
+absence of a composed-route test is exactly how the false uniformity claim
+survived five documents.
+
+### Two approved follow-ons in the same round
+
+**The `/edit` document failures render a page instead of redirecting.** They fire
+after the gate has returned `serve` against a valid `arp_edit` cookie, so the
+capability is already proven and the route is entitled to answer with its own
+content. The old silent `302` meant an owner clicked Edit, landed in a read-only
+viewer with no explanation, and clicking again just repeated it — and for a
+private report the viewer bounced them on to the unlock wall. Carrying the right
+`oa` through that redirect fixes the symptom; **not redirecting removes the
+path**. There is no `Location`, so the unlock wall is unreachable from a document
+failure by construction. `409`, not 200 and not 3xx (a 200 would tell every probe
+that editing worked); `editViewHeaders({appOrigin})`, the same ADR-013 stack the
+editor render uses, since this is the same route's own first-party document
+carrying strictly less. New event `edit-document-unopenable` — keeping
+`*-degraded-to-view` for something that never reaches the view is the same drift
+this whole PR is removing.
+
+**`deniedEdit` funnels a REJECTED token before it degrades an owner.** It checked
+`if (oa)` before the `/reports/{slug}/open` funnel. That was safe while `oa` could
+only arrive on a query — present exactly once, on the request just minted. Once
+it is cookie-carried it survives the whole session, so it also catches every
+LATER denial: an expired `arp_edit`, a rotated secret, clock skew. Every one of
+those is a token that was *presented and failed*, and a fresh mint is the one
+thing that repairs it. The old order removed the recovery path in precisely the
+secret-rotation scenario Phase 5-E exists for. The gate now separates a
+**rejection** from an **absence**: rejected + funnel available → funnel, even
+with a verified `oa`; absent + `oa` → the `oa` degrade, unchanged; no funnel → the
+`oa` degrade, which is what keeps the unlock wall unreachable when `APP_ORIGIN`
+is unset. This extends the PR #185 residual redirect loop to owners on purpose —
+a loop the operator can see beats an owner quietly parked in read-only, which is
+how this incident stayed invisible.
+
+Also folded in: the 50k-deep `document-unparsable` test carries an explicit 30s
+budget (it costs ~6s to build and parse — over vitest's 5s default — and shrinking
+the fixture would make it fast and make it prove nothing).
+
+ADR-0056's unlock bullet and ADR-0063 Phase 5-G carry all three decisions.
