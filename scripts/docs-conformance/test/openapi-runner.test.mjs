@@ -41,6 +41,12 @@ test("runner: a fully clean fixture yields zero violations", () => {
       "docs/api/openapi.yaml": `openapi: 3.1.0\n${defaultConfig.openapi.mustContain.join("\n")}\n`,
       "tests/e2e/features/demo.feature":
         "@phase-1\nFeature: Demo\n\n  Scenario: ok\n    Given x\n    Then y\n",
+      // A `status: "full"` use-case must EXECUTE (feature-executes): opted into
+      // playwright.config.ts's `features` array, with step definitions beside
+      // it. A clean fixture therefore has to model both.
+      "tests/e2e/features/demo.steps.ts": "// steps",
+      "playwright.config.ts":
+        'defineBddConfig({ features: ["tests/e2e/features/demo.feature"] });\n',
     },
     config,
   );

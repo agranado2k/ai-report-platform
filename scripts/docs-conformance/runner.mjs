@@ -4,6 +4,7 @@
 import * as adrIndexSync from "./validators/adr-index-sync.mjs";
 import * as adrMadr from "./validators/adr-madr.mjs";
 import * as eventNames from "./validators/event-names.mjs";
+import * as featureExecutes from "./validators/feature-executes.mjs";
 import * as featurePresence from "./validators/feature-presence.mjs";
 import * as gherkinStructure from "./validators/gherkin-structure.mjs";
 import * as glossaryTerms from "./validators/glossary-terms.mjs";
@@ -15,6 +16,7 @@ export const VALIDATORS = [
   glossaryTerms,
   eventNames,
   featurePresence,
+  featureExecutes,
   gherkinStructure,
   openapiStructure,
 ];
