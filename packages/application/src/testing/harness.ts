@@ -8,6 +8,7 @@
 import type { UploadReportDeps } from "../use-cases/upload-report";
 import {
   FakeBundleProcessor,
+  FakeEditabilityProbe,
   FakeHasher,
   FakePlanLimiter,
   InMemoryAuditLogger,
@@ -30,6 +31,9 @@ export interface AppTestHarness {
   readonly reports: InMemoryReportRepository;
   readonly blobs: InMemoryBlobStore;
   readonly bundles: FakeBundleProcessor;
+  /** The editor's open-time precondition (ADR-0080) — scripted, so a test can
+   *  make an upload un-editable without hand-crafting a document. */
+  readonly editability: FakeEditabilityProbe;
   readonly idempotency: InMemoryIdempotencyStore;
   readonly outbox: InMemoryEventOutbox;
   /** Audit log (ADR-0070) — every mutating action's audit_log row. */
@@ -52,6 +56,7 @@ export type AppTestHarnessOverrides = Partial<
     | "reports"
     | "blobs"
     | "bundles"
+    | "editability"
     | "idempotency"
     | "outbox"
     | "audit"
@@ -75,6 +80,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const reports = overrides.reports ?? new InMemoryReportRepository();
   const blobs = overrides.blobs ?? new InMemoryBlobStore();
   const bundles = overrides.bundles ?? new FakeBundleProcessor();
+  const editability = overrides.editability ?? new FakeEditabilityProbe();
   const idempotency = overrides.idempotency ?? new InMemoryIdempotencyStore();
   const outbox = overrides.outbox ?? new InMemoryEventOutbox();
   const audit = overrides.audit ?? new InMemoryAuditLogger();
@@ -93,6 +99,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     reports,
     blobs,
     bundles,
+    editability,
     idempotency,
     outbox,
     audit,
@@ -112,6 +119,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     reports,
     blobs,
     bundles,
+    editability,
     idempotency,
     outbox,
     audit,

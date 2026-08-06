@@ -23,6 +23,7 @@ import {
   type Result,
   type ScanStatus,
   type UserId,
+  type VersionEditability,
   type VersionId,
   type VersionManifest,
   type VersionOrigin,
@@ -32,6 +33,7 @@ import type {
   AuditLogger,
   BlobStore,
   BundleProcessor,
+  EditabilityProbe,
   EventOutbox,
   FolderRepository,
   Hasher,
@@ -54,6 +56,9 @@ export interface UploadReportDeps extends CanWriteDeps {
   readonly folders: FolderRepository;
   readonly blobs: BlobStore;
   readonly bundles: BundleProcessor;
+  /** The editor's own open-time precondition (ADR-0080), run at write time so
+   *  "views fine, won't edit" is a recorded state rather than a surprise. */
+  readonly editability: EditabilityProbe;
   readonly idempotency: IdempotencyStore;
   readonly outbox: EventOutbox;
   /** Audit log (ADR-0070) — one `report.uploaded` row per fresh upload/re-upload. */
@@ -139,6 +144,12 @@ export async function uploadReport(
   const initialAcl = cmd.updateSlug ? null : await resolveInheritedAcl(deps, cmd.actor.folderId);
   if (initialAcl !== null && !initialAcl.ok) return initialAcl;
 
+  // 2c. Editability (ADR-0080). Metadata ABOUT the bytes, never a
+  // transformation OF them, and never a rejection: an un-editable document is
+  // stored, served and versioned exactly like any other — this only makes the
+  // state knowable before a user discovers it as a silent redirect.
+  const editability = probeEditability(deps, bundle, cmd.sourceDoc !== undefined);
+
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
   //
   // SECURITY/CORRECTNESS (PR #151 review, Fix 3): `bundle.contentHash` alone
@@ -192,8 +203,8 @@ export async function uploadReport(
 
   // 5. Resolve create vs re-upload, run the domain transition.
   const emission = await (cmd.updateSlug
-    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle, cmd.origin)
-    : create(deps, cmd, bundle));
+    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle, cmd.origin, editability)
+    : create(deps, cmd, bundle, editability));
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
@@ -309,7 +320,32 @@ function sidecarFile(doc: Record<string, unknown>) {
   };
 }
 
-function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBundle) {
+/**
+ * Ask the probe about the bytes that will actually be stored as the entry
+ * document (ADR-0080).
+ *
+ * A bundle whose manifest names an entry document that is not among its files
+ * is a shape only a future zip processor could produce; there is nothing to
+ * probe, so the verdict is UNKNOWN (`null`) — the same honest answer the
+ * migration gives pre-existing rows. Guessing `editable` here would be the
+ * exact false assurance this ADR exists to remove.
+ */
+function probeEditability(
+  deps: Pick<UploadReportDeps, "editability">,
+  bundle: ProcessedBundle,
+  hasSourceDoc: boolean,
+): VersionEditability | null {
+  const entry = bundle.files.find((f) => f.path === bundle.entryDocument);
+  if (!entry) return null;
+  return deps.editability.probe(entry.bytes, hasSourceDoc);
+}
+
+function create(
+  deps: UploadReportDeps,
+  cmd: UploadCommand,
+  bundle: ProcessedBundle,
+  editability: VersionEditability | null,
+) {
   return Promise.resolve(
     ok(
       createReport({
@@ -324,6 +360,7 @@ function create(deps: UploadReportDeps, cmd: UploadCommand, bundle: ProcessedBun
         manifest: manifestOf(bundle),
         sizeBytes: bundle.sizeBytes,
         origin: cmd.origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
+        editability, // ADR-0080 — null when nothing could be probed
       }),
     ),
   );
@@ -335,6 +372,7 @@ async function reUpload(
   actor: UploadActor,
   bundle: ProcessedBundle,
   origin: VersionOrigin | undefined,
+  editability: VersionEditability | null,
 ) {
   const slugR = makeSlug(updateSlug);
   if (!slugR.ok) return slugR;
@@ -358,6 +396,7 @@ async function reUpload(
     manifest: manifestOf(bundle),
     sizeBytes: bundle.sizeBytes,
     origin: origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
+    editability, // ADR-0080 — this version's own verdict, never v1's
   });
 }
 

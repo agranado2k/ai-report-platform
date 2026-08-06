@@ -327,6 +327,9 @@ importers:
       arp-domain:
         specifier: workspace:*
         version: link:../domain
+      arp-report-html:
+        specifier: workspace:*
+        version: link:../report-html
       aws4fetch:
         specifier: ^1.0.20
         version: 1.0.20

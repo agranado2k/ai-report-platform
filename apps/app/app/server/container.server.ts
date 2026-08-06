@@ -29,6 +29,7 @@ import {
   NanoidSlugFactory,
   PgBossScanWorkQueue,
   R2BlobStore,
+  ReportHtmlEditabilityProbe,
   ResendEmailSender,
   Sha256Hasher,
   SystemClock,
@@ -226,6 +227,10 @@ export function deps(): UploadReportDeps {
       keyPrefix: env.R2_KEY_PREFIX,
     }),
     bundles: new HtmlBundleProcessor(),
+    // ADR-0080 — runs the editor's own open-time precondition over the entry
+    // document at write time, so an un-editable upload is a recorded state
+    // rather than a silent redirect the user discovers later.
+    editability: new ReportHtmlEditabilityProbe(),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
     audit: auditLogger(),
