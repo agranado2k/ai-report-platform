@@ -306,4 +306,17 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
     /fragment/i,
   );
   expect(body, "the page must offer the read-only view").toContain(`/${slug}`);
+
+  // …and that offer must actually WORK. The bare `/{slug}` this page shipped
+  // with was measured in production on f83ed59: for a PRIVATE report it lands
+  // on the public viewer → `${appOrigin}/unlock/{slug}` → "Open this report" →
+  // `/reports/{slug}/open` → `/edit` → this page again. A cycle whose every hop
+  // is an improvement and whose net effect is that the OWNER of a private,
+  // unopenable report cannot read it at all. The `arp_edit_oa` cookie carried
+  // above IS the owner fallback, already verified by the gate, so the link must
+  // carry it as `?access=`.
+  expect(
+    body,
+    "the read-only link must carry the verified owner fallback — a bare /{slug} sends a private report's owner to the unlock wall and back here, forever",
+  ).toContain(`/${slug}?access=`);
 });

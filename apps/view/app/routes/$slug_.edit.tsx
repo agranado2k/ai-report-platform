@@ -197,13 +197,33 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // carries strictly less than the editor does — no report bytes, no edit
     // token. `viewHeaders()` would be wrong here; its top-level `sandbox` CSP
     // is for the untrusted report on `GET /<slug>`, not for this app's own UI.
-    console.warn(editUnopenableLine(slug, loaded.reason));
+    //
+    // The page's one forward action — "Open the read-only view" — carries the
+    // gate's OWN degrade target (`degradeTargetFor`), not a bare `/${slug}`.
+    // The bare link was the last hop of the same lockout: for a PRIVATE report
+    // it lands on the public viewer, which redirects to the app's unlock page,
+    // which offers `/reports/{slug}/open`, which comes straight back here — a
+    // cycle that never reaches the content. The target already embeds the
+    // `?access=` owner fallback the gate VERIFIED (acceptOwnerFallback), so
+    // nothing is minted on this credential-free origin; a write-grantee, who
+    // never has one, gets the bare link, which is correct for them (the unlock
+    // page recognises write access).
+    const readOnly = degradeTargetFor(decision, slug);
+    console.warn(editUnopenableLine(slug, loaded.reason, readOnly.ownerFallback));
     const unopenableHeaders = editViewHeaders({ appOrigin });
     unopenableHeaders.set("x-robots-tag", "noindex, nofollow");
-    return json(unopenableDocument({ reason: loaded.reason, slug, docTitle: report.title }), {
-      status: UNOPENABLE_STATUS,
-      headers: unopenableHeaders,
-    });
+    return json(
+      unopenableDocument({
+        reason: loaded.reason,
+        slug,
+        docTitle: report.title,
+        readOnlyHref: readOnly.to,
+      }),
+      {
+        status: UNOPENABLE_STATUS,
+        headers: unopenableHeaders,
+      },
+    );
   }
   const { doc, shell } = loaded;
 
