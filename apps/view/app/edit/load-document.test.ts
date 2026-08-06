@@ -101,12 +101,23 @@ describe("loadEditableDocument", () => {
   // whole contract is "never crash" that could still throw — and it is the line
   // every report with NO `_source.json` sidecar goes through, i.e. every
   // uploaded-never-edited report, which is exactly the incident report's shape.
-  it("a body ProseMirror cannot parse degrades with `document-unparsable`, never a 500", async () => {
-    expect(await load(await storeWith(file(ENTRY, deeplyNested)))).toEqual({
-      kind: "degraded",
-      reason: "document-unparsable",
-    });
-  });
+  //
+  // The explicit timeout is load-bearing, not padding: 50k nested elements is
+  // what it takes to overflow the recursive DOM walk RELIABLY across engines,
+  // and building + parsing that costs ~6s — over vitest's 5s default, so this
+  // test failed on timing alone under any parallel load. Shrinking the fixture
+  // would make it fast and make it stop proving anything (a shallower document
+  // parses fine), so the budget moves instead.
+  it(
+    "a body ProseMirror cannot parse degrades with `document-unparsable`, never a 500",
+    async () => {
+      expect(await load(await storeWith(file(ENTRY, deeplyNested)))).toEqual({
+        kind: "degraded",
+        reason: "document-unparsable",
+      });
+    },
+    30_000,
+  );
 
   // A corrupt sidecar used to be an UNCAUGHT JSON.parse in the loader — a 500
   // on a report the editor could otherwise have opened by re-parsing the body.
