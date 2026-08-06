@@ -34,7 +34,7 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it, vi } from "vitest";
-import { type Decision, decideServe, type GateDeps } from "./gate.server";
+import { type Decision, decideServe, degradeTargetFor, type GateDeps } from "./gate.server";
 
 const SECRET = "view-access-secret";
 const APP_ORIGIN = "https://app.example.test";
@@ -1043,5 +1043,43 @@ describe("decideServe edit — an unverified oa= is not an owner fallback", () =
       slug: SLUG,
       reason: "edit-token-denied",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// degradeTargetFor — the ONE place a route asks "if I can't render, where do I
+// send them, and is this an owner?". The /edit route had TWO answers: it read
+// `decision.degradeTo` for its document-load failures but hard-coded
+// `/${params.slug}` in its defensive-narrowing branch (review #247 M-2) — the
+// same "one branch left untouched" shape ADR-0063 criticises Phase 5-E for.
+// ---------------------------------------------------------------------------
+describe("degradeTargetFor", () => {
+  it("a served editor with an owner fallback → the ?access= target, flagged as owner", async () => {
+    const oa = ownerAccess();
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}; arp_edit_oa=${encodeURIComponent(oa)}`,
+    });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}?access=${encodeURIComponent(oa)}`,
+      ownerFallback: true,
+    });
+  });
+
+  it("a served editor without one → the bare viewer, not flagged", async () => {
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}`,
+    });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+  });
+
+  // The decision kinds the edit purpose cannot produce, but whose types the
+  // route still has to narrow past — the branch that used to answer silently.
+  it.each<[string, Decision]>([
+    ["interstitial", { kind: "interstitial" }],
+    ["error", { kind: "error", status: 404, message: "Not found" }],
+    ["redirect", { kind: "redirect", to: "/elsewhere" }],
+    ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
+  ])("%s → the bare viewer for this slug, not flagged", (_n, decision) => {
+    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
   });
 });

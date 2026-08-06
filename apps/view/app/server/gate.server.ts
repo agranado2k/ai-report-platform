@@ -144,7 +144,12 @@ export type EditDegradeReason =
   | "document-unsplittable"
   /** The body HTML defeated the ProseMirror parse (e.g. nesting deep enough to
    *  overflow the recursive DOM walk). Views fine, will not open in the editor. */
-  | "document-unparsable";
+  | "document-unparsable"
+  /** The route could not use the Decision it was handed — a shape the edit
+   *  purpose is not supposed to be able to produce (an `interstitial`, a
+   *  `serve` with no edit capability). Unreachable by construction today; it
+   *  exists so that if it ever DOES fire it is named rather than silent. */
+  | "gate-decision-unusable";
 
 /** The ONE structured log line for an /edit degrade — built here so the gate
  *  and the route (whose own post-gate failures degrade the same way) emit the
@@ -162,6 +167,30 @@ export function editDegradeLine(
     slug,
     reason,
   });
+}
+
+/**
+ * Where a route should send a visitor it cannot render for, and whether that
+ * target carries an owner fallback (which selects the log event).
+ *
+ * ONE answer for every Decision shape, including the ones purpose "edit" can't
+ * actually produce but whose types the route still has to narrow past. The
+ * /edit loader used to have two answers: `decision.degradeTo` for its
+ * document-load failures, and a hard-coded `/${params.slug}` — silently, with
+ * no log line — in its defensive-narrowing branch (review #247 M-2). That is
+ * the same "left one branch untouched" shape ADR-0063 criticises Phase 5-E for,
+ * and it is how an owner ends up at the unlock wall.
+ */
+export function degradeTargetFor(
+  decision: Decision,
+  slug: string,
+): { readonly to: string; readonly ownerFallback: boolean } {
+  return decision.kind === "serve"
+    ? {
+        to: decision.degradeTo ?? `/${slug}`,
+        ownerFallback: decision.ownerFallback ?? false,
+      }
+    : { to: `/${slug}`, ownerFallback: false };
 }
 
 export type Purpose = "view" | "edit";

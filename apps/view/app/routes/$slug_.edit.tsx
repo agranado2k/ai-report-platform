@@ -75,7 +75,7 @@ import { saveEdit } from "../edit/save-edit";
 import { listVersions } from "../edit/versions-client";
 import type { CommentWire, DiffWire, VersionWire } from "../edit/wire-types";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import { decideServe, editDegradeLine } from "../server/gate.server";
+import { decideServe, degradeTargetFor, editDegradeLine } from "../server/gate.server";
 
 function notFoundResponse(): Response {
   const headers = viewHeaders();
@@ -141,8 +141,16 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // Defensive narrowing only: for purpose "edit" the gate never emits
     // `interstitial`, never a "serve" without the edit capability, and never
     // a "serve" with appOrigin unset (it degrades those itself) — but the
-    // types can't prove it, so degrade the same way the gate would.
-    return redirectToPublicViewer(`/${params.slug ?? ""}`);
+    // types can't prove it. Degrade EXACTLY the way the gate would: through
+    // the gate's own target (which carries the owner `?access=` fallback when
+    // one is in play), and with a log line. This branch used to hard-code
+    // `/${params.slug}` and say nothing — the same silent, owner-stranding
+    // shape the rest of this fix removes.
+    const fallback = degradeTargetFor(decision, params.slug ?? "");
+    console.warn(
+      editDegradeLine(params.slug ?? "", fallback.ownerFallback, "gate-decision-unusable"),
+    );
+    return redirectToPublicViewer(fallback.to);
   }
 
   // A valid, already-redeemed arp_edit cookie, and a clean live version to
@@ -155,8 +163,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // play. Hard-coding `/${slug}` here was half of the 2026-08-06 owner lockout
   // — a private report's owner was handed to the public viewer, which
   // unlock-walls them, from a route that had just verified their capability.
-  const degradeTo = decision.degradeTo ?? `/${slug}`;
-  const ownerFallback = decision.ownerFallback ?? false;
+  const { to: degradeTo, ownerFallback } = degradeTargetFor(decision, slug);
 
   const loaded = await loadEditableDocument({
     blobs,
