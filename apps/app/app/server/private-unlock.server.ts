@@ -38,9 +38,13 @@ import type { Slug } from "arp-domain";
 export type PrivateUnlockDecision =
   /** The visitor may write this report: offer them the owner-open route. */
   | { readonly kind: "offer-owner-open"; readonly to: string }
-  /** Everyone else — including anonymous visitors and unknown slugs, so the
-   *  page can render ONE byte-identical 403 and never act as an existence
-   *  oracle for private reports (ADR-0056). */
+  /** Everyone else — including anonymous visitors — so the page can render ONE
+   *  byte-identical 403 and never act as an existence oracle for private
+   *  reports (ADR-0056). NOTE: an unknown slug never reaches this function; the
+   *  route resolves the report first and answers `privateDenied()` itself, with
+   *  the SAME status and bytes this `deny` produces. That composition is what
+   *  actually holds the indistinguishability property, so it is asserted at the
+   *  ROUTE level (`unlock-route.test.ts`), not here (review #247 H-2). */
   | { readonly kind: "deny" };
 
 export interface PrivateUnlockDeps {

@@ -78,8 +78,9 @@ describe("decidePrivateUnlock", () => {
   });
 
   // Existence must stay private (ADR-0056): every non-entitled visitor gets the
-  // SAME `deny`, so the page can render one byte-identical 403 for "not yours",
-  // "not signed in" and "no such report".
+  // SAME `deny`, so the page can render one byte-identical 403 for "not yours"
+  // and "not signed in". "No such report" is decided by the ROUTE, before this
+  // function runs — see unlock-route.test.ts for that leg.
   it.each<[string, () => { readonly orgId: typeof ORG; readonly userId: typeof OWNER } | null]>([
     ["a same-org non-owner, non-grantee", () => ({ orgId: ORG, userId: COLLEAGUE })],
     ["a cross-org visitor", () => ({ orgId: OTHER_ORG, userId: COLLEAGUE })],
@@ -91,7 +92,11 @@ describe("decidePrivateUnlock", () => {
     });
   });
 
-  it("an unknown slug is denied identically (never distinguishable from 'not yours')", async () => {
+  // Defense in depth only — the composed route short-circuits an unknown slug
+  // before it gets here, so this branch is UNREACHABLE in production. It is
+  // kept so the function stays safe if a future caller skips the route's
+  // lookup; the property that actually ships is asserted in unlock-route.test.ts.
+  it("an unknown slug is denied (unreachable via the route, kept as a safe default)", async () => {
     const { deps } = await fixture();
     expect(
       await decidePrivateUnlock(deps, {

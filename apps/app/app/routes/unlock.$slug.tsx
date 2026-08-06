@@ -60,6 +60,16 @@ function html(body: string, status = 200): Response {
 
 const notice = (msg: string, status = 200) => html(`<h1>Not available</h1><p>${msg}</p>`, status);
 
+// THE ONE DENIAL for everything this page must not confirm the existence of.
+// `private` is the DEFAULT mode (ADR-0056), so "no such report" and "a private
+// report you aren't entitled to" have to be the same bytes AND the same status
+// — otherwise `/unlock/{slug}` is an existence oracle for every private report
+// on the platform. It used to answer `200 "Report not found."` for an unknown /
+// malformed / soft-deleted slug and `403 "This report is private…"` for a
+// private non-owner, i.e. it told anyone who asked (review #247 H-2). Both the
+// loader and the action route EVERY such case through here.
+const privateDenied = () => notice("This report is private — only its owner can view it.", 403);
+
 function passwordForm(slug: string, opts: { error?: boolean } = {}): Response {
   return html(
     `<h1>This report is password-protected</h1>
@@ -113,9 +123,9 @@ async function loadAcl(slug: Slug) {
 export async function loader(args: LoaderFunctionArgs) {
   const { params, request } = args;
   const slug = makeSlug(String(params.slug ?? ""));
-  if (!slug.ok) return notice("Report not found.");
+  if (!slug.ok) return privateDenied();
   const report = await loadAcl(slug.value);
-  if (!report || report.deletedAt !== null) return notice("Report not found.");
+  if (!report || report.deletedAt !== null) return privateDenied();
 
   if (report.acl.mode === "public") {
     return redirectToView(slug.value, undefined, request); // nothing to authorize
@@ -132,9 +142,10 @@ export async function loader(args: LoaderFunctionArgs) {
   // so it CAN resolve the actor. It asks the same canWrite question
   // `/reports/{slug}/open` asks (ADR-0059 §4 / ADR-0060 §4) and hands anyone it
   // admits a link to that ONE mint — no capability is minted or duplicated
-  // here. Everyone else gets the unchanged 403, with no new signal about
-  // whether the report exists: `deny` is returned identically for "not
-  // entitled", "not signed in" and "no such report".
+  // here. Everyone else gets `privateDenied()` — the SAME status and the SAME
+  // bytes this route returns for a malformed slug, an unknown slug and a
+  // soft-deleted report, so "not entitled", "not signed in" and "no such
+  // report" are genuinely indistinguishable from outside.
   if (report.acl.mode === "private") {
     return privateUnlock(args, slug.value);
   }
@@ -153,6 +164,11 @@ export async function loader(args: LoaderFunctionArgs) {
 // — NOT bounced to sign-in: a sign-in prompt for one slug and a flat 403 for
 // another would turn this page into an existence oracle for private reports.
 async function privateUnlock(args: LoaderFunctionArgs, slug: Slug): Promise<Response> {
+  // `resolveActorForRead` passes this route's own `:slug`, so door 4 (the
+  // slug-bound edit token, resolve-actor.server.ts) is live here — DELIBERATELY:
+  // a caller holding a valid edit token for THIS report has already passed the
+  // same canWrite gate `/reports/{slug}/open` runs, so admitting them adds no
+  // capability they don't already hold.
   const actor = await resolveActorForRead(args);
   const decision = await decidePrivateUnlock(
     {
@@ -165,9 +181,7 @@ async function privateUnlock(args: LoaderFunctionArgs, slug: Slug): Promise<Resp
     },
     { actor: actor.ok ? actor.value : null, slug },
   );
-  if (decision.kind === "deny") {
-    return notice("This report is private — only its owner can view it.", 403);
-  }
+  if (decision.kind === "deny") return privateDenied();
   return ownerOpenPage(decision.to);
 }
 
@@ -175,11 +189,14 @@ async function privateUnlock(args: LoaderFunctionArgs, slug: Slug): Promise<Resp
 // /unlock is reached BY a redirect from the viewer and the viewer can bounce
 // straight back here, so an auto-redirect could loop where today it terminates).
 // `to` is built from a validated slug by decidePrivateUnlock — never raw input.
+// The wording is deliberately role-NEUTRAL: `decidePrivateUnlock` admits every
+// canWrite visitor, which is the owner OR a write-grantee (ADR-0060 §4), and a
+// grantee reading "Open as owner" would be told they are something they aren't.
 const ownerOpenPage = (to: string): Response =>
   html(
     `<h1>This report is private</h1>
 <p>You have access to it. Open it below.</p>
-<p><a href="${escapeAttr(to)}">Open as owner</a></p>`,
+<p><a href="${escapeAttr(to)}">Open this report</a></p>`,
   );
 
 // `org` mode (ADR-0056 P2): no form — a redirect handshake. Anonymous → /sign-in
@@ -243,9 +260,14 @@ function allowlistLoader(slug: Slug, request: Request): Response {
 
 export async function action({ params, request }: ActionFunctionArgs) {
   const slug = makeSlug(String(params.slug ?? ""));
-  if (!slug.ok) return notice("Report not found.");
+  if (!slug.ok) return privateDenied();
   const report = await loadAcl(slug.value);
-  if (!report || report.deletedAt !== null) return notice("Report not found.");
+  if (!report || report.deletedAt !== null) return privateDenied();
+  // The POST side is the SAME oracle as the loader's: a `private` report has no
+  // form to submit, so without this it fell through to "this sharing mode isn't
+  // available yet" (200) while an unknown slug answered "Report not found."
+  // (200) — two distinguishable answers reachable without ever issuing a GET.
+  if (report.acl.mode === "private") return privateDenied();
 
   const secret = accessTokenSecret();
   if (!secret) return notice("Private viewing is not configured.");
