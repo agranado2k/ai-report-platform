@@ -444,7 +444,8 @@ async function decideEdit(
   // loaders, kept intact behind the purpose parameter.
   if (deps.secret && queryToken) {
     const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
-    if (!claims) return deniedEdit(slug, oa, deps);
+    // A token was PRESENTED and did not verify — a rejection, not an absence.
+    if (!claims) return deniedEdit(slug, oa, "rejected", deps);
     const maxAge = Math.max(0, claims.exp - deps.nowSeconds);
     return {
       kind: "setCookieAndRedirect",
@@ -462,7 +463,13 @@ async function decideEdit(
     deps.secret && cookieToken
       ? readEditToken(cookieToken, slug, deps.secret, deps.nowSeconds)
       : null;
-  if (!claims || !cookieToken) return deniedEdit(slug, oa, deps);
+  if (!claims || !cookieToken) {
+    // A cookie that WAS present and failed to verify (expired, tampered,
+    // minted under a rotated secret) is a rejection; no cookie at all — or no
+    // secret with which to judge one — is an absence. The distinction decides
+    // whether `deniedEdit` funnels or degrades; see there.
+    return deniedEdit(slug, oa, cookieToken && deps.secret ? "rejected" : "absent", deps);
+  }
 
   // A valid, already-redeemed arp_edit cookie. Never render the editor without
   // a configured app origin — editViewHeaders REQUIRES it for connect-src, and
@@ -550,36 +557,67 @@ function degradedEdit(
   return { kind: "redirect", to: degradeLocation(slug, oa) };
 }
 
-/** The edit purpose's denied branch. With an `oa=` fallback present (an OWNER
- *  whose round-trip failed): degrade through the viewer's `?access=` owner
- *  flow, with the observability signal — unchanged. Otherwise (no token,
- *  expired/invalid token or cookie): funnel to the app's ONE edit-token mint,
- *  `GET {appOrigin}/reports/{slug}/open` — the app re-authenticates the
- *  session and re-mints `et=` for canWrite users (owner or write-grantee),
- *  and bounces everyone else to its home ("/" → sign-in for anonymous
- *  visitors), so a grantee's road into /edit no longer dead-ends at the
- *  read-only viewer.
+/** Why the edit capability was refused. The two are NOT interchangeable — see
+ *  `deniedEdit`, which routes them differently.
+ *
+ *  - `rejected`: a token WAS presented (query or cookie) and did not verify —
+ *    expired, tampered with, or minted under a since-rotated secret.
+ *  - `absent`: no token at all, or no secret with which to judge one. */
+type EditDenialCause = "rejected" | "absent";
+
+/** The edit purpose's denied branch — the funnel to the app's ONE edit-token
+ *  mint, `GET {appOrigin}/reports/{slug}/open`. The app re-authenticates the
+ *  session and re-mints `et=` for canWrite users (owner or write-grantee), and
+ *  bounces everyone else to its home ("/" → sign-in for anonymous visitors), so
+ *  a grantee's road into /edit doesn't dead-end at the read-only viewer.
+ *
+ *  ORDERING (reordered 2026-08-06 — this used to answer `if (oa)` FIRST):
+ *
+ *  - `rejected`, and the funnel is available → FUNNEL, even for an owner
+ *    holding a verified `oa`. A rejection says the capability round-trip is
+ *    what broke, and the mint is the thing that repairs it. Answering `oa`
+ *    first was safe only while `oa` could arrive on the query alone — it was
+ *    then present exactly once, on the request that had just been minted. Now
+ *    that it is cookie-carried it survives the whole edit session, so it also
+ *    catches every LATER rejection: an expired cookie, a rotated secret, clock
+ *    skew. Degrading those to read-only removes the recovery path in exactly
+ *    the secret-rotation scenario Phase 5-E exists for, and leaves a
+ *    still-entitled owner read-only for the fallback's remaining 24h.
+ *  - `absent`, with a verified `oa` → the `oa` degrade, unchanged. Nothing was
+ *    rejected, so nothing points at the mint round-trip; and the `oa` in hand
+ *    is a WORKING capability for the read-only view rather than a gamble on
+ *    another hop.
+ *  - anything, with no funnel available (no secret / no appOrigin) → the `oa`
+ *    degrade if one is in hand, else the bare public viewer. This is what keeps
+ *    the unlock wall unreachable for an owner even when the app origin is
+ *    unset.
  *
  *  Loop safety: /open → /edit?et=… → arp_edit cookie → served; a non-writer
  *  exits at the app home, never bouncing back here. The funnel is guarded on
  *  BOTH secret and appOrigin: with no secret this origin can never validate
  *  any token /open mints (funnelling would guarantee /edit → /open → /edit),
- *  and with no appOrigin there is nowhere to send anyone — both keep today's
- *  degrade to the public viewer. The residual loop (both secrets SET but
- *  misaligned, a non-owner grantee) is the PR #185 incident class — the
- *  browser's redirect-loop breaker surfaces it instead of a silent read-only
- *  degrade. */
-function deniedEdit(slug: string, oa: string | undefined, deps: GateDeps): Decision {
+ *  and with no appOrigin there is nowhere to send anyone. The residual loop
+ *  (both secrets SET but misaligned, a non-owner grantee) is the PR #185
+ *  incident class — the browser's redirect-loop breaker surfaces it instead of
+ *  a silent read-only degrade. The reorder deliberately EXTENDS that residual
+ *  loop to owners: a loud loop the operator can see beats an owner quietly
+ *  parked in read-only, which is how the 2026-08-06 incident stayed invisible. */
+function deniedEdit(
+  slug: string,
+  oa: string | undefined,
+  cause: EditDenialCause,
+  deps: GateDeps,
+): Decision {
+  const canFunnel = Boolean(deps.secret && deps.appOrigin);
+  if (canFunnel && (cause === "rejected" || !oa)) {
+    // NOT a degrade — the funnel is the happy path for a writer whose token
+    // simply needs re-minting. It re-enters through the mint, so no warning.
+    return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
+  }
   // Observability (claude-review #187): when an OWNER's edit-token round-trip
   // is denied and we degrade them to a read-only view (`oa` present), emit a
   // structured signal — the secret-misalignment class of incident is then
   // visible in logs rather than only inferable from user reports. Never logs
   // the token.
-  if (oa) return degradedEdit(slug, oa, "edit-token-denied", deps);
-  if (deps.secret && deps.appOrigin) {
-    // NOT a degrade — the funnel is the happy path for a writer whose cookie
-    // simply expired. It re-enters through the mint, so it needs no warning.
-    return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
-  }
-  return degradedEdit(slug, undefined, "edit-token-denied", deps);
+  return degradedEdit(slug, oa, "edit-token-denied", deps);
 }

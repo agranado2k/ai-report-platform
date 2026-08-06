@@ -793,7 +793,17 @@ describe("decideServe edit — degrade paths for a valid capability", () => {
 });
 
 describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-E)", () => {
-  it("denied + oa present → redirect through the viewer's ?access= owner flow, URL-encoded", async () => {
+  // REORDERED 2026-08-06. `deniedEdit` used to answer `if (oa)` BEFORE the
+  // funnel, so an owner holding a fallback ALWAYS went to read-only. That was
+  // safe while `oa` could only arrive on a query — it was present exactly once,
+  // on the request that had just been minted. Now that it is cookie-carried,
+  // an `arp_edit` that is REJECTED rather than absent (secret rotation,
+  // tampering, clock skew) hits the same branch and sends the owner to
+  // read-only instead of back through the mint that would have fixed them —
+  // removing the recovery path in precisely the secret-rotation scenario Phase
+  // 5-E exists for. A REJECTION now funnels first; the `oa` degrade is what
+  // happens when the funnel itself is unavailable.
+  it("REJECTED token + oa present → funnel to the mint, which is what can fix it", async () => {
     const oa = ownerAccess();
     const warn = vi.fn();
     expect(
@@ -801,8 +811,41 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    // The funnel is the happy path for a writer whose token simply needs
+    // re-minting — not a degrade, so nothing to warn about.
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("REJECTED token + oa, but NO appOrigin → the oa degrade (there is no mint to funnel to)", async () => {
+    const oa = ownerAccess();
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
+        appOrigin: undefined,
+        warn,
+      }),
     ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "owner-edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+
+  // ABSENCE is the other cause, and it keeps the old order: there was no token
+  // to reject, so nothing suggests the mint round-trip is what broke, and the
+  // verified `oa` in hand is a WORKING capability for the read-only view.
+  it("ABSENT token + oa present → the oa degrade (unchanged — nothing was rejected)", async () => {
+    const oa = ownerAccess();
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: `arp_edit_oa=${encodeURIComponent(oa)}`,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
       event: "owner-edit-degraded-to-view",
       slug: SLUG,
@@ -902,12 +945,32 @@ describe("decideServe edit — the owner fallback survives the 303 (cookie-carri
     });
   });
 
-  it("an EXPIRED arp_edit cookie alongside the oa cookie degrades the owner (never the unlock wall)", async () => {
+  // An EXPIRED `arp_edit` is a REJECTION, not an absence — a token was
+  // presented and did not verify — so it funnels rather than degrading. This
+  // is the case the reorder is really for: the owner's cookie has aged out (or
+  // the secret rotated under it), and the mint is what restores them. Degrading
+  // here would drop a still-entitled owner into read-only for the rest of the
+  // fallback's 24h life, with no way back except guessing at the dashboard.
+  it("an EXPIRED arp_edit cookie alongside the oa cookie funnels to the mint, not to read-only", async () => {
     const warn = vi.fn();
     expect(
       await decideEdit(buildReport({ verdict: "clean" }), {
         cookie: cookiesWith(editToken()),
         now: NOW + 901,
+        warn,
+      }),
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // …but the unlock wall still has to be unreachable when the funnel is gone.
+  it("an EXPIRED arp_edit cookie with NO appOrigin still degrades the owner through ?access=", async () => {
+    const warn = vi.fn();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        cookie: cookiesWith(editToken()),
+        now: NOW + 901,
+        appOrigin: undefined,
         warn,
       }),
     ).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(OA)}` });
