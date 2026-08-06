@@ -163,6 +163,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     reportId: report.id,
     versionId: version.id,
     entryDocument: version.manifest.entryDocument,
+    slug,
   });
   if (loaded.kind === "degraded") {
     // The other half: these two failures used to be SILENT. A real owner

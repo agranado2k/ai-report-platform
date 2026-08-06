@@ -141,7 +141,10 @@ export type EditDegradeReason =
   /** The live version's entry document could not be read from the blob store. */
   | "document-unreadable"
   /** The entry document could not be split into shell + body (no `<body>`). */
-  | "document-unsplittable";
+  | "document-unsplittable"
+  /** The body HTML defeated the ProseMirror parse (e.g. nesting deep enough to
+   *  overflow the recursive DOM walk). Views fine, will not open in the editor. */
+  | "document-unparsable";
 
 /** The ONE structured log line for an /edit degrade — built here so the gate
  *  and the route (whose own post-gate failures degrade the same way) emit the
