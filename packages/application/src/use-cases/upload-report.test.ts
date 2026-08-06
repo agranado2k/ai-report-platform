@@ -457,3 +457,37 @@ describe("uploadReport — Editability (ADR-0080)", () => {
     expect(editability.probed).toEqual([]);
   });
 });
+
+describe("uploadReport — Editability on an idempotent replay (ADR-0080)", () => {
+  it("replays the recorded verdict rather than re-probing", async () => {
+    const { deps, editability } = makeDeps();
+    editability.setVerdict("unparsable");
+    const first = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
+    editability.setVerdict("editable"); // the probe would now disagree
+    const second = await uploadReport(deps, cmd({ idempotencyKey: "k1" }));
+    expect(first.ok && first.value.result.editability).toBe("unparsable");
+    expect(second.ok && second.value.replayed).toBe(true);
+    expect(second.ok && second.value.result.editability).toBe("unparsable");
+  });
+
+  it("reads a record stored BEFORE ADR-0080 as UNKNOWN, not as a 500", async () => {
+    // In-flight idempotency records written by the previous deploy have no
+    // `editability` key at all. Rejecting them would turn every one of them
+    // into an Unexpected error on replay.
+    const { deps, idempotency } = makeDeps();
+    const ref = { actingUserId: userId("u1"), route: "POST /api/v1/reports", key: "legacy" };
+    // The same fingerprint the use case derives — content hash + target — so
+    // the replay branch is reached rather than the 422 reuse-conflict branch.
+    await idempotency.begin(ref, "hash-default:folder:f1");
+    await idempotency.complete(ref, {
+      responseStatus: 201,
+      responseBody: { slug: "slug000001", version: 1, scanStatus: "clean" },
+    });
+    const r = await uploadReport(deps, cmd({ idempotencyKey: "legacy" }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.replayed).toBe(true);
+      expect(r.value.result.editability).toBeNull();
+    }
+  });
+});
