@@ -13,7 +13,7 @@
 | **Last commit on main**| `ab164d6` — Merge PR #257 (issue #233: the ADR-0039 derived idempotency key no longer fails open on state-setting writes). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | none — every worktree from the #230–#257 arc is merged and pruned; the root checkout is in sync with `origin/main`. |
+| **Active worktrees**   | `worktree/idempotency-followups` (branch `fix/idempotency-followups`) — the two ADR-0039 follow-ups, this entry. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5237,3 +5237,35 @@ storage cost, not a correctness one.
 **Process**: worktree `worktree/idempotency-state-setting` (branch
 `fix/idempotency-state-setting`), off `main` at `83dba66`. TDD — 2 red on the carve-out,
 then green, then the contract fallout across 17 files.
+
+## 2026-08-07 — The two #233 follow-ups closed (MCP key + retention sweep)
+
+**Trigger**: after #257 landed, two gaps were recorded in ADR-0039 as accepted rather than
+fixed. Both are now closed.
+
+**MCP client sends an Idempotency-Key.** ADR-0039's mitigation for the removed derived-key
+fallback is "clients wanting exactly-once retry send a key" — but `apps/mcp/src/client.ts`
+sent none, so via MCP a retried DELETE surfaced 404 for a call that had actually succeeded,
+and a retried api-key create minted a second credential. The client now mints a key for
+every non-GET and pairs it with a bounded transport retry (3 attempts; 408/429/5xx and
+network errors, never a 4xx). The design constraint that mattered: the key identifies the
+ATTEMPT, minted once and reused across retries of that same call — deriving it from the
+payload would have rebuilt #233's defect on the client side. Two separate calls with
+identical bodies get different keys, pinned by a test. Multipart uploads stay
+single-attempt: a FormData body is a one-shot stream in some runtimes.
+
+**Retention swept on the existing cron tick.** `purgeExpired(olderThan, limit)` on the
+store, called from `POST /internal/scan-drain` after the drain, best-effort — a purge
+failure is logged and surfaced in the response, never escalated, because the drain gates
+reports becoming servable and retention does not. No new route, secret or Cloudflare
+trigger: a second scheduled surface for a job whose worst outcome is "the table is bigger
+than it needs to be" buys no reliability. The sweep is deliberately not load-bearing —
+`begin` already reclaims an expired row — which is the direct lesson of finding 2, where a
+24h window was described but enforced by a sweep that never existed.
+
+**Process note**: the failing test in this batch was my own stub, not the product — the
+`fetch` fake returned one `Response` whose body is single-use, so the second call read an
+exhausted stream. Third time today a test harness, not the code, was the defect.
+
+**Process**: worktree `worktree/idempotency-followups` (branch `fix/idempotency-followups`),
+off `main` at `ae5c728`. TDD — 3 red on the client, then green. Full suite 2486 passed.

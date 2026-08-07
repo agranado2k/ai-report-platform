@@ -534,6 +534,18 @@ export interface IdempotencyStore {
   begin(ref: IdempotencyKeyRef, fingerprint: string): Promise<Result<IdempotencyBegin, AppError>>;
   /** Store the final response so future matches replay it. */
   complete(ref: IdempotencyKeyRef, record: IdempotencyRecord): Promise<Result<void, AppError>>;
+  /**
+   * Delete records older than `olderThan`, at most `limit` per call. Returns
+   * how many went.
+   *
+   * Retention only — never correctness. Expiry is already enforced at claim
+   * time (`begin` reclaims a stale row), so a purge that never runs costs
+   * storage and nothing else. That is deliberate: ADR-0039 originally described
+   * a 24h window enforced by a sweep that did not exist, and a record therefore
+   * replayed forever (issue #233). Correctness must not depend on a job having
+   * run; this only stops the table growing without bound.
+   */
+  purgeExpired(olderThan: Date, limit: number): Promise<Result<number, AppError>>;
 }
 
 // ── Transactional outbox (ADR-0021) ───────────────────────────────────────

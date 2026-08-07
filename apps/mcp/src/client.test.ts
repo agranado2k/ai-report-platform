@@ -539,3 +539,237 @@ describe("ApiClient comments", () => {
     if (!r.ok) expect(r.problem.code).toBe("forbidden");
   });
 });
+
+// ── Idempotency-Key + transport retry (issue #233 follow-up) ───────────────
+//
+// ADR-0039's amendment removed the server-side DERIVED key for state-setting
+// writes, because a key derived from the payload replays A -> B -> A. The
+// mitigation it names is "clients wanting exactly-once retry semantics send an
+// Idempotency-Key" — but this client sent none at all, so via MCP a retried
+// DELETE surfaced 404 for a call that had actually succeeded, and a retried
+// api-key create minted a second credential.
+//
+// The key must identify an ATTEMPT, never the payload: deriving it from the
+// body here would re-create the exact bug #233 fixed. So it is minted once per
+// logical call and REUSED across transport retries of that same call — which
+// is what makes the retry safe rather than merely repeated.
+describe("ApiClient — idempotency", () => {
+  /** A stub that fails `failures` times, then succeeds.
+   *
+   *  Builds a FRESH Response per call rather than cloning a shared one: the
+   *  client now cancels the body of a response it is about to discard (to free
+   *  the socket), and cancelling one branch of a cloned body stalls the tee —
+   *  which hangs the test rather than the product. A real fetch hands back a
+   *  new response every time, so the fake must too. */
+  function flaky(failures: number, ok: Response) {
+    const calls: { headers: Record<string, string>; method: string }[] = [];
+    let n = 0;
+    const fn = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        headers: (init?.headers ?? {}) as Record<string, string>,
+        method: init?.method ?? "GET",
+      });
+      n += 1;
+      return n <= failures ? new Response("", { status: 503 }) : ok.clone();
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  }
+
+  /** Records the backoff the client asks for, and never actually sleeps. */
+  const slept: number[] = [];
+  const client = (fetchImpl: typeof fetch) =>
+    new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer x",
+      fetch: fetchImpl,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+  it("sends an Idempotency-Key on a mutating request", async () => {
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls[0]?.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("does NOT send one on an UPLOAD — the server's content-derived key is the dedup", async () => {
+    // uploadReport relies on the server deriving the key from the content
+    // (ADR-0039). A random key here would turn "the same bytes uploaded twice
+    // is one version" into "two versions", silently.
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).uploadReport({ html: "<html><body>hi</body></html>" });
+
+    expect(calls[0]?.headers["idempotency-key"]).toBeUndefined();
+  });
+
+  it("does NOT send one on a read", async () => {
+    const { fn, calls } = flaky(0, json({ object: "list", data: [], has_more: false }));
+
+    await client(fn).searchReports({ limit: 1 });
+
+    expect(calls[0]?.headers["idempotency-key"]).toBeUndefined();
+  });
+
+  it("REUSES the same key across transport retries — the whole point", async () => {
+    const { fn, calls } = flaky(1, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.headers["idempotency-key"]).toBe(calls[1]?.headers["idempotency-key"]);
+  });
+
+  it("mints a DIFFERENT key for a genuinely new call", async () => {
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+    const c = client(fn);
+
+    await c.deleteReport("aaaaaaaaaa");
+    await c.deleteReport("aaaaaaaaaa");
+
+    // Same payload, same route — a payload-derived key would collide here and
+    // make the second call a no-op replay. That is #233 in miniature.
+    expect(calls[0]?.headers["idempotency-key"]).not.toBe(calls[1]?.headers["idempotency-key"]);
+  });
+
+  it("gives up after the bounded number of attempts", async () => {
+    const { fn, calls } = flaky(99, json({}));
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(r.ok).toBe(false);
+    expect(calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it("does not retry a 4xx — it is the caller's request that is wrong", async () => {
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Not found" }, 404);
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(1);
+  });
+
+  it("BACKS OFF between attempts — without a delay the retry only meets its own in-flight claim", async () => {
+    slept.length = 0;
+    const { fn } = flaky(2, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    // One pause per retry, and growing.
+    expect(slept.length).toBe(2);
+    expect(slept[1]).toBeGreaterThan(slept[0] as number);
+  });
+
+  it("retries a 409 in-flight — that IS our own first attempt still settling", async () => {
+    // `beginIdempotentWrite` claims the key before the mutation's transaction
+    // and that INSERT autocommits, so a first attempt that reached the server
+    // and then failed leaves an in_flight row. Without this the agent gets
+    // "request in flight" instead of the recorded response.
+    const calls: string[] = [];
+    let n = 0;
+    const fn = (async () => {
+      calls.push("x");
+      n += 1;
+      return n === 1
+        ? json({ title: "Request in flight" }, 409)
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(2);
+    expect(r.ok).toBe(true);
+  });
+
+  it("does NOT retry a 409 on a request that carried no key", async () => {
+    // Nothing of ours is in flight, so the 409 is somebody else's news.
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Request in flight" }, 409);
+    }) as unknown as typeof fetch;
+
+    await client(fn).uploadReport({ html: "<html><body>x</body></html>" });
+
+    expect(calls.length).toBe(1);
+  });
+
+  it("honours Retry-After instead of its own backoff", async () => {
+    slept.length = 0;
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "2" } })
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(slept[0]).toBe(2000);
+  });
+
+  it("caps a hostile Retry-After so a tool call cannot hang", async () => {
+    slept.length = 0;
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "86400" } })
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(slept[0]).toBeLessThanOrEqual(5000);
+  });
+
+  it("reports the LAST network error when every attempt throws", async () => {
+    // The catch branch this change rewrote had no coverage at all.
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      throw new Error(`boom-${n}`);
+    }) as unknown as typeof fetch;
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.problem.status).toBe(502);
+      expect(r.problem.detail).toContain("boom-3");
+    }
+  });
+
+  it("recovers when fetch throws once and then succeeds", async () => {
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      if (n === 1) throw new Error("dropped");
+      return json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    expect((await client(fn).deleteReport("aaaaaaaaaa")).ok).toBe(true);
+  });
+
+  it("does NOT retry the folder-sharing apply — a replayed summary would misreport it", async () => {
+    // ADR-0078 §10: a LOOP of per-report state sets. Re-running leaves the end
+    // state right but reports reports changed on attempt 1 as `skipped`.
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Bad gateway" }, 502);
+    }) as unknown as typeof fetch;
+
+    await client(fn).applyFolderSharingToReports("folder_1", "org_view");
+
+    expect(calls.length).toBe(1);
+  });
+});

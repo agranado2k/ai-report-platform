@@ -9,15 +9,33 @@
 // work rather than double-process, and the reconcile/processing is idempotent.
 
 import type { ActionFunctionArgs } from "@remix-run/node";
+import { IDEMPOTENCY_TTL_MS } from "arp-adapters";
 import { drainScans } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { defineEnv } from "arp-env";
 import { errorToHttp, secretMatches } from "arp-http";
-import { scanDrainDeps } from "../server/container.server";
+import { deps, scanDrainDeps } from "../server/container.server";
 import { toResponse } from "../server/http.server";
 
 /** Jobs claimed per tick — bounded so a drain stays well under Vercel's 300s limit. */
 const BATCH_SIZE = 20;
+
+/**
+ * Idempotency-key retention (issue #233 finding 2), swept on THIS tick rather
+ * than behind its own route, secret and Cloudflare trigger.
+ *
+ * The sweep is pure housekeeping: `IdempotencyStore.begin` already reclaims an
+ * expired row, so nothing about correctness waits on it. That is precisely why
+ * it does not deserve its own cron — and why its failure must never fail the
+ * drain, which DOES gate reports becoming servable. Standing up a second
+ * scheduled trigger for a job whose worst outcome is "the table is bigger than
+ * it needs to be" would add an operational surface with no reliability gain.
+ *
+ * The window is IMPORTED from the store rather than re-declared, so the sweep
+ * and the claim-time check cannot drift apart. The batch is bounded so the tick
+ * stays well inside the same 300s budget the drain is sized against.
+ */
+const IDEMPOTENCY_PURGE_BATCH = 500;
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
@@ -54,5 +72,21 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!result.ok) {
     return jsonResponse(500, { error: "drain_failed", detail: result.error.kind });
   }
-  return jsonResponse(200, { drained: result.value.processed, failed: result.value.failed });
+
+  // Best-effort, AFTER the drain and never able to fail it: a purge that errors
+  // is logged and reported, not escalated, because the drain is what makes
+  // uploaded reports servable and retention is not.
+  const purge = await deps().idempotency.purgeExpired(
+    new Date(Date.now() - IDEMPOTENCY_TTL_MS),
+    IDEMPOTENCY_PURGE_BATCH,
+  );
+  if (!purge.ok) {
+    console.warn(JSON.stringify({ event: "idempotency-purge-failed", kind: purge.error.kind }));
+  }
+
+  return jsonResponse(200, {
+    drained: result.value.processed,
+    failed: result.value.failed,
+    idempotencyPurged: purge.ok ? purge.value : null,
+  });
 }

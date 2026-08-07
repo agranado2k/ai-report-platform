@@ -24,11 +24,13 @@ import type {
 } from "arp-application";
 import { idempotencyKeys } from "arp-db/schema";
 import { type AppError, ok, type Result } from "arp-domain";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { DbContext } from "./client";
 
-/** ADR-0039's stated window. A record older than this is treated as absent. */
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+/** ADR-0039's stated window. A record older than this is treated as absent.
+ *  Exported so the retention sweep uses the SAME window `begin` enforces —
+ *  the route used to re-declare it and assert in a comment that they matched. */
+export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class DrizzleIdempotencyStore implements IdempotencyStore {
   constructor(private readonly ctx: DbContext) {}
@@ -109,6 +111,45 @@ export class DrizzleIdempotencyStore implements IdempotencyStore {
       return ok({ outcome: "in_flight" });
     } catch (e) {
       return thrown("idempotency.begin", e);
+    }
+  }
+
+  /**
+   * Retention sweep. Bounded by `limit` so a tick stays well inside the
+   * caller's timeout, and safe to run concurrently — the DELETE takes row
+   * locks and a row deleted by another tick simply is not returned twice.
+   *
+   * Deliberately NOT load-bearing: `begin` already reclaims an expired row, so
+   * correctness never waits on this having run. ADR-0039 once described a
+   * 24h window enforced by a sweep that did not exist, and the records
+   * therefore replayed forever (issue #233) — the lesson recorded there is
+   * that expiry belongs at the read, and a purge is only housekeeping.
+   */
+  async purgeExpired(olderThan: Date, limit: number): Promise<Result<number, AppError>> {
+    try {
+      const db = this.ctx.current();
+      // Match the FULL primary key. `key` alone does not identify a row — the
+      // PK is (acting_user_id, route, key), and an explicit client-supplied key
+      // is just a string, so two users can hold the same one. Deleting by
+      // `key IN (…)` would take another user's row with it, including a FRESH
+      // in-flight claim, whose owner would then re-execute instead of replaying.
+      const deleted = await db.execute(sql`
+        DELETE FROM ${idempotencyKeys}
+        WHERE (${idempotencyKeys.actingUserId}, ${idempotencyKeys.route}, ${idempotencyKeys.key})
+          IN (
+            SELECT ${idempotencyKeys.actingUserId}, ${idempotencyKeys.route}, ${idempotencyKeys.key}
+            FROM ${idempotencyKeys}
+            WHERE ${idempotencyKeys.createdAt} <= ${olderThan}
+            LIMIT ${limit}
+          )
+        RETURNING ${idempotencyKeys.key}
+      `);
+      // `rowCount` is not populated by every driver (pglite leaves it 0), so
+      // count what RETURNING actually gave back.
+      const rows = (deleted as { readonly rows?: readonly unknown[] }).rows;
+      return ok(Array.isArray(rows) ? rows.length : 0);
+    } catch (e) {
+      return thrown("idempotency.purgeExpired", e);
     }
   }
 
