@@ -13,7 +13,7 @@
 | **Last commit on main**| `a71fbdb` — Merge PR #259 (`fix/idempotency-followups` — ADR-0039 follow-ups). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`, PR #261) and `worktree/sdlc-phase2-workflow` (branch `chore/sdlc-phase2-workflow`, stacked on Phase 1) — AI-SDLC plan Phases 1–2. `worktree/roundtrip-tests` (branch `test/idempotency-roundtrips`) — pre-existing, unmerged. `worktree/idempotency-followups` merged as #259 — prune with `/worktree-cleanup`. |
+| **Active worktrees**   | `worktree/sdlc-phase5-quality` (branch `chore/sdlc-phase5-quality`, stacked on the constitution branch) — AI-SDLC Phase 5.1/5.2, mutation + property testing (ADR-0081). `worktree/sdlc-phase5-constitution` (branch `docs/sdlc-phase5-constitution`, PR #267) — Phase 5.3 layered constitution (ADR-0082). `worktree/contract-seam` (branch `test/idempotency-contract-seam`) — pre-existing, unmerged. AI-SDLC Phases 1–3 merged as PRs #261/#262/#263; their worktrees pruned. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5423,3 +5423,60 @@ package-local paths outside the validator's root list; tracked as a follow-up.
 three of which edited `CLAUDE.md`). **ADR-0081 was deliberately skipped** and left for the
 concurrent Phase-5.1/5.2 sibling task, which needs a dependency ADR. `pnpm docs:check`
 green; `node --test scripts/docs-conformance/test/*.test.mjs` green.
+### 2026-08-07 — AI-SDLC plan, Phase 5.1/5.2: mutation testing + property tests (ADR-0081)
+
+The plan's answer to "the tests are the agent's target function, and nothing measures
+whether the target is load-bearing". A green suite proves nothing about assertion
+strength, and the specific LLM failure mode is an agent that can't make a test pass
+making the test ask for less instead. Coverage doesn't see it (the line still runs),
+the pre-push pairing guard doesn't see it (a test file did change), and the review
+agents could only offer taste. A surviving mutant is that same claim stated objectively.
+
+**Stryker (`@stryker-mutator/core` 9.6.1 + `@stryker-mutator/vitest-runner`)**, scoped
+to `packages/domain` — pure by ADR-024, so a mutant costs a function call. Config in
+`packages/domain/stryker.config.json`, plus a package-scoped `vitest.config.ts` so the
+runner can drive one package per mutant (the repo-wide suite still runs from the root
+config). `pnpm test:mutation` at the root, `pnpm --filter arp-domain test:mutation`
+in the package. Deliberately **on-demand / differential, never a per-push gate** and not
+a required check — `thresholds.break` is `null`, the run reports rather than fails.
+
+**Calibration — the whole package, nothing narrowed.** 28 source files, **1054 mutants,
+~51 s** wall-clock at `concurrency: 4` with `perTest` coverage analysis. Baseline
+**85.01 %** total / 87.41 % covered (890 killed, 129 survived, 6 timeout, 29 no-coverage,
+0 errors). After this branch's test work: **86.34 %** / 88.69 % (904 killed, 116 survived,
+28 no-coverage) in ~52 s — the suite grew 343 → 372 tests and the clock barely moved,
+because with `perTest` the cost tracks mutants, not tests. Honest caveats: that's a warm
+local 4-way run on Apple Silicon, so CI will be slower; Stryker reports 181 static mutants
+(17 %) eating ~84 % of the time and `ignoreStatic` is left OFF on purpose.
+
+**The finding, actioned.** 13 survivors sat in `access-token.ts`, ten inside
+`parseAccessClaims` — the narrow `claims-codec.ts` calls "the security boundary between
+token types sharing the same secret". Every type guard in it could be deleted with the
+suite still green **except** the `owner` one, which a hand-crafted-payload test covered.
+The module doc promises it rejects a mistyped `mode`/`email`/`owner`; one third of that
+was enforced, and `mode` is the ADR-0056 revocation-C binding that stops a stale cookie
+surviving an `Acl` mode switch. Red-green in that order: the mutant was applied to the
+source by hand, the new test shown to fail against it, the source restored. 13 survivors
+→ 2, and both remaining ones are provably equivalent (reasoned through in ADR-0081 §6).
+**No production source changed** — the behaviour was already right, only the evidence
+was missing, which is exactly the class of gap the tool exists to find.
+
+**fast-check property tests** (`packages/domain/src/*.property.test.ts`, 19 properties):
+`Slug` accept/reject over the real nanoid alphabet, `External Id` round-trip /
+fixed-width / prefix-binding / injectivity over the whole 128-bit space, `EmailAddress`
+normalization idempotence + dedupe + order-preservation (the shape of the three-way drift
+bug from claude-review #114), and `Acl` construction safety — mode never widens, no
+password hash outside `password` mode, allowlist TTL in range for exactly the in-range
+integers. `*.test.ts` naming is load-bearing (vitest collects only that); fast-check
+defaults, random seed per run, no pinning — a flaky property here is a real edge case.
+
+ADR-0081 also records the **refactor-vs-behaviour commit-separation rule**: a commit is
+either a behaviour-preserving refactor or a behaviour change, never both, because mixing
+them makes the mutation delta unattributable and the behaviour diff unreadable.
+
+**Process**: worktree `worktree/sdlc-phase5-quality` (branch `chore/sdlc-phase5-quality`),
+off `main` at `20ec897`. Phase 5.3 (layered-constitution CLAUDE.md) is a sibling worktree
+and owns CLAUDE.md — untouched here on purpose. Follow-ups left open: wiring the
+differential `--mutate` run into `/review-and-evaluate`'s Test Hygiene sub-agent so it
+cites mutants instead of opinions, a periodic scheduled run for score history, and
+calibrating `packages/application`.
