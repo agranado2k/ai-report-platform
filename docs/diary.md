@@ -4943,3 +4943,58 @@ today — a genuinely red check cannot block a merge, and an infrastructure blip
 (of which this week had two) is indistinguishable from a real defect. Splitting
 it keeps the "make checks required" change reviewable on its own and lets the
 new checks prove themselves green on this PR first.
+
+## 2026-08-06 — CI checks become required on `main` (the fifth retro item)
+
+`required_status_checks.contexts` on `main` was `[]` — verified against the live
+API, not inferred. Branch protection required "up to date with `main`" and
+nothing else, so **a red check could not block a merge**. PR #249 is the
+receipt: `Smoke the isolated preview / E2E smoke against preview` **failed** and
+the PR merged anyway. And with nothing gating, an infrastructure blip was
+indistinguishable from a real defect, because neither had any effect.
+
+Eight contexts are now set in `infra/terraform/envs/shared/main.tf` — the fast
+hermetic gate (`Unit tests`, which also carries the package typecheck and the
+`bddgen` step-definition check; `Editor browser tests`; `Biome`;
+`Docs conformance`; `Lint PR commits`) plus the infrastructure-first gate
+(`Isolate preview data plane`; `Smoke the isolated preview / E2E smoke against
+preview`; `Security headers / Security headers (viewer preview)`).
+
+**Every name was read off real check runs** (`gh api …/check-runs`) on PRs #248,
+#249 and #251 rather than inferred from the workflow files. Two things that
+would have bitten:
+
+1. A job calling a **reusable** workflow reports as `<caller job> / <called
+   job>`. Neither half alone is a valid context.
+2. Those same jobs *also* report under their **bare** name with conclusion
+   `skipped` — but only on `pull_request: closed`, where the caller's
+   `if: != 'closed'` skips it before the reusable workflow is reached. On the
+   runs that decide mergeability, only the composite exists.
+
+Deliberate exclusions: `Migration check` and every `Terraform` job are
+**path-filtered**, so they report nothing on PRs that miss the filter — which
+branch protection cannot tell apart from "pending" — and requiring one would
+brick every unrelated PR. `claude-review` / `review` stay out because ADR-030
+makes AI review advisory, and because both failed today on GitHub's own
+Actions incident.
+
+**Accepted friction:** `strict = true` was already set, so requiring checks now
+also means stale PRs must update before merging. `/merge-train` handles that via
+the update-branch API.
+
+`docs/ops.md` gains the recovery procedure. The deadlock is real and worth
+naming: a context string GitHub never reports leaves `main` unmergeable, and
+`enforce_admins = true` means the owner cannot merge past it either — including
+the PR that would fix the Terraform. The way out is to PATCH the protection
+rule's context list directly (admins may *edit* the rule even though they cannot
+*bypass* it), merge the fix, and let the next apply re-assert from code. It is a
+logged ADR-017 exception, self-healing by design.
+
+Shipped as a **separate PR, merged after** the e2e-hardening PR, so the new
+checks — including `Editor browser tests`, which that PR grows a second project
+for — prove themselves green before they gate anything. Worktree
+`worktree/required-checks` (branch `ci/required-status-checks`).
+
+At authoring time GitHub Actions was degraded (runs queued >90 minutes; `Migrate
+DB (prod)` and `Release` both failed on `main`), which is why verification used
+three already-completed PRs rather than the current one.
