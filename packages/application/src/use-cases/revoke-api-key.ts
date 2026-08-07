@@ -8,7 +8,9 @@
 // key, since a no-op revoke of someone else's/an already-revoked key must
 // still resolve an org for the row -- `audit_log.org_id` is NOT NULL) so it
 // carries the ACTOR's own org, mirroring every other audited actor here.
+
 import { type AppError, type OrgId, ok, type Result, type UserId } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import type { ApiKeyStore, AuditLogger, UnitOfWork } from "../ports";
 
@@ -50,23 +52,24 @@ export async function revokeApiKey(
   if (idem.value.outcome === "replay") return ok(undefined);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const revoked = await deps.apiKeys.revoke(input.id, actor.userId);
-    if (!revoked.ok) return revoked;
-    const audited = await deps.audit.record([
-      {
-        action: "api_key.revoked",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "api_key",
-        targetId: input.id,
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "api_key.revoked",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "api_key",
+          targetId: input.id,
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const revoked = await deps.apiKeys.revoke(input.id, actor.userId);
+      return revoked.ok ? ok(undefined) : revoked;
+    },
+  );
 }
