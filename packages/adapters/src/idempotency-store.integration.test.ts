@@ -74,70 +74,12 @@ describe("DrizzleIdempotencyStore (pglite integration)", () => {
         );
     };
 
-    it("replays a record that is still inside the window", async () => {
-      await store.begin(ref(), "fp1");
-      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
-      await ageRow(23);
-
-      const r = await store.begin(ref(), "fp1");
-      expect(r.ok && r.value.outcome).toBe("replay");
-    });
-
-    it("RECLAIMS an expired completed record instead of replaying it", async () => {
-      await store.begin(ref(), "fp1");
-      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
-      await ageRow(25);
-
-      const r = await store.begin(ref(), "fp1");
-      expect(r.ok && r.value.outcome).toBe("proceed");
-    });
-
-    it("does NOT answer in_flight forever once expired — the key works again", async () => {
-      // The regression the reclaim exists to prevent: hiding a stale row makes
-      // the SELECT miss and every retry 409 for good.
-      await store.begin(ref(), "fp1");
-      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
-      await ageRow(25);
-
-      const reclaimed = await store.begin(ref(), "fp1");
-      expect(reclaimed.ok && reclaimed.value.outcome).toBe("proceed");
-      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 2 } });
-
-      // …and the NEW response is what replays afterwards, not the wiped one.
-      const after = await store.begin(ref(), "fp1");
-      expect(after.ok && after.value.outcome).toBe("replay");
-      if (after.ok && after.value.outcome === "replay") {
-        expect(after.value.record.responseBody).toEqual({ v: 2 });
-      }
-    });
-
-    it("reclaims an expired record that was still in_flight (a crashed request)", async () => {
-      await store.begin(ref(), "fp1");
-      await ageRow(25);
-
-      const r = await store.begin(ref(), "fp1");
-      expect(r.ok && r.value.outcome).toBe("proceed");
-    });
-
-    it("does NOT clobber a FRESH in-flight record", async () => {
-      await store.begin(ref(), "fp1");
-
-      const r = await store.begin(ref(), "fp1");
-      expect(r.ok && r.value.outcome).toBe("in_flight");
-    });
-
-    it("an expired key reused with a DIFFERENT body proceeds rather than 422ing", async () => {
-      // Deliberate and worth pinning: past the window the key is genuinely
-      // free, so the reuse-different-body guard no longer applies. Recorded in
-      // the ADR-0039 amendment as a wire-contract change.
-      await store.begin(ref(), "fp1");
-      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
-      await ageRow(25);
-
-      const r = await store.begin(ref(), "fp2-different");
-      expect(r.ok && r.value.outcome).toBe("proceed");
-    });
-
+    // The six expiry/reclaim cases that lived here now run against BOTH tiers
+    // from the shared contract (testing/contracts/idempotency-store.contract.ts).
+    // Duplicating them here would test the adapter twice and the fake never —
+    // which is precisely the asymmetry that let the two diverge (#233).
+    // What stays is adapter-specific: the bounded batch, and row IDENTITY,
+    // which has no in-memory analogue because the fake keys on a string.
     it("purges records past the window, bounded by the limit", async () => {
       await store.begin(ref(), "fp1");
       await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
