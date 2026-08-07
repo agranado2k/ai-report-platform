@@ -31,6 +31,9 @@ import { defineConfig } from "vitest/config";
 // directly rather than deferring it to e2e like the mounted editor route.
 export default defineConfig({
   test: {
+    // KEEP IN SYNC with the TDD pairing guard's source-tree regex in
+    // .husky/pre-push — it is a hand-maintained mirror of these globs; adding
+    // a covered tree here without updating it silently un-guards that tree.
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",

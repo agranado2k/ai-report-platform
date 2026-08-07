@@ -77,7 +77,7 @@ This repo IS NOT:
 
 - A Bash playground for `curl | bash` shenanigans. Never fetch and execute remote code.
 - A place to add runtime dependencies casually. Each new dependency goes through PR review (Claude + Gemini, plus the operator's own read-through) and may require an ADR — especially for the domain/application layers, which are dependency-locked.
-- A place to bypass branch protection. `PUSH_WITHOUT_DOCS=1` and `PUSH_WITHOUT_TESTS=1` exist as the only escape hatches for `.husky/pre-push`; both print a loud warning into the push output, and CI re-runs the docs gate regardless — a bypass defers the failure, it cannot hide it.
+- A place to bypass branch protection. `PUSH_WITHOUT_DOCS=1` and `PUSH_WITHOUT_TESTS=1` exist as the only escape hatches for `.husky/pre-push`; both print a loud warning into the push output. CI re-runs the **docs** gate, so a docs bypass only defers the failure; the TDD pairing guard has no CI counterpart yet — a tests bypass is local-only and on the operator's judgment.
 
 ## Quick reference
 

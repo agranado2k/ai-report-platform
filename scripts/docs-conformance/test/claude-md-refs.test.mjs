@@ -103,6 +103,46 @@ test("still resolves references after a fenced code block (``` fences must not d
   cleanup(ctx);
 });
 
+test("ignores /-tokens in spans that don't open with a slash command (shell snippets, path args)", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": `${CONFORMANT["CLAUDE.md"]}\nNever run \`rm -rf /tmp\` or \`chmod +x /usr/local/bin\` here.`,
+  });
+  const out = run(ctx);
+  assert.deepEqual(out, []);
+  cleanup(ctx);
+});
+
+test("checks every /-token in a span that opens with a slash command", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": `${CONFORMANT["CLAUDE.md"]}\nCompose \`/loop /ghost-command <PR#>\` for continuous runs.`,
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "skill-missing"));
+  assert.match(out[0].message, /ghost-command/);
+  cleanup(ctx);
+});
+
+test("checks .claude/skills and .claude/hooks literal path references", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": [
+      CONFORMANT["CLAUDE.md"],
+      "The procedural skill is at `.claude/skills/tdd/SKILL.md`.",
+      "See also `.claude/skills/ghost/SKILL.md`.",
+      "Enforcement lives in `.claude/hooks/tdd-guard.sh`.",
+    ].join("\n"),
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 2);
+  assert.ok(out.every((v) => v.rule === "path-missing"));
+  assert.match(out.map((v) => v.message).join(" "), /ghost/);
+  assert.match(out.map((v) => v.message).join(" "), /tdd-guard/);
+  cleanup(ctx);
+});
+
 test("stays silent when CLAUDE.md does not exist (fixtures that don't model it)", () => {
   const ctx = ctxFor({ "docs/adr/INDEX.md": "# ADRs" });
   const out = run(ctx);
