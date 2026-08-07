@@ -152,22 +152,36 @@ Then(
     ).toBe(303);
     expect(loc).toContain(`/${slug}/edit`);
     expect(loc).not.toContain("/unlock");
-    const setCookie = res
+    // `headersArray()` already yields ONE entry per Set-Cookie, so take the
+    // `name=value` pair off the front of each. (The previous version joined
+    // them with "; " and then tried to split them apart again on a COMMA that
+    // by then did not exist — so the split found a single element, kept the
+    // text before its first ";", and silently dropped `arp_edit_oa`. The gate
+    // then saw no owner fallback and correctly emitted a bare read-only link,
+    // which read as a product bug.)
+    const setCookiePairs = res
       .headersArray()
       .filter((h) => h.name.toLowerCase() === "set-cookie")
-      .map((h) => h.value)
-      .join("; ");
-    expect(setCookie).toContain("arp_edit");
+      .map((h) => h.value.split(";")[0]?.trim() ?? "")
+      .filter(Boolean);
+
+    // Assert BOTH by their `name=` prefix: `arp_edit` is a substring of
+    // `arp_edit_oa`, so a bare `toContain("arp_edit")` passes on either one
+    // alone — which is exactly how the missing cookie stayed invisible.
+    expect(
+      setCookiePairs.some((c) => c.startsWith("arp_edit=")),
+      `the 303 must mint the edit cookie; got ${JSON.stringify(setCookiePairs)}`,
+    ).toBe(true);
+    expect(
+      setCookiePairs.some((c) => c.startsWith("arp_edit_oa=")),
+      `an OWNER's 303 must also persist the owner fallback (ADR-0063 Phase 5-G) — without it every later degrade strands the owner; got ${JSON.stringify(setCookiePairs)}`,
+    ).toBe(true);
 
     // Carried to the SECOND hop below — the request that actually decides
     // whether the editor opens, and the one both production incidents happened
     // on. `Set-Cookie` values are `name=value; Path=…; HttpOnly; …`; the cookie
     // header wants just the `name=value` pairs.
-    editCookieHeader = setCookie
-      .split(/,(?=\s*arp_[a-z_]+=)/)
-      .map((c) => c.split(";")[0]?.trim() ?? "")
-      .filter(Boolean)
-      .join("; ");
+    editCookieHeader = setCookiePairs.join("; ");
   },
 );
 
