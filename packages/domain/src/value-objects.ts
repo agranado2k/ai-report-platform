@@ -41,8 +41,9 @@ export type VersionOrigin = (typeof VERSION_ORIGINS)[number];
  * while the editor additionally needs the presentation shell to split off an
  * editable body (ADR-0062 §2) and — absent a `_source.json` sidecar — that body
  * to parse into `reportSchema`. So a document can view perfectly and refuse to
- * open: `unsplittable` (no usable `<body>` boundary — an HTML fragment, the
- * common agent upload) and `unparsable` (the body defeats the schema parser)
+ * open: `unsplittable` (a MALFORMED `<body>` — unclosed, or closed before it
+ * opens; a document with no `<body>` at all splits fine per ADR-0062
+ * Amendment 4) and `unparsable` (the body defeats the schema parser)
  * are the two ways that happens, and they name the same two failures the read
  * path degrades on.
  *

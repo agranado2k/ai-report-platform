@@ -231,9 +231,18 @@ function domParserParse(html: string): Document {
 // a proper `<html><head>…</head><body>…</body></html>`, so this only fires
 // on a degenerate input.
 function injectCspIntoParsedDocument(doc: Document, fallbackHtml: string): string {
+  // `documentElement` FIRST. Reading `doc.head` on a document with a null
+  // documentElement throws inside the parser's own getter rather than
+  // returning undefined, so the guard below never ran — it was dead code for
+  // exactly the input it exists to catch. ADR-0062 Amendment 4 makes that
+  // input reachable: a bare fragment splits to an EMPTY shell, so this is
+  // asked to parse "".
+  if (doc.documentElement?.tagName !== "HTML") {
+    return fallbackHtml;
+  }
   const head = doc.head;
   const body = doc.body;
-  if (doc.documentElement?.tagName !== "HTML" || !head || !body) {
+  if (!head || !body) {
     return fallbackHtml;
   }
   head.insertAdjacentHTML("afterbegin", CSP_META);

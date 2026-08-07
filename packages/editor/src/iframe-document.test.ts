@@ -62,6 +62,18 @@ function makeShell(overrides: Partial<Shell> = {}): Shell {
 }
 
 describe("buildIframeDocument", () => {
+  // ADR-0062 Amendment 4 makes this input REACHABLE: a bare fragment splits to
+  // an empty shell, so the iframe builder is asked to parse "". The guard for
+  // it was dead — `doc.head` was read before `documentElement` was checked, and
+  // under linkedom that getter throws on a null documentElement rather than
+  // returning undefined. Both empty-shell paths must fall back, not crash.
+  it("falls back instead of throwing when the shell is EMPTY (a bare fragment)", () => {
+    const empty: Shell = { pre: "", post: "" };
+
+    expect(() => buildIframeDocument(empty, testParse)).not.toThrow();
+    expect(buildIframeDocument(empty, testParse)).toContain("<!doctype html>");
+  });
+
   it("inserts the CSP meta tag as the first child of <head>, before the report's own <style>", () => {
     const doc = buildIframeDocument(makeShell(), testParse);
     const headStart = doc.indexOf("<head>") + "<head>".length;

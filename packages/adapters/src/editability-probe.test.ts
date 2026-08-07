@@ -19,8 +19,14 @@ describe("ReportHtmlEditabilityProbe", () => {
     expect(probe.probe(enc(FIXTURE), false)).toBe("editable");
   });
 
-  it("answers 'unsplittable' for the fragment an agent uploads by accident", () => {
-    expect(probe.probe(enc("<h1>Findings</h1><p>no body tag</p>"), false)).toBe("unsplittable");
+  it("answers 'editable' for the fragment an agent uploads by accident", () => {
+    // ADR-0062 Amendment 4: the fragment is the COMMON agent upload, so it is
+    // the case the editor must handle, not the case it refuses.
+    expect(probe.probe(enc("<h1>Findings</h1><p>no body tag</p>"), false)).toBe("editable");
+  });
+
+  it("answers 'unsplittable' for a body that never closes", () => {
+    expect(probe.probe(enc("<html><body><p>hi</p></html>"), false)).toBe("unsplittable");
   });
 
   it("honors the sidecar branch the editor itself takes", () => {
@@ -50,7 +56,7 @@ describe("the read path is unchanged by the probe (ADR-0038)", () => {
 
   const cases: readonly [name: string, html: string][] = [
     ["an editable document", FIXTURE],
-    ["an unsplittable fragment", "<h1>Findings</h1><p>no body tag</p>"],
+    ["an unsplittable unclosed body", "<html><body><p>hi</p></html>"],
     [
       "an unparsable body",
       `<html><body>${"<div>".repeat(5000)}x${"</div>".repeat(5000)}</body></html>`,

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { probeEditability } from "./editability.js";
+import { splitShell } from "./shell.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = readFileSync(path.resolve(__dirname, "fixtures/ai-readiness-report.html"), "utf-8");
@@ -12,10 +13,20 @@ describe("probeEditability", () => {
     expect(probeEditability(FIXTURE)).toBe("editable");
   });
 
-  it("says a bare fragment with no <body> is unsplittable", () => {
-    // The exact shape an agent uploads by accident, and the shape that views
-    // fine and cannot be edited (ADR-0080's motivating case).
-    expect(probeEditability("<h1>Just a fragment</h1><p>no body tag</p>")).toBe("unsplittable");
+  it("says a bare fragment with no <body> is EDITABLE (ADR-0062 Amendment 4)", () => {
+    // The exact shape an agent uploads by accident. It used to be the
+    // motivating case for `unsplittable` (ADR-0080); Amendment 4 makes the
+    // split synthesise the boundary instead of demanding the tag, because
+    // "views fine, refuses to edit" was a dead end for the report's owner.
+    expect(probeEditability("<h1>Just a fragment</h1><p>no body tag</p>")).toBe("editable");
+  });
+
+  it("says a head-only document with no <body> is editable and keeps its head shell", () => {
+    const html = "<html><head><style>p{color:red}</style></head><p>hi</p></html>";
+
+    expect(probeEditability(html)).toBe("editable");
+    // The second half of this test's own name, which it used not to check.
+    expect(splitShell(html).bodyHtml).not.toContain("<style");
   });
 
   it("says a document whose <body> never closes is unsplittable", () => {
@@ -40,14 +51,17 @@ describe("probeEditability", () => {
   });
 
   it("still requires the shell to split even with a sidecar", () => {
-    expect(probeEditability("<h1>fragment</h1>", true)).toBe("unsplittable");
+    // An UNCLOSED body is the surviving unsplittable shape after Amendment 4:
+    // the tag is present, so the fragment path never engages, and there is no
+    // `</body>` to split on. A sidecar cannot rescue it.
+    expect(probeEditability("<html><body><p>hi</p></html>", true)).toBe("unsplittable");
   });
 
   it("reports the shell failure FIRST when a document fails both legs", () => {
     // Ordering matters: it mirrors the editor's own call order, so the recorded
     // reason names the step that would actually stop it.
     const deep = "<div>".repeat(5000) + "x" + "</div>".repeat(5000);
-    expect(probeEditability(deep)).toBe("unsplittable");
+    expect(probeEditability(`<html><body>${deep}</html>`)).toBe("unsplittable");
   });
 
   it("never mutates or re-emits the input — it only answers a question", () => {

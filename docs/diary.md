@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/unopenable-readonly` (branch `fix/unopenable-readonly`) — not merged into origin/main. `worktree/diary-mcp-close` (this entry). Everything else pruned by `/worktree-cleanup` on 2026-08-07 (4 removed: `diary-worktree-sync`, `e2e-hardening`, `mcp-body-limit`, `required-checks` — all merged: #249, #252, #250, #253). |
+| **Active worktrees**   | `worktree/editable-fragments` (branch `fix/editable-fragments`) — ADR-0062 Amendment 4, this entry. `worktree/diary-mcp-close`. `worktree/mcp-body-limit` — kept by `/worktree-cleanup` for uncommitted changes, needs an operator decision. Everything from the #230–#253 arc is merged and pruned. |
 
 | **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/unopenable-readonly` (branch `fix/unopenable-readonly` — the last hop of the owner lockout; this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
@@ -5105,3 +5105,45 @@ ADR-0080 §4 (reaffirmed with the concrete case) + its follow-up list.
 **Process**: worktree `worktree/unopenable-readonly` (branch `fix/unopenable-readonly`),
 off `main`. Strict TDD — red at the two tiers #247 established (the page's own pure
 tier, the gate's log line), then green, then the e2e assertion.
+
+## 2026-08-07 — Body-less documents are editable (ADR-0062 Amendment 4)
+
+**Trigger**: after the owner-lockout arc (#247–#251) landed and was verified in production
+by `/ce-dogfood`, the operator reported the symptom was still live in a different form:
+*"I can only open the report in view mode, not in edit mode."* The lockout WAS fixed —
+`isK1rs7pL4` now reaches its owner instead of the unlock wall — but the report remained
+uneditable, and I had verified reachability without ever verifying editability. Two
+different properties; only one had been checked.
+
+**Cause**: not a regression. `splitShell` (ADR-0062 §2) required a literal `<body>` opening
+tag and threw without one, so `probeEditability` recorded `unsplittable` and every editor
+entry point degraded. The report was published by an agent as `<html><head>…</head>` plus
+content, **no `<body>` tag** — a shape browsers render perfectly by synthesising the body.
+So it viewed fine and refused to edit, which ADR-0080 had catalogued as a legitimate state
+but which was, for this shape, self-inflicted.
+
+**Fix**: the split needs the shell/content BOUNDARY, not the tag. `splitShell` now falls
+back to end-of-`</head>`, then end-of-`<html …>`, then offset 0. The ordering is the safety
+argument: letting `<head>` fall into the editable body would feed `<style>` to the schema
+parser and strip the report's CSS on first save — worse than refusing to open. `unsplittable`
+survives with a narrower meaning (a MALFORMED body), and the three places that told the
+operator to "re-upload as a full HTML page" were corrected, since that advice now fixes
+nothing.
+
+**No migration needed**: the read path re-derives the verdict (`loadEditableDocument` calls
+`splitShell` on the stored bytes), so editing works on deploy. Only the dashboard badge and
+MCP metadata read the stored `editability` column and will lag until a backfill re-probe —
+a label, not a capability.
+
+**Process note worth keeping**: the re-upload workaround was attempted first and proved
+IMPOSSIBLE for the agent — the harness blocks bulk page-content extraction from the browser
+(base64 and plain slices alike), which is correct behaviour. That constraint is what forced
+the durable fix, and it is a good default: fix the product, don't hand-migrate the operator's
+data.
+
+**Blast radius**: 7 tests across 4 files encoded the old contract and were repointed at the
+surviving unsplittable shape (an unclosed body) rather than deleted, so the degrade path
+keeps its coverage. Full suite 2451 passed.
+
+**Process**: worktree `worktree/editable-fragments` (branch `fix/editable-fragments`), off
+`main` at `effe8bd`. Strict TDD — 4 red, then green, then the contract-change fallout.

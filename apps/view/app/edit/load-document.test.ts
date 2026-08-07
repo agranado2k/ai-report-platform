@@ -87,14 +87,24 @@ describe("loadEditableDocument", () => {
   });
 
   it.each<[string, string]>([
-    ["no <body> at all", "<!doctype html><html><head></head></html>"],
     ["an unclosed body", "<!doctype html><html><body><p>hi</p></html>"],
-    ["a bare fragment", "<h1>Just a fragment</h1><p>uploaded verbatim</p>"],
+    ["a </body> ahead of its opening tag", "<!doctype html><html></body><body><p>hi</p>"],
   ])("%s degrades with `document-unsplittable` rather than throwing", async (_n, html) => {
     expect(await load(await storeWith(file(ENTRY, html)))).toEqual({
       kind: "degraded",
       reason: "document-unsplittable",
     });
+  });
+
+  // ADR-0062 Amendment 4. These two used to sit in the list above; they are the
+  // shapes an agent actually publishes, and refusing them stranded the report's
+  // own owner on a read-only view of a report they own.
+  it.each<[string, string]>([
+    ["no <body> at all", "<!doctype html><html><head></head><p>hi</p></html>"],
+    ["a bare fragment", "<h1>Just a fragment</h1><p>uploaded verbatim</p>"],
+  ])("%s now LOADS instead of degrading", async (_n, html) => {
+    const result = await load(await storeWith(file(ENTRY, html)));
+    expect(result.kind).toBe("loaded");
   });
 
   // THE LAST UNGUARDED CALL. `parseBody` was the only line in a function whose

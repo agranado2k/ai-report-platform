@@ -239,7 +239,7 @@ describe("loadReportDiff — an unsplittable version", () => {
       v2,
     } = await twoVersionHarness({
       withSidecars: false,
-      v2Html: "<h1>A fragment with no body, stored verbatim</h1>",
+      v2Html: "<html><body><h1>An unclosed body, stored verbatim</h1></html>",
     });
 
     const result = await loadReportDiff(
