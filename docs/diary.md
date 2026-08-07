@@ -5368,3 +5368,58 @@ behavior change arrives ranked alongside style notes.
 **Process**: worktree `worktree/sdlc-phase3-review` (branch `chore/sdlc-phase3-review`),
 stacked on `chore/sdlc-phase2-workflow`. Skill/script changes — the docs gate + manual
 script runs are the verification tier.
+
+### 2026-08-07 — AI-SDLC plan, Phase 5.3: the layered constitution (ADR-0082)
+
+`CLAUDE.md` was one 110-line file mixing three unrelated things: portable framework rules,
+this stack's engineering rules, and this repo's process elaboration. That made the
+framework non-replicable (you couldn't take "tests are the target function" without also
+taking Neon advisory locks) and it spent the always-loaded instruction budget on things
+that are true but rarely needed. Restructured into four layers, per SwarmForge's
+constitution model and the AGENTS.md ~150–200-instruction budget:
+
+- **Root `CLAUDE.md` — 110 → 96 lines**, of which ~24 are the quick-reference table (kept
+  in full; it's the highest-traffic thing in the file). Keeps only the orientation
+  paragraph, seven one-sentence hard rules, the trust boundary compressed to one paragraph
+  pointing at ADR-0069, the table, the article pointers, and "the spec wins".
+- **`.claude/constitution/shared-invariants.md`** — 11 portable invariants, written with
+  **no product, vendor, path, or command names**, so "copy it verbatim into the next
+  project" is a `cp` rather than an editing pass. Includes the Phase-5.2 rule
+  (refactor-only never shares a commit with behavior change) and the Phase-5.1 rule
+  (measure the ceiling — mutation testing, final QA through the UI).
+- **`.claude/constitution/local-engineering.md`** (FP/DDD/glossary, test tiers, infra,
+  boundaries) and **`local-workflow.md`** (commits, ADR-0044 merge policy in full, the
+  ADR-026 matrix, dual AI review, ADR mechanics, the diary protocol).
+- **Nested `apps/mcp/CLAUDE.md` and `packages/domain/CLAUDE.md`** (~25 lines each) — load
+  only when an agent works in that tree. Prompt-surface-is-product-surface rules for the
+  MCP (ADR-0072 layers, `OVERCLAIM_PATTERNS` + skill-sync guards, prompt deltas are
+  Axis-2 confirm-list material); purity + property-test/mutation ownership for the domain.
+
+**References are plain paths, never `@`-imports** — an `@`-import is eager and would
+rebuild the monolith at request time, which is the whole thing this was meant to stop.
+
+**Nothing binding was dropped.** The old root was inventoried at **41 distinct rules**,
+each traced to exactly one new home (full mapping in the commit body): **20 kept in the
+root** (terse), **21 moved to an article** (14 → `local-engineering.md`, 7 →
+`local-workflow.md`), **1 de-duplicated to `.claude/skills/tdd/SKILL.md`** (the skill is
+now the sole home for TDD conventions; the root keeps the obligation + a pointer). The
+nested files restate 3 of those rules in package scope and add 6 that did not exist
+before (5 MCP prompt-surface, 1 domain property/mutation ownership). One claim was
+deleted as **false** rather than relocated: the header's "ADR-0035–0048 in `docs/adr/`",
+stale since ADR-0049.
+
+**The validator followed the prose.** `scripts/docs-conformance/validators/claude-md-refs.mjs`
+now runs its checks over `.claude/constitution/*.md` as well as the root, and
+`.claude/constitution/` joined the checked path roots so the root's own article references
+are existence-checked. Test-first: 5 new fixture tests in
+`scripts/docs-conformance/test/claude-md-refs.test.mjs` (red at 4/5, then green at 16/16).
+Moving text out from under the only guard that keeps it honest would have violated the
+"process docs are executable or CI-verified" rule in the very commit that wrote it down.
+Nested per-package `CLAUDE.md` files are **not** yet validated — they reference
+package-local paths outside the validator's root list; tracked as a follow-up.
+
+**Process**: worktree `worktree/sdlc-phase5-constitution` (branch
+`docs/sdlc-phase5-constitution`), off `main` at `20ec897` (after PRs #261/#262/#263, all
+three of which edited `CLAUDE.md`). **ADR-0081 was deliberately skipped** and left for the
+concurrent Phase-5.1/5.2 sibling task, which needs a dependency ADR. `pnpm docs:check`
+green; `node --test scripts/docs-conformance/test/*.test.mjs` green.
