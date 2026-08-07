@@ -209,6 +209,21 @@ export const features = {
   "enforce-mfa": { title: "Enforce MFA for admins", phase: "@phase-4", status: "wip" },
 };
 
+/**
+ * CLAUDE.md executable-reference rules (plan Phase 1.2). Slash commands in
+ * backticks must resolve to `.claude/skills/<name>/SKILL.md`; the ignore list
+ * names commands that are real but not repo skills. Each entry carries its
+ * reason here so the exemption is itself reviewable.
+ */
+export const claudeMdRefs = {
+  ignoreCommands: [
+    "/loop", // Claude Code global skill (interval runner), not a repo skill
+    "/security-review", // Claude Code built-in
+    "/install-github-app", // Claude Code built-in (one-time setup, quoted in ADR-030 context)
+    "/merge", // historical reference — the obsolete bot-merge flow, quoted as history
+  ],
+};
+
 /** OpenAPI structural assertions (lint-lite; full Spectral lint is deferred). */
 export const openapi = {
   mustContain: [
@@ -248,4 +263,4 @@ export const openapi = {
   },
 };
 
-export default { adr, glossary, events, featureTags, features, openapi };
+export default { adr, glossary, events, featureTags, features, claudeMdRefs, openapi };
