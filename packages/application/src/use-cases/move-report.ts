@@ -6,6 +6,7 @@
 // a cross-org grantee moves a report within the org that hosts it. Load+authz
 // stays OUTSIDE the tx; persists via the report's save + a `report.moved`
 // audit_log row (ADR-0070), committed together (ADR-0037 §5).
+
 import {
   type AppError,
   type FolderId,
@@ -15,6 +16,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -94,29 +96,26 @@ export async function moveReport(
   const idemRef = idem.value.ref;
 
   const moved = placeInFolder(found.value, input.toFolderId);
-  return deps.uow.run(async () => {
-    const saved = await deps.reports.save(moved);
-    if (!saved.ok) return saved;
-    const audited = await deps.audit.record([
-      {
-        action: "report.moved",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-        meta: { fromFolderId, toFolderId: input.toFolderId },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 200,
-        responseBody: reportReplayBody(moved),
-      });
-      if (!done.ok) return done;
-    }
-    return ok(moved); // the moved report → the resource the API returns (ADR-0053)
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "report.moved",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "report",
+          targetId: found.value.id,
+          meta: { fromFolderId, toFolderId: input.toFolderId },
+        },
+      ],
+      response: (report) => ({ responseStatus: 200, responseBody: reportReplayBody(report) }),
+    },
+    // the moved report → the resource the API returns (ADR-0053)
+    async () => {
+      const saved = await deps.reports.save(moved);
+      return saved.ok ? ok(moved) : saved;
+    },
+  );
 }
