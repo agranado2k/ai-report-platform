@@ -485,8 +485,23 @@ interface IdemEntry {
   readonly createdAt: Date;
 }
 
+/** ADR-0039's retention window, mirrored from the Drizzle adapter so the fake
+ *  expires on the same boundary. Duplicated deliberately: `arp-application`
+ *  must not import from `arp-adapters` (ADR-024's dependency direction), and
+ *  the shared contract now asserts both tiers agree. */
+export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
 export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottable {
   private readonly entries = new Map<string, IdemEntry>();
+
+  /** TEST-ONLY: age a record so a suite can cross the retention window without
+   *  waiting a day. The shared contract drives this through its `expire` hook;
+   *  the adapter's equivalent is a SQL backdate. Not part of IdempotencyStore. */
+  ageForTest(ref: IdempotencyKeyRef, byMs: number): void {
+    const k = idemKey(ref);
+    const e = this.entries.get(k);
+    if (e) this.entries.set(k, { ...e, createdAt: new Date(e.createdAt.getTime() - byMs) });
+  }
 
   async begin(
     ref: IdempotencyKeyRef,
@@ -495,6 +510,14 @@ export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottab
     const k = idemKey(ref);
     const existing = this.entries.get(k);
     if (!existing) {
+      this.entries.set(k, { fingerprint, state: "in_flight", createdAt: new Date() });
+      return ok({ outcome: "proceed" });
+    }
+    // EXPIRED: reclaim in place, exactly as the adapter does. Hiding the row
+    // instead would answer in_flight forever — a worse failure than the
+    // staleness it fixes (#233 finding 2). The reclaim resets the fingerprint,
+    // so an expired key reused with a different body proceeds rather than 422s.
+    if (existing.createdAt.getTime() <= Date.now() - IDEMPOTENCY_TTL_MS) {
       this.entries.set(k, { fingerprint, state: "in_flight", createdAt: new Date() });
       return ok({ outcome: "proceed" });
     }
