@@ -1,7 +1,7 @@
 // Integration tests for DrizzleIdempotencyStore against real Postgres (pglite).
 import type { IdempotencyKeyRef } from "arp-application";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleIdempotencyStore } from "./idempotency-store";
 import { makeTestDb, type SeededIdentity, seedIdentity, type TestDb } from "./testing/pglite";
 
