@@ -31,16 +31,34 @@
 // the REAL `parseBody`, laid out the way apps/view's `/edit` route lays it
 // out, and the test drives it with real mouse input.
 //
-// EVERY CONTRACT BELOW RUNS TWICE, over two fixtures that differ in exactly
-// one respect: whether the report's own stylesheet sets `scroll-behavior`.
-// That is not decoration. `scrollIntoView({behavior: "auto"})` and
-// ProseMirror's own `window.scrollBy()` both DEFER to that property, so the
-// same code means different things on the two documents, and a suite that runs
-// only one of them cannot say which meaning it just tested. The no-`scroll-
-// behavior` fixture is the one that matters most for provenance: the document
-// the operator measured the production anchor failure on had no such rule, so
-// on it `auto` already resolved to instant — and this tier is where that can be
-// shown rather than argued.
+// EVERY CONTRACT BELOW RUNS OVER THREE DOCUMENTS, in two Playwright projects.
+//
+// The `chromium` project runs the two SYNTHETIC fixtures, which differ in
+// exactly one respect: whether the report's own stylesheet sets
+// `scroll-behavior`. That is not decoration. `scrollIntoView({behavior:
+// "auto"})` and ProseMirror's own `window.scrollBy()` both DEFER to that
+// property, so the same code means different things on the two documents, and a
+// suite that runs only one of them cannot say which meaning it just tested. The
+// no-`scroll-behavior` fixture is the one that matters most for provenance: the
+// document the operator measured the production anchor failure on had no such
+// rule, so on it `auto` already resolved to instant — and this tier is where
+// that can be shown rather than argued.
+//
+// The `real-report` project runs the SAME contracts over
+// `packages/report-html/src/fixtures/ai-readiness-report.html` — a verbatim
+// generated report, 86KB, nine sections, a 20,828px scroll range — and it
+// exists because ADR-0079's fixture rule ("a fixture may be smaller than a real
+// report, never different IN KIND") was broken by the very commit that wrote it,
+// and the mechanical guard that followed (harness/fixture-fidelity.test.ts) can
+// only catch a scroll-relevant declaration that is MISSING. It cannot catch a
+// DOM shaped differently, content two orders of magnitude longer, or an anchor
+// whose `scroll-margin-top` makes "top-aligned" mean 16px rather than 0. A
+// second project running the real document can, and now does, on every PR.
+//
+// A fixture that genuinely cannot satisfy a contract is EXCLUDED EXPLICITLY,
+// with the reason on the fixture table — see `headingAnchor`, which is `null`
+// for the real report because it puts all nine anchor ids on `<section>`
+// elements and has no heading id to click.
 import { expect, test } from "@playwright/test";
 import { buildHarness } from "./harness/build.mjs";
 
@@ -364,26 +382,104 @@ async function readAnchorRealm(page: Page, targetId: string) {
   }, targetId);
 }
 
-/** The two report documents this contract runs against. */
-const FIXTURES = [
+/**
+ * THE REPORT DOCUMENTS THIS CONTRACT RUNS AGAINST, and the selectors each one
+ * offers.
+ *
+ * The two SYNTHETIC fixtures differ in exactly one respect — whether the
+ * report's own stylesheet sets `scroll-behavior` — for the reason in this
+ * file's header. The third is the REAL generated report, verbatim, and it is
+ * here because ADR-0079's rule ("a fixture may be smaller than a real report,
+ * never different IN KIND") had already been broken twice by the time it was
+ * written down, and prose plus a text-scanning fidelity test (harness/
+ * fixture-fidelity.test.ts) can only ever catch declarations that are MISSING.
+ * They cannot catch a DOM that is shaped differently, content lengths that are
+ * two orders of magnitude apart, or an anchor sitting 973px down a 20,000px
+ * document rather than 1,100px down a 3,000px one. Running the same contracts
+ * over the real thing can.
+ *
+ * Every selector is per-fixture rather than hard-coded, because the real report
+ * shares none of the synthetic ids: it is a `#summary`/`#how`/`#roles` document
+ * with a nine-entry TOC, and pretending otherwise would mean quietly narrowing
+ * the second project to whatever happened to match.
+ */
+type ReportFixture = {
+  /** Path, relative to `harness/`, of the report to mount. */
+  readonly file: string;
+  readonly label: string;
+  /** Playwright tag selecting which PROJECT runs this fixture — the second
+   *  project (`real-report`) is what makes "the same specs, over a real
+   *  report" a thing CI enforces rather than a thing someone remembers. */
+  readonly tag: string;
+  /** Whether this fixture's own stylesheet sets `scroll-behavior: smooth`.
+   *  Only a smooth one can assert that the editor's injected override wins the
+   *  cascade — on the others there is nothing to override. */
+  readonly asksForSmooth: boolean;
+  /** An id on a `<section>` that is BELOW THE FOLD at rest and has enough
+   *  document below it that top-aligning it is reachable. Both are premises of
+   *  `expectAnchorRevealed`, which asserts them rather than assuming them. */
+  readonly sectionAnchor: string;
+  /** An id on a HEADING rather than a section, or `null` when the fixture has
+   *  none. The real generated report puts EVERY anchor id on a `<section>`
+   *  (all nine of them), so there is no heading-id case to run there — the
+   *  contract is therefore not registered for that fixture at all, rather than
+   *  registered-and-skipped. Heading ids stay covered by the synthetic pair. */
+  readonly headingAnchor: string | null;
+  /** An absolute external link that is ON SCREEN at rest, so it can be clicked
+   *  without first scrolling (which would perturb the state under test). */
+  readonly externalHref: string;
+  /** A prose paragraph that is ON SCREEN at rest, for the comment leg. */
+  readonly commentParagraph: string;
+};
+
+const FIXTURES: readonly ReportFixture[] = [
   {
     file: "report.html",
     label: "a report whose CSS asks for smooth scrolling",
-    /** Whether this fixture's own stylesheet sets `scroll-behavior: smooth`.
-     *  Only the smooth one can assert that the editor's injected override wins
-     *  the cascade — on the other there is nothing to override. */
+    tag: "@synthetic-fixture",
     asksForSmooth: true,
+    sectionAnchor: "deep-section",
+    headingAnchor: "section-two",
+    externalHref: "https://example.com/",
+    commentParagraph: "#filler p",
   },
   {
     file: "plain-report.html",
     label: "a report with no scroll-behavior at all (the measured production document)",
+    tag: "@synthetic-fixture",
     asksForSmooth: false,
+    sectionAnchor: "deep-section",
+    headingAnchor: "section-two",
+    externalHref: "https://example.com/",
+    commentParagraph: "#filler p",
   },
-] as const;
+  {
+    // The same 86KB document `fixture-fidelity.test.ts` scans, and the same one
+    // editor-auth.feature uploads to a real preview — so the three tiers now
+    // agree on what "a report" means.
+    file: "../../../packages/report-html/src/fixtures/ai-readiness-report.html",
+    label: "the REAL generated report, verbatim (ADR-0079 fidelity)",
+    tag: "@real-report",
+    // `html { scroll-behavior: smooth }` — this is the document that rule was
+    // copied INTO the synthetic fixture from.
+    asksForSmooth: true,
+    // 973px down a 20,828px-scrollable document, against a 647px surface: below
+    // the fold with ~20,000px of runway, and `section { scroll-margin-top: 1rem }`
+    // applies to it — which is exactly the 16px landing offset a hard-coded
+    // "top means zero" assertion would have got wrong.
+    sectionAnchor: "summary",
+    headingAnchor: null,
+    externalHref: "https://uk.linkedin.com/in/agranado2k",
+    commentParagraph: "p.sub",
+  },
+];
 
 for (const fixture of FIXTURES) {
-  test.describe(`in-page anchor links in the editor — ${fixture.label}`, () => {
+  test.describe(`in-page anchor links in the editor — ${fixture.label}`, {
+    tag: fixture.tag,
+  }, () => {
     let harnessPage: string;
+    const anchor = fixture.sectionAnchor;
 
     test.beforeAll(async () => {
       harnessPage = await buildHarness(fixture.file);
@@ -395,10 +491,11 @@ for (const fixture of FIXTURES) {
       await expect
         .poll(async () =>
           page.evaluate(
-            () =>
+            (href) =>
               (
                 document.querySelector("iframe") as HTMLIFrameElement
-              )?.contentDocument?.querySelector('a[href="#deep-section"]') !== null,
+              )?.contentDocument?.querySelector(`a[href="${href}"]`) !== null,
+            `#${anchor}`,
           ),
         )
         .toBe(true);
@@ -407,21 +504,28 @@ for (const fixture of FIXTURES) {
     test("clicking a fragment link scrolls the editing surface to that section", async ({
       page,
     }) => {
-      const before = await readEditorScroll(page, "deep-section");
+      const before = await readEditorScroll(page, anchor);
       expect(before.scrollY).toBe(0);
 
-      await clickLinkInEditor(page, "#deep-section");
+      await clickLinkInEditor(page, `#${anchor}`);
 
-      await expectAnchorRevealed(page, "deep-section", before);
+      await expectAnchorRevealed(page, anchor, before);
     });
 
-    test("an id on a heading scrolls too, not just an id on a section", async ({ page }) => {
-      const before = await readEditorScroll(page, "section-two");
+    // Registered only for fixtures that HAVE a heading id. The real generated
+    // report puts all nine of its anchor ids on `<section>` elements, so this
+    // contract has no subject there — an explicit non-registration, not a
+    // silent narrowing (the reason is on `headingAnchor` in the table above).
+    if (fixture.headingAnchor) {
+      const headingAnchor = fixture.headingAnchor;
+      test("an id on a heading scrolls too, not just an id on a section", async ({ page }) => {
+        const before = await readEditorScroll(page, headingAnchor);
 
-      await clickLinkInEditor(page, "#section-two");
+        await clickLinkInEditor(page, `#${headingAnchor}`);
 
-      await expectAnchorRevealed(page, "section-two", before);
-    });
+        await expectAnchorRevealed(page, headingAnchor, before);
+      });
+    }
 
     // THE MODELLED REGRESSION, and the word "modelled" is doing real work.
     // `armCaretReveal` installs a competitor that reveals the caret ~20ms after
@@ -436,12 +540,12 @@ for (const fixture of FIXTURES) {
     // (`anchorScrollTransaction`, packages/editor/src/editor-state.ts).
     test("the scroll survives ProseMirror's post-click caret reveal", async ({ page }) => {
       await armCaretReveal(page);
-      const before = await readEditorScroll(page, "deep-section");
+      const before = await readEditorScroll(page, anchor);
       expect(before.scrollY).toBe(0);
 
-      await clickLinkInEditor(page, "#deep-section");
+      await clickLinkInEditor(page, `#${anchor}`);
 
-      await expectAnchorRevealed(page, "deep-section", before);
+      await expectAnchorRevealed(page, anchor, before);
     });
 
     // THE ONE ASSERTION IN THIS FILE THAT IS ABOUT THE CALL RATHER THAN THE
@@ -454,23 +558,23 @@ for (const fixture of FIXTURES) {
     test("the top-alignment pass really calls scrollIntoView on the anchor", async ({ page }) => {
       await armScrollIntoViewSpy(page);
 
-      await clickLinkInEditor(page, "#deep-section");
+      await clickLinkInEditor(page, `#${anchor}`);
 
       await expect
-        .poll(async () => await readScrollIntoViewCalls(page, "section#deep-section"), {
+        .poll(async () => await readScrollIntoViewCalls(page, `section#${anchor}`), {
           timeout: ARRIVAL_MS,
         })
         .toEqual([
           {
             realm: "parent",
-            on: "section#deep-section",
+            on: `section#${anchor}`,
             args: JSON.stringify([{ behavior: "instant", block: "start" }]),
           },
         ]);
 
       // And it STAYS one call: the pass is not re-issued by a later render.
       await page.waitForTimeout(HOLD_MS);
-      expect(await readScrollIntoViewCalls(page, "section#deep-section")).toHaveLength(1);
+      expect(await readScrollIntoViewCalls(page, `section#${anchor}`)).toHaveLength(1);
     });
 
     // THE TWO CONTRACTS ROUND FIVE ADDED, and why they are contracts rather
@@ -515,12 +619,12 @@ for (const fixture of FIXTURES) {
           return 0;
         };
       });
-      const before = await readEditorScroll(page, "deep-section");
+      const before = await readEditorScroll(page, anchor);
       expect(before.scrollY).toBe(0);
 
-      await clickLinkInEditor(page, "#deep-section");
+      await clickLinkInEditor(page, `#${anchor}`);
 
-      await expectAnchorRevealed(page, "deep-section", before);
+      await expectAnchorRevealed(page, anchor, before);
     });
 
     test("the anchor jump survives a caller callback that throws mid-dispatch", async ({
@@ -537,12 +641,12 @@ for (const fixture of FIXTURES) {
         (window as unknown as { __throwOnSelectionChange: boolean }).__throwOnSelectionChange =
           true;
       });
-      const before = await readEditorScroll(page, "deep-section");
+      const before = await readEditorScroll(page, anchor);
       expect(before.scrollY).toBe(0);
 
-      await clickLinkInEditor(page, "#deep-section");
+      await clickLinkInEditor(page, `#${anchor}`);
 
-      await expectAnchorRevealed(page, "deep-section", before);
+      await expectAnchorRevealed(page, anchor, before);
     });
 
     // THE REALM FACT, PINNED, because getting it backwards cost three rounds of
@@ -555,7 +659,7 @@ for (const fixture of FIXTURES) {
     test("ProseMirror renders the report with the PARENT realm's constructors", async ({
       page,
     }) => {
-      const realm = await readAnchorRealm(page, "deep-section");
+      const realm = await readAnchorRealm(page, anchor);
 
       expect(realm.realmsAreDistinct).toBe(true);
       // The shell — parsed by the iframe itself from `srcdoc`.
@@ -617,28 +721,28 @@ for (const fixture of FIXTURES) {
         };
       });
 
-      await clickLinkInEditor(page, "https://example.com/");
+      await clickLinkInEditor(page, fixture.externalHref);
 
       await expect
         .poll(async () =>
           page.evaluate(() => (window as unknown as { __opened: string[] }).__opened),
         )
-        .toEqual(["https://example.com/"]);
+        .toEqual([fixture.externalHref]);
       // And the surface stayed put — asserted after the same hold window the
       // anchor cases use, so a late scroll would be seen rather than slept
       // through.
       await page.waitForTimeout(HOLD_MS);
-      expect((await readEditorScroll(page, "deep-section")).scrollY).toBe(0);
+      expect((await readEditorScroll(page, anchor)).scrollY).toBe(0);
     });
 
     test("Alt+click suppresses activation so the link text stays editable", async ({ page }) => {
-      const point = await linkPoint(page, "#deep-section");
+      const point = await linkPoint(page, `#${anchor}`);
       await page.keyboard.down("Alt");
       await page.mouse.click(point.x, point.y);
       await page.keyboard.up("Alt");
 
       await page.waitForTimeout(HOLD_MS);
-      expect((await readEditorScroll(page, "deep-section")).scrollY).toBe(0);
+      expect((await readEditorScroll(page, anchor)).scrollY).toBe(0);
     });
 
     // THE LAST LEG OF THE CLICK-DISPATCH MATRIX. Comment click-to-highlight
@@ -652,7 +756,7 @@ for (const fixture of FIXTURES) {
       // Make a real selection with real mouse input (a double-click selects the
       // word under the pointer), then turn it into a comment the way the route
       // does — rather than hand-computing ProseMirror positions here.
-      const paragraph = await elementBox(page, "#filler p");
+      const paragraph = await elementBox(page, fixture.commentParagraph);
       await page.mouse.dblclick(paragraph.left + 10, paragraph.y);
 
       await expect(page.getByTestId("pending-selection")).not.toHaveText("");
