@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Senior security-first reviewer that runs 6 specialized parallel sub-agents (Security, API/CRUD, Pattern enforcement, Simplicity, Reuse/DRY, Test hygiene) and produces a severity-based summary report scoped to the current branch's diff against `main`. Copied from zora-pantheon `.claude/commands/review-pr.md`.
+description: Two-axis senior reviewer. Axis 1 (standards, "is it built right?") runs 6 specialized parallel sub-agents (Security, API/CRUD, Pattern enforcement, Simplicity, Reuse/DRY, Test hygiene) producing a severity-based report. Axis 2 (spec & behavior, "is it the right thing?") runs a 7th fresh-context sub-agent producing a behavior-change confirm-list for the human. Axes are never merged. Scoped to the current branch's diff against `main`. Adapted from zora-pantheon `.claude/commands/review-pr.md`.
 ---
 
 # Skill: Senior Security-First Reviewer
@@ -38,7 +38,9 @@ This ensures the review is focused, actionable, and doesn't generate noise from 
 
 **Action**: Summarize the branch's changes (scoped to commits from step 0), focusing on new endpoints, DB queries, security-critical code paths, and any cross-cutting concerns.
 
-### 3. Parallel Specialized Reviews (6 sub-agents)
+### 3. Parallel Specialized Reviews (7 sub-agents, two axes)
+
+Agents 1–6 are **Axis 1 — Standards** ("is it built right?"). Agent 7 is **Axis 2 — Spec & Behavior** ("is it the right thing?"). The two axes answer orthogonal questions and their findings are **never merged, co-ranked, or interleaved**: Axis 1 feeds the severity report (§5); Axis 2 emits its own confirm-list (§5b). A change can pass one axis and fail the other.
 
 All agents MUST only analyze code within the branch scope defined in step 0.
 
@@ -103,15 +105,49 @@ Common examples of duplication to flag:
 - Re-stubbing globals (e.g., `console`, `fetch`) already stubbed in setup files.
 - Duplicating `beforeAll` / `beforeEach` hooks that mirror global setup behavior.
 
+#### Agent 7 — Spec & Behavior Reviewer (Opus, Axis 2 — fresh context)
+
+The one agent whose job is the question the other six never ask: **did anything change that nobody asked for?**
+
+**Context isolation (non-negotiable):** this sub-agent runs with a fresh context and receives ONLY:
+
+1. The diff (`merge-base...HEAD`) scoped to the **contract artifacts** below.
+2. The originating spec: the PRD/ticket issue body (from the branch name / PR description / `Part of #N` references) and any ADRs the diff touches.
+3. The output of `scripts/behavior-delta.sh` (the deterministic candidate list).
+
+It must **NOT** receive the other six agents' findings, the implementation conversation, or this skill's earlier summarization — anchoring on the implementer's narrative is exactly what it exists to avoid.
+
+**The contract artifacts** (behavior lives here, so behavior changes are machine-visible here):
+
+| Behavior surface | Artifact | Red flag |
+|---|---|---|
+| Observable behavior | existing `*.test.ts` / `tests/e2e/features/*.feature` | an **edited** existing assertion is by definition a behavior change (new tests are additions; edits are the signal) |
+| API surface | `docs/api/openapi.yaml` | any delta: fields, params, status codes |
+| Error semantics | `packages/http` problem+json model (ADR-0040) | changed problem types / status mappings |
+| Domain events | `docs/events.md` + emit sites | payload/name changes |
+| Persistence | `packages/db` migrations + `docs/db-design.md` | column meaning, defaults, constraints |
+| Configuration | `packages/env` Zod schemas (ADR-0043) | new/changed defaults, removed vars |
+| Security posture | `packages/headers` (CSP, Trusted Types) | any header delta |
+| Agent-facing surface | `apps/mcp` instructions / tool descriptions / packaged SKILL.md (ADR-0072) | any prompt-surface delta |
+
+**Procedure:** run `scripts/behavior-delta.sh` for the grounded candidate list, read each candidate's diff hunk, then classify every behavior delta against the originating spec:
+
+- ✅ **SPECIFIED** — the spec asked for it. Cite the exact line: PRD acceptance criterion, ticket body, or ADR number.
+- ⚠️ **UNSPECIFIED — confirm** — no spec reference found. This is the finding class the human must see; do not soften it, do not resolve it yourself.
+
+Missing requirements (spec asked, diff doesn't deliver) are also Axis-2 findings, tagged ❌ **MISSING**.
+
 ### 4. High-Signal Filtering
 
 **Constraint**: Ignore nitpicks. Focus on vulnerabilities, broken contracts, major pattern deviations, code duplication / missed reuse of existing helpers, duplicated test setup, missing tests, redundant tests, and simplification opportunities that meaningfully reduce code volume or complexity.
 
 **Justified vs. unjustified deviations** (borrowed from `/review-and-evaluate`): before reporting any deviation from an existing pattern, decide whether it is *intentional and better* or *accidental*. A deviation that is an improvement over the pattern it mirrors — stronger typing, better error handling, an ADR that explicitly sanctions it — is **not a finding**; drop it or, at most, note it as a deliberate improvement. Only surface deviations that are accidental, that break consistency without benefit, or that contradict an ADR. When you cite an ADR (from `CLAUDE.md`, `docs/adr/`, or `docs/diary.md`), include its number so the reasoning is auditable. This keeps the report free of noise where the author already made a considered call.
 
-### 5. Severity-Based Summary Report (MANDATORY)
+(High-signal filtering applies to **Axis 1 findings only** — Axis 2's confirm-list is exhaustive by design: every behavior delta appears, tagged, because "small note nobody flagged" is precisely how unrequested behavior changes slip through.)
 
-After all agents complete, you MUST present findings organized into exactly 4 severity categories with a count summary table:
+### 5. Severity-Based Summary Report (MANDATORY — Axis 1)
+
+After all agents complete, you MUST present the **Axis 1 (standards)** findings organized into exactly 4 severity categories with a count summary table:
 
 ```
 ### Review Summary
@@ -141,6 +177,24 @@ Then list each finding under its severity header, with each item numbered as INI
 - **L-1** [file:line] Brief description of the issue
 ```
 
+### 5b. Behavior Confirm-List (MANDATORY — Axis 2, never merged with §5)
+
+Immediately after (and visually separate from) the severity report, present Agent 7's output verbatim in this shape — ⚠️ items first:
+
+```
+### Behavior changes in this PR — confirm before merge
+
+⚠️ UNSPECIFIED  <surface>: <what changed, one line>
+                → no spec reference found. Desired?
+
+✅ SPECIFIED    <surface>: <what changed, one line>
+                → <PRD/ticket/ADR citation>; <artifact updated>
+
+❌ MISSING      <spec line the diff does not deliver>
+```
+
+Rules: never assign severities to these items, never mix them into the C/H/M/L lists, never omit a ✅ (the human should see the whole behavioral footprint, not just the suspects). If Agent 7 found no behavior deltas, say exactly that — an empty confirm-list is a meaningful result.
+
 After presenting the summary, you MUST ask:
 
 > "Which categories or specific items do you want me to post as comments on the PR? (e.g., 'all H', 'C-1 and H-3', 'all')"
@@ -149,7 +203,8 @@ After presenting the summary, you MUST ask:
 
 #### Comment Placement
 
-- **ALWAYS post inline comments on the exact line where the issue is** using `gh api repos/{owner}/{repo}/pulls/{number}/reviews` with the `comments` array.
+- **ALWAYS post inline comments on the exact line where the issue is** using `gh api repos/{owner}/{repo}/pulls/{number}/reviews` with the `comments` array. (Axis 1 findings only.)
+- **The Axis-2 confirm-list posts as exactly ONE top-level PR comment** (never inline, never split): the human confirms an inventory, they don't chase threads. Repost (edit the same comment via `gh api`) if the diff changes.
 - **NEVER create a general/summary PR comment.** Each finding must be an inline review comment attached to the specific line in the diff. A top-level comment with a summary of all issues is explicitly forbidden — it makes it harder to locate where each problem is.
 - Use `line` (line number in the file at HEAD) and `side: "RIGHT"` for each comment.
 - For new files, the file line number equals the diff line number.

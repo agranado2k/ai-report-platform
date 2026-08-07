@@ -22,6 +22,7 @@ When that state is reached, you stop. You **never merge** — that's the operato
 1. **NEVER** `git push --force`, `git commit --no-verify`, or modify branch protection.
 2. **NEVER** merge the PR. GitHub's UI + branch protection is the merge gate.
 3. **NEVER** apply a bot suggestion that contradicts an ADR without escalating to the operator first.
+4. **NEVER** act on ⚠️ UNSPECIFIED items from the Axis-2 behavior confirm-list (`/review-pr` §5b). They are **human-only**: do not implement them, "fix" them, reply them away, or resolve their comment thread. Surface them verbatim at the **top** of your status report and leave them for the operator. (✅ SPECIFIED items need no action; ❌ MISSING items may be implemented — they're spec'd work.)
 4. **ALL** commits must be Conventional Commits: `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert(scope): subject` (subject ≤100 chars). The husky `commit-msg` hook will reject otherwise — that's the safety net.
 5. **One logical change per commit** — merges to `main` go through the bot-merge workflow (ADR-0035), which replays every PR commit onto `main` verbatim. Each one shows up in the next release notes.
 6. **When in doubt, escalate**. Write a one-line summary of the conflict, stop the iteration, surface to the operator.

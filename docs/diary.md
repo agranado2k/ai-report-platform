@@ -5340,3 +5340,31 @@ resolve — the docs gate now covers its own additions.
 **Process**: worktree `worktree/sdlc-phase2-workflow` (branch `chore/sdlc-phase2-workflow`),
 stacked on `chore/sdlc-phase1-hygiene` (shared CLAUDE.md/diary edits; PR retargets to main
 when Phase 1 merges). Skills are markdown — no vitest surface; the docs gate is the test.
+
+### 2026-08-07 — AI-SDLC plan, Phase 3: two-axis /review-pr (behavior confirm-list)
+
+The answer to "review-pr adds many notes — how do we surface behavior changes for the
+engineer to confirm?". Diagnosis from the analysis report: all six review sub-agents
+answer the STANDARDS question ("is it built right?"); none asks the SPEC question ("is it
+the right thing — and did anything change that nobody asked for?"), so an unrequested
+behavior change arrives ranked alongside style notes.
+
+- **Agent 7 — Spec & Behavior Reviewer** added to `.claude/skills/review-pr/` (one skill,
+  seventh sub-agent — merged per the report-comment decision, not a sibling skill). Fresh
+  context, receives ONLY the contract-artifact diff + originating PRD/ticket/ADRs + the
+  deterministic candidate list; never the other agents' findings or implementation
+  history. Classifies every behavior delta ✅ SPECIFIED (with citation) / ⚠️ UNSPECIFIED —
+  confirm / ❌ MISSING. Output is §5b, a confirm-list that is never merged or co-ranked
+  with the severity report, posted as exactly ONE top-level PR comment.
+- **`scripts/behavior-delta.sh`** — grounded candidates, not vibes: edited (not added)
+  existing tests/features, plus any delta in openapi.yaml, packages/http (ADR-0040),
+  docs/events.md, packages/db + db-design, packages/env (ADR-0043), packages/headers,
+  and the apps/mcp prompt surfaces (ADR-0072). Verified against this branch (empty — no
+  contract deltas, correctly) and a 20-commit-old base (full sectioned inventory).
+- **`/pr-iterate` hard rule 4**: ⚠️ UNSPECIFIED items are human-only — never implemented,
+  replied away, or resolved by the agent; surfaced verbatim at the top of the status
+  report. ✅ items need no action; ❌ MISSING items are spec'd work and may be implemented.
+
+**Process**: worktree `worktree/sdlc-phase3-review` (branch `chore/sdlc-phase3-review`),
+stacked on `chore/sdlc-phase2-workflow`. Skill/script changes — the docs gate + manual
+script runs are the verification tier.
