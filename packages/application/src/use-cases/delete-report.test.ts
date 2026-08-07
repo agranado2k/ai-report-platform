@@ -118,3 +118,23 @@ describe("deleteReport idempotency (ADR-0039)", () => {
     expect(deps.audit.recorded().length).toBe(1);
   });
 });
+
+// ── #233 acceptance: the pre-emptive burn ──────────────────────────────────
+describe("deleteReport — a pre-emptive delete must not burn the key (#233)", () => {
+  it("a delete fired before the report is re-created does not swallow the real one", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report(orgA, "ffffffffff"));
+    const target = { slug: slug("ffffffffff") };
+
+    // 1. Arm: a real delete records a key for this exact payload.
+    expect((await deleteReport(deps, ownerActor, target)).ok).toBe(true);
+    // 2. The slug is live again (re-uploaded, or restored out-of-band).
+    await deps.reports.save(report(orgA, "ffffffffff"));
+    // 3. The real delete. A derived-key replay would answer 204 and leave it.
+    const real = await deleteReport(deps, ownerActor, target);
+
+    expect(real.ok, "the second delete must actually run, not replay").toBe(true);
+    const after = await deps.reports.findBySlug(slug("ffffffffff"));
+    expect(after.ok && after.value?.deletedAt, "the report must really be gone").not.toBeNull();
+  });
+});

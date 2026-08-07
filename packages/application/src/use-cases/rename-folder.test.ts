@@ -184,3 +184,23 @@ describe("renameFolder idempotency (ADR-0039)", () => {
     expect(deps.audit.recorded().length).toBe(2);
   });
 });
+
+// ── #233 acceptance: the round-trip, not the audit count ───────────────────
+describe("renameFolder — A -> B -> A must land on A (#233)", () => {
+  it("re-applying the original name actually re-persists it", async () => {
+    const { folders, ...rest } = await setup();
+    const deps = { folders, ...rest };
+    const actor = { orgId: orgA, userId: actorA };
+    const at = (name: string) => renameFolder(deps, actor, { folderId: folderId(F1), name });
+
+    expect((await at("A")).ok).toBe(true);
+    expect((await at("B")).ok).toBe(true);
+    const back = await at("A");
+
+    expect(back.ok && back.value.name).toBe("A");
+    const stored = await folders.findById(folderId(F1));
+    expect(stored.ok && stored.value?.name, "the PERSISTED name must be the last one set").toBe(
+      "A",
+    );
+  });
+});

@@ -142,3 +142,29 @@ describe("renameReport idempotency (ADR-0039)", () => {
     expect(!r.ok && r.error.kind).toBe("IdempotencyInFlight");
   });
 });
+
+// ── #233 acceptance: the round-trip, not the audit count ───────────────────
+//
+// The keyless-retry test above asserts an audit-row COUNT — a proxy for "the
+// write ran again", not for "the end state is what the last call asked for".
+// Those come apart exactly when the fix regresses, which is how #233 survived
+// its own test suite. Assert the PERSISTED aggregate.
+describe("renameReport — A -> B -> A must land on A (#233)", () => {
+  it("re-applying the original title actually re-persists it", async () => {
+    const reports = new InMemoryReportRepository();
+    await reports.save(report(orgA, "ffffffffff"));
+    const deps = { reports, ...writeDeps() };
+    const at = (title: string) =>
+      renameReport(deps, ownerActor, { slug: slug("ffffffffff"), title });
+
+    expect((await at("A")).ok).toBe(true);
+    expect((await at("B")).ok).toBe(true);
+    const back = await at("A");
+
+    expect(back.ok && back.value.title).toBe("A");
+    const stored = await reports.findBySlug(slug("ffffffffff"));
+    expect(stored.ok && stored.value?.title, "the PERSISTED title must be the last one set").toBe(
+      "A",
+    );
+  });
+});

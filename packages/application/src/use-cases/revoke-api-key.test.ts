@@ -96,3 +96,40 @@ describe("revokeApiKey idempotency (ADR-0039)", () => {
     expect(deps.audit.recorded().length).toBe(2);
   });
 });
+
+// ── #233 acceptance: no STALE replay ───────────────────────────────────────
+//
+// revokeApiKey has no inverse either (a revoked key is never un-revoked), so
+// the round-trip is expressed the same way as resolveComment: a keyless retry
+// must reflect the store NOW, not a snapshot the first call recorded. Under the
+// derived-key fallback the second revoke never executed, so a key revoked out
+// of band and re-issued could be reported revoked while it was live.
+describe("revokeApiKey — a keyless retry must reach the store again (#233)", () => {
+  it("really executes the second revoke instead of replaying the first", async () => {
+    const deps = makeDeps();
+    const created = await deps.apiKeys.create({
+      actingUserId: alice,
+      issuedInOrgId: orgA,
+      name: "k",
+      scopes: ["reports:write"],
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const input = { id: created.value.summary.id };
+
+    // A revoked key is already revoked after call 1, so asserting the END STATE
+    // passes whether or not the retry ran — an earlier version of this test did
+    // exactly that and was a tautology. Count the store interaction instead:
+    // that is the thing a derived-key replay skips.
+    let revocations = 0;
+    const revoke = deps.apiKeys.revoke.bind(deps.apiKeys);
+    deps.apiKeys.revoke = async (...args: Parameters<typeof revoke>) => {
+      revocations += 1;
+      return revoke(...args);
+    };
+
+    expect((await revokeApiKey(deps, { userId: alice, orgId: orgA }, input)).ok).toBe(true);
+    expect((await revokeApiKey(deps, { userId: alice, orgId: orgA }, input)).ok).toBe(true);
+
+    expect(revocations, "a replayed response would never reach the store twice").toBe(2);
+  });
+});

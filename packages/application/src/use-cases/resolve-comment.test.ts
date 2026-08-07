@@ -25,6 +25,7 @@ import {
   SequentialIdGenerator,
 } from "../testing/in-memory";
 import { addComment } from "./add-comment";
+import { editComment } from "./edit-comment";
 import { resolveComment } from "./resolve-comment";
 
 const orgA = orgId("00000000-0000-7000-8000-0000000000a1");
@@ -273,5 +274,38 @@ describe("resolveComment idempotency (ADR-0039)", () => {
     // re-applying. The retry now really runs — same end state, one more
     // audit row. An explicit Idempotency-Key still claims and replays.
     expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 2);
+  });
+});
+
+// ── #233 acceptance: no STALE replay ───────────────────────────────────────
+//
+// resolveComment has no inverse — there is no `unresolveComment` — so A -> B -> A
+// does not exist for it. The equivalent property is that a keyless retry returns
+// the CURRENT comment rather than a snapshot recorded by the first call: under
+// the derived-key fallback the retry replayed a body captured BEFORE any later
+// edit, so the caller was handed stale content while the store held something
+// else. That is the same defect wearing a different shape.
+describe("resolveComment — a keyless retry must not replay a stale snapshot (#233)", () => {
+  it("returns the comment as it is NOW, not as it was at the first resolve", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("kkkkkkkkkk"));
+    const created = await addComment(deps, ownerActor, {
+      slug: slug("kkkkkkkkkk"),
+      body: "note",
+      anchor,
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const input = { slug: slug("kkkkkkkkkk"), commentId: created.value.id };
+
+    expect((await resolveComment(deps, ownerActor, input)).ok).toBe(true);
+    // The comment changes AFTER the first resolve recorded its response.
+    const edited = await editComment(deps, ownerActor, { ...input, body: "edited after resolve" });
+    expect(edited.ok).toBe(true);
+
+    const retry = await resolveComment(deps, ownerActor, input);
+
+    expect(retry.ok && retry.value.body, "a replayed snapshot would still say 'note'").toBe(
+      "edited after resolve",
+    );
   });
 });
