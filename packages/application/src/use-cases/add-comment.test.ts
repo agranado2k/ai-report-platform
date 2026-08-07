@@ -158,7 +158,10 @@ describe("addComment use case", () => {
 });
 
 describe("addComment idempotency (ADR-0039)", () => {
-  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
+  // This use case is classified `sound`: the payload identifies the REQUEST,
+  // so a retry is a duplicate and replaying it is the guarantee. #233 removed
+  // the derived fallback only where it identifies desired STATE.
+  it("REPLAYS an identical keyless retry — posting twice must not post twice (#233: sound)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report(orgA, "iiiiiiiiii"));
     const input = { slug: slug("iiiiiiiiii"), body: "same note", anchor };

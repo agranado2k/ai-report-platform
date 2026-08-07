@@ -44,7 +44,6 @@ import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type {
   AuditLogger,
   GrantStore,
-  IdempotencyKeyRef,
   OrgWriteGrantStore,
   ReportRepository,
   UnitOfWork,

@@ -342,3 +342,32 @@ function slugOrThrow() {
   if (!r.ok) throw new Error("bad slug");
   return r.value;
 }
+
+// ── THE EXPLOIT, executed (issue #233 / GHSA-ghxh-82j4-pp6m) ───────────────
+//
+// The advisory's other named shape: "org -> private -> org leaves the report
+// private". The rewritten idempotency test above asserts an audit-row COUNT,
+// which is a proxy for "the write re-ran" — not for "the report's sharing mode
+// is what the caller last asked for". Those come apart precisely when the fix
+// regresses, so assert the STATE.
+describe("setAcl — A -> B -> A must land on A (#233)", () => {
+  it("re-applying the original mode actually re-applies it", async () => {
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
+    const at = (mode: "org" | "private") => setAcl(deps, ACTOR, { slug: slugOrThrow(), mode });
+
+    expect((await at("org")).ok).toBe(true);
+    expect((await at("private")).ok).toBe(true);
+    const back = await at("org");
+
+    // Under the derived-key fallback this third call replayed the FIRST
+    // response: the API answered `org` while the stored report stayed
+    // `private`. Assert the persisted aggregate, not the returned body.
+    expect(back.ok && back.value.acl.mode).toBe("org");
+    const stored = await reports.findBySlug(slugOrThrow());
+    expect(
+      stored.ok && stored.value?.acl.mode,
+      "the PERSISTED acl must match the last call, not the first",
+    ).toBe("org");
+  });
+});

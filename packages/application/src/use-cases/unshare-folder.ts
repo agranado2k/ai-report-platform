@@ -17,7 +17,7 @@ import {
 } from "arp-domain";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "DELETE /api/v1/folders/{id}/shares/{email}";
 

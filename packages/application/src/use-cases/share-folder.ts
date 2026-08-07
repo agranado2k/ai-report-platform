@@ -32,7 +32,6 @@ import type {
   AuditLogger,
   FolderRepository,
   FolderShare,
-  IdempotencyKeyRef,
   IdentityStore,
   UnitOfWork,
 } from "../ports";

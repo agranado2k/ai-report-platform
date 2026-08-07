@@ -1339,16 +1339,31 @@ components:
       required: false
       schema: { type: string }
       description: >
-        Optional idempotency key (ADR-0039, IETF/Stripe style) — honored on
-        EVERY mutating endpoint. If absent, the server derives one from
-        acting_user_id + method + route + a canonical payload fingerprint (for
-        upload: content_hash + target). A match replays the stored response
-        without re-executing; an explicit key reused with a different body →
-        422; a concurrent in-flight retry → 409. Keys live 24h. To deliberately
-        re-apply an identical request within that window, send a fresh explicit
-        key. One carve-out: a password-mode acl set WITHOUT an explicit key
-        skips the derived fallback (the key must never be a function of the
-        plaintext password); send an explicit key to opt in.
+        Optional idempotency key (ADR-0039, IETF/Stripe style) — honored on EVERY
+        mutating endpoint. An explicit key replays the stored response without
+        re-executing; reused with a different body → 422; a concurrent in-flight
+        retry → 409. Keys live 24h; past that the key is free again, so an
+        expired key reused with a different body proceeds rather than 422ing.
+        To deliberately re-apply an identical request inside the window, send a
+        fresh explicit key.
+
+
+        WITHOUT a key the server derives one — but ONLY for operations where
+        the payload identifies the REQUEST rather than the desired STATE
+        (ADR-0039 amendment 2026-08-07, issue #233). Creating a comment, a reply
+        or a folder derives a key, so an unkeyed retry cannot duplicate them.
+        Every other mutating operation — rename, move, set-acl, grant-write,
+        revoke-write, share/unshare, set-visibility, edit/resolve comment, all
+        deletes, and api-key create/revoke — derives NO key, because a derived
+        key there replays the first response and never re-applies (A → B → A
+        would land on B), and a delete-shaped key can be burned before the fact.
+
+
+        CONSEQUENCE for unkeyed retries of those operations: they RE-EXECUTE.
+        A repeated rename/move/set-acl is idempotent in effect but writes a
+        second audit row; a repeated DELETE returns 404 (already gone) rather
+        than a replayed 204; a repeated api-key create mints a second key.
+        Send an Idempotency-Key to get exactly-once retry semantics.
     Limit:
       name: limit
       in: query

@@ -127,3 +127,40 @@ function makeSlugOrThrow() {
   if (!r.ok) throw new Error("bad slug");
   return r.value;
 }
+
+// ── THE EXPLOIT, executed (issue #233 / GHSA-ghxh-82j4-pp6m) ───────────────
+//
+// This is the scenario the advisory names, and until this test existed nothing
+// in the suite ran it. The rewritten idempotency test above asserts an
+// audit-row COUNT, which is a proxy for "the write re-ran" — not for "the
+// grantee actually lost write access". Those come apart exactly when the fix
+// regresses, so the count alone would not have caught a re-introduction.
+describe("revokeWrite — a pre-emptive revoke must not burn the key (#233)", () => {
+  it("a revoke fired BEFORE the grant exists does not swallow the real revoke", async () => {
+    const { reports, grants, audit, uow } = await seed();
+    const deps = { reports, grants, audit, uow, ...idempotencyTestDeps() };
+    const target = { slug: revokeSlug(), email: "victim@x.com" };
+
+    // 1. Arm: revoke an email that has no grant yet. Under the derived-key
+    //    fallback this CLAIMS and COMPLETES a key for (user, route, payload).
+    await revokeWrite(deps, ACTOR, target);
+    // 2. The grant is created.
+    await grants.grant(REPORT_ID, "victim@x.com", OWNER, null);
+    // 3. The real revoke. With the fallback this REPLAYED step 1's 204 and
+    //    never executed — the grantee kept write access.
+    const real = await revokeWrite(deps, ACTOR, target);
+
+    expect(real.ok).toBe(true);
+    const remaining = await grants.listByReport(REPORT_ID);
+    expect(
+      remaining.ok && remaining.value.map((g) => g.granteeEmail),
+      "the grantee must NOT still hold write access",
+    ).not.toContain("victim@x.com");
+  });
+});
+
+function revokeSlug() {
+  const r = makeSlug(SLUG);
+  if (!r.ok) throw new Error("bad slug");
+  return r.value;
+}

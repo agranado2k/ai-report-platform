@@ -26,7 +26,7 @@ import {
   reviveFolderReplay,
 } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "POST /api/v1/folders/{id}/visibility";
 

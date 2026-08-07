@@ -74,6 +74,15 @@ The flag names what it **controls**, not one rationale for it — `create-api-ke
 
 **Defect 2 — the 24h window was fiction.** No sweep and no predicate enforced it; a record replayed forever, which is what turned defect 1 from a 24h annoyance into a permanent one. Expiry is now enforced at CLAIM time, and an expired record is **reclaimed in place** rather than hidden: filtering it out of the lookup would answer `in_flight`/`409` forever, a worse failure than the staleness it fixes. The reclaiming UPDATE is conditioned on the row still being stale, so a concurrent reclaim falls through to the conservative `in_flight`. Rows still accumulate — a purge job remains an operational follow-up, but its absence is now a storage cost rather than a correctness one.
 
+### Consequences of the amendment, stated explicitly
+
+Four follow-on effects, recorded because a review found each of them undocumented rather than because any is a surprise:
+
+- **Duplicate audit rows.** A keyless retry of any `unsound` operation now re-executes, so one logical action can write N `acl.set` / `grant.write.granted` / `comment.resolved` rows after an ordinary network retry. `resolve-comment` is the sharpest case: the domain transition is a genuine no-op on an already-resolved comment, but the use case audits unconditionally, so the row records a resolution that did nothing. That is a reporting-fidelity cost of the fix, accepted.
+- **An expired key reused with a different body now proceeds instead of `422`.** Past the 24h window the key is genuinely free, so `IdempotencyKeyReuseDifferentBody` no longer applies. This is a wire-contract change on a documented status code; `openapi.yaml` states it.
+- **The reclaim is a destructive write outside the caller's transaction.** `beginIdempotentWrite` runs before `uow.run`, so the reclaiming `UPDATE` autocommits and nulls the expired response before the replacement mutation is known to succeed. If that request then fails, the row is left `in_flight` with a fresh `createdAt` and the key answers `409` for another window. This is the same shape as the pre-existing "claim then crash" case this ADR already documents, and the record it discards was already expired and unusable — but it is a real failure mode and it is not crash-consistent in the way the mutation/record pair is.
+- **The primary client sends no key.** `apps/mcp/src/client.ts` sets only `accept`, `authorization` and `content-type` on every request — `uploadReport` documents that omission deliberately. So the mitigation "clients wanting exactly-once retry send an `Idempotency-Key`" does **not** currently apply to the agent-driven client ADR-0039 was written for. Concretely, via MCP: the 17 `unsound` operations have no retry protection, the six delete-shaped ones surface a `404` to the agent for a call that actually succeeded, and a retried `create-api-key` mints a second credential. Threading a key through the MCP client is the obvious follow-up and is **not** in this change.
+
 ## Considered options
 
 1. **`Idempotency-Key` header + derived fallback + Postgres tx-bound** *(chosen)*.

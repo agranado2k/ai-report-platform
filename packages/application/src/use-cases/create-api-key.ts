@@ -22,13 +22,7 @@ import {
   validationError,
 } from "arp-domain";
 import { beginIdempotentWrite, type IdempotentWriteDeps, reviveReplay } from "../idempotent-write";
-import type {
-  ApiKeyStore,
-  ApiKeySummary,
-  AuditLogger,
-  IdempotencyKeyRef,
-  UnitOfWork,
-} from "../ports";
+import type { ApiKeyStore, ApiKeySummary, AuditLogger, UnitOfWork } from "../ports";
 
 /** The Scope a key is minted with when the caller doesn't pick (ADR-0016). */
 const DEFAULT_SCOPES: readonly Scope[] = [REPORTS_WRITE_SCOPE];
