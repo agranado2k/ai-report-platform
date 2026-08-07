@@ -7,6 +7,7 @@
 // them as a structured `Problem` so a tool can render an actionable message to the
 // model. Injectable `fetch` keeps this unit-testable without a live API.
 
+import { randomUUID } from "node:crypto";
 import type {
   AclSharingWire,
   AclWire,
@@ -65,6 +66,13 @@ function appendCursor(qs: URLSearchParams, p: CursorParams): void {
   if (p.startingAfter) qs.set("starting_after", p.startingAfter);
   if (p.endingBefore) qs.set("ending_before", p.endingBefore);
 }
+
+/** Bounded: two retries after the first try. Enough to ride out a redeploy or a
+ *  dropped connection; small enough that a genuinely down API fails fast. */
+const MAX_ATTEMPTS = 3;
+/** Transients only — never a 4xx. 408 request-timeout, 429 too-many-requests,
+ *  and the 5xx a rolling deploy produces. */
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 export class ApiClient {
   constructor(private readonly cfg: ApiClientConfig) {}
@@ -392,6 +400,21 @@ export class ApiClient {
     const headers: Record<string, string> = { accept: "application/json" };
     if (this.cfg.authorization) headers.authorization = this.cfg.authorization;
 
+    // ADR-0039 + its 2026-08-07 amendment (issue #233). The server no longer
+    // DERIVES a key for state-setting writes — a key derived from the payload
+    // replays A -> B -> A and lets a pre-emptive delete burn the real one — so
+    // the only exactly-once retry semantics available are the ones a client
+    // asks for. This client previously asked for none, which meant a retried
+    // DELETE returned 404 for a call that had succeeded.
+    //
+    // Minted ONCE, here, and reused by every attempt below. It identifies this
+    // ATTEMPT, not the payload: two genuinely separate calls with identical
+    // bodies get different keys, which is exactly the property that makes this
+    // safe rather than a client-side reconstruction of the removed bug.
+    if (method !== "GET" && method !== "HEAD") {
+      headers["idempotency-key"] = randomUUID();
+    }
+
     let payload: BodyInit | undefined;
     if (body?.json !== undefined) {
       headers["content-type"] = "application/json";
@@ -401,16 +424,32 @@ export class ApiClient {
       payload = body.form;
     }
 
-    let res: Response;
-    try {
-      res = await doFetch(`${this.cfg.baseUrl}${path}`, { method, headers, body: payload });
-    } catch (e) {
-      return {
-        ok: false,
-        problem: { title: "Network error reaching the API", status: 502, detail: String(e) },
-      };
+    // A FormData body is a one-shot stream in some runtimes, so replaying it is
+    // not guaranteed safe — uploads keep the old single-attempt behaviour.
+    const attempts = body?.form ? 1 : MAX_ATTEMPTS;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const res = await doFetch(`${this.cfg.baseUrl}${path}`, { method, headers, body: payload });
+        // Retry only what a retry can fix: transport-level and server-side
+        // transients. A 4xx is the caller's request being wrong, and repeating
+        // it just burns the key.
+        if (!RETRYABLE_STATUS.has(res.status) || attempt === attempts) return this.parse<T>(res);
+      } catch (e) {
+        lastError = e;
+        if (attempt === attempts) break;
+      }
     }
-    return this.parse<T>(res);
+
+    return {
+      ok: false,
+      problem: {
+        title: "Network error reaching the API",
+        status: 502,
+        detail: String(lastError ?? "request failed after retries"),
+      },
+    };
   }
 
   private async parse<T>(res: Response): Promise<ApiResult<T>> {

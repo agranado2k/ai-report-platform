@@ -136,5 +136,42 @@ describe("DrizzleIdempotencyStore (pglite integration)", () => {
       const r = await store.begin(ref(), "fp2-different");
       expect(r.ok && r.value.outcome).toBe("proceed");
     });
+
+    it("purges records past the window, bounded by the limit", async () => {
+      await store.begin(ref(), "fp1");
+      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+      await ageRow(25);
+
+      const purged = await store.purgeExpired(new Date(Date.now() - 24 * 60 * 60 * 1000), 500);
+
+      expect(purged.ok && purged.value).toBe(1);
+      // Gone, so the key claims fresh rather than replaying.
+      const after = await store.begin(ref(), "fp1");
+      expect(after.ok && after.value.outcome).toBe("proceed");
+    });
+
+    it("leaves records INSIDE the window alone", async () => {
+      await store.begin(ref(), "fp1");
+      await store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+      await ageRow(23);
+
+      const purged = await store.purgeExpired(new Date(Date.now() - 24 * 60 * 60 * 1000), 500);
+
+      expect(purged.ok && purged.value).toBe(0);
+      const after = await store.begin(ref(), "fp1");
+      expect(after.ok && after.value.outcome).toBe("replay");
+    });
+
+    it("honours the limit so one tick cannot run long", async () => {
+      for (const k of ["a", "b", "c"]) {
+        const r = { ...ref(), key: `key-${k}` };
+        await store.begin(r, "fp1");
+      }
+      await ageRow(25);
+
+      const purged = await store.purgeExpired(new Date(Date.now() - 24 * 60 * 60 * 1000), 2);
+
+      expect(purged.ok && purged.value).toBe(2);
+    });
   });
 });

@@ -479,6 +479,10 @@ interface IdemEntry {
   readonly fingerprint: string;
   readonly state: "in_flight" | "completed";
   readonly record?: IdempotencyRecord;
+  /** When the key was claimed — only `purgeExpired` reads it. Stamped from the
+   *  wall clock because this fake has no injected one; a test controls the
+   *  sweep by choosing `olderThan`, not by moving time. */
+  readonly createdAt: Date;
 }
 
 export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottable {
@@ -491,7 +495,7 @@ export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottab
     const k = idemKey(ref);
     const existing = this.entries.get(k);
     if (!existing) {
-      this.entries.set(k, { fingerprint, state: "in_flight" });
+      this.entries.set(k, { fingerprint, state: "in_flight", createdAt: new Date() });
       return ok({ outcome: "proceed" });
     }
     if (existing.fingerprint !== fingerprint) {
@@ -519,6 +523,18 @@ export class InMemoryIdempotencyStore implements IdempotencyStore, TxSnapshottab
     }
     this.entries.set(k, { ...existing, state: "completed", record });
     return ok(undefined);
+  }
+
+  async purgeExpired(olderThan: Date, limit: number): Promise<Result<number, AppError>> {
+    let purged = 0;
+    for (const [k, e] of this.entries) {
+      if (purged >= limit) break;
+      if (e.createdAt <= olderThan) {
+        this.entries.delete(k);
+        purged++;
+      }
+    }
+    return ok(purged);
   }
 
   snapshot(): unknown {

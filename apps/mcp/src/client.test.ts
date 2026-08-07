@@ -539,3 +539,103 @@ describe("ApiClient comments", () => {
     if (!r.ok) expect(r.problem.code).toBe("forbidden");
   });
 });
+
+// ── Idempotency-Key + transport retry (issue #233 follow-up) ───────────────
+//
+// ADR-0039's amendment removed the server-side DERIVED key for state-setting
+// writes, because a key derived from the payload replays A -> B -> A. The
+// mitigation it names is "clients wanting exactly-once retry semantics send an
+// Idempotency-Key" — but this client sent none at all, so via MCP a retried
+// DELETE surfaced 404 for a call that had actually succeeded, and a retried
+// api-key create minted a second credential.
+//
+// The key must identify an ATTEMPT, never the payload: deriving it from the
+// body here would re-create the exact bug #233 fixed. So it is minted once per
+// logical call and REUSED across transport retries of that same call — which
+// is what makes the retry safe rather than merely repeated.
+describe("ApiClient — idempotency", () => {
+  const retryable = new Response("", { status: 503 });
+
+  /** A stub that fails `failures` times, then succeeds. */
+  function flaky(failures: number, ok: Response) {
+    const calls: { headers: Record<string, string>; method: string }[] = [];
+    let n = 0;
+    const fn = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        headers: (init?.headers ?? {}) as Record<string, string>,
+        method: init?.method ?? "GET",
+      });
+      n += 1;
+      // Clone BOTH: a Response body is single-use, so returning the same
+      // object twice fails on the second read — a defect in the stub, not
+      // in the client under test.
+      return n <= failures ? retryable.clone() : ok.clone();
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  }
+
+  const client = (fetchImpl: typeof fetch) =>
+    new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer x",
+      fetch: fetchImpl,
+    });
+
+  it("sends an Idempotency-Key on a mutating request", async () => {
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls[0]?.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("does NOT send one on a read", async () => {
+    const { fn, calls } = flaky(0, json({ object: "list", data: [], has_more: false }));
+
+    await client(fn).searchReports({ limit: 1 });
+
+    expect(calls[0]?.headers["idempotency-key"]).toBeUndefined();
+  });
+
+  it("REUSES the same key across transport retries — the whole point", async () => {
+    const { fn, calls } = flaky(1, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.headers["idempotency-key"]).toBe(calls[1]?.headers["idempotency-key"]);
+  });
+
+  it("mints a DIFFERENT key for a genuinely new call", async () => {
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+    const c = client(fn);
+
+    await c.deleteReport("aaaaaaaaaa");
+    await c.deleteReport("aaaaaaaaaa");
+
+    // Same payload, same route — a payload-derived key would collide here and
+    // make the second call a no-op replay. That is #233 in miniature.
+    expect(calls[0]?.headers["idempotency-key"]).not.toBe(calls[1]?.headers["idempotency-key"]);
+  });
+
+  it("gives up after the bounded number of attempts", async () => {
+    const { fn, calls } = flaky(99, json({}));
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(r.ok).toBe(false);
+    expect(calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it("does not retry a 4xx — it is the caller's request that is wrong", async () => {
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Not found" }, 404);
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(1);
+  });
+});

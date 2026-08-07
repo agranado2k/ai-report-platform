@@ -24,7 +24,7 @@ import type {
 } from "arp-application";
 import { idempotencyKeys } from "arp-db/schema";
 import { type AppError, ok, type Result } from "arp-domain";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import type { DbContext } from "./client";
 
 /** ADR-0039's stated window. A record older than this is treated as absent. */
@@ -109,6 +109,35 @@ export class DrizzleIdempotencyStore implements IdempotencyStore {
       return ok({ outcome: "in_flight" });
     } catch (e) {
       return thrown("idempotency.begin", e);
+    }
+  }
+
+  /**
+   * Retention sweep. Bounded by `limit` so a tick stays well inside the
+   * caller's timeout, and safe to run concurrently — the DELETE takes row
+   * locks and a row deleted by another tick simply is not returned twice.
+   *
+   * Deliberately NOT load-bearing: `begin` already reclaims an expired row, so
+   * correctness never waits on this having run. ADR-0039 once described a
+   * 24h window enforced by a sweep that did not exist, and the records
+   * therefore replayed forever (issue #233) — the lesson recorded there is
+   * that expiry belongs at the read, and a purge is only housekeeping.
+   */
+  async purgeExpired(olderThan: Date, limit: number): Promise<Result<number, AppError>> {
+    try {
+      const db = this.ctx.current();
+      const doomed = db
+        .select({ key: idempotencyKeys.key })
+        .from(idempotencyKeys)
+        .where(lte(idempotencyKeys.createdAt, olderThan))
+        .limit(limit);
+      const deleted = await db
+        .delete(idempotencyKeys)
+        .where(inArray(idempotencyKeys.key, doomed))
+        .returning({ key: idempotencyKeys.key });
+      return ok(deleted.length);
+    } catch (e) {
+      return thrown("idempotency.purgeExpired", e);
     }
   }
 
