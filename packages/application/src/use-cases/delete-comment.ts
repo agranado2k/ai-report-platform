@@ -20,6 +20,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadReadableReport, type TenancyActor, type WriteGrantCheckDeps } from "../load-owned";
 import type { AuditLogger, CommentRepository, ReportRepository, UnitOfWork } from "../ports";
@@ -79,24 +80,25 @@ export async function deleteComment(
 
   const reportId = report.value.id;
   const targetCommentId = input.commentId;
-  return deps.uow.run(async () => {
-    const deleted = await deps.comments.delete(targetCommentId);
-    if (!deleted.ok) return deleted;
-    const audited = await deps.audit.record([
-      {
-        action: "comment.deleted",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "comment",
-        targetId: targetCommentId,
-        meta: { reportId },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "comment.deleted",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "comment",
+          targetId: targetCommentId,
+          meta: { reportId },
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const deleted = await deps.comments.delete(targetCommentId);
+      return deleted.ok ? ok(undefined) : deleted;
+    },
+  );
 }
