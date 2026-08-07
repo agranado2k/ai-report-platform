@@ -43,6 +43,15 @@ export default defineConfig({
       // in the fast gate. Playwright only collects `*.spec.ts` from that
       // directory, so the two never overlap.
       "tests/browser/**/*.test.ts",
+      // The e2e SUPPORT layer's own guards. These are the helpers the Gherkin
+      // steps lean on, and their edge cases (redirect loops, cookie carry-over
+      // across origins, …) are pure enough to pin here rather than discovering
+      // them on a preview. They take structural seams instead of importing
+      // Playwright's runtime, so this stays a node-tier suite. Playwright's
+      // `setup` project only collects `clerk-auth.setup.ts` from this directory
+      // and playwright-bdd only collects `*.steps.ts`, so the tiers never
+      // overlap.
+      "tests/e2e/support/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test

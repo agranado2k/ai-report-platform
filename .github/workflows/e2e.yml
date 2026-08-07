@@ -27,8 +27,21 @@ name: E2E (BDD)
 # itself (a `workflow_call` job runs in the context of the calling workflow's
 # event), so THIS workflow's own changes are exercised by the PR that makes them.
 #
-# The 29 product .feature files are not executed yet (no step defs); step
-# definitions + a widened features glob land with 1d (upload API) and 1e (viewer).
+# WHAT RUNS HERE (revised 2026-08-06). The old note said "the 29 product
+# .feature files are not executed yet". They are no longer waiting: 23 were
+# deleted because their behaviour is genuinely verified in other tiers, 1
+# (block-service-worker) was wired, and 8 remain as DECLARED coverage gaps that
+# are not opted in — see tests/e2e/README.md for the disposition of all 32 and
+# the evidence behind each. `docs-conformance`'s `feature-executes` validator
+# now fails the build if a use-case catalogued `status: "full"` is not actually
+# executed, so the corpus cannot drift back into decoration.
+#
+# A SKIPPED SCENARIO FAILS THIS JOB. tests/e2e/support/skip-guard.ts is
+# registered as a reporter and acts whenever CI is set: the smoke's
+# `test.skip(...)` guards key on PLAYWRIGHT_VIEW_BASE_URL and
+# E2E_SCAN_DRAIN_SECRET, both produced by preview-isolation.yml and threaded
+# through this workflow, so a skip here means the wiring broke rather than that
+# there was nothing to test.
 
 on:
   workflow_call:

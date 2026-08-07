@@ -12,8 +12,20 @@ import { STORAGE_STATE_PATH } from "./tests/e2e/support/storage-state-path";
 //
 //   - tests/e2e/features/folder-sharing.feature — ADR-0076 §6, the dashboard
 //     folder visibility + sharing UI (folder-sharing.steps.ts).
+//   - tests/e2e/features/block-service-worker.feature — ADR-0014, the edge
+//     middleware refusal on BOTH origins (block-service-worker.steps.ts).
+//
+// THIS LIST IS NOW ENFORCED, not merely maintained. docs-conformance's
+// `feature-executes` validator requires every catalogued use-case with
+// `status: "full"` to appear here and to have step definitions beside it — so a
+// feature file cannot claim coverage it does not have (scripts/docs-conformance/
+// validators/feature-executes.mjs).
 const testDir = defineBddConfig({
-  features: ["tests/e2e/smoke/**/*.feature", "tests/e2e/features/folder-sharing.feature"],
+  features: [
+    "tests/e2e/smoke/**/*.feature",
+    "tests/e2e/features/folder-sharing.feature",
+    "tests/e2e/features/block-service-worker.feature",
+  ],
   steps: [
     "tests/e2e/smoke/**/*.steps.ts",
     "tests/e2e/features/**/*.steps.ts",
@@ -34,7 +46,16 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // `no-silent-skip` is always registered and only ever acts when `CI` is set
+  // (tests/e2e/support/skip-guard.ts): in CI a skipped scenario FAILS the job,
+  // because the two things the smoke's `test.skip(...)` guards key on —
+  // PLAYWRIGHT_VIEW_BASE_URL and E2E_SCAN_DRAIN_SECRET — are produced by
+  // preview-isolation.yml and threaded through e2e.yml, so a skip there means
+  // the wiring broke and the coverage that caught two production incidents is
+  // silently gone. Locally the same guards are correct and stay quiet.
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }], ["./tests/e2e/support/skip-guard.ts"]]
+    : [["list"], ["./tests/e2e/support/skip-guard.ts"]],
   use: {
     // Set by CI from the Vercel preview deployment_status.target_url; defaults
     // to a locally-served app for `pnpm e2e` on a dev box.
