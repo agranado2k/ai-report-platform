@@ -251,3 +251,33 @@ describe("editComment idempotency (ADR-0039)", () => {
     expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 2);
   });
 });
+
+// ── #233 acceptance: the round-trip, not the audit count ───────────────────
+describe("editComment — A -> B -> A must land on A (#233)", () => {
+  it("re-applying the original body actually re-persists it", async () => {
+    const deps = makeDeps();
+    await deps.reports.save(report("iiiiiiiiii"));
+    const created = await addComment(deps, ownerActor, {
+      slug: slug("iiiiiiiiii"),
+      body: "seed",
+      anchor,
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const at = (body: string) =>
+      editComment(deps, ownerActor, {
+        slug: slug("iiiiiiiiii"),
+        commentId: created.value.id,
+        body,
+      });
+
+    expect((await at("A")).ok).toBe(true);
+    expect((await at("B")).ok).toBe(true);
+    const back = await at("A");
+
+    expect(back.ok && back.value.body).toBe("A");
+    const stored = await deps.comments.findById(created.value.id);
+    expect(stored.ok && stored.value?.body, "the PERSISTED body must be the last one set").toBe(
+      "A",
+    );
+  });
+});

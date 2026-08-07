@@ -24,14 +24,14 @@ ADR-026 makes documentation a contract and describes three enforcement points: a
 - **Seam = CI only.** `pnpm docs:check` is the gate; `.github/workflows/docs-conformance.yml` runs it (and the harness self-tests) on every PR. The runner stays a pure, fast CLI so a future PR can wire the ADR-026 pre-push hook over the same command without refactoring.
 - **Zero new dependencies.** The harness uses Node built-ins only; its own tests use `node:test`. This explicitly avoids choosing a project-wide test runner in this PR (that remains a separate decision). OpenAPI validation is **lint-lite** (required-token checks); full Spectral/Redocly schema linting and markdown/link linting are deferred enhancements, logged here so the gap is explicit.
 - **Rules live in `config.mjs`** (allowed ADR statuses, required MADR sections, banned aliases, canonical events, the use-case catalog, OpenAPI tokens); validators hold no policy.
-- **Seven validators**: ADR-MADR conformance, ADR↔INDEX bijection, glossary banned-alias, canonical-event presence, feature-presence bijection, Gherkin structure, OpenAPI structure.
+- **Seven validators** at acceptance: ADR-MADR conformance, ADR↔INDEX bijection, glossary banned-alias, canonical-event presence, feature-presence bijection, Gherkin structure, OpenAPI structure. *(Amended since: `feature-executes` — every `full` use-case actually runs in CI, 2026-08-06; `claude-md-refs` — every command/script/hook referenced in CLAUDE.md exists on disk, 2026-08-07. The registry is `runner.mjs`; the table in `scripts/docs-conformance/README.md` is kept current.)*
 - **Use-case corpus authored**: 29 `.feature` files. Phase-1 upload/serve use-cases are worked; later-phase ones are valid `@wip` skeletons. Feature-presence asserts existence + parse, never behavioral completeness — `@wip` keeps the catalog honest.
 
 ### Consequences
 
 **Positive**: one merge-gating signal; contract drift (naming, ADR registry, events, OpenAPI, orphan/missing features) caught automatically; no new runtime or test-runner dependency; rules reviewable as data.
 
-**Negative**: partial implementation of ADR-026 (no pre-push hook yet) — a contributor only learns of a violation at CI, not at push time. Lint-lite OpenAPI checks can pass a structurally-valid-but-semantically-wrong document until Spectral is added.
+**Negative**: ~~partial implementation of ADR-026 (no pre-push hook yet) — a contributor only learns of a violation at CI, not at push time.~~ *(Resolved 2026-08-07: `.husky/pre-push` now runs `pnpm docs:check` locally.)* Lint-lite OpenAPI checks can pass a structurally-valid-but-semantically-wrong document until Spectral is added.
 
 **Neutral**: `node:test` is used here without committing the wider codebase to it; that choice stays open.
 

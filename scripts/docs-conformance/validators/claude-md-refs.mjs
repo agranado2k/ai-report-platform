@@ -12,13 +12,15 @@ export const id = "claude-md-refs";
 
 const BACKTICK_SPAN = /`([^`]+)`/g;
 // A slash command is a single-segment, kebab-case token: `/tdd`, `/grill-me`.
-// Multi-segment spans (`/api/v1/reports`) are URLs/paths, not commands. A span
-// may open with a command and continue with arguments (`/tdd <task>`,
-// `/loop /pr-iterate <PR#>` — every /-token in the span is checked).
+// Multi-segment spans (`/api/v1/reports`) are URLs/paths, not commands. Only
+// spans that OPEN with a slash command are command-bearing — that keeps shell
+// snippets (`rm -rf /tmp`) from being misread as command references — and in a
+// command-bearing span every /-token is checked (`/loop /pr-iterate <PR#>`).
+const COMMAND_SPAN = /^\/[a-z]/;
 const COMMAND_TOKEN = /(?:^|\s)\/([a-z][a-z0-9-]*)(?=\s|$)/g;
 // Checkable repo paths: anything under these roots. Extensionless names are
 // legal (husky hooks are extensionless files).
-const PATH_TOKEN = /^(?:scripts|\.husky|\.claude\/hooks)\/[\w./-]+$/;
+const PATH_TOKEN = /^(?:scripts|\.husky|\.claude\/(?:hooks|skills))\/[\w./-]+$/;
 
 export function run(ctx) {
   const out = [];
@@ -36,6 +38,7 @@ export function run(ctx) {
   for (const span of manual.matchAll(BACKTICK_SPAN)) {
     const text = span[1];
     if (PATH_TOKEN.test(text)) paths.add(text);
+    if (!COMMAND_SPAN.test(text)) continue;
     for (const m of text.matchAll(COMMAND_TOKEN)) commands.add(m[1]);
   }
 

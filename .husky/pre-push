@@ -5,8 +5,10 @@
 #   2. TDD pairing  — pushed source changes must come with test changes
 #                     bypass: PUSH_WITHOUT_TESTS=1
 # Bypasses print a loud warning into the push output so they are visible in
-# the terminal history; CI re-runs the docs gate regardless, so a bypass only
-# defers the failure, it cannot hide it.
+# the terminal history. Asymmetry to know about: CI re-runs the DOCS gate
+# (docs-conformance.yml), so PUSH_WITHOUT_DOCS only defers that failure — but
+# no workflow re-checks TDD pairing, so PUSH_WITHOUT_TESTS is a local-only
+# bypass and its use is on the operator's judgment.
 
 # --- 1. docs guard -----------------------------------------------------------
 if [ "$PUSH_WITHOUT_DOCS" = "1" ]; then
@@ -24,6 +26,12 @@ fi
 # For each ref being pushed, diff the outgoing commits. Source files are the
 # vitest-covered production trees; a push that touches them without touching
 # any test tier (*.test.ts, *.spec.ts, *.feature, *.test.mjs) is blocked.
+# KEEP IN SYNC with the test-covered source trees: the `include` globs in
+# vitest.config.ts (which carries the matching reminder) PLUS the node:test
+# tree scripts/docs-conformance/ — nothing ties them together mechanically yet.
+# docs-conformance/config.mjs is excluded: it is reviewable policy DATA
+# (ADR-0041 — "validators hold no policy"), so editing it needs no test change.
+# Renames are excluded (--diff-filter=ACM): a pure move is not new behavior.
 if [ "$PUSH_WITHOUT_TESTS" = "1" ]; then
   echo "⚠️  PUSH_WITHOUT_TESTS=1 — TDD pairing guard BYPASSED for this push." >&2
   exit 0
@@ -42,10 +50,10 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   fi
   [ -z "$base" ] && continue # cannot resolve a base — do not block on a guess
 
-  changed=$(git diff --name-only --diff-filter=ACMR "$base" "$local_sha" 2>/dev/null)
+  changed=$(git diff --name-only --diff-filter=ACM "$base" "$local_sha" 2>/dev/null)
   [ -z "$changed" ] && continue
 
-  src=$(echo "$changed" | grep -E '^(packages/[^/]+/src/|apps/mcp/src/|apps/app/app/server/|apps/view/app/(server|edit)/|scripts/docs-conformance/).*\.(ts|tsx|mjs)$' | grep -Ev '\.(test|spec)\.(ts|tsx|mjs)$|\.d\.ts$' || true)
+  src=$(echo "$changed" | grep -E '^(packages/[^/]+/src/|apps/mcp/src/|apps/app/app/server/|apps/view/app/(server|edit)/|scripts/docs-conformance/).*\.(ts|tsx|mjs)$' | grep -Ev '\.(test|spec)\.(ts|tsx|mjs)$|\.d\.ts$|^scripts/docs-conformance/config\.mjs$' || true)
   tests=$(echo "$changed" | grep -E '\.(test|spec)\.(ts|tsx|mjs)$|\.feature$' || true)
 
   if [ -n "$src" ] && [ -z "$tests" ]; then
