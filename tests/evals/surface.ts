@@ -23,13 +23,27 @@ import { registerReadTools, registerWriteTools } from "../../apps/mcp/src/tools"
 
 export { INSTRUCTIONS, OVERCLAIM_PATTERNS };
 
+/** The ADR-0051 behaviour hints each registration sets deliberately. */
+export interface ToolAnnotations {
+  readonly readOnlyHint?: boolean;
+  readonly destructiveHint?: boolean;
+  readonly idempotentHint?: boolean;
+  readonly openWorldHint?: boolean;
+}
+
 /** One `server.registerTool(...)` call, captured verbatim. */
 export interface RegisteredTool {
   readonly name: string;
+  /** The human-facing display name. Not behaviour-shaping — captured so the
+   *  smoke tier can see a tool registered without one, not projected. */
+  readonly title: string;
   /** The agent-facing description — the Layer-0 prompt surface under test. */
   readonly description: string;
   /** The raw zod input shape (property name → schema). */
   readonly inputShape: Record<string, z.ZodType>;
+  /** MCP tool annotations (ADR-0051). See `projectAnnotations` for why these
+   *  cannot simply be forwarded. */
+  readonly annotations: ToolAnnotations;
 }
 
 /** Every tool `buildMcpServer` registers, in stable (sorted) order. */
@@ -38,12 +52,19 @@ export function captureRegisteredTools(): RegisteredTool[] {
   const capturingServer = {
     registerTool(
       name: string,
-      config: { description?: string; inputSchema?: Record<string, z.ZodType> },
+      config: {
+        title?: string;
+        description?: string;
+        inputSchema?: Record<string, z.ZodType>;
+        annotations?: ToolAnnotations;
+      },
     ) {
       captured.push({
         name,
+        title: config.title ?? "",
         description: config.description ?? "",
         inputShape: config.inputSchema ?? {},
+        annotations: config.annotations ?? {},
       });
     },
   } as unknown as McpServer;
@@ -95,6 +116,37 @@ export interface AnthropicToolDefinition {
   readonly input_schema: Record<string, unknown>;
 }
 
+/**
+ * Fold the behaviour-shaping annotations into the description text.
+ *
+ * An MCP client receives `annotations` as a structured field; an Anthropic
+ * Messages-API tool definition has **no such field** — `name`,
+ * `description`, `input_schema` is the whole contract. So an annotation that
+ * is not written into the description is an annotation the model never sees,
+ * and an eval case leaning on one (the negative case that expects
+ * `reports_delete` to prompt for confirmation rather than fire) would be
+ * measuring a hint that does not ship. Dropping them silently made the suite
+ * grade a surface strictly weaker than the real one.
+ *
+ * Only `readOnlyHint` and `destructiveHint` are projected: those are the two
+ * that change whether a model picks a tool or pauses to confirm.
+ * `idempotentHint` and `openWorldHint` shape a CLIENT's retry and sandboxing
+ * policy rather than the model's selection, so projecting them would add
+ * tokens to every tool definition for no measurable behaviour.
+ *
+ * This is a PROJECTION, not the shipped text — the marker is appended here,
+ * not in `apps/mcp/src/tools.ts`. A real MCP client gets the same information
+ * through the structured field; this is how it reaches a provider that has no
+ * field for it.
+ */
+export function projectAnnotations(description: string, annotations: ToolAnnotations): string {
+  const hints: string[] = [];
+  if (annotations.readOnlyHint === true) hints.push("read-only (makes no changes)");
+  if (annotations.destructiveHint === true) hints.push("DESTRUCTIVE (data loss; confirm first)");
+  if (hints.length === 0) return description;
+  return `${description}\n\nTool safety hints: ${hints.join("; ")}.`;
+}
+
 /** Project the registrations into the wire shape the provider sends. */
 export function toolsForProvider(): AnthropicToolDefinition[] {
   return captureRegisteredTools().map((tool) => {
@@ -103,6 +155,10 @@ export function toolsForProvider(): AnthropicToolDefinition[] {
     const { $schema: _dialect, ...input_schema } = z.toJSONSchema(
       z.object(tool.inputShape),
     ) as Record<string, unknown> & { $schema?: string };
-    return { name: tool.name, description: tool.description, input_schema };
+    return {
+      name: tool.name,
+      description: projectAnnotations(tool.description, tool.annotations),
+      input_schema,
+    };
   });
 }

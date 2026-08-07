@@ -50,7 +50,7 @@
   },
   {
     "name": "folders_delete",
-    "description": "Delete a folder. Blocked (error) if it still contains reports or subfolders. Destructive.",
+    "description": "Delete a folder. Blocked (error) if it still contains reports or subfolders. Destructive.\n\nTool safety hints: DESTRUCTIVE (data loss; confirm first).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -67,7 +67,7 @@
   },
   {
     "name": "folders_list",
-    "description": "List the folders YOU can see (ADR-0076: yours + org-visible + shared-with-you + legacy) as a cursor-paginated list ({object:'list', data, has_more}); each item has id (folder_…), name, slug, parent_id, visibility (private|org), and owner (a user_ id, or null for a legacy pre-ownership folder). Read-only. Use a folder_ id with reports_search to scope a search, or when deciding where to organize a report.",
+    "description": "List the folders YOU can see (ADR-0076: yours + org-visible + shared-with-you + legacy) as a cursor-paginated list ({object:'list', data, has_more}); each item has id (folder_…), name, slug, parent_id, visibility (private|org), and owner (a user_ id, or null for a legacy pre-ownership folder). Read-only. Use a folder_ id with reports_search to scope a search, or when deciding where to organize a report.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -91,7 +91,7 @@
   },
   {
     "name": "folders_list_shares",
-    "description": "List everyone a folder's owner has shared its VISIBILITY with (ADR-0076) — returns a list of { object:'folder_share', email, granted_by, granted_at }. Read-only and OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` scope. Distinct from reports_get_acl (report VIEW access) and reports_list_write_grants (report WRITE access) — this is folder-tree visibility.",
+    "description": "List everyone a folder's owner has shared its VISIBILITY with (ADR-0076) — returns a list of { object:'folder_share', email, granted_by, granted_at }. Read-only and OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` scope. Distinct from reports_get_acl (report VIEW access) and reports_list_write_grants (report WRITE access) — this is folder-tree visibility.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -239,7 +239,7 @@
   },
   {
     "name": "reports_delete",
-    "description": "Delete a report (the viewer then returns 410 Gone). OWNER-ONLY (ADR-0059): only the user who created the report can delete it. Destructive — confirm intent first.",
+    "description": "Delete a report (the viewer then returns 410 Gone). OWNER-ONLY (ADR-0059): only the user who created the report can delete it. Destructive — confirm intent first.\n\nTool safety hints: DESTRUCTIVE (data loss; confirm first).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -256,7 +256,7 @@
   },
   {
     "name": "reports_delete_comment",
-    "description": "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.",
+    "description": "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.\n\nTool safety hints: DESTRUCTIVE (data loss; confirm first).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -314,7 +314,7 @@
   },
   {
     "name": "reports_get",
-    "description": "Fetch a single report by its slug — returns slug, title, is_published, folder_id, owner (the owning user's user_… id, ADR-0059), and sharing: 'private' | 'org_view' | 'org_edit' | null (ADR-0078). Read `sharing`, NOT acl.mode, to tell how a report is shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an org write grant the acl cannot express. null means an advanced mode (password/allowlist/public) — use reports_get_acl for that. The acl block itself is included only when you are the report's owner. Also returns editability: 'editable' | 'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. Read-only. Use it to confirm a report exists / check its title, folder or sharing before an update, move, or delete. A missing slug returns not-found; a report outside your org returns forbidden.",
+    "description": "Fetch a single report by its slug — returns slug, title, is_published, folder_id, owner (the owning user's user_… id, ADR-0059), and sharing: 'private' | 'org_view' | 'org_edit' | null (ADR-0078). Read `sharing`, NOT acl.mode, to tell how a report is shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an org write grant the acl cannot express. null means an advanced mode (password/allowlist/public) — use reports_get_acl for that. The acl block itself is included only when you are the report's owner. Also returns editability: 'editable' | 'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. Read-only. Use it to confirm a report exists / check its title, folder or sharing before an update, move, or delete. A missing slug returns not-found; a report outside your org returns forbidden.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -331,7 +331,7 @@
   },
   {
     "name": "reports_get_acl",
-    "description": "Read a report's sharing acl — returns { object:'acl', mode, for allowlist the allowed_emails + access_ttl_seconds, and sharing }. Read-only and OWNER-ONLY (ADR-0059): only the user who created the report can read its share config. mode is one of private (owner-only, the default) | public | password | org | allowlist. sharing is the composed three-state answer (ADR-0078): 'private' | 'org_view' | 'org_edit' | null. READ `sharing`, NOT `mode`, to decide whether the org can EDIT: org_view and org_edit both have mode 'org' and differ only in an org write grant the acl cannot express, so inferring from mode alone gets it wrong. Use it before reports_set_acl or reports_set_sharing to see the current state.",
+    "description": "Read a report's sharing acl — returns { object:'acl', mode, for allowlist the allowed_emails + access_ttl_seconds, and sharing }. Read-only and OWNER-ONLY (ADR-0059): only the user who created the report can read its share config. mode is one of private (owner-only, the default) | public | password | org | allowlist. sharing is the composed three-state answer (ADR-0078): 'private' | 'org_view' | 'org_edit' | null. READ `sharing`, NOT `mode`, to decide whether the org can EDIT: org_view and org_edit both have mode 'org' and differ only in an org write grant the acl cannot express, so inferring from mode alone gets it wrong. Use it before reports_set_acl or reports_set_sharing to see the current state.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -370,7 +370,7 @@
   },
   {
     "name": "reports_list_comments",
-    "description": "List a report's Comments (ADR-0064) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (comment_…), report_id, author_id (user_…), parent_id (a comment_ id when it's a reply, else null), body, anchor ({ version_pinned: { version_id, text_quote } }), resolved_at (null until resolved), and created_at. Read-only; comments never appear on the public viewer. Page with starting_after.",
+    "description": "List a report's Comments (ADR-0064) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (comment_…), report_id, author_id (user_…), parent_id (a comment_ id when it's a reply, else null), body, anchor ({ version_pinned: { version_id, text_quote } }), resolved_at (null until resolved), and created_at. Read-only; comments never appear on the public viewer. Page with starting_after.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -401,7 +401,7 @@
   },
   {
     "name": "reports_list_versions",
-    "description": "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' | 'unparsable' | null — whether THAT version's bytes can be opened in the editor, ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.",
+    "description": "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' | 'unparsable' | null — whether THAT version's bytes can be opened in the editor, ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -432,7 +432,7 @@
   },
   {
     "name": "reports_list_write_grants",
-    "description": "List everyone the owner has granted write access (rename/re-upload/move) on a report (ADR-0060) — returns a list of { object:'write_grant', email, granted_by, granted_at }. Read-only and OWNER-ONLY: only the user who created the report can see its write-grant roster. Distinct from reports_get_acl (that's VIEW access; this is WRITE access).",
+    "description": "List everyone the owner has granted write access (rename/re-upload/move) on a report (ADR-0060) — returns a list of { object:'write_grant', email, granted_by, granted_at }. Read-only and OWNER-ONLY: only the user who created the report can see its write-grant roster. Distinct from reports_get_acl (that's VIEW access; this is WRITE access).\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -515,7 +515,7 @@
   },
   {
     "name": "reports_search",
-    "description": "Search your reports by title/slug text. Returns a cursor-paginated list ({object:'list', data, has_more}); each item has id (report_…), slug, title, is_published, folder_id. Read-only. Page with starting_after; omit `q` to list all.",
+    "description": "Search your reports by title/slug text. Returns a cursor-paginated list ({object:'list', data, has_more}); each item has id (report_…), slug, title, is_published, folder_id. Read-only. Page with starting_after; omit `q` to list all.\n\nTool safety hints: read-only (makes no changes).",
     "input_schema": {
       "type": "object",
       "properties": {
