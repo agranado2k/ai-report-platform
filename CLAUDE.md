@@ -29,14 +29,14 @@ Full rationale, the classification of the three legs, and the considered/rejecte
 1. **Use a git worktree** (ADR-025). Never edit files in the root checkout for in-progress work.
 
    ```bash
-   # From the project root (~/PetProjects/ai-report-platform/)
+   # From the project root (~/PetProjects/centaur-spec/)
    git worktree add worktree/<slug> -b <type>/<slug>
    cd worktree/<slug>
    ```
 
    Worktrees live under `worktree/` inside the project (gitignored). `<type>` is one of `feat`, `fix`, `refactor`, `chore`, `docs`. Examples: `feat/phase-0b-tf-modules`, `fix/r2-roundtrip-test`, `docs/adr-031-foo`.
 
-2. **Start with `/tdd`** for any code change. Write the failing test first, then implementation, then refactor. The procedural skill is at `.claude/skills/tdd/SKILL.md` (adapted from Matt Pocock's upstream); Phase 0e will add the enforcement hooks (`PostToolUse` / `Stop`) on top.
+2. **Start with `/tdd`** for any code change. Write the failing test first, then implementation, then refactor. The procedural skill is at `.claude/skills/tdd/SKILL.md` (adapted from Matt Pocock's upstream). Enforcement: the `.husky/pre-push` TDD pairing guard blocks a push whose source changes carry no test changes (`PUSH_WITHOUT_TESTS=1` bypasses once, loudly).
 
 3. **Read the relevant ADR** before changing infrastructure or security code. ADRs live in `docs/adr/` using the [MADR template](https://adr.github.io/madr/) — one file per decision, named `NNNN-short-kebab-title.md`. `docs/adr/INDEX.md` is the registry. ADR-001 through ADR-030 still live inside `docs/spec.html` pending extraction (see the backlog in `INDEX.md`); ADR-0035 onwards lives in `docs/adr/`. Several Phase 0c decisions are recorded as dated entries in `docs/diary.md` rather than as standalone ADRs (listed in `docs/adr/INDEX.md`) — they're still binding policy. **When writing a new ADR, create a file in `docs/adr/`; do NOT put architectural decision content in the diary.** The diary is the chronological development log — it can reference an ADR by number but is not the source of truth for any decision.
 
@@ -52,7 +52,7 @@ Full rationale, the classification of the three legs, and the considered/rejecte
 
 ## Before `git push`
 
-1. Run `/docs-check` (or let `docs-prepush-guard.sh` fire). The doc-trigger matrix is in ADR-026:
+1. Run `pnpm docs:check` (the `.husky/pre-push` hook runs it for you). The doc-trigger matrix is in ADR-026:
    - Schema change → `docs/db-design.md` + ADR if non-trivial
    - New API route → `docs/api/openapi.yaml` + Bruno regen
    - New use case → `tests/e2e/features/*.feature` + README entry
@@ -61,7 +61,7 @@ Full rationale, the classification of the three legs, and the considered/rejecte
    - `.claude/skills/**` or `.claude/hooks/**` → `CLAUDE.md` update
    - `infra/terraform/**` → `docs/infra.md` + ops runbook
 
-2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local pre-push hook runs a subset.
+2. CI will run: biome, typecheck, branch-name, unit, e2e, security-headers, Bruno contract, docs-trigger-matrix. The local `.husky/pre-push` hook runs a subset: `pnpm docs:check` plus the TDD pairing guard.
 
 3. PRs receive **automated dual AI review** (ADR-030 — fully wired): Claude via `.github/workflows/claude-code-review.yml`, Gemini via `.github/workflows/gemini-review.yml`. Both auto-run on every PR open / sync / ready / reopen and post inline review comments. The `@claude` mention bot (`.github/workflows/claude.yml`) additionally responds in PR / issue / review-comment threads with `use_commit_signing: true` so any commits it pushes satisfy branch protection. Auth: `CLAUDE_CODE_OAUTH_TOKEN` (set by `/install-github-app`) and `GEMINI_API_KEY` (set by Phase 0b Terraform) — both already in repo secrets. Under the solo-developer branch-protection policy (`required_approving_review_count = 0`), human approval is **not required to merge** — the PR mechanism itself is the gate, alongside CI status checks. Bot reviews are advisory; they don't gate merge. CODEOWNERS at `.github/CODEOWNERS` is informational (ownership map for future contributors); when a second developer joins, flip `required_approving_review_count` back to `1` in `infra/terraform/modules/github-repo/main.tf`.
 
@@ -77,7 +77,7 @@ This repo IS NOT:
 
 - A Bash playground for `curl | bash` shenanigans. Never fetch and execute remote code.
 - A place to add runtime dependencies casually. Each new dependency goes through PR review (Claude + Gemini, plus the operator's own read-through) and may require an ADR — especially for the domain/application layers, which are dependency-locked.
-- A place to bypass branch protection. `PUSH_WITHOUT_DOCS=1` exists as the only escape hatch for `docs-prepush-guard.sh`; it logs to the PR and flags it in audit.
+- A place to bypass branch protection. `PUSH_WITHOUT_DOCS=1` and `PUSH_WITHOUT_TESTS=1` exist as the only escape hatches for `.husky/pre-push`; both print a loud warning into the push output. CI re-runs the **docs** gate, so a docs bypass only defers the failure; the TDD pairing guard has no CI counterpart yet — a tests bypass is local-only and on the operator's judgment.
 
 ## Quick reference
 
@@ -96,7 +96,7 @@ This repo IS NOT:
 | Turn a conversation into a PRD as a GitHub issue | `/to-prd`                                       |
 | Get system-wide context on an unfamiliar area | `/zoom-out`                                  |
 | Rescue a deteriorating area of the codebase | `/improve-codebase-architecture` (deepening + interface design + ubiquitous language) |
-| Check docs are in sync                   | `/docs-check`                                   |
+| Check docs are in sync                   | `pnpm docs:check`                               |
 | Update API surface                       | Edit `docs/api/openapi.yaml`; Bruno auto-regens |
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |
 | Clean up old worktrees + sync main       | `/worktree-cleanup` (runs `scripts/worktree-cleanup.sh`; `--dry-run` to preview) |
