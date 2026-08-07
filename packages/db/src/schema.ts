@@ -55,8 +55,9 @@ export const commentIntentEnum = pgEnum("comment_intent", ["note", "enhancement"
 // (same precedent as org_kind, migration 0014).
 export const folderVisibilityEnum = pgEnum("folder_visibility", ["private", "org"]);
 // Editability (ADR-0080): the editor's own open-time verdict on a version's
-// stored bytes, recorded at write time. `unsplittable` = no usable <body>
-// boundary (splitShell); `unparsable` = the body defeats the reportSchema
+// stored bytes, recorded at write time. `unsplittable` = a malformed <body>
+// (splitShell — a document with NO <body> synthesises the boundary instead,
+// ADR-0062 Amendment 4); `unparsable` = the body defeats the reportSchema
 // parser (parseBody). UNKNOWN is the column's NULL, never a value here — a
 // version nobody probed must not be readable as a verdict. Brand-new enum type
 // created in the same migration as its column, so the #127 drizzle-kit

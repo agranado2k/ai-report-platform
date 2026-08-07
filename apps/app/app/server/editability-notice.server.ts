@@ -38,9 +38,9 @@ export function editabilityNotice(
       return {
         label: "Not editable",
         title:
-          "This report still views normally, but the editor can't open it: the document has " +
-          "no usable <body> — it looks like an HTML fragment rather than a full page. " +
-          "Re-upload a complete <html><body>…</body></html> document to make it editable.",
+          "This report still views normally, but the editor can't open it: its <body> tag is " +
+          "malformed — unclosed, or closed before it opens. Re-upload it with a balanced " +
+          "<body>…</body>, or with no <body> tag at all, and it will open.",
       };
     case "unparsable":
       return {

@@ -297,7 +297,8 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "grantee). To set/change the title afterwards use reports_update. Title is not set here. " +
         "The response also carries editability: 'editable' | 'unsplittable' | 'unparsable' | " +
         "null (ADR-0080) — whether what you just published can be opened in the editor. " +
-        "'unsplittable' means your HTML had no usable <body> (you sent a fragment); " +
+        "'unsplittable' means your HTML had a MALFORMED <body> (unclosed, or closed before " +
+        "it opens); a document with no <body> tag at all is fine and opens normally; " +
         "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
         "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
         "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",

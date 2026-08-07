@@ -28,7 +28,7 @@ import { splitShell } from "./shell.js";
 
 /**
  * The verdict. `editable` = the editor can open these bytes. `unsplittable` =
- * no usable `<body>` boundary (a fragment, an unclosed body, a `</body>` ahead
+ * no usable `<body>` boundary (an unclosed body, or a `</body>` ahead
  * of its opening tag). `unparsable` = the shell splits but the body defeats the
  * schema parser — the `document-unparsable` degrade on the read path.
  */
