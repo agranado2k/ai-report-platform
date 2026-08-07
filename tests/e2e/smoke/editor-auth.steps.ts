@@ -124,15 +124,28 @@ Then(
     // someOrigin is wrong for navigation purposes — new URL() only needs it to
     // pull the et= param back out.
     const location = response.headers().location ?? "";
-    const token = new URL(location).searchParams.get("et");
+    const params = new URL(location).searchParams;
+    const token = params.get("et");
     expect(token, `expected an et= token in Location "${location}"`).toBeTruthy();
+    // `oa` — the owner fallback — rides the SAME Location for an owner
+    // (open-report.server.ts mints it alongside `et`). Carry it through: the
+    // view mints `arp_edit_oa` only when the request presents `oa`
+    // (gate.server.ts's `...(oa ? [ownerFallbackCookie(...)] : [])`), so a
+    // request rebuilt from `et` alone can never produce that cookie and the
+    // assertion below would be testing the harness, not the product.
+    const ownerFallback = params.get("oa");
+    expect(
+      ownerFallback,
+      `expected an oa= owner fallback in Location "${location}" — the opener IS the owner here`,
+    ).toBeTruthy();
 
     // Hit the REAL view-origin /edit with the freshly-minted edit token, no
     // redirect following. `page.request` carries the context's Vercel
     // deployment-protection bypass header (playwright.config.ts) and needs no
     // Clerk session — the view origin is credential-free, the token IS the proof.
     const res = await page.request.get(
-      `${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}`,
+      `${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}` +
+        `&oa=${encodeURIComponent(ownerFallback as string)}`,
       { maxRedirects: 0 },
     );
     const loc = res.headers().location ?? "";
