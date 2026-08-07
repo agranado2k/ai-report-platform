@@ -1,0 +1,672 @@
+[
+  {
+    "name": "folders_apply_sharing_to_reports",
+    "description": "Apply a sharing state to the REPORTS INSIDE a folder (ADR-0078). Sharing a folder with folders_set_visibility shows people the folder's NAME only — this is what reaches the reports in it. Requires the `acl:write` scope. You must be able to see the folder; each report is then authorized on its own, so ONLY REPORTS YOU OWN can change. A report is changed only if you own it and it is currently in the state the direction starts from; everything else is listed back to you untouched with a reason (not owned by you, password-protected, allowlisted, already public, already at the destination). Always read `skipped` and `failed` in the result before telling the user it worked — this tool reports exactly what it did and did not change.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        },
+        "sharing": {
+          "type": "string",
+          "enum": [
+            "private",
+            "org_view",
+            "org_edit"
+          ],
+          "description": "The state to apply to the reports inside the folder."
+        }
+      },
+      "required": [
+        "id",
+        "sharing"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_create",
+    "description": "Create a folder to organize reports into — pair with reports_move (or reports_upload's folder_path) once it exists. `parent_id` is required — new folders nest under an existing one; use folders_list to find the root (or another) folder id. The new folder is OWNED by you, and its visibility is PRIVATE when created under the Root (nobody else sees it, not even its name), else inherited from the parent (ADR-0076). To let others see it, use folders_share for specific people or folders_set_visibility for the whole org.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The folder name."
+        },
+        "parent_id": {
+          "type": "string",
+          "description": "Parent folder_ id (required; from folders_list)."
+        }
+      },
+      "required": [
+        "name",
+        "parent_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_delete",
+    "description": "Delete a folder. Blocked (error) if it still contains reports or subfolders. Destructive.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_list",
+    "description": "List the folders YOU can see (ADR-0076: yours + org-visible + shared-with-you + legacy) as a cursor-paginated list ({object:'list', data, has_more}); each item has id (folder_…), name, slug, parent_id, visibility (private|org), and owner (a user_ id, or null for a legacy pre-ownership folder). Read-only. Use a folder_ id with reports_search to scope a search, or when deciding where to organize a report.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "Max items (1–100, default 20).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "starting_after": {
+          "description": "Cursor: a folder_ id; returns items AFTER it (page forward).",
+          "type": "string"
+        },
+        "ending_before": {
+          "description": "Cursor: a folder_ id; returns items BEFORE it (page back).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_list_shares",
+    "description": "List everyone a folder's owner has shared its VISIBILITY with (ADR-0076) — returns a list of { object:'folder_share', email, granted_by, granted_at }. Read-only and OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` scope. Distinct from reports_get_acl (report VIEW access) and reports_list_write_grants (report WRITE access) — this is folder-tree visibility.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_rename",
+    "description": "Change a folder's name. Use folders_list to find its id.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The new name."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_set_visibility",
+    "description": "Set who can SEE a folder (ADR-0076): `private` (only its owner + people it's shared with via folders_share) or `org` (every org member). OWNER-only for owned folders; a LEGACY folder (created before per-user ownership — `owner` is null in folders_list) is ADOPTED: calling this makes YOU its owner. Requires the `acl:write` scope. The Root folder is always org-visible and is never owned — calling this on it is an error in either direction. Visibility gates the folder itself, not the reports inside it — report access stays governed by each report's acl.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "org"
+          ],
+          "description": "Who can see the folder."
+        }
+      },
+      "required": [
+        "id",
+        "visibility"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_share",
+    "description": "Give a specific person VISIBILITY of a folder by email (ADR-0076) — they can then see it in their folder tree and target it when moving reports. Confers NO rename/delete/create rights and NO access to the reports inside (share those with reports_set_acl / reports_grant_write). OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` scope. The grantee doesn't need an account yet — the share matches by email once they sign up. A share is only EFFECTIVE for someone in the same org as the folder: folder listings are org-scoped, so a grantee whose account lives in another org never sees it. The grant is still recorded, and starts working if they later join.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        },
+        "email": {
+          "type": "string",
+          "description": "The grantee's email address."
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "folders_unshare",
+    "description": "Revoke a previously shared folder visibility (ADR-0076). OWNER-only (or any member for a legacy owner-less folder); requires the `acl:write` scope. Idempotent — unsharing an email with no share still succeeds. Use folders_list_shares to see who currently has visibility.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The folder_ id (from folders_list)."
+        },
+        "email": {
+          "type": "string",
+          "description": "The grantee's email address to revoke."
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_add_comment",
+    "description": "Create a comment on a report (ADR-0064), or a REPLY to an existing comment when you pass parent_comment_id. Requires write access (canWrite, ADR-0064 §3): the report's owner or a write grantee. The comment is anchored to a specific ReportVersion and the exact quoted text it refers to (version_id + text_quote — get a version_ id from reports_list_versions). Returns the created comment resource (id comment_…, parent_id set for a reply else null, body, anchor, resolved_at:null, created_at). Comments are private to the org — they never show on the public viewer.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "body": {
+          "type": "string",
+          "description": "The comment text."
+        },
+        "version_id": {
+          "type": "string",
+          "description": "The version_ id this comment is pinned to (from reports_list_versions)."
+        },
+        "text_quote": {
+          "type": "string",
+          "description": "The exact quoted text in that version the comment refers to."
+        },
+        "relative": {
+          "description": "Optional editor anchor hint, forwarded opaquely (position within the quoted text)."
+        },
+        "parent_comment_id": {
+          "description": "Reply to this comment_ id. Omit to create a top-level (root) comment.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "body",
+        "version_id",
+        "text_quote"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_delete",
+    "description": "Delete a report (the viewer then returns 410 Gone). OWNER-ONLY (ADR-0059): only the user who created the report can delete it. Destructive — confirm intent first.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_delete_comment",
+    "description": "Delete a comment (ADR-0064). Allowed for the comment's AUTHOR or the report's OWNER. Destructive — confirm intent first. Use reports_list_comments to find the comment_ id.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "comment_id": {
+          "type": "string",
+          "description": "The comment_ id to delete (from reports_list_comments)."
+        }
+      },
+      "required": [
+        "slug",
+        "comment_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_edit_comment",
+    "description": "Edit a comment's text (`body`) and/or its `intent` (ADR-0064) — fix a typo or change what the comment asks an agent to do. Allowed for the comment's AUTHOR or the report's OWNER (the same rule as resolve/delete, NOT the write-access gate on add). Supply at least one of body/intent; an omitted field is left unchanged. intent is one of note | enhancement | add | remove (an invalid value is rejected). The anchor is immutable and cannot be edited. Returns the updated comment resource.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "comment_id": {
+          "type": "string",
+          "description": "The comment_ id to edit (from reports_list_comments)."
+        },
+        "body": {
+          "description": "New comment text. Omit to leave the body unchanged.",
+          "type": "string"
+        },
+        "intent": {
+          "description": "New intent. Omit to leave the intent unchanged.",
+          "type": "string",
+          "enum": [
+            "note",
+            "enhancement",
+            "add",
+            "remove"
+          ]
+        }
+      },
+      "required": [
+        "slug",
+        "comment_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_get",
+    "description": "Fetch a single report by its slug — returns slug, title, is_published, folder_id, owner (the owning user's user_… id, ADR-0059), and sharing: 'private' | 'org_view' | 'org_edit' | null (ADR-0078). Read `sharing`, NOT acl.mode, to tell how a report is shared: org_view and org_edit have the SAME acl mode ('org') and differ only in an org write grant the acl cannot express. null means an advanced mode (password/allowlist/public) — use reports_get_acl for that. The acl block itself is included only when you are the report's owner. Also returns editability: 'editable' | 'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. Read-only. Use it to confirm a report exists / check its title, folder or sharing before an update, move, or delete. A missing slug returns not-found; a report outside your org returns forbidden.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id (from reports_search)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_get_acl",
+    "description": "Read a report's sharing acl — returns { object:'acl', mode, for allowlist the allowed_emails + access_ttl_seconds, and sharing }. Read-only and OWNER-ONLY (ADR-0059): only the user who created the report can read its share config. mode is one of private (owner-only, the default) | public | password | org | allowlist. sharing is the composed three-state answer (ADR-0078): 'private' | 'org_view' | 'org_edit' | null. READ `sharing`, NOT `mode`, to decide whether the org can EDIT: org_view and org_edit both have mode 'org' and differ only in an org write grant the acl cannot express, so inferring from mode alone gets it wrong. Use it before reports_set_acl or reports_set_sharing to see the current state.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_grant_write",
+    "description": "Grant another person the ability to rename, re-upload, or move a specific report — NOT delete/set_acl/manage grants, which stay owner-only (ADR-0060). OWNER-ONLY; requires the `acl:write` scope. Works CROSS-ORG — the grantee is typically outside your org (they don't need to have signed up yet; the grant matches by email once they do). Confers NO view access by itself — share viewing separately with reports_set_acl if they also need to open it in the viewer. The result carries `open_url` — share it with the grantee: it opens the editor for them (no notification is sent otherwise).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "email": {
+          "type": "string",
+          "description": "The grantee's email address."
+        }
+      },
+      "required": [
+        "slug",
+        "email"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_list_comments",
+    "description": "List a report's Comments (ADR-0064) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (comment_…), report_id, author_id (user_…), parent_id (a comment_ id when it's a reply, else null), body, anchor ({ version_pinned: { version_id, text_quote } }), resolved_at (null until resolved), and created_at. Read-only; comments never appear on the public viewer. Page with starting_after.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "limit": {
+          "description": "Max items (1–100, default 20).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "starting_after": {
+          "description": "Cursor: a comment_ id; returns items AFTER it (page forward).",
+          "type": "string"
+        },
+        "ending_before": {
+          "description": "Cursor: a comment_ id; returns items BEFORE it (page back).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_list_versions",
+    "description": "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list ({object:'list', data, has_more}), newest-created first; each item has id (version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' | 'unparsable' | null — whether THAT version's bytes can be opened in the editor, ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "limit": {
+          "description": "Max items (1–100, default 20).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "starting_after": {
+          "description": "Cursor: a version_ id; returns items AFTER it (page forward).",
+          "type": "string"
+        },
+        "ending_before": {
+          "description": "Cursor: a version_ id; returns items BEFORE it (page back).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_list_write_grants",
+    "description": "List everyone the owner has granted write access (rename/re-upload/move) on a report (ADR-0060) — returns a list of { object:'write_grant', email, granted_by, granted_at }. Read-only and OWNER-ONLY: only the user who created the report can see its write-grant roster. Distinct from reports_get_acl (that's VIEW access; this is WRITE access).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_move",
+    "description": "Move a report into a different folder. Requires write access (ADR-0059/0060): the report's owner or a write grantee. The destination folder must be in the REPORT's org AND visible to you (ADR-0076) — a folder you cannot see reads as NOT FOUND, since its existence is private. Use folders_list to find the folder id: it lists exactly the folders you may target.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "folder_id": {
+          "type": "string",
+          "description": "The destination folder_ id (from folders_list)."
+        }
+      },
+      "required": [
+        "slug",
+        "folder_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_resolve_comment",
+    "description": "Mark a comment as resolved (ADR-0064) — sets its resolved_at. Allowed for the comment's AUTHOR or the report's OWNER (a different rule from the write-access gate on add). One-way and idempotent: there is only one resolved transition (no un-resolve today), so resolving an already-resolved comment is safe. Returns the updated comment resource.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "comment_id": {
+          "type": "string",
+          "description": "The comment_ id to resolve (from reports_list_comments)."
+        }
+      },
+      "required": [
+        "slug",
+        "comment_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_revoke_write",
+    "description": "Revoke a previously granted write access (ADR-0060). OWNER-ONLY; requires the `acl:write` scope. Idempotent — revoking an email with no grant still succeeds. Use reports_list_write_grants first to see who currently has write access.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "email": {
+          "type": "string",
+          "description": "The grantee's email address to revoke."
+        }
+      },
+      "required": [
+        "slug",
+        "email"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_search",
+    "description": "Search your reports by title/slug text. Returns a cursor-paginated list ({object:'list', data, has_more}); each item has id (report_…), slug, title, is_published, folder_id. Read-only. Page with starting_after; omit `q` to list all.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "description": "Free-text match on title/slug. Omit to list all.",
+          "type": "string"
+        },
+        "folder_id": {
+          "description": "Restrict to this folder_ id.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max items (1–100, default 20).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "starting_after": {
+          "description": "Cursor: a report_ id; returns items AFTER it (page forward).",
+          "type": "string"
+        },
+        "ending_before": {
+          "description": "Cursor: a report_ id; returns items BEFORE it (page back).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_set_acl",
+    "description": "Set how a report is shared (ADR-0056). OWNER-ONLY (ADR-0059): only the user who created the report can change its sharing. mode: 'private' (owner-only — only you can view, the default for new reports), 'public' (anyone with the link), 'password' (requires `password`), 'allowlist' (only `allowed_emails` — each is emailed a one-time magic link; optional `access_ttl_seconds` sets how long their access lasts), or 'org'. REPLACES the whole acl — send the COMPLETE allowed_emails list, not a delta. Use reports_get_acl first.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "private",
+            "public",
+            "password",
+            "org",
+            "allowlist"
+          ],
+          "description": "The sharing mode."
+        },
+        "allowed_emails": {
+          "description": "allowlist mode: the FULL list of emails allowed to view (replaces any existing).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "password": {
+          "description": "password mode: the viewing password.",
+          "type": "string"
+        },
+        "access_ttl_seconds": {
+          "description": "allowlist mode: how long granted access lasts (60–7776000; default 604800 = 7d).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "slug",
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_set_sharing",
+    "description": "Set a report's sharing in ONE step (ADR-0078): 'private' (only you), 'org_view' (everyone in your org can view), or 'org_edit' (everyone in your org can view AND edit). OWNER-ONLY; requires the `acl:write` scope. Read and write are always paired — 'org_edit' also grants viewing, so this can never give people edit access to something they cannot open. DELETE stays owner-only in every option. Prefer this over reports_set_acl for org sharing; use reports_set_acl when you need a password, an invite list, or a public link, and reports_grant_write to give ONE named person edit access instead of the whole org. If the report currently uses password, allowlist or public, this REFUSES with an explanation of what would be lost — re-send with confirm_discard: true only if the user has agreed to lose that setting.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "sharing": {
+          "type": "string",
+          "enum": [
+            "private",
+            "org_view",
+            "org_edit"
+          ],
+          "description": "The target sharing state."
+        },
+        "confirm_discard": {
+          "description": "Only needed when the report currently uses password/allowlist/public. Acknowledges that the setting will be permanently discarded.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "slug",
+        "sharing"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_update",
+    "description": "Change a report's title. Requires write access (ADR-0059/0060): the report's owner or a write grantee. Find its slug with reports_search first.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The report's slug or its report_ id."
+        },
+        "title": {
+          "type": "string",
+          "description": "The new title."
+        }
+      },
+      "required": [
+        "slug",
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reports_upload",
+    "description": "Create a report from an HTML document — returns the slug + a permanent `view_url` you can share immediately. To PUBLISH A NEW VERSION of that same report later (after edits/re-generation), call this again with `update_slug` set to its slug: the `view_url` stays exactly the same, only the content and version number change (re-upload requires write access, ADR-0059/0060 — the report's owner or a write grantee). To set/change the title afterwards use reports_update. Title is not set here. The response also carries editability: 'editable' | 'unsplittable' | 'unparsable' | null (ADR-0080) — whether what you just published can be opened in the editor. 'unsplittable' means your HTML had a MALFORMED <body> (unclosed, or closed before it opens); a document with no <body> tag at all is fine and opens normally; 'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is NOT an error: the upload succeeded and the report still views perfectly at view_url. Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "html": {
+          "type": "string",
+          "description": "The report's full HTML document. Served byte-for-byte — there is no serve-time rewriting — so what you emit is what readers get. LINK CONVENTIONS (ADR-0062 Amendment 3; nothing adds these for you): give the target an `id` and point in-page links at it (`<a href=\"#summary\">` → `<section id=\"summary\">`); put `target=\"_blank\" rel=\"noopener noreferrer\"` on every EXTERNAL link you want to open in a new tab. Anchor BLOCK elements only (`section`, `h1`-`h6`, `p`, `div`, `li`, `td`, `blockquote`): editing a report and saving re-serializes it, and `id` is NOT retained on the inline elements modelled as marks (`span`, `a`, `code`, `strong`, `em`), so `<span id>` becomes a dead anchor. That save also normalizes: a `target` other than `_blank` and `rel=\"opener\"` are dropped as frame-escape/tabnabbing primitives, unrecognized `rel` tokens are dropped, `style` is sanitized, and attribute order is not preserved. SIZE: the MCP transport caps the whole JSON-RPC request at 4 MiB, and JSON escaping inflates the HTML in transit — keep the document under ~3.5MB or the call fails with HTTP 413. Bigger files go through the web upload instead (per-file cap 25 MiB)."
+        },
+        "update_slug": {
+          "description": "Publish a new version under this existing slug instead of creating a new report — the view_url is unchanged. Omit to create a brand-new report.",
+          "type": "string"
+        },
+        "folder_path": {
+          "description": "Create-only: place a NEW report at this folder path (e.g. '/q3'). Cannot combine with update_slug.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "html"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
