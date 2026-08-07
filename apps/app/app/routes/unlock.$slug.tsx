@@ -27,8 +27,8 @@ import { decidePrivateUnlock } from "../server/private-unlock.server";
 const ACCESS_TTL_SECONDS = 900; // 15 min (password + org modes)
 
 // `slug` is always a validated nanoid (makeSlug) before it reaches here, so it's safe
-// to interpolate into the form action; no inline styles (the app-origin CSP, ADR-013/#65,
-// may forbid them) — plain, functional HTML (claude-review #100).
+// to interpolate into the form action. (This comment used to also claim the app-origin CSP
+// "may forbid" inline styles, justifying an unstyled page — it does not; see PAGE_STYLE below.)
 // HTML-attribute escape — the `?link=` token is echoed into a hidden input on the confirm
 // page, so an attacker-supplied `?link="><script>…` must not break out (claude-review #116).
 const escapeAttr = (s: string) =>
@@ -57,6 +57,16 @@ const escapeAttr = (s: string) =>
  * still renders correctly when the app's static assets are unavailable, which
  * is exactly the degraded condition some of these denials accompany.
  *
+ * The palette is the arp-ui token set (`packages/ui/src/theme.css`) — the
+ * single source of truth shared by BOTH origins — transcribed literally,
+ * because a raw Response has no build step to @import it. The product is
+ * dark-only (`color-scheme: dark`, `--bg: #1a1410`), so this page is too: an
+ * earlier cut of this style honoured `prefers-color-scheme` and rendered LIGHT
+ * in a browser where the dashboard next to it rendered dark. Caught by looking
+ * at the preview rather than by any test. Transcribed values can drift from the
+ * tokens; that is the accepted cost of not framing this page or shipping it a
+ * linked asset it may not be able to load.
+ *
  * The styling lives HERE, in the one wrapper, and never in a caller's copy:
  * every denial must remain byte-identical across sharing modes (the
  * existence-oracle guard in unlock-route.test.ts), and per-branch styling is
@@ -68,39 +78,31 @@ const PAGE_STYLE = `<style>
 body {
   margin: 0; min-height: 100vh; padding: 2rem 1.5rem;
   display: flex; flex-direction: column; justify-content: center;
-  background: #17140f; color: #f5efe6;
+  background: #1a1410; color: #f2e9dc;
   font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 main { width: 100%; max-width: 34rem; margin: 0 auto }
 .eyebrow {
   font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
-  color: #8d8578; margin: 0 0 1.75rem;
+  color: #9a8b78; margin: 0 0 1.75rem;
 }
 h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 600; margin: 0 0 .75rem }
-p { margin: 0 0 1rem; color: #cfc7ba }
-a { color: #f5efe6; text-underline-offset: .2em }
-a:hover { color: #fff }
-label { display: block; font-size: .875rem; color: #cfc7ba; margin-bottom: 1rem }
+p { margin: 0 0 1rem; color: #c6b9a6 }
+a { color: #f2e9dc; text-underline-offset: .2em }
+a:hover { color: #e8a04c }
+label { display: block; font-size: .875rem; color: #c6b9a6; margin-bottom: 1rem }
 input {
   display: block; width: 100%; margin-top: .375rem; padding: .625rem .75rem;
-  background: #211d17; color: inherit; font: inherit;
-  border: 1px solid #3a342b; border-radius: .375rem;
+  background: #241c16; color: inherit; font: inherit;
+  border: 1px solid rgba(242, 233, 220, 0.16); border-radius: .375rem;
 }
-input:focus-visible { outline: 2px solid #c9a227; outline-offset: 1px; border-color: transparent }
+input:focus-visible { outline: 2px solid #c8762d; outline-offset: 1px; border-color: transparent }
 button {
   padding: .625rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
-  background: #f5efe6; color: #17140f; border: 0; border-radius: .375rem;
+  background: #c8762d; color: #231405; border: 0; border-radius: .375rem;
 }
-button:hover { background: #fff }
-@media (prefers-color-scheme: light) {
-  body { background: #faf8f5; color: #17140f }
-  p, label { color: #55504a }
-  .eyebrow { color: #7a736a }
-  a { color: #17140f }
-  input { background: #fff; border-color: #ddd6cc }
-  button { background: #17140f; color: #faf8f5 }
-}
+button:hover { background: #e8a04c }
 </style>`;
 
 // These raw Responses bypass entry.server.tsx, so set baseline framing headers here — the
