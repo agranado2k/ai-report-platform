@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/editable-fragments` (branch `fix/editable-fragments`) — ADR-0062 Amendment 4, this entry. `worktree/diary-mcp-close`. `worktree/mcp-body-limit` — kept by `/worktree-cleanup` for uncommitted changes, needs an operator decision. Everything from the #230–#253 arc is merged and pruned. |
+| **Active worktrees**   | `worktree/unlock-page-and-editability` (branch `fix/unlock-page-and-editability`) — this entry. Everything from the #230–#255 arc is merged and pruned (3 removed by `/worktree-cleanup` on 2026-08-07 after #255). |
 
 | **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/unopenable-readonly` (branch `fix/unopenable-readonly` — the last hop of the owner lockout; this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
@@ -5147,3 +5147,44 @@ keeps its coverage. Full suite 2451 passed.
 
 **Process**: worktree `worktree/editable-fragments` (branch `fix/editable-fragments`), off
 `main` at `effe8bd`. Strict TDD — 4 red, then green, then the contract-change fallout.
+
+## 2026-08-07 — Unlock-page presentation + the stale-editability reset
+
+**Trigger**: the `/ce-dogfood` run that verified the owner-lockout fix in production also
+surfaced a defect nobody had filed — every page `/unlock/{slug}` serves (the private
+notice, the password form, the allowlist form, and all nine denial classes) rendered as
+raw user-agent-default HTML: Times New Roman on white, default-blue links. On the one
+surface whose job is to say "this is private, here is the way in", that reads as a broken
+site. Reproduced on two reports, so it was systematic, not a failed asset load.
+
+**Why it shipped that way**: a comment in `unlock.$slug.tsx` withheld styling because the
+app-origin CSP "may forbid" inline styles. It does not — `app-headers.ts` sets
+`style-src 'self' 'unsafe-inline'`, and these raw Responses carry only
+`frame-ancestors 'none'`, which constrains framing and nothing else. The caution cost the
+page its design for no security benefit. Worth noting as a pattern: an unverified security
+hedge in a comment survived for months and shaped the product.
+
+**Fix**: an inline `<style>` in the ONE wrapper — inline rather than a linked asset so the
+page still renders when static assets are unavailable, which is exactly the degraded
+condition some of these denials accompany. Keeping it in the wrapper (never in a caller's
+copy) is what preserves the existence-oracle guard: all nine denial classes stay
+byte-identical, re-verified by the pre-existing matrix test.
+
+**Second item, same PR**: migration `0022` resets every stored `editability = 'unsplittable'`
+to NULL. ADR-0062 Amendment 4 changed the split predicate, so those verdicts were produced
+by a rule that no longer exists — and for the common agent upload (no `<body>`) they are
+now wrong, making the dashboard assert "Not editable" about reports that open fine. NULL
+means UNKNOWN, which is never treated as un-editable; same policy migration `0021` set. The
+reset is scoped to `unsplittable` because `editable`/`unparsable` were reached through the
+`<body>` path, which Amendment 4 leaves byte-for-byte unchanged. Editing was never blocked
+by this column — `loadEditableDocument` re-derives the split on every open — so this only
+stops the UI lying.
+
+**Also today**: issue #233's reproduction steps were moved to a private security advisory
+(GHSA-ghxh-82j4-pp6m) because the affected routes (`revoke-write`, `set-acl`) are still
+unpatched in production. The advisory is created; the public redaction is prepared but was
+blocked by the tool-permission classifier and awaits the operator.
+
+**Process**: worktree `worktree/unlock-page-and-editability` (branch
+`fix/unlock-page-and-editability`), off `main` at `83dba66`. TDD — 2 red on the styling,
+then green, with the byte-identical-denial guard held throughout.

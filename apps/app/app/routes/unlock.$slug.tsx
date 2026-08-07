@@ -27,8 +27,8 @@ import { decidePrivateUnlock } from "../server/private-unlock.server";
 const ACCESS_TTL_SECONDS = 900; // 15 min (password + org modes)
 
 // `slug` is always a validated nanoid (makeSlug) before it reaches here, so it's safe
-// to interpolate into the form action; no inline styles (the app-origin CSP, ADR-013/#65,
-// may forbid them) — plain, functional HTML (claude-review #100).
+// to interpolate into the form action. (This comment used to also claim the app-origin CSP
+// "may forbid" inline styles, justifying an unstyled page — it does not; see PAGE_STYLE below.)
 // HTML-attribute escape — the `?link=` token is echoed into a hidden input on the confirm
 // page, so an attacker-supplied `?link="><script>…` must not break out (claude-review #116).
 const escapeAttr = (s: string) =>
@@ -37,15 +37,97 @@ const escapeAttr = (s: string) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
 
+/**
+ * The presentation shell for every page this route serves.
+ *
+ * These are the product's front door for anyone who arrives at a link they
+ * cannot open — including a report's own OWNER, who reaches the private notice
+ * before the one mint that lets them in. They shipped as raw user-agent-default
+ * HTML: Times New Roman on white with default-blue links. On a page whose whole
+ * job is to say "this is private, here is the way in", that reads as a broken
+ * site rather than a deliberate boundary, which is the opposite of the
+ * assurance the page exists to give.
+ *
+ * The earlier comment here withheld styling because the app-origin CSP "may
+ * forbid" inline styles. It does not: `app-headers.ts` sets
+ * `style-src 'self' 'unsafe-inline'`, and these raw Responses carry only
+ * `frame-ancestors 'none'`, which constrains framing and nothing else. So an
+ * inline <style> was always allowed — the caution cost the page its design for
+ * no security benefit. It stays INLINE rather than a linked asset so the page
+ * still renders correctly when the app's static assets are unavailable, which
+ * is exactly the degraded condition some of these denials accompany.
+ *
+ * The palette is the arp-ui token set (`packages/ui/src/theme.css`) — the
+ * single source of truth shared by BOTH origins — re-declared here, because a
+ * raw Response has no build step to @import it. The product is dark-only
+ * (`color-scheme: dark`), so this page is too: an earlier cut honoured
+ * `prefers-color-scheme` and rendered LIGHT in a browser where the dashboard
+ * beside it rendered dark.
+ *
+ * Re-declaring is a standing drift risk — nothing about editing `theme.css`
+ * would otherwise tell you this page exists — so the tokens are hoisted into
+ * one `:root` block and `unlock-route.test.ts` parses BOTH files and compares
+ * them. A token retuned upstream and not here fails the build instead of
+ * shipping an unlock page that no longer matches the product around it. Add a
+ * value here only if it exists upstream under the same name.
+ *
+ * The styling lives HERE, in the one wrapper, and never in a caller's copy:
+ * every denial must remain byte-identical across sharing modes (the
+ * existence-oracle guard in unlock-route.test.ts), and per-branch styling is
+ * precisely how that uniformity would drift.
+ */
+const PAGE_STYLE = `<style>
+:root {
+  color-scheme: dark;
+  --bg: #1a1410;
+  --surface: #241c16;
+  --border-strong: rgba(242, 233, 220, 0.16);
+  --fg: #f2e9dc;
+  --muted: #c6b9a6;
+  --subtle: #9a8b78;
+  --brand: #c8762d;
+  --brand-hover: #e8a04c;
+  --on-brand: #231405;
+}
+* { box-sizing: border-box }
+body {
+  margin: 0; min-height: 100vh; padding: 2rem 1.5rem;
+  display: flex; flex-direction: column; justify-content: center;
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { width: 100%; max-width: 34rem; margin: 0 auto }
+.eyebrow {
+  font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--subtle); margin: 0 0 1.75rem;
+}
+h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 600; margin: 0 0 .75rem }
+p { margin: 0 0 1rem; color: var(--muted) }
+a { color: var(--fg); text-underline-offset: .2em }
+a:hover { color: var(--brand-hover) }
+label { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 1rem }
+input {
+  display: block; width: 100%; margin-top: .375rem; padding: .625rem .75rem;
+  background: var(--surface); color: inherit; font: inherit;
+  border: 1px solid var(--border-strong); border-radius: .375rem;
+}
+input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; border-color: transparent }
+button {
+  padding: .625rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
+  background: var(--brand); color: var(--on-brand); border: 0; border-radius: .375rem;
+}
+button:hover { background: var(--brand-hover) }
+</style>`;
+
 // These raw Responses bypass entry.server.tsx, so set baseline framing headers here — the
-// credential/email forms must not be frameable (clickjacking, claude-review #116). No inline
-// styles (the app-origin CSP, ADR-013/#65, may forbid them) — plain, functional HTML.
+// credential/email forms must not be frameable (clickjacking, claude-review #116).
 function html(body: string, status = 200): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Report access</title></head>
-<body>${body}</body></html>`,
+<title>Report access</title>${PAGE_STYLE}</head>
+<body><main><p class="eyebrow">Centaur Spec</p>${body}</main></body></html>`,
     {
       status,
       headers: {

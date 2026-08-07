@@ -63,7 +63,7 @@ are cross-cutting infrastructure. The only shared-kernel ids are `UserId`/`OrgId
 | `grant_level` | `editor`, `admin` — **superseded, unused** (ADR-0060; write grants have one implicit level) |
 | `scan_status` | `pending`, `clean`, `flagged`, `blocked` |
 | `version_origin` | `upload`, `editor` (ADR-0062 §6, ADR-0065; default `upload`) |
-| `version_editability` | `editable`, `unsplittable`, `unparsable` (ADR-0080; migration `0021`). The UNKNOWN state is the column's NULL, deliberately **not** a value — a version nobody probed must not read as a verdict |
+| `version_editability` | `editable`, `unsplittable`, `unparsable` (ADR-0080; migration `0021`). The UNKNOWN state is the column's NULL, deliberately **not** a value — a version nobody probed must not read as a verdict. Migration `0022` resets every stored `unsplittable` back to NULL: PR #255 changed the split predicate twice (`a645b27` body-less documents, `f34d606` scan-not-regex), so those verdicts came from a rule that no longer exists (see the `editability` row below) |
 | `scan_job_status` | `queued`, `running`, `done`, `failed` |
 | `acl_mode` | `private`, `public`, `password`, `org`, `allowlist` |
 | `idempotency_state` | `in_flight`, `completed` |
@@ -197,7 +197,7 @@ making `live_version_id` nullable and set after the first version commits.
 | `scan_status` | `scan_status` | default `pending`; **denormalized cache** of the `ScanJob` verdict, updated on `ReportVersionScanned` |
 | `uploaded_at` | timestamptz | |
 | `origin` | `version_origin` | `upload` \| `editor` (ADR-0062 §6, ADR-0065); default `upload`, NOT NULL. Every row is `upload` today — the in-app editor doesn't exist yet (migration 0011) |
-| `editability` | `version_editability` NULL | **Editability** (ADR-0080): the editor's own open-time precondition (`splitShell`, then `parseBody` when there is no `_source.json` sidecar) run against THESE bytes at write time. NULL = UNKNOWN (never probed) — no default, so migration `0021` asserts nothing about the rows it cannot read. Immutable per version: `upsertVersions` refreshes only `scan_status` on conflict |
+| `editability` | `version_editability` NULL | **Editability** (ADR-0080): the editor's own open-time precondition (`splitShell`, then `parseBody` when there is no `_source.json` sidecar) run against THESE bytes at write time. NULL = UNKNOWN (never probed) — no default, so migration `0021` asserts nothing about the rows it cannot read. Immutable per version: `upsertVersions` refreshes only `scan_status` on conflict. **Recorded-at-write means it can go stale when the predicate changes**: ADR-0062 Amendment 4 made body-less documents splittable, so migration `0022` NULLs every `unsplittable` row rather than guessing a new verdict a migration cannot compute (it cannot read R2). Editing is unaffected either way — `loadEditableDocument` re-derives the split from the stored bytes on every open. The column is NOT badge-only: it is part of the wire contract (`packages/http/src/wire`, `resource.ts`, `write-response.ts`) and is surfaced by the MCP tools, and it is a required (nullable) property of three `openapi.yaml` schemas. So the reset is visible to API/MCP consumers as `"editability": null` — contract-legal and intended, but a consumer branching on the literal string will see it change |
 
 Indexes: `report_id`, `(report_id, version_no)` unique, `scan_status`.
 
