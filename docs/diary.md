@@ -5378,7 +5378,7 @@ taking Neon advisory locks) and it spent the always-loaded instruction budget on
 that are true but rarely needed. Restructured into four layers, per SwarmForge's
 constitution model and the AGENTS.md ~150–200-instruction budget:
 
-- **Root `CLAUDE.md` — 110 → 96 lines**, of which ~24 are the quick-reference table (kept
+- **Root `CLAUDE.md` — 110 → 100 lines**, of which 27 are the quick-reference table (kept
   in full; it's the highest-traffic thing in the file). Keeps only the orientation
   paragraph, seven one-sentence hard rules, the trust boundary compressed to one paragraph
   pointing at ADR-0069, the table, the article pointers, and "the spec wins".
@@ -5398,7 +5398,7 @@ constitution model and the AGENTS.md ~150–200-instruction budget:
 **References are plain paths, never `@`-imports** — an `@`-import is eager and would
 rebuild the monolith at request time, which is the whole thing this was meant to stop.
 
-**Nothing binding was dropped.** The old root was inventoried at **41 distinct rules**,
+**Nothing binding was dropped.** The old root was inventoried at **42 distinct rules**,
 each traced to exactly one new home (full mapping in the commit body): **20 kept in the
 root** (terse), **21 moved to an article** (14 → `local-engineering.md`, 7 →
 `local-workflow.md`), **1 de-duplicated to `.claude/skills/tdd/SKILL.md`** (the skill is
