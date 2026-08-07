@@ -5001,7 +5001,34 @@ At authoring time GitHub Actions was degraded (runs queued >90 minutes; `Migrate
 DB (prod)` and `Release` both failed on `main`), which is why verification used
 three already-completed PRs rather than the current one.
 
-<<<<<<< HEAD
+## 2026-08-07 — MCP upload body limit shipped (#250); worktree sweep
+
+**PR #250 merged** (`fix/mcp-body-limit`): the remote MCP server's JSON-RPC body
+cap went from Express's accidental 100kb default to an explicit 4 MiB
+(`MAX_JSON_BODY_BYTES`), fixing `reports_upload` 413s at ~85–100KB of HTML. The
+review pass hardened the same boundary: over-limit and malformed bodies now get
+the app's JSON error shape (not Express's HTML page), and credentials resolve
+BEFORE the body is buffered, so anonymous callers can't force multi-MB buffering.
+The ~3.5MB practical HTML ceiling is documented in the tool description, the
+centaur-spec skill (both copies), `docs/mcp-usage.md`, and a transport note in
+ADR-0037 §9. Verified live post-deploy: a 200KB unauthenticated POST to
+`mcp.centaurspec.com/mcp` returns the JSON 401 (old code 413'd pre-auth).
+The branch carries one empty `chore(ci)` commit — a GitHub Actions incident
+(2026-08-06) dropped the PR's trigger events repeatedly; two close/reopen cycles
+didn't re-fire workflows and a fresh SHA was the remaining lever.
+
+**Known gap surfaced by the #250 review (pre-existing, not addressed):** with
+the accidental 100kb brake gone, the 4 MiB transport cap is the only enforced
+size guard on the MCP upload path — there is still no rate limiting anywhere,
+`AllowAllPlanLimiter` admits everything, and ADR-0037 §9's sync pre-check caps
+remain the "later slice" stub.
+
+**Worktree sweep** (`/worktree-cleanup`): pruned `diary-worktree-sync` (#249),
+`e2e-hardening` (#252), `mcp-body-limit` (#250), `required-checks` (#253); the
+2026-08-06 entry's note that `mcp-body-limit` had uncommitted changes is
+resolved — that work became #250. Kept: `unopenable-readonly` (unmerged).
+Root `main` fast-forwarded to `6a55311`.
+
 ---
 
 ## 2026-08-06 — the read-only link had no key: the owner could learn why, and still not read
@@ -5078,32 +5105,3 @@ ADR-0080 §4 (reaffirmed with the concrete case) + its follow-up list.
 **Process**: worktree `worktree/unopenable-readonly` (branch `fix/unopenable-readonly`),
 off `main`. Strict TDD — red at the two tiers #247 established (the page's own pure
 tier, the gate's log line), then green, then the e2e assertion.
-=======
-## 2026-08-07 — MCP upload body limit shipped (#250); worktree sweep
-
-**PR #250 merged** (`fix/mcp-body-limit`): the remote MCP server's JSON-RPC body
-cap went from Express's accidental 100kb default to an explicit 4 MiB
-(`MAX_JSON_BODY_BYTES`), fixing `reports_upload` 413s at ~85–100KB of HTML. The
-review pass hardened the same boundary: over-limit and malformed bodies now get
-the app's JSON error shape (not Express's HTML page), and credentials resolve
-BEFORE the body is buffered, so anonymous callers can't force multi-MB buffering.
-The ~3.5MB practical HTML ceiling is documented in the tool description, the
-centaur-spec skill (both copies), `docs/mcp-usage.md`, and a transport note in
-ADR-0037 §9. Verified live post-deploy: a 200KB unauthenticated POST to
-`mcp.centaurspec.com/mcp` returns the JSON 401 (old code 413'd pre-auth).
-The branch carries one empty `chore(ci)` commit — a GitHub Actions incident
-(2026-08-06) dropped the PR's trigger events repeatedly; two close/reopen cycles
-didn't re-fire workflows and a fresh SHA was the remaining lever.
-
-**Known gap surfaced by the #250 review (pre-existing, not addressed):** with
-the accidental 100kb brake gone, the 4 MiB transport cap is the only enforced
-size guard on the MCP upload path — there is still no rate limiting anywhere,
-`AllowAllPlanLimiter` admits everything, and ADR-0037 §9's sync pre-check caps
-remain the "later slice" stub.
-
-**Worktree sweep** (`/worktree-cleanup`): pruned `diary-worktree-sync` (#249),
-`e2e-hardening` (#252), `mcp-body-limit` (#250), `required-checks` (#253); the
-2026-08-06 entry's note that `mcp-body-limit` had uncommitted changes is
-resolved — that work became #250. Kept: `unopenable-readonly` (unmerged).
-Root `main` fast-forwarded to `6a55311`.
->>>>>>> origin/main
