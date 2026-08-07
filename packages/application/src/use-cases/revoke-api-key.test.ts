@@ -89,6 +89,16 @@ describe("revokeApiKey idempotency (ADR-0039)", () => {
     const second = await revokeApiKey(deps, { userId: alice, orgId: orgA }, input);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
+    // NOTE — why this route has no A -> B -> A sibling. A revoked key is never
+    // un-revoked, so there is no second state to return to and no observable
+    // difference between "re-applied" and "replayed" in the store. #233's
+    // acceptance is satisfied here by its FIRST clause ("either skips the
+    // derived-key fallback or is proven by a round-trip"): this use case skips
+    // it, and this count is the evidence that the retry really executes.
+    // A separate call-counting test was written and then removed — it measured
+    // the same thing at a different port (the store's revoke and the audit row
+    // are in one uow.run with no branch between them), so it was duplication
+    // wearing the costume of extra coverage.
     // #233: was 1, when the derived-key fallback replayed instead of
     // re-applying. The retry now really runs — same end state (these are
     // naturally idempotent), one more audit row. An explicit

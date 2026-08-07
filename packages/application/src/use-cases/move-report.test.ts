@@ -271,3 +271,29 @@ describe("moveReport leaves sharing alone (ADR-0078 §7)", () => {
     expect(after.ok && after.value?.acl.mode).toBe("org");
   });
 });
+
+// ── #233 acceptance: the round-trip, not the audit count ───────────────────
+describe("moveReport — A -> B -> A must land on A (#233)", () => {
+  it("moving back to the original folder actually re-persists it", async () => {
+    const reports = new InMemoryReportRepository();
+    const folders = new InMemoryFolderRepository();
+    const ROOT = "00000000-0000-7000-8000-0000000000a0";
+    const DEST = "00000000-0000-7000-8000-0000000000a9";
+    await folders.save(folder(ROOT, orgA, "Root"));
+    await folders.save(folder(DEST, orgA, "Dest"));
+    await reports.save(report(orgA, "iiiiiiiiii"));
+    const deps = { reports, folders, ...writeDeps() };
+    const at = (to: string) =>
+      moveReport(deps, ownerActor, { slug: slug("iiiiiiiiii"), toFolderId: folderId(to) });
+
+    expect((await at(DEST)).ok).toBe(true);
+    expect((await at(ROOT)).ok).toBe(true);
+    const back = await at(DEST);
+
+    expect(back.ok && back.value.folderId).toBe(folderId(DEST));
+    const stored = await reports.findBySlug(slug("iiiiiiiiii"));
+    expect(stored.ok && stored.value?.folderId, "the PERSISTED folder must be the last set").toBe(
+      folderId(DEST),
+    );
+  });
+});
