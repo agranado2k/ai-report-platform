@@ -19,10 +19,10 @@ import type { AclMode } from "./value-objects";
 
 const aclMode = fc.constantFrom<AclMode>("private", "public", "org", "password", "allowlist");
 
-/** Arbitrary boundary input: every mode crossed with every optional field, so the
- *  mode/field combinations nobody writes a test for (a password hash on an `org`
- *  Acl, an allowlist on a `public` one) are covered too. */
-const anyAclInput: fc.Arbitrary<MakeAclInput> = fc.record<MakeAclInput>(
+/** Every mode crossed with every optional field, so the mode/field combinations
+ *  nobody writes a test for (a password hash on an `org` Acl, an allowlist on a
+ *  `public` one) are covered. Left in the mix below as the chaos arm. */
+const chaoticAclInput: fc.Arbitrary<MakeAclInput> = fc.record<MakeAclInput>(
   {
     mode: aclMode,
     passwordHash: fc.option(fc.string(), { nil: undefined }),
@@ -34,6 +34,76 @@ const anyAclInput: fc.Arbitrary<MakeAclInput> = fc.record<MakeAclInput>(
     }),
   },
   { requiredKeys: ["mode"] },
+);
+
+/**
+ * Boundary input, weighted so every mode is drawn often — most importantly the
+ * ACCEPTED `allowlist` Acl, the only shape that carries the ADR-0056 TTL and
+ * normalized-email invariants.
+ *
+ * `chaoticAclInput` alone reached an accepted `allowlist` in ~1.4% of draws
+ * (measured over 10k): `mode` is `allowlist` a fifth of the time, but the
+ * allowlist then has to survive present-and-non-empty, every entry a valid
+ * format, and an in-range TTL — and its entries are half arbitrary strings. So
+ * the four allowlist properties below spent almost every run returning early,
+ * asserting nothing. Weighting is not cosmetic here: an arbitrary that reaches
+ * the interesting branch by luck is a test that passes by luck.
+ */
+const anyAclInput: fc.Arbitrary<MakeAclInput> = fc.oneof(
+  // Modes that construct unconditionally.
+  {
+    arbitrary: fc.record<MakeAclInput>({
+      mode: fc.constantFrom<AclMode>("private", "public", "org"),
+    }),
+    weight: 2,
+  },
+  // `password`, both sides of the non-blank check.
+  {
+    arbitrary: fc.record<MakeAclInput>({
+      mode: fc.constant<AclMode>("password"),
+      passwordHash: fc.oneof(fc.string({ minLength: 1 }), fc.constantFrom("", "   ")),
+    }),
+    weight: 2,
+  },
+  // `allowlist` that should be ACCEPTED: ≥1 real address, in-range or absent TTL.
+  {
+    arbitrary: fc.record<MakeAclInput>(
+      {
+        mode: fc.constant<AclMode>("allowlist"),
+        allowedEmails: fc.array(fc.emailAddress(), { minLength: 1, maxLength: 6 }),
+        accessTtlSeconds: fc.option(
+          fc.integer({ min: MIN_ACCESS_TTL_SECONDS, max: MAX_ACCESS_TTL_SECONDS }),
+          { nil: undefined },
+        ),
+      },
+      { requiredKeys: ["mode", "allowedEmails"] },
+    ),
+    weight: 4,
+  },
+  // `allowlist` straddling each rejection edge: empty list, junk entries,
+  // out-of-range and non-integer TTLs.
+  {
+    arbitrary: fc.record<MakeAclInput>(
+      {
+        mode: fc.constant<AclMode>("allowlist"),
+        allowedEmails: fc.option(fc.array(fc.oneof(fc.emailAddress(), fc.string())), {
+          nil: undefined,
+        }),
+        accessTtlSeconds: fc.option(
+          fc.oneof(
+            fc.integer({ min: MIN_ACCESS_TTL_SECONDS - 5, max: MIN_ACCESS_TTL_SECONDS + 5 }),
+            fc.integer({ min: MAX_ACCESS_TTL_SECONDS - 5, max: MAX_ACCESS_TTL_SECONDS + 5 }),
+            fc.double({ noNaN: true, min: -10, max: 10 }),
+          ),
+          { nil: undefined },
+        ),
+      },
+      { requiredKeys: ["mode"] },
+    ),
+    weight: 3,
+  },
+  // The original unrestricted cross-product, kept for the odd mode/field pairs.
+  { arbitrary: chaoticAclInput, weight: 3 },
 );
 
 describe("Acl construction (ADR-0056) — properties", () => {
@@ -75,6 +145,10 @@ describe("Acl construction (ADR-0056) — properties", () => {
         expect(r.value.accessTtlSeconds).toBeLessThanOrEqual(MAX_ACCESS_TTL_SECONDS);
         expect(Number.isInteger(r.value.accessTtlSeconds)).toBe(true);
         expect(r.value.allowedEmails.length).toBeGreaterThan(0);
+        // Oracle note: `normalizeEmailAddresses` is deliberately the oracle here —
+        // the claim under test is "`makeAcl` routes the allowlist through the ONE
+        // normalization home (ADR-0056)", not "normalization is correct". That is
+        // pinned independently in email-address.property.test.ts.
         expect([...r.value.allowedEmails]).toEqual([
           ...normalizeEmailAddresses(input.allowedEmails ?? []),
         ]);
