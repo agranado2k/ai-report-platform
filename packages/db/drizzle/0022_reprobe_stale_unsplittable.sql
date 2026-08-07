@@ -18,8 +18,21 @@
 -- for editing and only stops the UI asserting "Not editable" about reports
 -- that now open fine.
 --
--- Scoped to 'unsplittable' deliberately. 'editable' and 'unparsable' were
--- reached through the <body> path, which Amendment 4 leaves byte-for-byte
--- unchanged, so those verdicts are still the ones the current predicate would
--- give. Versions are re-probed as they are re-uploaded; there is still no sweep.
+-- Scoped to 'unsplittable' deliberately, and the reason matters because the
+-- next re-probe migration will reuse it. PR #255 changed the predicate TWICE:
+-- a645b27 (body-less documents split instead of throwing) and f34d606 (the
+-- boundary is found by scanning, not by regex). The second one DOES change the
+-- split output for documents whose <body> is mentioned in a comment, a <style>
+-- or an attribute — so "the <body> path is byte-for-byte unchanged" would be
+-- the wrong rule to state. What is true, checked shape by shape against both
+-- predicates, is narrower: only 'unsplittable' -> 'editable' flips; every
+-- 'editable' verdict stays 'editable', and the two genuinely-unsplittable
+-- shapes (unclosed <body>, </body> before <body>) still throw identically.
+--
+-- Known cost: those genuinely-unsplittable rows are NULLed too, so an accurate
+-- "Not editable" badge disappears and the owner rediscovers it by clicking
+-- Edit and hitting the degrade. Avoiding that needs a sweep that reads R2,
+-- which is exactly what a migration cannot do.
+--
+-- Versions are re-probed as they are re-uploaded; there is still no sweep.
 UPDATE "report_versions" SET "editability" = NULL WHERE "editability" = 'unsplittable';

@@ -23,7 +23,6 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { InMemoryReportRepository } from "arp-application/testing";
 import {
   type Acl,
@@ -241,7 +240,7 @@ describe("/unlock/{slug} — the inlined palette tracks packages/ui/src/theme.cs
   const rootTokens = (css: string): Map<string, string> => {
     const root = /:root\s*\{([\s\S]*?)\}/.exec(css);
     const out = new Map<string, string>();
-    for (const m of (root?.[1] ?? "").matchAll(/(--[a-z-]+)\s*:\s*([^;]+);/g)) {
+    for (const m of (root?.[1] ?? "").matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
       const [, k, v] = m;
       if (k && v) out.set(k, v.trim());
     }
