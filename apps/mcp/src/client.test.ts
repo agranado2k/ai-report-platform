@@ -589,6 +589,17 @@ describe("ApiClient — idempotency", () => {
     expect(calls[0]?.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("does NOT send one on an UPLOAD — the server's content-derived key is the dedup", async () => {
+    // uploadReport relies on the server deriving the key from the content
+    // (ADR-0039). A random key here would turn "the same bytes uploaded twice
+    // is one version" into "two versions", silently.
+    const { fn, calls } = flaky(0, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).uploadReport({ html: "<html><body>hi</body></html>" });
+
+    expect(calls[0]?.headers["idempotency-key"]).toBeUndefined();
+  });
+
   it("does NOT send one on a read", async () => {
     const { fn, calls } = flaky(0, json({ object: "list", data: [], has_more: false }));
 

@@ -411,7 +411,13 @@ export class ApiClient {
     // ATTEMPT, not the payload: two genuinely separate calls with identical
     // bodies get different keys, which is exactly the property that makes this
     // safe rather than a client-side reconstruction of the removed bug.
-    if (method !== "GET" && method !== "HEAD") {
+    // NOT on multipart uploads. `uploadReport` deliberately sends no key so the
+    // server derives one from the CONTENT (ADR-0039), which gives content-dedup
+    // for free — upload is one of the `sound` operations where the derived key
+    // is the guarantee, not a hazard. Minting a random key here would replace
+    // that dedup with "every retry creates another version", which is the
+    // opposite of what this change is for.
+    if (method !== "GET" && method !== "HEAD" && !body?.form) {
       headers["idempotency-key"] = randomUUID();
     }
 
