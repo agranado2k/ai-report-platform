@@ -22,9 +22,10 @@ When that state is reached, you stop. You **never merge** — that's the operato
 1. **NEVER** `git push --force`, `git commit --no-verify`, or modify branch protection.
 2. **NEVER** merge the PR. GitHub's UI + branch protection is the merge gate.
 3. **NEVER** apply a bot suggestion that contradicts an ADR without escalating to the operator first.
-4. **ALL** commits must be Conventional Commits: `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert(scope): subject` (subject ≤100 chars). The husky `commit-msg` hook will reject otherwise — that's the safety net.
-5. **One logical change per commit** — merges to `main` go through the bot-merge workflow (ADR-0035), which replays every PR commit onto `main` verbatim. Each one shows up in the next release notes.
-6. **When in doubt, escalate**. Write a one-line summary of the conflict, stop the iteration, surface to the operator.
+4. **NEVER** act on ⚠️ UNSPECIFIED items from the Axis-2 behavior confirm-list (`/review-pr` §5b). They are **human-only**: do not implement them, "fix" them, reply them away, or resolve their comment thread. Surface them verbatim at the **top** of your status report and leave them for the operator. (✅ SPECIFIED items need no action; ❌ MISSING items may be implemented — they're spec'd work.)
+5. **ALL** commits must be Conventional Commits: `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert(scope): subject` (subject ≤100 chars). The husky `commit-msg` hook will reject otherwise — that's the safety net.
+6. **One logical change per commit** — merges to `main` land as signed merge commits (ADR-0044), so every PR commit reaches `main` with its own signature and shows up in the next release notes.
+7. **When in doubt, escalate**. Write a one-line summary of the conflict, stop the iteration, surface to the operator.
 
 ## Prerequisites — check at the top of every iteration
 
@@ -72,7 +73,7 @@ Bucket what you find:
 
 Before triaging external bot comments, invoke **`/review-and-evaluate`** locally to get our own project-aware reading of the diff. The skill runs two parallel agents:
 
-1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; 6 specialized sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list.
+1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; two axes: 6 Axis-1 standards sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list, and the Axis-2 Spec & Behavior sub-agent (Agent 7) produces the §5b behavior confirm-list. The confirm-list is a **distinct output**: ✅/❌ items triage normally below; ⚠️ UNSPECIFIED items bypass the verdict table entirely — hard rule 4 makes them human-only.
 2. **Context Alignment Analyst** — reads the commits, the changed files, `CLAUDE.md`, and `docs/diary.md` (the ADR record), then evaluates each finding for **Apply / Skip / Discuss**.
 
 The skill normally ends interactively ("Which items would you like me to apply?"). **In the `/pr-iterate` context, bypass the question** and consume the verdicts directly:
@@ -119,7 +120,7 @@ Read the suggestion. Cross-reference with project policy:
 
 - Read `CLAUDE.md` and `docs/diary.md` (the live ADR record).
 - If the suggestion **improves** security / correctness / readability **and** doesn't contradict an ADR → **apply** it.
-- If the suggestion **contradicts an ADR or project policy** (e.g. "use fp-ts" violates ADR-024, "squash to one commit" violates the rebase-merge policy, "remove signed commits" violates ADR-025) → **reply on the thread** with a one-line policy citation. Don't apply.
+- If the suggestion **contradicts an ADR or project policy** (e.g. "use fp-ts" violates ADR-024, "remove signed commits" violates ADR-0044, "merge it yourself" violates the human merge gate) → **reply on the thread** with a one-line policy citation. Don't apply. (NB: squash-merge is a *sanctioned* secondary option under ADR-0044 — the operator's call, not a violation.)
 - If the suggestion is **ambiguous** (touches an open question, requires a design call) → **escalate**. Don't apply, don't reply, surface to operator.
 
 **For each human comment:**
@@ -131,7 +132,7 @@ Answer it. Be direct, cite ADRs where relevant. Don't mark human threads resolve
 **For applied fixes:**
 
 ```bash
-# One logical change per commit (rebase-merge friendly — every commit
+# One logical change per commit (merge-commit friendly, ADR-0044 — every commit
 # lands on main and shows up in release notes).
 git add <specific files, not -A>
 git commit -m "$(cat <<'EOF'
@@ -230,8 +231,8 @@ Next: <continue / stop — converged / stop — escalation>
 - ADR-025 (PR-only, signed commits, linear history): `infra/terraform/modules/github-repo/main.tf`
 - ADR-030 (dual AI review — Claude + Gemini): `.github/workflows/claude-code-review.yml` + `.github/workflows/gemini-review.yml`
 - Solo-dev branch-protection policy (0 required approvals): `infra/terraform/modules/github-repo/main.tf`
-- Conventional Commits + semantic-release + rebase-merge convention: `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
-- ADR-0035 (bot-merge workflow `/merge`): `.github/workflows/bot-merge.yml`
+- Conventional Commits + semantic-release + signed-merge-commit convention (ADR-0044): `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
+- ADR-0044 (signed merge commits — supersedes ADR-0035's bot-merge `/merge` flow): CLAUDE.md "Use Conventional Commits" section
 
 Sibling skills this one invokes:
 
