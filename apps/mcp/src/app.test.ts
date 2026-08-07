@@ -1,6 +1,8 @@
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createApp, type OAuthDeps } from "./app";
+import { createApp, MAX_JSON_BODY_BYTES, type OAuthDeps } from "./app";
 
 // pk = pk_(test|live)_ + base64(frontendApiHost + "$")
 const PK = `pk_test_${btoa("clerk.example.com$")}`;
@@ -47,6 +49,73 @@ describe("createApp — OAuth disabled (no Clerk keys)", () => {
     const res = await postMcp(createApp(), "Bearer arp_live_x").send(toolsList);
     expect(res.status).toBe(200);
     expect(JSON.stringify(res.body)).toContain("reports_search");
+  });
+
+  it("accepts a JSON body well above Express's 100kb default (large reports_upload html)", async () => {
+    // A reports_upload call carries the whole HTML document inside the JSON-RPC
+    // body; Express's default json() limit (100kb) 413'd real uploads at ~85-100KB
+    // of HTML. Pad a tools/list request past that threshold to pin the raised limit.
+    const bigBody = { ...toolsList, params: { _meta: { pad: "x".repeat(500_000) } } };
+    const res = await postMcp(createApp(), "Bearer arp_live_x").send(bigBody);
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a body over the cap with the app's JSON error shape, not Express's HTML page", async () => {
+    const bigBody = {
+      ...toolsList,
+      params: { _meta: { pad: "x".repeat(MAX_JSON_BODY_BYTES + 1024) } },
+    };
+    const res = await postMcp(createApp(), "Bearer arp_live_x").send(bigBody);
+    expect(res.status).toBe(413);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.body.error).toMatch(/too large/i);
+  });
+
+  it("rejects malformed JSON with the app's JSON error shape, not Express's HTML page", async () => {
+    const res = await postMcp(createApp(), "Bearer arp_live_x").send('{"jsonrpc": "2.0", broken');
+    expect(res.status).toBe(400);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.body.error).toMatch(/invalid json/i);
+  });
+
+  it("rejects an unauthenticated over-limit request with 401 — credentials before buffering", async () => {
+    // The credential check reads only headers; running it before the body parser
+    // means anonymous callers can't make the function buffer multi-MB bodies.
+    const bigBody = {
+      ...toolsList,
+      params: { _meta: { pad: "x".repeat(MAX_JSON_BODY_BYTES + 1024) } },
+    };
+    const res = await postMcp(createApp()).send(bigBody);
+    expect(res.status).toBe(401);
+  });
+
+  it("survives a client abort mid-drain — no unhandled stream error", async () => {
+    // An anonymous upload that dies partway lands in the 401 drain path; the
+    // request stream then errors, which must not crash the process.
+    const server = createApp().listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      await new Promise<void>((resolve) => {
+        const req = http.request({
+          port,
+          method: "POST",
+          path: "/mcp",
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(MAX_JSON_BODY_BYTES),
+          },
+        });
+        req.on("error", () => resolve()); // our own destroy() surfaces client-side
+        req.on("response", () => resolve());
+        req.write('{"jsonrpc":"2.0",');
+        setTimeout(() => req.destroy(), 25);
+      });
+      // The server must still be serviceable after the aborted request.
+      const res = await request(server).get("/health");
+      expect(res.status).toBe(200);
+    } finally {
+      server.close();
+    }
   });
 });
 
