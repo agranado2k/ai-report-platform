@@ -129,7 +129,7 @@ It must **NOT** receive the other six agents' findings, the implementation conve
 | Configuration | `packages/env` Zod schemas (ADR-0043) | new/changed defaults, removed vars |
 | Security posture | `packages/headers` (CSP, Trusted Types) | any header delta |
 | Agent-facing surface | `apps/mcp` instructions / tool descriptions / packaged SKILL.md (ADR-0072) | any prompt-surface delta |
-| Process & agent surfaces | `.claude/skills/**`, `.husky/**`, `scripts/docs-conformance/**` | skills/hooks/gates change how every future session behaves — same confirm treatment |
+| Process & agent surfaces | `.claude/skills/**`, `.claude/constitution/**`, root and nested `CLAUDE.md`, `.husky/**`, `scripts/docs-conformance/**` | skills/hooks/gates/standing instructions change how every future session behaves — same confirm treatment; an edited constitution rule with no spec reference is an unapproved policy change, not a docs tidy-up |
 
 **Procedure:** run `scripts/behavior-delta.sh` for the grounded candidate list, read each candidate's diff hunk, then classify every behavior delta against the originating spec:
 

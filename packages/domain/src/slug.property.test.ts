@@ -15,6 +15,24 @@ const validSlug = fc
   .array(fc.constantFrom(...NANOID_ALPHABET.split("")), { minLength: 10, maxLength: 10 })
   .map((chars) => chars.join(""));
 
+/**
+ * Candidates that straddle the accept/reject boundary. The unconstrained
+ * `fc.string({ maxLength: 15 })` this replaces landed on an ACCEPTED slug in
+ * ~0.1% of draws (13 in 10k, measured), so the two-sided "accepts exactly"
+ * property below was in practice just the rejection property a third time —
+ * dead weight that read like coverage. Each near-miss arm is one edit away
+ * from valid, which is where an off-by-one or a coercing constructor lives.
+ */
+const slugCandidate = fc.oneof(
+  validSlug,
+  validSlug.map((s) => s.slice(0, 9)), // one char short
+  validSlug.map((s) => `${s}${s[0]}`), // one char long
+  fc
+    .tuple(validSlug, fc.integer({ min: 0, max: 9 }), fc.constantFrom(..."!@ .+=/%".split("")))
+    .map(([s, at, bad]) => `${s.slice(0, at)}${bad}${s.slice(at + 1)}`), // right length, wrong alphabet
+  fc.string({ minLength: 0, maxLength: 15 }), // arbitrary junk
+);
+
 describe("Slug (ADR-0038) — properties", () => {
   it("accepts every nanoid(10) and returns it byte-identical (no coercion)", () => {
     fc.assert(
@@ -56,7 +74,7 @@ describe("Slug (ADR-0038) — properties", () => {
 
   it("accepts exactly the strings matching the documented nanoid shape", () => {
     fc.assert(
-      fc.property(fc.string({ minLength: 0, maxLength: 15 }), (raw) => {
+      fc.property(slugCandidate, (raw) => {
         expect(makeSlug(raw).ok).toBe(/^[A-Za-z0-9_-]{10}$/.test(raw));
       }),
     );

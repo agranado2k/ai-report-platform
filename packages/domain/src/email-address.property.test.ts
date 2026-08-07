@@ -24,6 +24,28 @@ const messyEmail = fc.oneof(
   fc.string(),
 );
 
+/**
+ * Independent oracle for the shape `isValidEmailFormat` documents: "non-empty
+ * local part, a single `@`, a domain containing a dot, no whitespace anywhere".
+ *
+ * Hand-written from that doc comment, deliberately NOT derived from `EMAIL_RE`.
+ * The earlier version of the acceptance property below asserted
+ * `makeEmailAddress ≡ isValidEmailFormat ∘ normalizeEmailAddress`, which uses
+ * the implementation as its own oracle: both sides consult `EMAIL_RE`, so the
+ * property proves only that the implementation equals itself. It stayed green
+ * under `EMAIL_RE := /^$/` — a mutant that rejects every address on earth.
+ * A second, structurally different statement of the rule is the only thing that
+ * can disagree with the first.
+ */
+function looksLikeEmail(value: string): boolean {
+  if (/\s/.test(value)) return false;
+  const [local, domain, ...rest] = value.split("@");
+  if (local === undefined || domain === undefined || rest.length > 0) return false;
+  if (local.length === 0) return false;
+  const dot = domain.indexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+}
+
 describe("EmailAddress normalization (ADR-0056) — properties", () => {
   it("is idempotent: normalizing an already-normalized address changes nothing", () => {
     fc.assert(
@@ -70,12 +92,17 @@ describe("EmailAddress normalization (ADR-0056) — properties", () => {
     );
   });
 
-  it("makeEmailAddress accepts exactly the normalized values isValidEmailFormat accepts", () => {
+  it("accepts exactly the addresses matching the documented shape, and returns them normalized", () => {
     fc.assert(
       fc.property(messyEmail, (raw) => {
+        const normalized = normalizeEmailAddress(raw);
+        const shouldAccept = looksLikeEmail(normalized);
+        // Both the predicate and the smart constructor are pinned to the
+        // independent oracle — not to each other.
+        expect(isValidEmailFormat(normalized)).toBe(shouldAccept);
         const r = makeEmailAddress(raw);
-        expect(r.ok).toBe(isValidEmailFormat(normalizeEmailAddress(raw)));
-        if (r.ok) expect(r.value).toBe(normalizeEmailAddress(raw));
+        expect(r.ok).toBe(shouldAccept);
+        if (r.ok) expect(r.value).toBe(normalized);
       }),
     );
   });

@@ -81,6 +81,18 @@ test("flags a referenced husky hook that does not exist", () => {
   cleanup(ctx);
 });
 
+test("flags a referenced docs/ path that does not exist", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": `${CONFORMANT["CLAUDE.md"]}\nThe registry is \`docs/adr/GHOST-INDEX.md\`.`,
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.match(out[0].message, /GHOST-INDEX/);
+  cleanup(ctx);
+});
+
 test("still resolves references after a fenced code block (``` fences must not desync span pairing)", () => {
   const ctx = ctxFor({
     ...CONFORMANT,
@@ -91,6 +103,32 @@ test("still resolves references after a fenced code block (``` fences must not d
       "   ```bash",
       "   git worktree add worktree/<slug> -b <type>/<slug>",
       "   ```",
+      "",
+      "Then run `/ghost-command` to proceed.",
+      "And `/tdd <task>` as usual.",
+    ].join("\n"),
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "skill-missing"));
+  assert.match(out[0].message, /ghost-command/);
+  cleanup(ctx);
+});
+
+// The reason a manual reaches for `~~~` at all is to show a ``` fence verbatim —
+// which leaves an odd number of stray backticks in the document. Unstripped,
+// that inverts every span pairing after it and the validator goes blind.
+test("still resolves references after a ~~~ fenced block (~~~ fences must not desync span pairing)", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": [
+      "# Instructions",
+      "1. Wrap shell snippets in a fence:",
+      "",
+      "   ~~~markdown",
+      "   ```bash",
+      "   git worktree add worktree/<slug> -b <type>/<slug>",
+      "   ~~~",
       "",
       "Then run `/ghost-command` to proceed.",
       "And `/tdd <task>` as usual.",
@@ -160,7 +198,9 @@ const WITH_ARTICLE = {
   "CLAUDE.md": [
     CONFORMANT["CLAUDE.md"],
     "Elaboration lives in `.claude/constitution/shared-invariants.md`.",
+    "Process detail lives in `.claude/constitution/local-workflow.md`.",
   ].join("\n"),
+  ".claude/constitution/local-workflow.md": "# Local workflow\nCurate commits before the PR.",
   ".claude/constitution/shared-invariants.md": [
     "# Shared invariants",
     "Tests are the target function — start with `/tdd`.",
@@ -224,5 +264,27 @@ test("checks articles even when the root CLAUDE.md is absent", () => {
   assert.equal(out.length, 1);
   assert.ok(hasRule(out, "skill-missing"));
   assert.equal(out[0].file, ".claude/constitution/shared-invariants.md");
+  cleanup(ctx);
+});
+
+test("flags an article the root never references (unreachable — no agent will load it)", () => {
+  const ctx = ctxFor({
+    ...WITH_ARTICLE,
+    ".claude/constitution/local-engineering.md": "# Local engineering\nKeep the domain pure.",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "article-unreferenced"));
+  assert.equal(out[0].file, ".claude/constitution/local-engineering.md");
+  assert.match(out[0].message, /CLAUDE\.md/);
+  cleanup(ctx);
+});
+
+test("stays silent about reachability when there is no root CLAUDE.md to be reachable from", () => {
+  const ctx = ctxFor({
+    ".claude/constitution/shared-invariants.md": "# Shared invariants\nTests are the target function.",
+  });
+  const out = run(ctx);
+  assert.deepEqual(out, []);
   cleanup(ctx);
 });
