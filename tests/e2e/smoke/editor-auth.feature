@@ -51,8 +51,7 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
   #
   # (4) THE NEGATIVE (ADR-0080). A report the editor cannot open — a document
   # whose <body> never closes, the shape that survives ADR-0062 Amendment 4 —
-  # must be
-  # ACCEPTED, must view, must read back as `editability: "unsplittable"` on the
+  # must be ACCEPTED, must view, must read back as `editability: "unsplittable"` on the
   # API, and must DEGRADE off `/edit` rather than 500 or vanish. "Views fine,
   # won't edit" is a legitimate state; this proves it is a legible one.
   #

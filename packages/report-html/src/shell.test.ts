@@ -96,3 +96,64 @@ describe("splitShell — documents with no <body> tag", () => {
     expect(bodyHtml).toBe("<p>x</p>");
   });
 });
+
+// ── Adversarial + optional-end-tag boundary finding (review of PR #255) ─────
+//
+// Every case here CORRUPTS the report under a naive scan: the head's <style>
+// lands in the editable body, `parseBody` drops it, and the first save writes
+// the report back without its content or its CSS. The round-trip stays
+// byte-exact throughout, which is exactly why none of the existing tests see
+// it — the damage happens on the parse→serialize leg, not the split leg.
+describe("splitShell — the head must never reach the editable body", () => {
+  const KEEPS_HEAD_OUT: readonly [name: string, html: string][] = [
+    [
+      "an OMITTED </head> (optional end tag in HTML5)",
+      `<!doctype html><html><head><meta charset="utf-8"><title>Q3</title><style>.c{color:#0a0}</style><h1>Q3</h1><p>Body.</p></html>`,
+    ],
+    [
+      "a decoy </head> inside an HTML comment",
+      `<html><!-- see </head> --><head><style>p{color:red}</style></head><h1>Title</h1></html>`,
+    ],
+    [
+      "a decoy </head> inside a <style> string (RAWTEXT)",
+      `<html><head><style>a::after{content:"</head>"}</style></head><h1>Title</h1></html>`,
+    ],
+    [
+      "a decoy </head> inside an attribute value",
+      `<html><head><meta name="x" content="</head>"><style>p{color:red}</style></head><h1>T</h1></html>`,
+    ],
+  ];
+
+  it.each(KEEPS_HEAD_OUT)("%s keeps <style> in the shell, not the body", (_n, html) => {
+    const { shell, bodyHtml } = splitShell(html);
+
+    expect(bodyHtml).not.toContain("<style");
+    expect(bodyHtml).not.toContain("<meta");
+    expect(shell.pre).toContain("<style");
+  });
+
+  it.each(KEEPS_HEAD_OUT)("%s still round-trips byte-identically", (_n, html) => {
+    const { shell, bodyHtml } = splitShell(html);
+    expect(reinjectShell(shell, bodyHtml)).toBe(html);
+  });
+
+  it("keeps the real content in the body when </head> is omitted", () => {
+    const { bodyHtml } = splitShell(
+      `<!doctype html><html><head><style>.c{color:#0a0}</style><h1>Q3</h1><p>Body.</p></html>`,
+    );
+
+    expect(bodyHtml).toContain("<h1>Q3</h1>");
+    expect(bodyHtml).toContain("<p>Body.</p>");
+  });
+
+  it("does not treat a <body> mentioned inside a comment as the real body", () => {
+    // BODY_OPEN_RE is comment-blind, so this used to be reported as a
+    // malformed body — copy that tells the operator to fix a tag they never
+    // wrote. A report ABOUT html is a realistic instance.
+    const { bodyHtml } = splitShell(
+      `<html><head></head><h1>Doc</h1><!-- <body> --><p>x</p></html>`,
+    );
+
+    expect(bodyHtml).toContain("<h1>Doc</h1>");
+  });
+});

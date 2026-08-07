@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { probeEditability } from "./editability.js";
+import { splitShell } from "./shell.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = readFileSync(path.resolve(__dirname, "fixtures/ai-readiness-report.html"), "utf-8");
@@ -21,9 +22,11 @@ describe("probeEditability", () => {
   });
 
   it("says a head-only document with no <body> is editable and keeps its head shell", () => {
-    expect(probeEditability("<html><head><style>p{color:red}</style></head><p>hi</p></html>")).toBe(
-      "editable",
-    );
+    const html = "<html><head><style>p{color:red}</style></head><p>hi</p></html>";
+
+    expect(probeEditability(html)).toBe("editable");
+    // The second half of this test's own name, which it used not to check.
+    expect(splitShell(html).bodyHtml).not.toContain("<style");
   });
 
   it("says a document whose <body> never closes is unsplittable", () => {
