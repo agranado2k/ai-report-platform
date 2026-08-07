@@ -282,7 +282,8 @@ test("flags an article the root never references (unreachable — no agent will 
 
 test("stays silent about reachability when there is no root CLAUDE.md to be reachable from", () => {
   const ctx = ctxFor({
-    ".claude/constitution/shared-invariants.md": "# Shared invariants\nTests are the target function.",
+    ".claude/constitution/shared-invariants.md":
+      "# Shared invariants\nTests are the target function.",
   });
   const out = run(ctx);
   assert.deepEqual(out, []);
