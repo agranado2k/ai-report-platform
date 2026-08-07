@@ -86,29 +86,31 @@ export async function createApiKey(
   // without a secret. Duplicate mints are cheap and harmless (keys are
   // revocable); a swallowed mint with no secret is not. The stored replay body
   // carries ONLY the summary — never the plaintext token.
-  let idemRef: IdempotencyKeyRef | undefined;
-  if (input.idempotencyKey !== undefined) {
-    const idem = await beginIdempotentWrite(deps, {
-      actingUserId: actor.userId,
-      route: ROUTE,
-      key: input.idempotencyKey,
-      fingerprint: [name, scopes.join(",")],
-    });
-    if (!idem.ok) return idem;
-    if (idem.value.outcome === "replay") {
-      const summary = reviveReplay(
-        idem.value.record,
-        (body): body is ApiKeySummary =>
-          typeof body === "object" &&
-          body !== null &&
-          typeof (body as Record<string, unknown>).id === "string" &&
-          typeof (body as Record<string, unknown>).keyPrefix === "string",
-      );
-      if (!summary.ok) return summary;
-      return ok({ token: null, summary: summary.value });
-    }
-    idemRef = idem.value.ref;
+  // The carve-out is centralized in beginIdempotentWrite via
+  // `derivedFallback` — no local guard, so there is only ONE place this
+  // decision can be made or drift (issue #233).
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    // ADR-0039 derived fallback: a swallowed duplicate mint returns no secret — worse than a cheap revocable duplicate
+    derivedFallback: "unsound",
+    key: input.idempotencyKey,
+    fingerprint: [name, scopes.join(",")],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") {
+    const summary = reviveReplay(
+      idem.value.record,
+      (body): body is ApiKeySummary =>
+        typeof body === "object" &&
+        body !== null &&
+        typeof (body as Record<string, unknown>).id === "string" &&
+        typeof (body as Record<string, unknown>).keyPrefix === "string",
+    );
+    if (!summary.ok) return summary;
+    return ok({ token: null, summary: summary.value });
   }
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const created = await deps.apiKeys.create({

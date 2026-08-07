@@ -108,7 +108,7 @@ describe("revokeWrite use case (ADR-0060)", () => {
 });
 
 describe("revokeWrite idempotency (ADR-0039)", () => {
-  it("replays the recorded 204 on an identical retry — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const { reports, grants, audit, uow } = await seed();
     const deps = { reports, grants, audit, uow, ...idempotencyTestDeps() };
     await grants.grant(REPORT_ID, "g@x.io", OWNER, null);
@@ -116,7 +116,9 @@ describe("revokeWrite idempotency (ADR-0039)", () => {
     const second = await revokeWrite(deps, ACTOR, { slug: makeSlugOrThrow(), email: "g@x.io" });
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    expect(audit.recorded().length).toBe(1);
+    // Was 1: the derived-key fallback replayed instead of re-applying, which
+    // is the #233 defect. A keyless retry now really runs again.
+    expect(audit.recorded().length).toBe(2);
   });
 });
 

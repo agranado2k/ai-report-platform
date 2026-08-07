@@ -185,7 +185,7 @@ describe("grantWrite use case (ADR-0060)", () => {
 });
 
 describe("grantWrite idempotency (ADR-0039)", () => {
-  it("replays the recorded write_grant resource on an identical retry — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const { reports, grants, identities, audit, uow } = await seed();
     const deps = { reports, grants, identities, audit, uow, ...idempotencyTestDeps() };
     const input = { slug: grantSlug(), email: "invitee@corp.com" };
@@ -193,7 +193,9 @@ describe("grantWrite idempotency (ADR-0039)", () => {
     const second = await grantWrite(deps, ACTOR, input);
     expect(first.ok && first.value.granteeEmail).toBe("invitee@corp.com");
     expect(second.ok && second.value.granteeEmail).toBe("invitee@corp.com");
-    expect(audit.recorded().length).toBe(1);
+    // Was 1: the derived-key fallback replayed instead of re-applying, which
+    // is the #233 defect. A keyless retry now really runs again.
+    expect(audit.recorded().length).toBe(2);
   });
 });
 

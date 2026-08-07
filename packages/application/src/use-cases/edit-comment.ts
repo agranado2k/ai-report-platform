@@ -127,6 +127,8 @@ export async function editComment(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: sets the body; A -> B -> A must re-apply
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [
       input.slug,
@@ -157,10 +159,14 @@ export async function editComment(
       },
     ]);
     if (!audited.ok) return audited;
-    return deps.idempotency.complete(idemRef, {
-      responseStatus: 200,
-      responseBody: emission.value.comment,
-    });
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    return idemRef
+      ? deps.idempotency.complete(idemRef, {
+          responseStatus: 200,
+          responseBody: emission.value.comment,
+        })
+      : ok(undefined);
   });
   if (!committed.ok) return committed;
 

@@ -279,7 +279,7 @@ describe("setAcl use case (ADR-0056)", () => {
 });
 
 describe("setAcl idempotency (ADR-0039)", () => {
-  it("replays the recorded report resource on an identical retry — one acl.set audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
     const input = { slug: slugOrThrow(), mode: "public" as const };
@@ -287,7 +287,9 @@ describe("setAcl idempotency (ADR-0039)", () => {
     const second = await setAcl(deps, ACTOR, input);
     expect(first.ok && first.value.acl.mode).toBe("public");
     expect(second.ok && second.value.acl.mode).toBe("public");
-    expect(audit.recorded().length).toBe(1);
+    // Was 1: the derived-key fallback replayed instead of re-applying, which
+    // is the #233 defect. A keyless retry now really runs again.
+    expect(audit.recorded().length).toBe(2);
   });
 
   it("a password-mode set WITHOUT an explicit key skips the idempotency claim — two different passwords both apply", async () => {
@@ -324,6 +326,9 @@ describe("setAcl idempotency (ADR-0039)", () => {
     const second = await setAcl(deps, ACTOR, input);
     expect(first.ok).toBe(true);
     expect(second.ok && second.value.acl.mode).toBe("password");
+    // Still 1: this test sends an EXPLICIT Idempotency-Key, so the claim/replay
+    // machinery applies exactly as before. #233 only removed the DERIVED
+    // fallback, which is the one the client never asked for.
     expect(audit.recorded().length).toBe(1);
     // The replayed acl body never carries a hash (reportReplayBody redaction).
     if (second.ok && second.value.acl.mode === "password") {

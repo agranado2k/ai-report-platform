@@ -254,7 +254,7 @@ describe("resolveComment use case", () => {
 });
 
 describe("resolveComment idempotency (ADR-0039)", () => {
-  it("replays the recorded resolved comment on an identical retry — one comment.resolved audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report("kkkkkkkkkk"));
     const created = await addComment(deps, ownerActor, {
@@ -269,6 +269,9 @@ describe("resolveComment idempotency (ADR-0039)", () => {
     const second = await resolveComment(deps, ownerActor, input);
     expect(first.ok && first.value.resolvedAt).not.toBeNull();
     expect(second.ok && second.value.resolvedAt).not.toBeNull();
-    expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 1);
+    // #233: was +1, when the derived-key fallback replayed instead of
+    // re-applying. The retry now really runs — same end state, one more
+    // audit row. An explicit Idempotency-Key still claims and replays.
+    expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 2);
   });
 });

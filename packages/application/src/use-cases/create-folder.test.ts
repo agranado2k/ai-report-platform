@@ -286,7 +286,7 @@ describe("createFolder use case", () => {
 });
 
 describe("createFolder idempotency (ADR-0039)", () => {
-  it("replays the ORIGINAL folder resource on an identical retry — no duplicate", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const d = await setup();
     const actor = { orgId: orgA, userId: actorA };
     const input = { parentId: rootA, name: "Quarterly" };

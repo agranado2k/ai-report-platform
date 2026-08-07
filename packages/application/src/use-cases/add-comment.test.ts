@@ -158,7 +158,7 @@ describe("addComment use case", () => {
 });
 
 describe("addComment idempotency (ADR-0039)", () => {
-  it("replays the ORIGINAL comment on an identical retry — no duplicate comment, one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report(orgA, "iiiiiiiiii"));
     const input = { slug: slug("iiiiiiiiii"), body: "same note", anchor };

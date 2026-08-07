@@ -181,7 +181,7 @@ describe("unshareFolder use case (ADR-0076)", () => {
     expect(!r.ok && r.error.kind).toBe("ValidationError");
   });
 
-  it("replays the recorded 204 on an identical retry with an EXPLICIT key — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const d = await setup();
     await shareFolder(d, actorMe, { folderId: folderId(F1), email: "pal@test.local" });
     const input = { folderId: folderId(F1), email: "pal@test.local", idempotencyKey: "k1" };
@@ -243,7 +243,7 @@ describe("listFolderShares authz (ADR-0076)", () => {
 });
 
 describe("shareFolder idempotency (ADR-0039)", () => {
-  it("replays the recorded share on an identical retry with an EXPLICIT key — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const d = await setup();
     const input = { folderId: folderId(F1), email: "pal@test.local", idempotencyKey: "k1" };
     const first = await shareFolder(d, actorMe, input);

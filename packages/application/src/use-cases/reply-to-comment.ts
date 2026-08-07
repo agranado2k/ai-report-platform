@@ -93,6 +93,8 @@ export async function replyToComment(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: creating a reply twice would post it twice
+    derivedFallback: "sound",
     key: input.idempotencyKey,
     fingerprint: [
       input.slug,

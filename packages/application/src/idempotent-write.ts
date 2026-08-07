@@ -62,16 +62,66 @@ export interface IdempotentWriteInput {
    *  stored fingerprint and the derived-key input. null/undefined encode as ""
    *  so optional fields keep the encoding stable. */
   readonly fingerprint: readonly (string | number | null | undefined)[];
+  /**
+   * Whether the ADR-0039 DERIVED-key fallback is sound for this operation.
+   * REQUIRED — a use case must classify itself, because the wrong answer fails
+   * OPEN and silently (issue #233 / GHSA-ghxh-82j4-pp6m).
+   *
+   * `sound` — running it twice would create a second thing (add a comment,
+   * create a folder). The derived key is genuinely protective: it is what makes
+   * a retried POST not duplicate. Keep it.
+   *
+   * `unsound` — running it twice leaves the same end state (rename, move,
+   * set-acl, grant, revoke, delete). The fingerprint describes the DESIRED
+   * state, so A → B → A derives the key of the FIRST call and replays it: the
+   * API answers 200 with the stale body and never re-applies. `idempotency_keys`
+   * has no TTL sweep, so that window never closes. The delete-shaped variant is
+   * worse — the key can be burned before the fact, making the real call a
+   * no-op. These operations are naturally idempotent in effect, so the fallback
+   * buys nothing and costs correctness: it is skipped unless the CLIENT sends
+   * an explicit `Idempotency-Key`, in which case the client owns retry identity
+   * and the full claim/replay machinery applies as usual.
+   *
+   * The fallback can also be unsound for reasons unrelated to state-setting —
+   * `create-api-key` marks itself `unsound` because a swallowed duplicate mint
+   * returns a key summary with NO secret, which is worse than the cheap,
+   * revocable duplicate it would prevent. Hence this flag names what it
+   * CONTROLS rather than one rationale for it.
+   */
+  readonly derivedFallback: "sound" | "unsound";
 }
 
 export type IdempotentBegin =
+  /** `ref` is undefined when no key was claimed — an `unsound` operation with
+   *  no explicit client key. Callers complete only when it is present. */
+  | { readonly outcome: "proceed"; readonly ref?: IdempotencyKeyRef | undefined }
+  | { readonly outcome: "replay"; readonly record: IdempotencyRecord };
+
+/** The `sound` result: a key is ALWAYS claimed, so `ref` is always present.
+ *  Narrowing this in the type keeps one-shot call sites unchanged and stops a
+ *  `if (ref)` guard from silently skipping `complete` where completing is the
+ *  whole point (a skipped complete would let a retried POST duplicate). */
+export type IdempotentBeginClaimed =
   | { readonly outcome: "proceed"; readonly ref: IdempotencyKeyRef }
   | { readonly outcome: "replay"; readonly record: IdempotencyRecord };
 
+export function beginIdempotentWrite(
+  deps: IdempotentWriteDeps,
+  input: IdempotentWriteInput & { readonly derivedFallback: "sound" },
+): Promise<Result<IdempotentBeginClaimed, AppError>>;
+export function beginIdempotentWrite(
+  deps: IdempotentWriteDeps,
+  input: IdempotentWriteInput,
+): Promise<Result<IdempotentBegin, AppError>>;
 export async function beginIdempotentWrite(
   deps: IdempotentWriteDeps,
   input: IdempotentWriteInput,
 ): Promise<Result<IdempotentBegin, AppError>> {
+  // The carve-out, centralized. Previously each use case either hand-rolled
+  // this `if` or — for fifteen of them — simply did not, which is the defect.
+  if (input.derivedFallback === "unsound" && input.key === undefined) {
+    return ok({ outcome: "proceed" });
+  }
   const fingerprint = deps.keyHasher.hash(
     input.fingerprint.map((s) => (s === null || s === undefined ? "" : String(s))).join("\n"),
   );

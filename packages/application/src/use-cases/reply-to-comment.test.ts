@@ -211,7 +211,7 @@ describe("replyToComment use case", () => {
 });
 
 describe("replyToComment idempotency (ADR-0039)", () => {
-  it("replays the ORIGINAL reply on an identical retry — no duplicate reply", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report("iiiiiiiiii"));
     const root = await addComment(deps, ownerActor, {

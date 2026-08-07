@@ -55,6 +55,8 @@ export async function renameFolder(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: sets the name; A -> B -> A must re-apply
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [input.folderId, input.name],
   });
@@ -76,11 +78,15 @@ export async function renameFolder(
       },
     ]);
     if (!audited.ok) return audited;
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 200,
-      responseBody: renamed.value,
-    });
-    if (!done.ok) return done;
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 200,
+        responseBody: renamed.value,
+      });
+      if (!done.ok) return done;
+    }
     return ok(renamed.value);
   });
 }

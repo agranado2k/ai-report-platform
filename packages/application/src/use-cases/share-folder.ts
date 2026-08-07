@@ -93,18 +93,20 @@ export async function shareFolder(
   // first 201 and never re-insert the share. An upsert of the same grant is
   // naturally idempotent, so the fallback buys nothing. With an EXPLICIT
   // `Idempotency-Key` the client owns retry identity and replay applies.
-  let idemRef: IdempotencyKeyRef | undefined;
-  if (input.idempotencyKey !== undefined) {
-    const idem = await beginIdempotentWrite(deps, {
-      actingUserId: actor.userId,
-      route: ROUTE,
-      key: input.idempotencyKey,
-      fingerprint: [input.folderId, email.value],
-    });
-    if (!idem.ok) return idem;
-    if (idem.value.outcome === "replay") return reviveFolderShareReplay(idem.value.record);
-    idemRef = idem.value.ref;
-  }
+  // The carve-out is centralized in beginIdempotentWrite via
+  // `derivedFallback` — no local guard, so there is only ONE place this
+  // decision can be made or drift (issue #233).
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    // ADR-0039 derived fallback: sets a share STATE (the #230 carve-out, now centralized)
+    derivedFallback: "unsound",
+    key: input.idempotencyKey,
+    fingerprint: [input.folderId, email.value],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveFolderShareReplay(idem.value.record);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const shared = await deps.folderShares.grant(

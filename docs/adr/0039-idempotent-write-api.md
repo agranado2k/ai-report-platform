@@ -60,6 +60,20 @@ The write API is driven heavily by LLMs/agents and the MCP server, where network
 **Neutral**
 - 24h TTL is a retry-safety window, not a long-term dedup guarantee; identical content re-uploaded after the window creates a new version.
 
+## Amendment (2026-08-07) — the derived fallback is unsound for state-setting writes
+
+Reported as issue #233, detail preserved in **GHSA-ghxh-82j4-pp6m**. Two defects, one root cause: the derived-key fallback was applied to every mutating use case, and the 24h window this ADR describes was never enforced.
+
+**Defect 1 — the fallback fails OPEN on writes that set state.** The derived key is `hash(user ∥ route ∥ hash(canonical significant payload))`. For a one-shot write (add a comment, create a folder) that is exactly right: the payload identifies the *request*, so a retry is a duplicate and replaying it is the guarantee. For a write that sets STATE, the payload identifies the *desired state* — so `org → private → org` derives the key of the FIRST call and replays it. The API answers `200` with the stale body and never re-applies. The delete-shaped variant is worse: the key can be burned **before** the fact, so the real call no-ops — which for `revoke-write` means the grantee keeps write access, and for `set-acl` means a revoked share silently survives.
+
+**Decision:** the classification is now a REQUIRED field on `IdempotentWriteInput` — `derivedFallback: "sound" | "unsound"`. `unsound` skips the derived key entirely; an EXPLICIT `Idempotency-Key` still claims and replays exactly as before, because that is the guarantee a client actually asked for. Required rather than defaulted because the wrong answer fails open and silently: a new use case must decide, and the compiler makes it.
+
+The flag names what it **controls**, not one rationale for it — `create-api-key` is `unsound` for an unrelated reason (a swallowed duplicate mint returns a key summary with no secret, which is worse than the cheap, revocable duplicate it would prevent). Five use cases had hand-rolled this carve-out locally after #230; those local guards are removed, so the decision now lives in exactly one place.
+
+**Behaviour change, accepted deliberately:** a keyless retry of a delete-shaped write now returns the natural error (`404` — it is already gone) instead of a replayed `204`. Clients wanting exactly-once retry semantics send an `Idempotency-Key`. Masking that with a permanent derived record is precisely the hole.
+
+**Defect 2 — the 24h window was fiction.** No sweep and no predicate enforced it; a record replayed forever, which is what turned defect 1 from a 24h annoyance into a permanent one. Expiry is now enforced at CLAIM time, and an expired record is **reclaimed in place** rather than hidden: filtering it out of the lookup would answer `in_flight`/`409` forever, a worse failure than the staleness it fixes. The reclaiming UPDATE is conditioned on the row still being stale, so a concurrent reclaim falls through to the conservative `in_flight`. Rows still accumulate — a purge job remains an operational follow-up, but its absence is now a storage cost rather than a correctness one.
+
 ## Considered options
 
 1. **`Idempotency-Key` header + derived fallback + Postgres tx-bound** *(chosen)*.

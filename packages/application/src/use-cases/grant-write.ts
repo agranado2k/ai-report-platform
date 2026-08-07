@@ -79,6 +79,8 @@ export async function grantWrite(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: sets grant STATE for an email; re-granting must re-apply
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [input.slug, email.value],
   });
@@ -122,11 +124,15 @@ export async function grantWrite(
         message: "write grant not found immediately after granting",
       });
     }
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 201,
-      responseBody: grant,
-    });
-    if (!done.ok) return done;
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 201,
+        responseBody: grant,
+      });
+      if (!done.ok) return done;
+    }
     return ok(grant);
   });
 }
