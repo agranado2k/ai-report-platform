@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/diary-worktree-sync` (this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
+| **Active worktrees**   | `worktree/unopenable-readonly` (branch `fix/unopenable-readonly`) — not merged into origin/main. `worktree/diary-mcp-close` (this entry). Everything else pruned by `/worktree-cleanup` on 2026-08-07 (4 removed: `diary-worktree-sync`, `e2e-hardening`, `mcp-body-limit`, `required-checks` — all merged: #249, #252, #250, #253). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -4998,3 +4998,31 @@ for — prove themselves green before they gate anything. Worktree
 At authoring time GitHub Actions was degraded (runs queued >90 minutes; `Migrate
 DB (prod)` and `Release` both failed on `main`), which is why verification used
 three already-completed PRs rather than the current one.
+
+## 2026-08-07 — MCP upload body limit shipped (#250); worktree sweep
+
+**PR #250 merged** (`fix/mcp-body-limit`): the remote MCP server's JSON-RPC body
+cap went from Express's accidental 100kb default to an explicit 4 MiB
+(`MAX_JSON_BODY_BYTES`), fixing `reports_upload` 413s at ~85–100KB of HTML. The
+review pass hardened the same boundary: over-limit and malformed bodies now get
+the app's JSON error shape (not Express's HTML page), and credentials resolve
+BEFORE the body is buffered, so anonymous callers can't force multi-MB buffering.
+The ~3.5MB practical HTML ceiling is documented in the tool description, the
+centaur-spec skill (both copies), `docs/mcp-usage.md`, and a transport note in
+ADR-0037 §9. Verified live post-deploy: a 200KB unauthenticated POST to
+`mcp.centaurspec.com/mcp` returns the JSON 401 (old code 413'd pre-auth).
+The branch carries one empty `chore(ci)` commit — a GitHub Actions incident
+(2026-08-06) dropped the PR's trigger events repeatedly; two close/reopen cycles
+didn't re-fire workflows and a fresh SHA was the remaining lever.
+
+**Known gap surfaced by the #250 review (pre-existing, not addressed):** with
+the accidental 100kb brake gone, the 4 MiB transport cap is the only enforced
+size guard on the MCP upload path — there is still no rate limiting anywhere,
+`AllowAllPlanLimiter` admits everything, and ADR-0037 §9's sync pre-check caps
+remain the "later slice" stub.
+
+**Worktree sweep** (`/worktree-cleanup`): pruned `diary-worktree-sync` (#249),
+`e2e-hardening` (#252), `mcp-body-limit` (#250), `required-checks` (#253); the
+2026-08-06 entry's note that `mcp-body-limit` had uncommitted changes is
+resolved — that work became #250. Kept: `unopenable-readonly` (unmerged).
+Root `main` fast-forwarded to `6a55311`.
