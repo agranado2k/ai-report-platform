@@ -120,7 +120,7 @@ Read the suggestion. Cross-reference with project policy:
 
 - Read `CLAUDE.md` and `docs/diary.md` (the live ADR record).
 - If the suggestion **improves** security / correctness / readability **and** doesn't contradict an ADR → **apply** it.
-- If the suggestion **contradicts an ADR or project policy** (e.g. "use fp-ts" violates ADR-024, "squash to one commit" violates the rebase-merge policy, "remove signed commits" violates ADR-025) → **reply on the thread** with a one-line policy citation. Don't apply.
+- If the suggestion **contradicts an ADR or project policy** (e.g. "use fp-ts" violates ADR-024, "remove signed commits" violates ADR-0044, "merge it yourself" violates the human merge gate) → **reply on the thread** with a one-line policy citation. Don't apply. (NB: squash-merge is a *sanctioned* secondary option under ADR-0044 — the operator's call, not a violation.)
 - If the suggestion is **ambiguous** (touches an open question, requires a design call) → **escalate**. Don't apply, don't reply, surface to operator.
 
 **For each human comment:**
@@ -132,7 +132,7 @@ Answer it. Be direct, cite ADRs where relevant. Don't mark human threads resolve
 **For applied fixes:**
 
 ```bash
-# One logical change per commit (rebase-merge friendly — every commit
+# One logical change per commit (merge-commit friendly, ADR-0044 — every commit
 # lands on main and shows up in release notes).
 git add <specific files, not -A>
 git commit -m "$(cat <<'EOF'
@@ -231,7 +231,7 @@ Next: <continue / stop — converged / stop — escalation>
 - ADR-025 (PR-only, signed commits, linear history): `infra/terraform/modules/github-repo/main.tf`
 - ADR-030 (dual AI review — Claude + Gemini): `.github/workflows/claude-code-review.yml` + `.github/workflows/gemini-review.yml`
 - Solo-dev branch-protection policy (0 required approvals): `infra/terraform/modules/github-repo/main.tf`
-- Conventional Commits + semantic-release + rebase-merge convention: `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
+- Conventional Commits + semantic-release + signed-merge-commit convention (ADR-0044): `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
 - ADR-0044 (signed merge commits — supersedes ADR-0035's bot-merge `/merge` flow): CLAUDE.md "Use Conventional Commits" section
 
 Sibling skills this one invokes:
