@@ -204,3 +204,35 @@ function grantSlug() {
   if (!r.ok) throw new Error("bad slug");
   return r.value;
 }
+
+// ── #233 acceptance: the round-trip, not the audit count ───────────────────
+//
+// grant -> revoke -> re-grant. The keyless-retry test above asserts an audit
+// COUNT; the state assertion is what actually distinguishes "re-applied" from
+// "replayed the first response", because a replayed grant leaves the report
+// with NO grant while the API reports one.
+describe("grantWrite — grant -> revoke -> re-grant must restore the grant (#233)", () => {
+  it("re-granting after a revoke actually re-persists the grant", async () => {
+    const { reports, grants, identities, audit, uow } = await seed();
+    const deps = { reports, grants, identities, audit, uow, ...idempotencyTestDeps() };
+    const input = { slug: grantSlug(), email: "invitee@corp.com" };
+    // Read the id back rather than restating seed()'s literal — a change to the
+    // fixture must not break this test for the wrong reason.
+    const seeded = await reports.findBySlug(grantSlug());
+    if (!seeded.ok || !seeded.value) throw new Error("seed failed");
+    const target = seeded.value.id;
+
+    expect((await grantWrite(deps, ACTOR, input)).ok).toBe(true);
+    // Revoked out-of-band: the derived key for the re-grant below is identical
+    // to the first call's, so a fallback would replay it and never re-persist.
+    await grants.revoke(target, "invitee@corp.com");
+    const regranted = await grantWrite(deps, ACTOR, input);
+
+    expect(regranted.ok).toBe(true);
+    const listed = await grants.listByReport(target);
+    expect(
+      listed.ok && listed.value.map((g) => g.granteeEmail),
+      "the grant must exist again — a replayed response would leave none",
+    ).toContain("invitee@corp.com");
+  });
+});
