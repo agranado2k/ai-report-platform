@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -297,7 +298,20 @@ Given("a report I own that the editor cannot open exists", async ({ request }) =
       file: {
         name: "unclosed-body.html",
         mimeType: "text/html",
-        buffer: Buffer.from("<html><body><h1>Findings</h1><p>Never closed.</html>", "utf8"),
+        // UNIQUE PER RUN, deliberately. The upload's ADR-0039 derived key is
+        // hash(user, route, contentHash, target), and preview-isolation.yml
+        // REUSES the per-PR Neon branch across pushes ("data persists"). With
+        // byte-stable fixture content the second push's upload REPLAYS the
+        // first one's response instead of uploading: no new report, and the
+        // assertions below then read whatever happened to the ORIGINAL row
+        // since. That is exactly how this test failed when migration 0022
+        // landed mid-PR and NULLed the editability it was asserting on — a
+        // green-to-red flip with no product change behind it. A nonce in the
+        // body keeps the content hash fresh so every run really uploads.
+        buffer: Buffer.from(
+          `<html><body><h1>Findings ${randomUUID()}</h1><p>Never closed.</html>`,
+          "utf8",
+        ),
       },
     },
   });

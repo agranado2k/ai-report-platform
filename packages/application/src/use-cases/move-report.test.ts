@@ -195,7 +195,7 @@ describe("moveReport target visibility (ADR-0076)", () => {
 });
 
 describe("moveReport idempotency (ADR-0039)", () => {
-  it("replays the recorded moved-report resource on an identical retry — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const reports = new InMemoryReportRepository();
     const folders = new InMemoryFolderRepository();
     await folders.save(folder("00000000-0000-7000-8000-0000000000a0", orgA, "Root"));
@@ -210,7 +210,11 @@ describe("moveReport idempotency (ADR-0039)", () => {
     const second = await moveReport(deps, ownerActor, input);
     expect(first.ok && first.value.folderId).toBe(input.toFolderId);
     expect(second.ok && second.value.folderId).toBe(input.toFolderId);
-    expect(deps.audit.recorded().length).toBe(1);
+    // #233: was 1, when the derived-key fallback replayed instead of
+    // re-applying. The retry now really runs — same end state (these are
+    // naturally idempotent), one more audit row. An explicit
+    // Idempotency-Key still claims and replays exactly as before.
+    expect(deps.audit.recorded().length).toBe(2);
   });
 });
 

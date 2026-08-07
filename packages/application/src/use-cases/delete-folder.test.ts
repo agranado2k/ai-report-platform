@@ -190,13 +190,19 @@ describe("deleteFolder visibility scoping (ADR-0076)", () => {
 });
 
 describe("deleteFolder idempotency (ADR-0039)", () => {
-  it("replays the recorded 204 on an identical retry — one audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = await setup();
     const actor = { orgId: orgA, userId: actorA };
     const first = await deleteFolder(deps, actor, { folderId: folderId(SUB) });
     const second = await deleteFolder(deps, actor, { folderId: folderId(SUB) });
     expect(first.ok).toBe(true);
-    expect(second.ok).toBe(true);
+    // #233: the keyless retry now really RUNS. For a delete-shaped operation
+    // that means the second call fails (the thing is already gone) instead of
+    // replaying a recorded 204. That is the point: the derived key could
+    // otherwise be burned BEFORE the fact, making the real delete a no-op.
+    // A client that wants exactly-once retry semantics sends an
+    // Idempotency-Key, which still claims and replays as before.
+    expect(second.ok).toBe(false);
     expect(deps.audit.recorded().length).toBe(1);
   });
 });

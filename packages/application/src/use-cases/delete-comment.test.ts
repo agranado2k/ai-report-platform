@@ -170,7 +170,7 @@ describe("deleteComment use case", () => {
 });
 
 describe("deleteComment idempotency (ADR-0039)", () => {
-  it("replays the recorded 204 on an identical retry — one comment.deleted audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = makeDeps();
     await deps.reports.save(report("llllllllll"));
     const created = await addComment(deps, ownerActor, {
@@ -184,7 +184,13 @@ describe("deleteComment idempotency (ADR-0039)", () => {
     const first = await deleteComment(deps, ownerActor, input);
     const second = await deleteComment(deps, ownerActor, input);
     expect(first.ok).toBe(true);
-    expect(second.ok).toBe(true); // replayed 204, NOT a NotFound
+    // #233: the keyless retry now really RUNS. For a delete-shaped operation
+    // that means the second call fails (the thing is already gone) instead of
+    // replaying a recorded 204. That is the point: the derived key could
+    // otherwise be burned BEFORE the fact, making the real delete a no-op.
+    // A client that wants exactly-once retry semantics sends an
+    // Idempotency-Key, which still claims and replays as before.
+    expect(second.ok).toBe(false); // replayed 204, NOT a NotFound
     expect(deps.audit.recorded().length).toBe(auditRowsAfterSeed + 1);
   });
 });

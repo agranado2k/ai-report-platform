@@ -13,7 +13,7 @@
 | **Last commit on main**| `78d84e6` — Merge PR #206 (Terraform reconcile of `VIEW_ACCESS_TOKEN_SECRET` drift via a keepers rotation, applied by the CI apply-prod pipeline). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/unlock-page-and-editability` (branch `fix/unlock-page-and-editability`) — this entry. Everything from the #230–#255 arc is merged and pruned (3 removed by `/worktree-cleanup` on 2026-08-07 after #255). |
+| **Active worktrees**   | `worktree/idempotency-state-setting` (branch `fix/idempotency-state-setting`) — #233 / GHSA-ghxh-82j4-pp6m, this entry. Everything from the #230–#256 arc is merged and pruned. |
 
 | **Active worktrees**   | `worktree/mcp-body-limit` (branch `fix/mcp-body-limit`) — **kept by `/worktree-cleanup` because it has uncommitted changes**, not because it is active work; it predates the 2026-08 sharing/link/lockout runs and needs an operator decision (finish, stash, or discard). `worktree/unopenable-readonly` (branch `fix/unopenable-readonly` — the last hop of the owner lockout; this entry). Everything else is merged and pruned — 16 worktrees removed on 2026-08-06 (the folder-visibility → report-sharing → link-fidelity → owner-lockout arc, #230–#248). |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
@@ -5188,3 +5188,54 @@ blocked by the tool-permission classifier and awaits the operator.
 **Process**: worktree `worktree/unlock-page-and-editability` (branch
 `fix/unlock-page-and-editability`), off `main` at `83dba66`. TDD — 2 red on the styling,
 then green, with the byte-identical-denial guard held throughout.
+
+## 2026-08-07 — Issue #233 closed: the derived-key fallback no longer fails open
+
+**Trigger**: the operator asked for the two items I had flagged as unaddressed — the #233
+routes still unpatched in production, and the token-drift risk in the new unlock stylesheet.
+This entry covers the first; the second landed on #256 as a build-failing drift test.
+
+**What was wrong**: ADR-0039's derived-key fallback — `hash(user ∥ route ∥ hash(payload))`
+— was applied to every mutating use case. That is correct for a ONE-SHOT write (the payload
+identifies the request, so a retry is a duplicate) and wrong for a write that sets STATE
+(the payload identifies the desired state, so `A → B → A` replays the first call and never
+re-applies). The delete-shaped variant is worse: the key can be burned *before* the fact,
+so the real call no-ops — `revoke-write` leaving the grantee with write access, `set-acl`
+leaving a revoked share alive. Fifteen use cases were unguarded; five had hand-rolled a
+local carve-out after #230.
+
+**Fix**: `derivedFallback: "sound" | "unsound"` is a REQUIRED field on
+`IdempotentWriteInput`. Required, not defaulted, because the wrong answer fails open and
+silently — the compiler now makes every current and future use case decide. All 20 call
+sites classified; the five local guards deleted so the decision lives in one place. The
+`sound` overload keeps `ref` non-optional, so a one-shot site cannot silently skip
+`complete` (which would let a retried POST duplicate).
+
+**Second half**: the 24h window ADR-0039 describes was never enforced — no sweep, no
+predicate — which is what made defect 1 permanent rather than a 24h annoyance. Expiry now
+applies at claim time, and an expired record is RECLAIMED in place. My first cut merely
+filtered stale rows out of the lookup, which would have answered `in_flight`/409 forever —
+a worse failure than the staleness it fixed. Caught before commit by reasoning through the
+conflict path, not by a test.
+
+**Accepted behaviour change**: a keyless retry of a delete-shaped write now returns the
+natural 404 instead of a replayed 204. Clients wanting exactly-once retry send an
+`Idempotency-Key`, which still claims and replays untouched. Masking that with a permanent
+derived record was the hole.
+
+**Test fallout**: 13 use-case tests asserted "replays the recorded X on an identical retry
+— one audit row". That IS the vulnerability, stated as a guarantee. Each was repointed to
+the true new contract rather than deleted, and the shapes differ: delete-shaped writes now
+have the retry FAIL with one audit row, state-setting writes succeed with two. A blanket
+edit got this wrong first (it also caught set-acl's explicit-key test, which correctly
+still replays) — fixed per file. Added a seam-level companion proving the explicit-key path
+still replays end-to-end. Full suite 2467 passed.
+
+**Still open**: the public redaction of #233 itself is prepared but blocked by the
+tool-permission classifier and awaits the operator; the advisory (GHSA-ghxh-82j4-pp6m) is
+created and private. A purge job for `idempotency_keys` is an operational follow-up — now a
+storage cost, not a correctness one.
+
+**Process**: worktree `worktree/idempotency-state-setting` (branch
+`fix/idempotency-state-setting`), off `main` at `83dba66`. TDD — 2 red on the carve-out,
+then green, then the contract fallout across 17 files.

@@ -279,7 +279,7 @@ describe("setAcl use case (ADR-0056)", () => {
 });
 
 describe("setAcl idempotency (ADR-0039)", () => {
-  it("replays the recorded report resource on an identical retry — one acl.set audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
     const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
     const input = { slug: slugOrThrow(), mode: "public" as const };
@@ -287,7 +287,9 @@ describe("setAcl idempotency (ADR-0039)", () => {
     const second = await setAcl(deps, ACTOR, input);
     expect(first.ok && first.value.acl.mode).toBe("public");
     expect(second.ok && second.value.acl.mode).toBe("public");
-    expect(audit.recorded().length).toBe(1);
+    // Was 1: the derived-key fallback replayed instead of re-applying, which
+    // is the #233 defect. A keyless retry now really runs again.
+    expect(audit.recorded().length).toBe(2);
   });
 
   it("a password-mode set WITHOUT an explicit key skips the idempotency claim — two different passwords both apply", async () => {
@@ -324,6 +326,9 @@ describe("setAcl idempotency (ADR-0039)", () => {
     const second = await setAcl(deps, ACTOR, input);
     expect(first.ok).toBe(true);
     expect(second.ok && second.value.acl.mode).toBe("password");
+    // Still 1: this test sends an EXPLICIT Idempotency-Key, so the claim/replay
+    // machinery applies exactly as before. #233 only removed the DERIVED
+    // fallback, which is the one the client never asked for.
     expect(audit.recorded().length).toBe(1);
     // The replayed acl body never carries a hash (reportReplayBody redaction).
     if (second.ok && second.value.acl.mode === "password") {
@@ -337,3 +342,32 @@ function slugOrThrow() {
   if (!r.ok) throw new Error("bad slug");
   return r.value;
 }
+
+// ── THE EXPLOIT, executed (issue #233 / GHSA-ghxh-82j4-pp6m) ───────────────
+//
+// The advisory's other named shape: "org -> private -> org leaves the report
+// private". The rewritten idempotency test above asserts an audit-row COUNT,
+// which is a proxy for "the write re-ran" — not for "the report's sharing mode
+// is what the caller last asked for". Those come apart precisely when the fix
+// regresses, so assert the STATE.
+describe("setAcl — A -> B -> A must land on A (#233)", () => {
+  it("re-applying the original mode actually re-applies it", async () => {
+    const { reports, hasher, grants, orgWriteGrants, audit, uow } = await seed();
+    const deps = { reports, hasher, grants, orgWriteGrants, audit, uow, ...idempotencyTestDeps() };
+    const at = (mode: "org" | "private") => setAcl(deps, ACTOR, { slug: slugOrThrow(), mode });
+
+    expect((await at("org")).ok).toBe(true);
+    expect((await at("private")).ok).toBe(true);
+    const back = await at("org");
+
+    // Under the derived-key fallback this third call replayed the FIRST
+    // response: the API answered `org` while the stored report stayed
+    // `private`. Assert the persisted aggregate, not the returned body.
+    expect(back.ok && back.value.acl.mode).toBe("org");
+    const stored = await reports.findBySlug(slugOrThrow());
+    expect(
+      stored.ok && stored.value?.acl.mode,
+      "the PERSISTED acl must match the last call, not the first",
+    ).toBe("org");
+  });
+});

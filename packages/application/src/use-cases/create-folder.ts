@@ -108,6 +108,8 @@ export async function createFolder(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: creating a folder twice would make two folders
+    derivedFallback: "sound",
     key: input.idempotencyKey,
     fingerprint: [input.parentId, input.name],
   });

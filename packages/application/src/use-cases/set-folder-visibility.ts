@@ -26,7 +26,7 @@ import {
   reviveFolderReplay,
 } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "POST /api/v1/folders/{id}/visibility";
 
@@ -73,18 +73,20 @@ export async function setFolderVisibility(
   // visibility twice is naturally idempotent in effect, so the fallback buys
   // nothing here. With an EXPLICIT `Idempotency-Key` the client owns retry
   // identity and the claim/replay machinery applies as usual.
-  let idemRef: IdempotencyKeyRef | undefined;
-  if (input.idempotencyKey !== undefined) {
-    const idem = await beginIdempotentWrite(deps, {
-      actingUserId: actor.userId,
-      route: ROUTE,
-      key: input.idempotencyKey,
-      fingerprint: [input.folderId, input.visibility],
-    });
-    if (!idem.ok) return idem;
-    if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
-    idemRef = idem.value.ref;
-  }
+  // The carve-out is centralized in beginIdempotentWrite via
+  // `derivedFallback` — no local guard, so there is only ONE place this
+  // decision can be made or drift (issue #233).
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    // ADR-0039 derived fallback: sets visibility STATE (the #230 carve-out, now centralized)
+    derivedFallback: "unsound",
+    key: input.idempotencyKey,
+    fingerprint: [input.folderId, input.visibility],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const saved = await deps.folders.save(changed.value);

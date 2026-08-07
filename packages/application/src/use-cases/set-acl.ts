@@ -125,6 +125,8 @@ export async function setAcl(
     const idem = await beginIdempotentWrite(deps, {
       actingUserId: actor.userId,
       route: ROUTE,
+      // ADR-0039 derived fallback: sets sharing STATE; org -> private -> org must re-apply, not replay (security-relevant)
+      derivedFallback: "unsound",
       key: input.idempotencyKey,
       fingerprint: [
         input.slug,

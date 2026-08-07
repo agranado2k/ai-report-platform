@@ -286,7 +286,10 @@ describe("createFolder use case", () => {
 });
 
 describe("createFolder idempotency (ADR-0039)", () => {
-  it("replays the ORIGINAL folder resource on an identical retry — no duplicate", async () => {
+  // This use case is classified `sound`: the payload identifies the REQUEST,
+  // so a retry is a duplicate and replaying it is the guarantee. #233 removed
+  // the derived fallback only where it identifies desired STATE.
+  it("REPLAYS an identical keyless retry — the derived key is what makes a retry safe (#233: sound)", async () => {
     const d = await setup();
     const actor = { orgId: orgA, userId: actorA };
     const input = { parentId: rootA, name: "Quarterly" };

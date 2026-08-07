@@ -44,7 +44,6 @@ import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type {
   AuditLogger,
   GrantStore,
-  IdempotencyKeyRef,
   OrgWriteGrantStore,
   ReportRepository,
   UnitOfWork,
@@ -130,18 +129,20 @@ export async function setReportSharing(
   // `private`. Setting the same state twice is naturally idempotent in effect,
   // so the fallback buys nothing here. An EXPLICIT key means the client owns
   // retry identity, and the usual claim/replay machinery applies.
-  let idemRef: IdempotencyKeyRef | undefined;
-  if (input.idempotencyKey !== undefined) {
-    const idem = await beginIdempotentWrite(deps, {
-      actingUserId: actor.userId,
-      route: ROUTE,
-      key: input.idempotencyKey,
-      fingerprint: [input.slug, input.sharing],
-    });
-    if (!idem.ok) return idem;
-    if (idem.value.outcome === "replay") return reviveSharingReplay(idem.value.record);
-    idemRef = idem.value.ref;
-  }
+  // The carve-out is centralized in beginIdempotentWrite via
+  // `derivedFallback` — no local guard, so there is only ONE place this
+  // decision can be made or drift (issue #233).
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    // ADR-0039 derived fallback: sets sharing STATE (the #230 carve-out, now centralized)
+    derivedFallback: "unsound",
+    key: input.idempotencyKey,
+    fingerprint: [input.slug, input.sharing],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return reviveSharingReplay(idem.value.record);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     // Prune first, exactly as setAcl does (ADR-0056 "5e", issue #137): a

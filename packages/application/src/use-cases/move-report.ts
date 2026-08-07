@@ -84,6 +84,8 @@ export async function moveReport(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: sets the parent folder; A -> B -> A must re-apply
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [input.slug, input.toFolderId],
   });
@@ -106,11 +108,15 @@ export async function moveReport(
       },
     ]);
     if (!audited.ok) return audited;
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 200,
-      responseBody: reportReplayBody(moved),
-    });
-    if (!done.ok) return done;
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    if (idemRef) {
+      const done = await deps.idempotency.complete(idemRef, {
+        responseStatus: 200,
+        responseBody: reportReplayBody(moved),
+      });
+      if (!done.ok) return done;
+    }
     return ok(moved); // the moved report → the resource the API returns (ADR-0053)
   });
 }

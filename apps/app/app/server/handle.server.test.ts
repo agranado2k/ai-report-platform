@@ -440,10 +440,26 @@ describe("handle() — end-to-end idempotency through the seam (ADR-0039)", () =
     };
   }
 
-  it("replays: an identical retry returns the recorded 200 body with exactly one audit row", async () => {
+  // #233 / GHSA-ghxh-82j4-pp6m, at the seam. A rename is state-setting, so a
+  // retry WITHOUT a client key re-applies rather than replaying a derived-key
+  // record. Same status, same body — the difference is that the write really
+  // happened, which is what makes A -> B -> A land on A.
+  it("re-applies a KEYLESS identical retry — same 200 body, a second audit row", async () => {
     const { action, audit } = await makeRenameRoute();
     const first = await action(patchReq("Renamed"));
     const second = await action(patchReq("Renamed"));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ slug: "abc1234567", title: "Renamed" });
+    expect(audit.recorded().length).toBe(2);
+  });
+
+  it("replays a retry that carries an Idempotency-Key — exactly one audit row", async () => {
+    // The guarantee clients actually asked for survives untouched: #233 removed
+    // only the DERIVED fallback, never the explicit-key path.
+    const { action, audit } = await makeRenameRoute();
+    const first = await action(patchReq("Renamed", "client-key-1"));
+    const second = await action(patchReq("Renamed", "client-key-1"));
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual({ slug: "abc1234567", title: "Renamed" });

@@ -17,7 +17,7 @@ import {
 } from "arp-domain";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
-import type { AuditLogger, FolderRepository, IdempotencyKeyRef, UnitOfWork } from "../ports";
+import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
 
 const ROUTE = "DELETE /api/v1/folders/{id}/shares/{email}";
 
@@ -61,18 +61,20 @@ export async function unshareFolder(
   // is already naturally idempotent (revoking nothing succeeds), so the
   // fallback buys nothing. With an EXPLICIT `Idempotency-Key` the client owns
   // retry identity and the recorded 204 replays as usual.
-  let idemRef: IdempotencyKeyRef | undefined;
-  if (input.idempotencyKey !== undefined) {
-    const idem = await beginIdempotentWrite(deps, {
-      actingUserId: actor.userId,
-      route: ROUTE,
-      key: input.idempotencyKey,
-      fingerprint: [input.folderId, email.value],
-    });
-    if (!idem.ok) return idem;
-    if (idem.value.outcome === "replay") return ok(undefined);
-    idemRef = idem.value.ref;
-  }
+  // The carve-out is centralized in beginIdempotentWrite via
+  // `derivedFallback` — no local guard, so there is only ONE place this
+  // decision can be made or drift (issue #233).
+  const idem = await beginIdempotentWrite(deps, {
+    actingUserId: actor.userId,
+    route: ROUTE,
+    // ADR-0039 derived fallback: delete-shaped (the #230 carve-out, now centralized)
+    derivedFallback: "unsound",
+    key: input.idempotencyKey,
+    fingerprint: [input.folderId, email.value],
+  });
+  if (!idem.ok) return idem;
+  if (idem.value.outcome === "replay") return ok(undefined);
+  const idemRef = idem.value.ref;
 
   return deps.uow.run(async () => {
     const revoked = await deps.folderShares.revoke(found.value.id, email.value);
@@ -89,6 +91,10 @@ export async function unshareFolder(
     ]);
     if (!audited.ok) return audited;
     if (!idemRef) return ok(undefined);
-    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    return idemRef
+      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
+      : ok(undefined);
   });
 }

@@ -165,7 +165,7 @@ describe("setFolderVisibility use case (ADR-0076)", () => {
 });
 
 describe("setFolderVisibility idempotency (ADR-0039)", () => {
-  it("replays the recorded folder resource on an identical retry with an EXPLICIT key — one audit row", async () => {
+  it("replays a retry carrying an EXPLICIT Idempotency-Key — client-owned retry identity", async () => {
     const d = await setup();
     await d.folders.save(
       folder(F1, orgA, "Mine", {

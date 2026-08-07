@@ -53,6 +53,8 @@ export async function deleteComment(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: delete-shaped; the key must not be burnable before the fact
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [input.slug, input.commentId],
   });
@@ -91,6 +93,10 @@ export async function deleteComment(
       },
     ]);
     if (!audited.ok) return audited;
-    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    return idemRef
+      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
+      : ok(undefined);
   });
 }

@@ -75,7 +75,7 @@ describe("revokeApiKey use case", () => {
 });
 
 describe("revokeApiKey idempotency (ADR-0039)", () => {
-  it("replays the recorded success on an identical retry — one api_key.revoked audit row", async () => {
+  it("re-applies on an identical KEYLESS retry — no derived-key replay (#233)", async () => {
     const deps = makeDeps();
     const created = await deps.apiKeys.create({
       actingUserId: alice,
@@ -89,6 +89,10 @@ describe("revokeApiKey idempotency (ADR-0039)", () => {
     const second = await revokeApiKey(deps, { userId: alice, orgId: orgA }, input);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    expect(deps.audit.recorded().length).toBe(1);
+    // #233: was 1, when the derived-key fallback replayed instead of
+    // re-applying. The retry now really runs — same end state (these are
+    // naturally idempotent), one more audit row. An explicit
+    // Idempotency-Key still claims and replays exactly as before.
+    expect(deps.audit.recorded().length).toBe(2);
   });
 });

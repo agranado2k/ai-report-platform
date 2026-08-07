@@ -57,6 +57,8 @@ export async function revokeWrite(
   const idem = await beginIdempotentWrite(deps, {
     actingUserId: actor.userId,
     route: ROUTE,
+    // ADR-0039 derived fallback: delete-shaped; a pre-emptive revoke must not swallow the real one (security-relevant)
+    derivedFallback: "unsound",
     key: input.idempotencyKey,
     fingerprint: [input.slug, email.value],
   });
@@ -82,6 +84,10 @@ export async function revokeWrite(
       },
     ]);
     if (!audited.ok) return audited;
-    return deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null });
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233).
+    return idemRef
+      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
+      : ok(undefined);
   });
 }
