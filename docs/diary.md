@@ -13,7 +13,7 @@
 | **Last commit on main**| `a71fbdb` — Merge PR #259 (`fix/idempotency-followups` — ADR-0039 follow-ups). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`) — AI-SDLC plan Phase 1, this entry. `worktree/roundtrip-tests` (branch `test/idempotency-roundtrips`) — pre-existing, unmerged. `worktree/idempotency-followups` merged as #259 — prune with `/worktree-cleanup`. |
+| **Active worktrees**   | `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`, PR #261) and `worktree/sdlc-phase2-workflow` (branch `chore/sdlc-phase2-workflow`, stacked on Phase 1) — AI-SDLC plan Phases 1–2. `worktree/roundtrip-tests` (branch `test/idempotency-roundtrips`) — pre-existing, unmerged. `worktree/idempotency-followups` merged as #259 — prune with `/worktree-cleanup`. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5309,3 +5309,34 @@ layered-constitution CLAUDE.md restructure) follow as their own tracer-bullet PR
 **Process**: worktree `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`),
 off `main` at `a71fbdb`. TDD on the validator — red (module missing), green (7), then two
 regression cases pinned the fence bug red→green.
+
+### 2026-08-07 — AI-SDLC plan, Phase 2: workflow core (to-tickets / implement / prototype)
+
+The missing middle of the spec→code chain. `/to-prd` produced one PRD issue and
+implementation started straight from it — exactly the setup the tracer-bullets analysis
+warns about: a big spec in one session invites big horizontal diffs.
+
+Three new skills in `.claude/skills/`:
+
+- **`/to-tickets`** — PRD → tracer-bullet tickets: every ticket passes the "what can I
+  demo?" admission test, is sized to one fresh context window, declares blocking edges
+  (DAG), and carries an HITL/AFK label (`ready-for-agent` on AFK). Prefactoring sequenced
+  first; expand–contract for wide mechanical refactors; a mandatory quiz step gates
+  publishing as GitHub sub-issues.
+- **`/implement`** — one ticket per fresh session: open by RESTATING the ticket (can't
+  restate → ticket not ready, no guessing), drive `/tdd` through the agreed seams,
+  typecheck + single-file runs while iterating, full suite once, self-review, commit.
+  Token burn is a ticket-sizing signal, not a model failure. Context isolation on top of
+  the ADR-025 worktree (branch) isolation.
+- **`/prototype`** — feasibility spikes: falsifiable question first, throwaway code
+  outside the repo tree (can't be committed by accident), timeboxed, code discarded,
+  finding recorded in the diary/ADR draft. Production always restarts through
+  `/implement` + `/tdd` — spike code is never promoted.
+
+CLAUDE.md gains the standing tracer-bullet rule as "Before any change" item 3 and three
+quick-reference rows; the Phase-1 `claude-md-refs` validator verifies the new commands
+resolve — the docs gate now covers its own additions.
+
+**Process**: worktree `worktree/sdlc-phase2-workflow` (branch `chore/sdlc-phase2-workflow`),
+stacked on `chore/sdlc-phase1-hygiene` (shared CLAUDE.md/diary edits; PR retargets to main
+when Phase 1 merges). Skills are markdown — no vitest surface; the docs gate is the test.
