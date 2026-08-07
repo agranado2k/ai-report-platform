@@ -189,16 +189,22 @@ export async function followToTerminal(
 
     const status = response.status();
     const location = response.headers().location ?? null;
-    hops.push({ url, status, location });
+    // `startUrl` may be RELATIVE ("/upload") — Playwright resolves it against the
+    // context's baseURL, but `new URL(relative, relativeBase)` throws, so the base
+    // for the next hop must be the ABSOLUTE url the request actually went to.
+    // Taking it from the response rather than tracking a baseURL ourselves keeps
+    // the helper working for both relative and cross-origin absolute starts.
+    const absolute = response.url() || url;
+    hops.push({ url: absolute, status, location });
 
     if (!REDIRECT_CODES.has(status)) {
-      return { status, url: response.url() || url, body: await response.text(), hops };
+      return { status, url: absolute, body: await response.text(), hops };
     }
     if (!location) {
       throw new Error(
-        `followToTerminal: ${status} with no Location header at ${url} — a redirect that names no destination is a bug, not a terminal state\n  ${renderChain(hops)}`,
+        `followToTerminal: ${status} with no Location header at ${absolute} — a redirect that names no destination is a bug, not a terminal state\n  ${renderChain(hops)}`,
       );
     }
-    url = new URL(location, url).toString();
+    url = new URL(location, absolute).toString();
   }
 }

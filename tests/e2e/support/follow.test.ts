@@ -24,7 +24,10 @@ type FakeCall = { readonly url: string; readonly headers: Record<string, string>
 /** A stand-in for Playwright's `APIRequestContext`, keyed by request URL.
  *  A route may be a single response or a queue consumed in order (so a test
  *  can make the SAME url answer differently on a second visit). */
-function fakeRequest(routes: Record<string, FakeHop | readonly FakeHop[]>) {
+function fakeRequest(
+  routes: Record<string, FakeHop | readonly FakeHop[]>,
+  baseUrl = "https://app.example",
+) {
   const calls: FakeCall[] = [];
   const queues = new Map<string, FakeHop[]>(
     Object.entries(routes).map(([url, hop]) => [url, Array.isArray(hop) ? [...hop] : [hop]]),
@@ -32,15 +35,21 @@ function fakeRequest(routes: Record<string, FakeHop | readonly FakeHop[]>) {
   return {
     calls,
     get: async (url: string, options: { headers?: Record<string, string> }) => {
-      calls.push({ url, headers: { ...(options.headers ?? {}) } });
-      const queue = queues.get(url);
+      // Playwright resolves a RELATIVE request path against the context's
+      // baseURL and reports the ABSOLUTE result from `response.url()`. The fake
+      // must do the same or it is different in kind from the thing it stands in
+      // for — a relative start then throws in production and passes here, which
+      // is exactly the shape that shipped (ADR-0079's fixture-fidelity rule).
+      const resolved = new URL(url, baseUrl).toString();
+      calls.push({ url: resolved, headers: { ...(options.headers ?? {}) } });
+      const queue = queues.get(resolved);
       const hop = queue && (queue.length > 1 ? queue.shift() : queue[0]);
-      if (!hop) throw new Error(`the fake has no route for ${url}`);
+      if (!hop) throw new Error(`the fake has no route for ${resolved}`);
       const headers: Record<string, string> = {};
       if (hop.location) headers.location = hop.location;
       return {
         status: () => hop.status,
-        url: () => url,
+        url: () => resolved,
         headers: () => headers,
         headersArray: () => (hop.setCookie ?? []).map((value) => ({ name: "set-cookie", value })),
         text: async () => hop.body ?? "",
@@ -59,6 +68,30 @@ describe("followToTerminal", () => {
     expect(terminal.url).toBe("https://app.example/x");
     expect(terminal.body).toBe("<html>hi");
     expect(terminal.hops).toEqual([{ url: "https://app.example/x", status: 200, location: null }]);
+  });
+
+  // The production failure this helper shipped with: every caller in the suite
+  // passes a RELATIVE path (`/upload`), because that is what Playwright's
+  // baseURL-aware `request.get` takes. Resolving the next hop against the
+  // relative string threw `TypeError: Invalid URL` on the FIRST redirect — so
+  // the helper written to stop the suite trusting intermediate hops could not
+  // walk a chain from any of its own call sites.
+  it("starts from a RELATIVE path and still resolves each following hop", async () => {
+    const request = fakeRequest({
+      "https://app.example/upload": { status: 302, location: "/sign-in?redirect_url=%2Fupload" },
+      "https://app.example/sign-in?redirect_url=%2Fupload": { status: 200, body: "sign in" },
+    });
+
+    const terminal = await followToTerminal(request, "/upload");
+
+    expect(terminal.status).toBe(200);
+    expect(terminal.url).toBe("https://app.example/sign-in?redirect_url=%2Fupload");
+    // The chain records absolute urls, so a failure message names a location
+    // someone can actually open rather than a bare path.
+    expect(terminal.hops.map((h) => h.url)).toEqual([
+      "https://app.example/upload",
+      "https://app.example/sign-in?redirect_url=%2Fupload",
+    ]);
   });
 
   it("follows a redirect ACROSS ORIGINS and reports the terminal hop, not the first", async () => {
