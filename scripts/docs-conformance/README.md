@@ -36,6 +36,8 @@ pnpm docs:check:test   # run the harness's own fixture tests (node:test)
 | `feature-presence` | bijection between the use-case catalog and `.feature` files |
 | `gherkin-structure` | each `.feature` has Feature + Scenario + exactly one known phase tag |
 | `openapi-structure` | `openapi.yaml` exists and carries the required contract tokens |
+| `feature-executes` | every `status: 'full'` use-case is wired into `playwright.config.ts` and has step definitions |
+| `claude-md-refs` | every slash command / script / hook path referenced in `CLAUDE.md` exists on disk |
 
 ## Adding a use-case
 

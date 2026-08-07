@@ -4,7 +4,7 @@
 
 ## Checklist
 
-- [ ] Conventional Commits; commits curated for rebase-merge (ADR-0035)
+- [ ] Conventional Commits; commits curated (`git rebase -i`) — lands as a signed merge commit (ADR-0044)
 - [ ] Docs updated per the trigger matrix (ADR-026); `pnpm docs:check` green
 - [ ] Tests added/updated where there's code; `pnpm test` green
 - [ ] Relevant ADRs respected (`docs/adr/`, `CLAUDE.md`)

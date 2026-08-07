@@ -2,7 +2,7 @@
 
 > A SaaS platform where LLMs push HTML reports to a user's account via API/MCP, the user gets a permanent shareable URL, and re-uploads update the live version without breaking links.
 
-**Status:** Phase 0a — Terraform state bootstrap.
+**Status:** Phase 1 shipped + hardened — auth (Clerk), remote MCP server (`mcp.centaurspec.com`), sharing/ACL, and the in-viewer editor + comments epic are live. The current-state block at the top of `docs/diary.md` is the authoritative status.
 
 ## Where things live
 
@@ -16,7 +16,7 @@
 | `apps/`                           | `apps/app` + `apps/view` Remix apps (Phase 0c)           |
 | `packages/`                       | `domain` · `application` · `adapters` · `db` · etc. (Phase 0c) |
 | `tests/e2e/infrastructure/`       | 13 Gherkin features gating Phase 1 (Phase 0d)            |
-| `tests/e2e/features/`             | 33 use-case `.feature` files; Phase-1 worked, later phases `@wip` |
+| `tests/e2e/features/`             | Use-case `.feature` catalog — every `full` entry executes in CI; `wip` = declared coverage gap (see `tests/e2e/README.md`) |
 | `docs/api/openapi.yaml`           | OpenAPI 3.1 contract for the upload/serve API (ADR-027)  |
 | `scripts/docs-conformance/`       | Dependency-free harness that gates spec/use-case well-formedness (ADR-0041) |
 | `.claude/`                        | Skills + hooks for TDD / docs / worktrees (Phase 0e)     |

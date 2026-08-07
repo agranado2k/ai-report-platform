@@ -8,11 +8,11 @@ description: Test-driven development with red-green-refactor loop. Use when user
 > **Project context — Centaur Spec** (read first):
 >
 > - **Test runner**: vitest. Run a workspace's tests with `pnpm turbo test --filter=<workspace>`. From within an app/package dir, `pnpm test` works directly. Append `--run --coverage` for a one-shot coverage report.
-> - **Test file conventions**: prefer `*.spec.ts` for unit/integration tests (co-located with source or under `src/__tests__/`). Use `*.spec-d.ts` for type-level tests.
+> - **Test file conventions**: use `*.test.ts`, co-located with source — `vitest.config.ts` collects **only** `*.test.ts` from the covered trees; a `*.spec.ts` unit test would silently never run (Playwright owns `*.spec.ts` in `tests/browser/`, so the tiers never overlap).
 > - **Domain layer is pure** (ADR-024): `packages/domain/` and `packages/application/` have NO I/O. Aggregate invariants and use-case happy paths are unit-testable with no mocks needed. The preferred pattern is real objects + readonly types, *not* mocks.
 > - **Adapter / integration tests**: real implementations against ephemeral fixtures wherever possible (Postgres via Drizzle test schema, R2 via local mock or a CI-only bucket). Use mocks only at the system boundary.
-> - **Domain language**: assertions and test names use the names defined in `docs/domain-glossary.md` (e.g., `Report`, `Version`, `Acl`, `Scope`). Do not invent local aliases inside test files.
-> - **TDD enforcement layer** (planned for Phase 0e): zora-pantheon's TDD hooks will be added alongside this SKILL.md as `PostToolUse` / `Stop` enforcement. For now this skill provides the *procedure*; the hooks will add the *enforcement*.
+> - **Domain language**: assertions and test names use the names defined in `docs/domain-glossary.md` (e.g., `Report`, `ReportVersion`, `Acl`, `Scope`). Do not invent local aliases inside test files.
+> - **TDD enforcement layer**: the `.husky/pre-push` TDD pairing guard blocks a push whose source changes carry no test changes (bypass `PUSH_WITHOUT_TESTS=1`, logged). This skill provides the *procedure*; the hook provides the *enforcement*.
 >
 > The rest of this file is Matt Pocock's upstream skill — universal advice; the project context above adapts it to our stack.
 

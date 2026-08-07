@@ -3,6 +3,7 @@
 
 import * as adrIndexSync from "./validators/adr-index-sync.mjs";
 import * as adrMadr from "./validators/adr-madr.mjs";
+import * as claudeMdRefs from "./validators/claude-md-refs.mjs";
 import * as eventNames from "./validators/event-names.mjs";
 import * as featureExecutes from "./validators/feature-executes.mjs";
 import * as featurePresence from "./validators/feature-presence.mjs";
@@ -19,6 +20,7 @@ export const VALIDATORS = [
   featureExecutes,
   gherkinStructure,
   openapiStructure,
+  claudeMdRefs,
 ];
 
 /** Run all validators against the context; returns a flat list of violations. */
