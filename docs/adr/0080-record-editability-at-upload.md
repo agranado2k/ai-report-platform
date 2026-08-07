@@ -68,6 +68,14 @@ This ADR adds no transformation, normalization, or validation to what the viewer
 
 Nor does it gate the editor. The dashboard's "Not editable" badge **explains**; the row still links to `/reports/{slug}/open`. A recorded verdict that suppressed the affordance would turn advisory metadata into authorization, and a stale or wrong verdict would then lock a user out of a report they can actually edit — reintroducing the incident from the other side.
 
+**Reaffirmed 2026-08-06, with a concrete case** (`fix/unopenable-readonly`, ADR-0063 Phase 5-H). Production on `f83ed59` showed a private, `unsplittable` report whose owner could cycle indefinitely: `/unlock/{slug}` → `/reports/{slug}/open` → `/edit` → the 409 unopenable page → its bare `/{slug}` link → back to `/unlock/{slug}`. The tempting shortcut was to *route* on this column — send an owner of an `unsplittable` report straight to the read-only view and skip an editor hand-off that cannot succeed. It was **rejected**, and the cycle was closed by making the 409 page's link carry the owner fallback the route already held instead. Beyond the paragraph above, three further reasons specific to routing:
+
+- **It would fix almost nothing.** `editability` is `null` for the entire pre-ADR-0080 corpus (§3), so a routing rule keyed on `unsplittable` would apply only to reports uploaded after this ADR shipped and leave every existing report in exactly the cycle that motivated the rule.
+- **Write-time verdict, read-time question.** The column records what the probe concluded about one set of bytes when they were stored; whether the editor opens them is decided when it tries. Any drift between the two (a probe bug, a later `_source.json` sidecar, a parser change) becomes a wrong routing decision. The 409 page cannot make that mistake — it exists only because the editor *actually* failed, on those bytes, on this request.
+- **One mint, one job.** `GET /reports/{slug}/open` is the single edit-token mint (ADR-0059 §4), and `/unlock` deliberately hands entitled visitors a link to it rather than deciding anything itself (`private-unlock.server.ts`). A content-shaped predicate inside that seam gives the authorization boundary a second, unrelated responsibility.
+
+The general rule this leaves standing: **Editability is read by things that explain, never by things that decide.**
+
 ### 5. Surfaced where the answer is needed
 
 - `VersionWire.editability` — per version, so version history shows which save broke or fixed the editor (`reports_list_versions`).
@@ -98,8 +106,8 @@ Nor does it gate the editor. The dashboard's "Not editable" badge **explains**; 
 ## Open follow-ups
 
 - A one-off backfill that probes every live version's stored entry document and fills in `editability` (data-plane job, own change).
-- Render an explanatory page on `/edit` instead of the silent redirect (PR #247 raises this too) — this ADR's field is what such a page would say.
-- Tighten the e2e negative to PR #247's owner-specific degrade (`?access=<oa>`) once it lands; a TODO in the step file names the coupling.
+- ~~Render an explanatory page on `/edit` instead of the silent redirect~~ — **done**, PR #247 (`apps/view/app/edit/unopenable.ts`); this ADR's field is what it says.
+- ~~Tighten the e2e negative to the owner-specific degrade (`?access=<oa>`)~~ — **done**, `fix/unopenable-readonly` (ADR-0063 Phase 5-H): the unopenable page's read-only link now carries the verified owner fallback, and `editor-auth.steps.ts` asserts `/{slug}?access=` in the deployed 409 body.
 
 ## More information
 
@@ -108,4 +116,4 @@ Nor does it gate the editor. The dashboard's "Not editable" badge **explains**; 
 - Wire contract: `docs/api/openapi.yaml` — `UploadResult.editability`, `ReportSummary.editability`, `VersionSummary.editability`.
 - Term: **Editability** in `docs/domain-glossary.md` (Reports & Folders context).
 - e2e: `tests/e2e/smoke/editor-auth.feature` + `.steps.ts`; the drain wiring is documented in `tests/e2e/README.md` and lives in `.github/workflows/preview-isolation.yml` and `.github/workflows/e2e.yml`.
-- Related incident write-ups: PR #247 (`fix/owner-lockout`) and the 2026-08-06 diary entry.
+- Related incident write-ups: PR #247 (`fix/owner-lockout`), ADR-0063 Phase 5-H (`fix/unopenable-readonly` — the last hop of the same lockout, and the decision NOT to route on this column), and the 2026-08-06 diary entries.

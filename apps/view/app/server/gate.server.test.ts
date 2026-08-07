@@ -34,7 +34,13 @@ import {
   versionId,
 } from "arp-domain";
 import { describe, expect, it, vi } from "vitest";
-import { type Decision, decideServe, degradeTargetFor, type GateDeps } from "./gate.server";
+import {
+  type Decision,
+  decideServe,
+  degradeTargetFor,
+  editUnopenableLine,
+  type GateDeps,
+} from "./gate.server";
 
 const SECRET = "view-access-secret";
 const APP_ORIGIN = "https://app.example.test";
@@ -1144,5 +1150,44 @@ describe("degradeTargetFor", () => {
     ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
   ])("%s → the bare viewer for this slug, not flagged", (_n, decision) => {
     expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// editUnopenableLine — the log line for a document failure, which renders the
+// 409 explanatory page instead of redirecting.
+//
+// It now also records WHETHER that page could hand the visitor a working
+// read-only link (i.e. whether an owner fallback was in hand). That bit is the
+// difference between "the owner was told why, and can still read their report"
+// and the production shape measured on f83ed59: a bare `/{slug}` link that,
+// for a private report, walks its OWNER back to the unlock page and round and
+// round. The whole lesson of #247 is that a fallback dying at one hop is
+// invisible unless something says so at that hop.
+//
+// The TOKEN is never logged — only the boolean.
+// ---------------------------------------------------------------------------
+describe("editUnopenableLine", () => {
+  it("records that the page offered the owner a working read-only link", () => {
+    expect(JSON.parse(editUnopenableLine(SLUG, "document-unsplittable", true))).toEqual({
+      event: "edit-document-unopenable",
+      slug: SLUG,
+      reason: "document-unsplittable",
+      ownerFallback: true,
+    });
+  });
+
+  it("records when it could not — a grantee, or an owner whose fallback was lost", () => {
+    expect(JSON.parse(editUnopenableLine(SLUG, "document-unreadable", false))).toEqual({
+      event: "edit-document-unopenable",
+      slug: SLUG,
+      reason: "document-unreadable",
+      ownerFallback: false,
+    });
+  });
+
+  it("never carries the token itself", () => {
+    const line = editUnopenableLine(SLUG, "document-unparsable", true);
+    expect(line).not.toMatch(/access=|oa=|owner\./);
   });
 });

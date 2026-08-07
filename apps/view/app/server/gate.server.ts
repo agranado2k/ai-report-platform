@@ -212,9 +212,22 @@ export function editDegradeLine(
  *  class (an owner silently stranded, possibly at the unlock wall), while this
  *  is a handled outcome the user was actually told about. `reason` keeps the
  *  same three values, so ADR-0063's open question (WHICH of the three fires in
- *  production) is still answerable off this line. */
-export function editUnopenableLine(slug: string, reason: EditDegradeReason): string {
-  return JSON.stringify({ event: "edit-document-unopenable", slug, reason });
+ *  production) is still answerable off this line.
+ *
+ *  `ownerFallback` records whether the page could hand the visitor a WORKING
+ *  read-only link (`degradeTargetFor(...).ownerFallback`). Without it the line
+ *  cannot distinguish the two outcomes that matter operationally: an owner told
+ *  why, who can still read their report, versus the shape measured in
+ *  production on f83ed59 — a bare `/{slug}` that walks a private report's owner
+ *  back to the unlock page and round again. The whole lesson of #247 is that a
+ *  fallback dying at one hop stays invisible unless that hop says so. The TOKEN
+ *  is never logged; only the boolean. */
+export function editUnopenableLine(
+  slug: string,
+  reason: EditDegradeReason,
+  ownerFallback: boolean,
+): string {
+  return JSON.stringify({ event: "edit-document-unopenable", slug, reason, ownerFallback });
 }
 
 /**
@@ -275,12 +288,15 @@ export type Decision =
        *  unlock wall the way the gate's own degrades no longer can.
        *
        *  As of 2026-08-06 the route's DOCUMENT failures (the blob read, the
-       *  shell split, the ProseMirror parse) no longer consume this: they
-       *  render an explanatory page instead of redirecting at all
-       *  (`edit/unopenable.ts`), which is why the unlock wall is unreachable
-       *  from them by construction rather than by carrying the right token.
-       *  The remaining consumer is the route's defensive-narrowing branch,
-       *  which cannot render and has nowhere of its own to go. */
+       *  shell split, the ProseMirror parse) no longer REDIRECT here: they
+       *  render an explanatory page instead (`edit/unopenable.ts`), which is
+       *  why the unlock wall is unreachable from them by construction rather
+       *  than by carrying the right token. They still consume this value — as
+       *  the `href` of that page's "Open the read-only view" link, so the one
+       *  forward action it offers actually reaches the report for a private
+       *  report's owner. A `Location` the browser follows and an `href` the
+       *  user clicks want the identical destination; giving them two answers is
+       *  how the first one silently rotted. */
       readonly degradeTo?: string;
       /** Whether `degradeTo` carries an owner fallback — selects the log event. */
       readonly ownerFallback?: boolean;

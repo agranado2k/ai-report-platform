@@ -62,10 +62,12 @@ export interface UnopenableDocumentPayload {
      *  quote it without asking for logs. */
     readonly reason: DocumentDegradeReason;
     readonly explanation: string;
-    /** ALWAYS a root-relative path built from this report's own slug — the
-     *  read-only view of the very report the user was trying to edit. Never an
-     *  absolute or protocol-relative URL, so it cannot become an open
-     *  redirect if it is ever used as one. */
+    /** ALWAYS a root-relative path on THIS origin — the read-only view of the
+     *  very report the user was trying to edit, `/{slug}` or
+     *  `/{slug}?access=<verified owner fallback>`. Never absolute and never
+     *  protocol-relative, so it cannot become an off-site jump; enforced by
+     *  `rootRelativePath` below rather than merely intended, because the value
+     *  now arrives from the caller. */
     readonly readOnlyHref: string;
   };
   readonly docTitle: string;
@@ -76,17 +78,63 @@ export interface UnopenableDocumentArgs {
   readonly reason: DocumentDegradeReason;
   readonly slug: string;
   readonly docTitle: string;
+  /**
+   * Where "Open the read-only view" points — the route's own degrade target,
+   * `degradeTargetFor(decision, slug).to` (../server/gate.server.ts).
+   *
+   * WHY IT IS PASSED IN RATHER THAN BUILT HERE (2026-08-06, second pass). This
+   * page originally hard-coded `/{slug}`. For a PRIVATE report that link cannot
+   * work: the public viewer sees private + no token and redirects to
+   * `${appOrigin}/unlock/{slug}`, whose owner-aware page offers
+   * `/reports/{slug}/open` → `/edit` → this page again → the same bare link. A
+   * user-driven cycle that never reaches the content. So the owner of a
+   * private, unopenable report could read a clear explanation of why they
+   * couldn't EDIT it and still could not READ it — the 2026-08-06 lockout in
+   * its last remaining form.
+   *
+   * The route already holds the fix: the `oa` fallback (query or `arp_edit_oa`
+   * cookie) that the gate has ALREADY verified with `acceptOwnerFallback`
+   * (HMAC + this slug + unexpired + `owner === true`), baked into
+   * `decision.degradeTo` as `?access=`. Carrying it here mints NOTHING — the
+   * view origin stays credential-free (ADR-0056: the app authorizes, the viewer
+   * verifies) — and reuses the ONE degrade-target answer rather than growing a
+   * second one, which is exactly the duplication `degradeTargetFor` exists to
+   * prevent.
+   *
+   * Omitted / not root-relative → the bare `/{slug}`, which is the CORRECT link
+   * for a write-grantee: `ownerOpenLocation` deliberately never mints them an
+   * `oa`, and the unlock page they land on recognises write access.
+   */
+  readonly readOnlyHref?: string;
 }
 
-/** Build the loader payload for the unopenable-document page. Carries NO
+/**
+ * Keep the link on this origin. Today's only caller passes `degradeTargetFor`'s
+ * output — built from a validated `Slug` and a percent-encoded, verified token
+ * — but the argument's type is `string`, and this anchor is rendered into a
+ * page, so the invariant the payload documents is enforced here rather than
+ * assumed of every future caller. Anything that isn't an unambiguous
+ * root-relative path (absolute, protocol-relative, `/\`-relative — which some
+ * browsers normalise to `//` — or a `javascript:`/other scheme) collapses to
+ * this report's own path.
+ */
+function rootRelativePath(href: string | undefined, slug: string): string {
+  return href?.startsWith("/") && !href.startsWith("//") && !href.startsWith("/\\")
+    ? href
+    : `/${slug}`;
+}
+
+/** Build the loader payload for the unopenable-document page. Carries no EDIT
  *  capability: the edit token is what the EDITOR render hands the client, and
- *  this is the branch where the editor did not render. */
+ *  this is the branch where the editor did not render. The read-only owner
+ *  fallback inside `readOnlyHref` is the one token it may carry, and only
+ *  because the visitor already presented it on this very request. */
 export function unopenableDocument(args: UnopenableDocumentArgs): UnopenableDocumentPayload {
   return {
     unopenable: {
       reason: args.reason,
       explanation: UNOPENABLE_EXPLANATION[args.reason],
-      readOnlyHref: `/${args.slug}`,
+      readOnlyHref: rootRelativePath(args.readOnlyHref, args.slug),
     },
     docTitle: args.docTitle,
     slug: args.slug,

@@ -124,15 +124,28 @@ Then(
     // someOrigin is wrong for navigation purposes — new URL() only needs it to
     // pull the et= param back out.
     const location = response.headers().location ?? "";
-    const token = new URL(location).searchParams.get("et");
+    const params = new URL(location).searchParams;
+    const token = params.get("et");
     expect(token, `expected an et= token in Location "${location}"`).toBeTruthy();
+    // `oa` — the owner fallback — rides the SAME Location for an owner
+    // (open-report.server.ts mints it alongside `et`). Carry it through: the
+    // view mints `arp_edit_oa` only when the request presents `oa`
+    // (gate.server.ts's `...(oa ? [ownerFallbackCookie(...)] : [])`), so a
+    // request rebuilt from `et` alone can never produce that cookie and the
+    // assertion below would be testing the harness, not the product.
+    const ownerFallback = params.get("oa");
+    expect(
+      ownerFallback,
+      `expected an oa= owner fallback in Location "${location}" — the opener IS the owner here`,
+    ).toBeTruthy();
 
     // Hit the REAL view-origin /edit with the freshly-minted edit token, no
     // redirect following. `page.request` carries the context's Vercel
     // deployment-protection bypass header (playwright.config.ts) and needs no
     // Clerk session — the view origin is credential-free, the token IS the proof.
     const res = await page.request.get(
-      `${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}`,
+      `${VIEW_BASE_URL}/${slug}/edit?et=${encodeURIComponent(token as string)}` +
+        `&oa=${encodeURIComponent(ownerFallback as string)}`,
       { maxRedirects: 0 },
     );
     const loc = res.headers().location ?? "";
@@ -152,22 +165,36 @@ Then(
     ).toBe(303);
     expect(loc).toContain(`/${slug}/edit`);
     expect(loc).not.toContain("/unlock");
-    const setCookie = res
+    // `headersArray()` already yields ONE entry per Set-Cookie, so take the
+    // `name=value` pair off the front of each. (The previous version joined
+    // them with "; " and then tried to split them apart again on a COMMA that
+    // by then did not exist — so the split found a single element, kept the
+    // text before its first ";", and silently dropped `arp_edit_oa`. The gate
+    // then saw no owner fallback and correctly emitted a bare read-only link,
+    // which read as a product bug.)
+    const setCookiePairs = res
       .headersArray()
       .filter((h) => h.name.toLowerCase() === "set-cookie")
-      .map((h) => h.value)
-      .join("; ");
-    expect(setCookie).toContain("arp_edit");
+      .map((h) => h.value.split(";")[0]?.trim() ?? "")
+      .filter(Boolean);
+
+    // Assert BOTH by their `name=` prefix: `arp_edit` is a substring of
+    // `arp_edit_oa`, so a bare `toContain("arp_edit")` passes on either one
+    // alone — which is exactly how the missing cookie stayed invisible.
+    expect(
+      setCookiePairs.some((c) => c.startsWith("arp_edit=")),
+      `the 303 must mint the edit cookie; got ${JSON.stringify(setCookiePairs)}`,
+    ).toBe(true);
+    expect(
+      setCookiePairs.some((c) => c.startsWith("arp_edit_oa=")),
+      `an OWNER's 303 must also persist the owner fallback (ADR-0063 Phase 5-G) — without it every later degrade strands the owner; got ${JSON.stringify(setCookiePairs)}`,
+    ).toBe(true);
 
     // Carried to the SECOND hop below — the request that actually decides
     // whether the editor opens, and the one both production incidents happened
     // on. `Set-Cookie` values are `name=value; Path=…; HttpOnly; …`; the cookie
     // header wants just the `name=value` pairs.
-    editCookieHeader = setCookie
-      .split(/,(?=\s*arp_[a-z_]+=)/)
-      .map((c) => c.split(";")[0]?.trim() ?? "")
-      .filter(Boolean)
-      .join("; ");
+    editCookieHeader = setCookiePairs.join("; ");
   },
 );
 
@@ -338,4 +365,17 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
     /fragment/i,
   );
   expect(body, "the page must offer the read-only view").toContain(`/${slug}`);
+
+  // …and that offer must actually WORK. The bare `/{slug}` this page shipped
+  // with was measured in production on f83ed59: for a PRIVATE report it lands
+  // on the public viewer → `${appOrigin}/unlock/{slug}` → "Open this report" →
+  // `/reports/{slug}/open` → `/edit` → this page again. A cycle whose every hop
+  // is an improvement and whose net effect is that the OWNER of a private,
+  // unopenable report cannot read it at all. The `arp_edit_oa` cookie carried
+  // above IS the owner fallback, already verified by the gate, so the link must
+  // carry it as `?access=`.
+  expect(
+    body,
+    "the read-only link must carry the verified owner fallback — a bare /{slug} sends a private report's owner to the unlock wall and back here, forever",
+  ).toContain(`/${slug}?access=`);
 });
