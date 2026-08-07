@@ -286,15 +286,18 @@ Then("the cookie-carrying request opens the editor instead of redirecting", asyn
 // ── The negative: a report the editor CANNOT open ───────────────────────────
 Given("a report I own that the editor cannot open exists", async ({ request }) => {
   session = await mintTestSession();
-  // A bare fragment — no <body> — which is a perfectly ordinary thing for an
-  // agent to upload, views fine, and defeats `splitShell` (ADR-0080).
+  // An UNCLOSED <body> — the shape that still defeats `splitShell` after
+  // ADR-0062 Amendment 4. A bare fragment (no <body> at all) used to live here,
+  // but that is now EDITABLE: it is the ordinary agent upload, and refusing it
+  // stranded the report's own owner on a read-only view. What remains genuinely
+  // unsplittable is a body whose boundary is ambiguous (ADR-0080).
   const uploadResponse = await request.post("/api/v1/reports", {
     headers: { Authorization: `Bearer ${session.jwt}` },
     multipart: {
       file: {
-        name: "fragment.html",
+        name: "unclosed-body.html",
         mimeType: "text/html",
-        buffer: Buffer.from("<h1>Findings</h1><p>An HTML fragment, not a document.</p>", "utf8"),
+        buffer: Buffer.from("<html><body><h1>Findings</h1><p>Never closed.</html>", "utf8"),
       },
     },
   });
@@ -361,8 +364,8 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
   expect(body, "the page must say the editor could not open this report").toMatch(
     /can[’']t be opened in the editor/i,
   );
-  expect(body, "the page must name the fragment cause — this fixture has no <body>").toMatch(
-    /fragment/i,
+  expect(body, "the page must name the cause — this fixture's <body> never closes").toMatch(
+    /malformed/i,
   );
   expect(body, "the page must offer the read-only view").toContain(`/${slug}`);
 
