@@ -1,0 +1,25 @@
+-- ADR-0062 Amendment 4 — retire verdicts the OLD split predicate produced.
+--
+-- `editability` is recorded at upload (ADR-0080) and never re-derived for the
+-- badge, so every row still carries the verdict of whatever `splitShell` meant
+-- on the day it was written. Amendment 4 changed that predicate: a document
+-- with no <body> tag now SPLITS (the boundary is found by scanning for
+-- </head> / the first non-head element) instead of throwing. Every stored
+-- 'unsplittable' was therefore produced by a predicate that no longer exists,
+-- and for the common case — the agent upload with no <body> — it is now wrong.
+--
+-- Reset those rows to NULL rather than guessing a new verdict, for the same
+-- reason migration 0021 backfilled NULL in the first place: a migration cannot
+-- read R2, so any value it wrote would be a verdict nobody ran. NULL means
+-- UNKNOWN, and UNKNOWN is never treated as un-editable — the dashboard shows
+-- no badge and the editor keeps attempting and degrading, which is exactly the
+-- behaviour the read path already produces (`loadEditableDocument` re-derives
+-- the split from the stored bytes on every open). So this is behaviour-neutral
+-- for editing and only stops the UI asserting "Not editable" about reports
+-- that now open fine.
+--
+-- Scoped to 'unsplittable' deliberately. 'editable' and 'unparsable' were
+-- reached through the <body> path, which Amendment 4 leaves byte-for-byte
+-- unchanged, so those verdicts are still the ones the current predicate would
+-- give. Versions are re-probed as they are re-uploaded; there is still no sweep.
+UPDATE "report_versions" SET "editability" = NULL WHERE "editability" = 'unsplittable';

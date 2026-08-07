@@ -37,15 +37,80 @@ const escapeAttr = (s: string) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
 
+/**
+ * The presentation shell for every page this route serves.
+ *
+ * These are the product's front door for anyone who arrives at a link they
+ * cannot open — including a report's own OWNER, who reaches the private notice
+ * before the one mint that lets them in. They shipped as raw user-agent-default
+ * HTML: Times New Roman on white with default-blue links. On a page whose whole
+ * job is to say "this is private, here is the way in", that reads as a broken
+ * site rather than a deliberate boundary, which is the opposite of the
+ * assurance the page exists to give.
+ *
+ * The earlier comment here withheld styling because the app-origin CSP "may
+ * forbid" inline styles. It does not: `app-headers.ts` sets
+ * `style-src 'self' 'unsafe-inline'`, and these raw Responses carry only
+ * `frame-ancestors 'none'`, which constrains framing and nothing else. So an
+ * inline <style> was always allowed — the caution cost the page its design for
+ * no security benefit. It stays INLINE rather than a linked asset so the page
+ * still renders correctly when the app's static assets are unavailable, which
+ * is exactly the degraded condition some of these denials accompany.
+ *
+ * The styling lives HERE, in the one wrapper, and never in a caller's copy:
+ * every denial must remain byte-identical across sharing modes (the
+ * existence-oracle guard in unlock-route.test.ts), and per-branch styling is
+ * precisely how that uniformity would drift.
+ */
+const PAGE_STYLE = `<style>
+:root { color-scheme: dark }
+* { box-sizing: border-box }
+body {
+  margin: 0; min-height: 100vh; padding: 2rem 1.5rem;
+  display: flex; flex-direction: column; justify-content: center;
+  background: #17140f; color: #f5efe6;
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { width: 100%; max-width: 34rem; margin: 0 auto }
+.eyebrow {
+  font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
+  color: #8d8578; margin: 0 0 1.75rem;
+}
+h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 600; margin: 0 0 .75rem }
+p { margin: 0 0 1rem; color: #cfc7ba }
+a { color: #f5efe6; text-underline-offset: .2em }
+a:hover { color: #fff }
+label { display: block; font-size: .875rem; color: #cfc7ba; margin-bottom: 1rem }
+input {
+  display: block; width: 100%; margin-top: .375rem; padding: .625rem .75rem;
+  background: #211d17; color: inherit; font: inherit;
+  border: 1px solid #3a342b; border-radius: .375rem;
+}
+input:focus-visible { outline: 2px solid #c9a227; outline-offset: 1px; border-color: transparent }
+button {
+  padding: .625rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
+  background: #f5efe6; color: #17140f; border: 0; border-radius: .375rem;
+}
+button:hover { background: #fff }
+@media (prefers-color-scheme: light) {
+  body { background: #faf8f5; color: #17140f }
+  p, label { color: #55504a }
+  .eyebrow { color: #7a736a }
+  a { color: #17140f }
+  input { background: #fff; border-color: #ddd6cc }
+  button { background: #17140f; color: #faf8f5 }
+}
+</style>`;
+
 // These raw Responses bypass entry.server.tsx, so set baseline framing headers here — the
-// credential/email forms must not be frameable (clickjacking, claude-review #116). No inline
-// styles (the app-origin CSP, ADR-013/#65, may forbid them) — plain, functional HTML.
+// credential/email forms must not be frameable (clickjacking, claude-review #116).
 function html(body: string, status = 200): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Report access</title></head>
-<body>${body}</body></html>`,
+<title>Report access</title>${PAGE_STYLE}</head>
+<body><main><p class="eyebrow">Centaur Spec</p>${body}</main></body></html>`,
     {
       status,
       headers: {

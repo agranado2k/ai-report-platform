@@ -179,6 +179,50 @@ describe("/unlock/{slug} loader — private mode (route level)", () => {
   });
 });
 
+// These pages are the product's front door for anyone who arrives at a link
+// they cannot open — including the report's OWNER. They shipped as raw
+// user-agent-default HTML (Times New Roman on white, default-blue links), which
+// on a page that says "this report is private" reads as a broken site rather
+// than a deliberate boundary. The route comment blamed the app-origin CSP, but
+// `app-headers.ts` sets `style-src 'self' 'unsafe-inline'` and these raw
+// Responses carry only `frame-ancestors 'none'` — inline styles were always
+// allowed here.
+describe("/unlock/{slug} — the page is presented, not raw", () => {
+  beforeEach(resetSession);
+
+  it("ships a stylesheet with the page", async () => {
+    await seed(buildReport(PRIVATE));
+    state.actor = { orgId: ORG, userId: OWNER };
+    const body = await ((await loader(args(SLUG))) as Response).text();
+
+    expect(body).toContain("<style>");
+    // Typography and surface, the two things whose ABSENCE produced the raw
+    // Times-New-Roman-on-white page. Asserted via the `font:`/`background:`
+    // properties the sheet actually sets, not a longhand it never uses.
+    expect(body).toMatch(/\bfont:/);
+    expect(body).toMatch(/\bbackground:/);
+  });
+
+  it("styles the DENIAL page too — a 404 is a front door as much as a form", async () => {
+    await seed(buildReport(PRIVATE));
+    state.actor = { orgId: ORG, userId: STRANGER };
+    const body = await ((await loader(args(SLUG))) as Response).text();
+
+    expect(body).toContain("<style>");
+  });
+
+  it("keeps the styling in the shell, never in the per-page copy", async () => {
+    // The denial's bytes must stay uniform across every mode (the guard
+    // below), so the styling has to live in the ONE wrapper, not be threaded
+    // through each caller where it could drift per branch.
+    await seed(buildReport(PRIVATE));
+    state.actor = { orgId: ORG, userId: OWNER };
+    const body = await ((await loader(args(SLUG))) as Response).text();
+
+    expect(body.indexOf("<style>")).toBeLessThan(body.indexOf("<body"));
+  });
+});
+
 // THE EXISTENCE-ORACLE GUARD, over EVERY denial class this page can produce.
 // Each must be indistinguishable — same status, same bytes, same headers —
 // from "you are a signed-in non-owner of a private report that exists".
