@@ -20,14 +20,40 @@ const VIEWPORT = { width: 1000, height: 700 } as const;
 export default defineConfig({
   testDir: ".",
   testMatch: /.*\.spec\.ts$/,
-  // ONE worker, and the harness depends on it: every spec builds the same
-  // `harness/index.generated.html` path, so parallel workers would race on
-  // writing and reading that single file. Give this suite a second spec file
-  // and either keep `workers: 1` or make the output path per-worker.
+  // ONE worker, and the harness depends on it: the generated page path is
+  // derived from the fixture's basename, so parallel workers running two
+  // projects over the same fixture would race on writing and reading one file.
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: { trace: "on-first-retry" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: VIEWPORT } }],
+  // TWO PROJECTS, ONE SPEC FILE. Each fixture's `test.describe` carries a tag
+  // and each project greps for one of them, which is what makes "the same
+  // contracts, over a real report" a thing CI enforces rather than a thing
+  // someone remembers to do.
+  //
+  // `real-report` is the ADR-0079 fidelity project. The rule it enforces — "a
+  // fixture may be smaller than a real report, never different IN KIND" — was
+  // violated by the commit that wrote it, and the node-tier guard that followed
+  // (harness/fixture-fidelity.test.ts) can only see scroll-relevant CSS that is
+  // absent from the synthetic fixture. It cannot see a differently-shaped DOM,
+  // content two orders of magnitude longer, or an anchor 973px down a 20,828px
+  // document. Running the real 86KB generated report through the same specs can.
+  //
+  // Both projects share the pinned viewport: the assertions are stated in terms
+  // of the editing pane's geometry, and a project's `use` REPLACES the top-level
+  // one, so it has to be repeated rather than inherited.
+  projects: [
+    {
+      name: "chromium",
+      grep: /@synthetic-fixture/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
+    {
+      name: "real-report",
+      grep: /@real-report/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
+  ],
 });

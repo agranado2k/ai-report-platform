@@ -112,3 +112,78 @@ with their signatures intact, so `require_signed_commits = true` is satisfied
 with no bot and no manual protection toggling. Rebase-merge is disabled (GitHub
 can't sign rebased commits); squash-merge is enabled as a secondary option.
 There is **no operator setup** for this — it's just the merge button.
+
+## Required status checks on `main` — and how to unblock a bad one
+
+**What is required** lives in `infra/terraform/envs/shared/main.tf`
+(`module.github_repo.required_status_checks`), applied by the Terraform pipeline
+on merge. `strict = true` is also set, so a PR must additionally be **up to date
+with `main`** before it can merge.
+
+### The failure mode this section exists for
+
+A required context is matched by **exact string**. If a workflow or job is
+renamed, or the list carries a typo, GitHub waits forever for a check that never
+arrives. The PR shows a pending required check and cannot be merged — and
+because `enforce_admins = true`, **the repo owner cannot merge past it either**,
+including the PR that would correct the Terraform. That is a genuine deadlock,
+and the only way out is to change the protection rule itself.
+
+`enforce_admins` prevents *bypassing* the rule; it does not prevent an admin
+from *editing* it. So:
+
+```bash
+# 1) See what the rule currently requires.
+gh api repos/agranado2k/ai-report-platform/branches/main/protection/required_status_checks \
+  -q '{strict: .strict, contexts: .contexts}'
+
+# 2) See what GitHub actually reported on the stuck PR's head commit.
+#    This is the authoritative list of valid context names.
+SHA=$(gh pr view <PR#> --json headRefOid -q .headRefOid)
+gh api "repos/agranado2k/ai-report-platform/commits/$SHA/check-runs?per_page=100" \
+  -q '.check_runs[].name' | sort -u
+
+# 3) Drop ONLY the stale context, keeping the rest. (PATCH replaces the whole
+#    list, so pass the full corrected set.)
+gh api -X PATCH repos/agranado2k/ai-report-platform/branches/main/protection/required_status_checks \
+  -F strict=true -f 'contexts[]=Unit tests' -f 'contexts[]=Biome' # …etc
+
+# 4) Merge the PR that corrects infra/terraform/envs/shared/main.tf. The
+#    Terraform apply on merge then re-asserts the rule from code, and step 3's
+#    manual edit is overwritten — which is the point: the drift is temporary
+#    and self-healing.
+```
+
+This is a **deliberate, logged exception to ADR-017** (everything-as-code, no
+clicking). Record it in `docs/diary.md` when used, the same as any other
+out-of-band change. Prefer the API form above over the GitHub UI so the exact
+change is copy-pasteable into the diary entry.
+
+### Adding a check to the required list
+
+1. Let it run on a real PR first.
+2. Read its **exact** reported name — never infer it from the workflow file:
+
+   ```bash
+   SHA=$(gh pr view <PR#> --json headRefOid -q .headRefOid)
+   gh api "repos/agranado2k/ai-report-platform/commits/$SHA/check-runs?per_page=100" \
+     -q '.check_runs[].name' | sort -u
+   ```
+
+   A job that calls a **reusable workflow** reports as
+   `<calling job name> / <called job name>` — e.g.
+   `Smoke the isolated preview / E2E smoke against preview`. Neither half alone
+   is a valid context.
+3. **Never require a path-filtered workflow.** `migration-check.yml`
+   (`packages/db/**`) and `terraform.yml` (`infra/terraform/**`) do not run — and
+   therefore report nothing — on PRs that miss their filter, which branch
+   protection cannot distinguish from "still running". To make one required, it
+   first needs a companion job that reports success when the paths are untouched.
+4. Add it to `required_status_checks` in `envs/shared/main.tf` and merge. The
+   pipeline applies it.
+
+### Retiring a check
+
+Remove it from the Terraform list **before** deleting or renaming the workflow
+job, and let that apply land first. The reverse order produces exactly the
+deadlock above.

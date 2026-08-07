@@ -38,6 +38,22 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # THE AUTHORITATIVE "every step is defined" CHECK, and it belongs in the
+      # fast gate because it needs nothing but the repo: `bddgen` generates a
+      # Playwright spec per opted-in .feature and ERRORS on any step with no
+      # definition. Without it, an undefined step in a feature listed in
+      # playwright.config.ts's `features` array would only be discovered by the
+      # e2e job, i.e. after a preview deploy — or not at all, if the e2e job
+      # were skipped.
+      #
+      # It is the enforcement half of docs-conformance's `feature-executes`
+      # validator (which checks the cheap file-level facts: listed in the array,
+      # a `<slug>.steps.ts` beside it, no @wip). Together they are what stops a
+      # `.feature` file claiming coverage it does not have — the state the
+      # corpus was in when 33 files existed and 1 of them ran.
+      - name: BDD step definitions all resolve
+        run: pnpm e2e:gen
+
   # Component-level BROWSER tests for packages/editor (ADR-0062 Amendment 3).
   # Hermetic — a file:// harness page bundling the real ReportEditor, no
   # deployment, no Clerk credentials, no database — so it belongs in this fast

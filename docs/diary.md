@@ -4889,6 +4889,116 @@ this entry rather than quietly rewritten. `worktree/mcp-body-limit` remains on d
 design and never force-removes — and it needs an operator decision rather than another
 automated pass.
 
+## 2026-08-06 — a retro on five green-CI defects, and four things that make green mean more
+
+Five defects shipped through green CI this week. The retro found four distinct
+mechanisms, not five instances of one, and this worktree
+(`worktree/e2e-hardening`, branch `test/e2e-hardening`) addresses all four.
+
+**1. The suite asserted intermediate hops.** `editor-auth.steps.ts` asserted the
+`303` off `/{slug}/edit?et=…` and stopped. BOTH the #188 re-nested-route P0 and
+the ADR-0080 owner lockout happened on the *next* request — twice through the
+same untested hop. `tests/e2e/support/follow.ts` now walks a chain to its
+terminal state, across origins, carrying cookies forward, capping hops and
+failing loudly on a loop. The existing `303` assertion stays (it is the direct
+#188 guard); a terminal assertion is added after it, on the status **and the
+body** — a bare `200` proved insufficient, since the public viewer, the
+unopenable-document page and the editor all answer with HTML and only one
+carries `data-testid="unified-editor"`.
+
+**2. Silent skips reported as success.** Seven `test.skip(...)` guards key on
+`PLAYWRIGHT_VIEW_BASE_URL` / `E2E_SCAN_DRAIN_SECRET`, both produced by
+`preview-isolation.yml` and threaded through `e2e.yml`. If either arrived empty
+the scenario skipped and the job went green over exactly the coverage that
+caught two incidents. A reporter now fails the run in CI on any unallowlisted
+skip — and on a run that collected **zero tests**, which is the shape a
+too-wide `grepInvert` produces and which no per-test rule can see. Locally it
+stays silent. `clerk-auth.setup.ts` is deliberately **not** allowlisted: a Clerk
+creds outage in CI must fail rather than warn.
+
+**3. A fixture different in kind from a real report.** The anchor-jump defect
+took three rounds partly because the browser harness had no `scroll-behavior`
+and its assertions were satisfiable by a wrong implementation (a reviewer showed
+`scrollTo(0, 1e6)` passing them). ADR-0079's fixture rule is now enforced by a
+second Playwright project, `real-report`, running the same spec file over the
+verbatim 86KB generated report. One contract is excluded **explicitly** — "an id
+on a heading scrolls too" has no subject on a document that puts all nine anchor
+ids on `<section>` elements — rather than by narrowing the project silently.
+
+**4. Coverage theatre: 33 `.feature` files, 1 of which ran.** `docs-conformance`
+validated a catalog↔file bijection, which is a fact about file names and says
+nothing about execution. All 32 non-running files were resolved with evidence:
+**23 deleted** (behaviour genuinely verified elsewhere — tombstones in
+`config.mjs` name the tests), **1 wired** (`block-service-worker`, whose ADR-0014
+edge refusal had *zero* tests in any tier), **8 kept as declared gaps** (seven of
+which are simply not implemented). A new `feature-executes` validator plus
+`bddgen` in `unit.yml` is the mechanical guard against regression.
+
+Test counts: vitest 2406 → 2427, browser tier 22 → 32, docs-conformance harness
+33 → 41.
+
+**A fifth item ships as a separate PR, deliberately merged after this one:**
+`required_status_checks.contexts` on `main` is `[]`, so nothing gates merge
+today — a genuinely red check cannot block a merge, and an infrastructure blip
+(of which this week had two) is indistinguishable from a real defect. Splitting
+it keeps the "make checks required" change reviewable on its own and lets the
+new checks prove themselves green on this PR first.
+
+## 2026-08-06 — CI checks become required on `main` (the fifth retro item)
+
+`required_status_checks.contexts` on `main` was `[]` — verified against the live
+API, not inferred. Branch protection required "up to date with `main`" and
+nothing else, so **a red check could not block a merge**. PR #249 is the
+receipt: `Smoke the isolated preview / E2E smoke against preview` **failed** and
+the PR merged anyway. And with nothing gating, an infrastructure blip was
+indistinguishable from a real defect, because neither had any effect.
+
+Eight contexts are now set in `infra/terraform/envs/shared/main.tf` — the fast
+hermetic gate (`Unit tests`, which also carries the package typecheck and the
+`bddgen` step-definition check; `Editor browser tests`; `Biome`;
+`Docs conformance`; `Lint PR commits`) plus the infrastructure-first gate
+(`Isolate preview data plane`; `Smoke the isolated preview / E2E smoke against
+preview`; `Security headers / Security headers (viewer preview)`).
+
+**Every name was read off real check runs** (`gh api …/check-runs`) on PRs #248,
+#249 and #251 rather than inferred from the workflow files. Two things that
+would have bitten:
+
+1. A job calling a **reusable** workflow reports as `<caller job> / <called
+   job>`. Neither half alone is a valid context.
+2. Those same jobs *also* report under their **bare** name with conclusion
+   `skipped` — but only on `pull_request: closed`, where the caller's
+   `if: != 'closed'` skips it before the reusable workflow is reached. On the
+   runs that decide mergeability, only the composite exists.
+
+Deliberate exclusions: `Migration check` and every `Terraform` job are
+**path-filtered**, so they report nothing on PRs that miss the filter — which
+branch protection cannot tell apart from "pending" — and requiring one would
+brick every unrelated PR. `claude-review` / `review` stay out because ADR-030
+makes AI review advisory, and because both failed today on GitHub's own
+Actions incident.
+
+**Accepted friction:** `strict = true` was already set, so requiring checks now
+also means stale PRs must update before merging. `/merge-train` handles that via
+the update-branch API.
+
+`docs/ops.md` gains the recovery procedure. The deadlock is real and worth
+naming: a context string GitHub never reports leaves `main` unmergeable, and
+`enforce_admins = true` means the owner cannot merge past it either — including
+the PR that would fix the Terraform. The way out is to PATCH the protection
+rule's context list directly (admins may *edit* the rule even though they cannot
+*bypass* it), merge the fix, and let the next apply re-assert from code. It is a
+logged ADR-017 exception, self-healing by design.
+
+Shipped as a **separate PR, merged after** the e2e-hardening PR, so the new
+checks — including `Editor browser tests`, which that PR grows a second project
+for — prove themselves green before they gate anything. Worktree
+`worktree/required-checks` (branch `ci/required-status-checks`).
+
+At authoring time GitHub Actions was degraded (runs queued >90 minutes; `Migrate
+DB (prod)` and `Release` both failed on `main`), which is why verification used
+three already-completed PRs rather than the current one.
+
 ---
 
 ## 2026-08-06 — the read-only link had no key: the owner could learn why, and still not read

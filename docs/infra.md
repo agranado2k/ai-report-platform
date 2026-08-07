@@ -103,6 +103,34 @@ infra/terraform/scripts/tf.sh prod plan
 infra/terraform/scripts/tf.sh prod apply
 ```
 
+### Branch protection — required status checks (2026-08-06)
+
+`module.github_repo` in `envs/shared/main.tf` now sets
+`required_status_checks`, which was `[]` from Phase 0c until this change: branch
+protection required "up to date with `main`" and nothing else, so a **red check
+could not block a merge**. Eight checks are now required — the fast hermetic
+gate (`Unit tests`, `Editor browser tests`, `Biome`, `Docs conformance`,
+`Lint PR commits`) and the infrastructure-first gate (`Isolate preview data
+plane`, `Smoke the isolated preview / E2E smoke against preview`,
+`Security headers / Security headers (viewer preview)`).
+
+Three consequences worth knowing before you touch this list:
+
+- **`strict = true` means stale PRs must update before merging.** Real added
+  friction on a busy day; `/merge-train` already handles it via GitHub's
+  update-branch API.
+- **A context string that GitHub never reports bricks `main`** — the rule waits
+  forever, and `enforce_admins = true` means the owner cannot merge past it
+  either. Always read the exact name off a real check run before adding it, and
+  see the recovery procedure in `docs/ops.md`.
+- **Path-filtered workflows must not be required.** `migration-check.yml` and
+  `terraform.yml` report nothing on PRs that miss their `paths:` filter, which
+  branch protection cannot tell apart from "pending". The AI review bots
+  (ADR-030) are also excluded — they are advisory by decision.
+
+Full rationale, the exact list and the per-exclusion reasoning are in the
+comments on `module.github_repo` in `infra/terraform/envs/shared/main.tf`.
+
 ### Required GitHub Actions configuration
 
 Once the repo lives at `github.com/agranado2k/<repo>`, populate these under **Settings → Secrets and variables → Actions**. The `terraform-shared/github-repo` module also writes the secrets back from Terraform — but the first apply needs them set manually (chicken-and-egg).

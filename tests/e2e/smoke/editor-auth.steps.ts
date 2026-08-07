@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { type APIRequestContext, type APIResponse, expect, test } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import { mintTestSession, type TestSession } from "../support/clerk-session";
+import { followToTerminal } from "../support/follow";
 
 const { Given, When, Then } = createBdd();
 
@@ -220,16 +221,39 @@ Then("the cookie-carrying request opens the editor instead of redirecting", asyn
   test.skip(!VIEW_BASE_URL, "PLAYWRIGHT_VIEW_BASE_URL not set — no view origin to follow to");
   test.skip(!SCAN_DRAIN_SECRET, "E2E_SCAN_DRAIN_SECRET not set — report is not servable");
 
-  const res = await page.request.get(`${VIEW_BASE_URL}/${slug}/edit`, {
+  // TERMINAL, not the first answer. `followToTerminal` walks wherever this
+  // request goes — carrying the `arp_edit` cookie forward across every hop —
+  // so a regression that bounces the owner somewhere else is measured at its
+  // DESTINATION rather than at the bounce. Today the chain is one hop long and
+  // the `hops` assertion below pins that; if it ever grows, the status and body
+  // assertions still describe what the owner actually gets, instead of silently
+  // passing on the redirect's own 3xx.
+  const terminal = await followToTerminal(page.request, `${VIEW_BASE_URL}/${slug}/edit`, {
     headers: { Cookie: editCookieHeader },
-    maxRedirects: 0,
   });
-  const loc = res.headers().location ?? "";
+  const chain = terminal.hops.map((h) => `${h.status} ${h.url}`).join(" → ");
+
   expect(
-    res.status(),
-    `expected 200 from the cookie-carrying /edit request; got ${res.status()} → "${loc}". A 302 here is the owner-lockout shape (ADR-0080): the gate accepted the token on hop 1 and refused the cookie on hop 2, or the document could not be opened. A 5xx is worse — the loader crashed where it is contracted never to.`,
+    terminal.hops,
+    `the cookie-carrying /edit request must be answered directly, with no redirect at all; got ${chain}`,
+  ).toHaveLength(1);
+  expect(
+    terminal.status,
+    `expected 200 from the cookie-carrying /edit request; got ${chain}. A 302 here is the owner-lockout shape (ADR-0080): the gate accepted the token on hop 1 and refused the cookie on hop 2, or the document could not be opened. A 5xx is worse — the loader crashed where it is contracted never to.`,
   ).toBe(200);
-  expect(loc).toBe("");
+
+  // AND THE BODY, because a 200 alone was not enough. `redirectToPublicViewer`
+  // is not the only way this route can fail an owner: the public viewer, the
+  // unopenable-document page and the editor all answer 2xx-or-4xx HTML, and
+  // only one of them is the editor. `data-testid="unified-editor"` is rendered
+  // by the "render" decision branch alone ($slug_.edit.tsx) — every degrade
+  // branch returns markup without it — so this is the assertion that says the
+  // owner got an EDITOR rather than merely a page.
+  expect(
+    terminal.body,
+    `the terminal response must be the mounted editor (data-testid="unified-editor"); got ${terminal.body.length} bytes from ${terminal.url}`,
+  ).toContain('data-testid="unified-editor"');
+  expect(terminal.body).not.toContain("/unlock/");
 });
 
 // ── The negative: a report the editor CANNOT open ───────────────────────────
@@ -277,10 +301,10 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
   test.skip(!VIEW_BASE_URL, "PLAYWRIGHT_VIEW_BASE_URL not set — no view origin to follow to");
   test.skip(!SCAN_DRAIN_SECRET, "E2E_SCAN_DRAIN_SECRET not set — report is not servable");
 
-  const res = await page.request.get(`${VIEW_BASE_URL}/${slug}/edit`, {
+  const terminal = await followToTerminal(page.request, `${VIEW_BASE_URL}/${slug}/edit`, {
     headers: { Cookie: editCookieHeader },
-    maxRedirects: 0,
   });
+  const chain = terminal.hops.map((h) => `${h.status} ${h.url}`).join(" → ");
 
   // THE POINT: an un-editable document must be EXPLAINED, not crash and not
   // vanish. PR #247 landed the contract this step was written against and
@@ -288,10 +312,18 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
   // viewer, the route renders its own page naming the reason. 409 — not 200
   // (which would tell every probe and log query that editing worked) and not
   // 3xx (the silent bounce that made the original incident invisible).
-  const body = await res.text();
+  //
+  // Followed to the TERMINAL state so that "it silently bounced" is measured
+  // rather than inferred: were the route to start redirecting again, the hops
+  // assertion names the whole chain instead of failing on an opaque 302.
+  const body = terminal.body;
   expect(
-    res.status(),
-    `expected the unopenable-document page, got ${res.status()} — a 5xx means the /edit loader crashed on a document it is contracted to degrade on, a 3xx means it silently bounced`,
+    terminal.hops,
+    `the unopenable-document page must be served directly, with no redirect; got ${chain}`,
+  ).toHaveLength(1);
+  expect(
+    terminal.status,
+    `expected the unopenable-document page, got ${chain} — a 5xx means the /edit loader crashed on a document it is contracted to degrade on, a 3xx means it silently bounced`,
   ).toBe(409);
 
   // The capability was already verified (the gate returned `serve` for a valid

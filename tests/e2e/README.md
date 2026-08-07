@@ -49,6 +49,65 @@ caller's contract held and giving a cold/suspended Neon branch a bounded warm-up
 grace window — not the primary mechanism for telling two racing deployments
 apart, since there aren't two anymore.
 
+## A skip in CI FAILS the job (`tests/e2e/support/skip-guard.ts`)
+
+Silence is not success. This suite guards its most valuable scenarios behind
+`test.skip(!process.env.X, …)`: `PLAYWRIGHT_VIEW_BASE_URL` for the cross-origin
+owner-open hand-off, `E2E_SCAN_DRAIN_SECRET` for the scan drain that makes a
+preview's upload servable at all. Those guards are **right locally** — a dev box
+has no preview to follow to, and a suite that exploded there would simply get run
+less. In CI they are the opposite: both variables are produced by
+`preview-isolation.yml` and threaded through `e2e.yml`, so if either arrives
+empty (a renamed job output, a `secrets:` block that stopped inheriting, a
+dropped workflow input) the scenario skips, the job reports **green**, and
+exactly the coverage that exists because two production incidents shipped through
+that hop is gone with no signal at all.
+
+So a custom reporter — registered in `playwright.config.ts`, active **only when
+`CI` is set** — fails the run when:
+
+- any collected test ends with outcome `skipped` and has not opted in; or
+- the run collected **zero tests**. A `grep`/`grepInvert` combination wide
+  enough to exclude the whole suite produces no skipped tests and a green run
+  over no coverage, which the per-test rule cannot see.
+
+**Opting a skip out.** Tag the scenario `@allow-skip` in its `.feature` (the tag
+is in docs-conformance's `featureTags` vocabulary, so it is a reviewed decision,
+not a stray string), or, for a plain `@playwright/test` spec with no Gherkin tags:
+
+```ts
+test.info().annotations.push({ type: "allow-skip", description: "why" });
+```
+
+**Nothing uses either today, and that is deliberate.** In particular
+`clerk-auth.setup.ts` is *not* allowlisted: if the Clerk staging credentials ever
+go missing in CI, that setup skips, `@auth`/`@browser` are grep-excluded, and the
+run would otherwise be green over zero authenticated coverage. `e2e.yml` already
+emits a `::warning::` for that case; the guard now makes it a failure. A scenario
+that legitimately cannot run in CI is usually a scenario whose precondition
+should be fixed instead.
+
+## Assert the TERMINAL state (`tests/e2e/support/follow.ts`)
+
+`editor-auth.feature` asserted the `303` off `/{slug}/edit?et=…` and stopped
+there — through **two** production incidents (#188's re-nested `/edit` route and
+the ADR-0080 owner lockout) that both happened on the request *after* it.
+
+`followToTerminal(request, url, { headers })` walks a redirect chain to whatever
+finally answers a non-redirect and returns `{ status, url, body, hops }`. It
+carries cookies forward **across origins** (deliberately unscoped by domain: the
+credential under test is the cross-origin `arp_edit` cookie), caps the hop count,
+and throws with the whole chain on a loop rather than hanging.
+
+Two rules go with it:
+
+1. **Never assert only an intermediate hop.** Keep the intermediate assertion if
+   it guards something specific — the `303` is the direct guard for #188 — and
+   add a terminal one after it.
+2. **Assert the body, not just the status.** A `200` alone proved insufficient
+   this week: the public viewer, the unopenable-document page and the editor all
+   answer with HTML, and only the editor carries `data-testid="unified-editor"`.
+
 ## Driving the scan drain on a preview (ADR-0045 / ADR-0080)
 
 A report only becomes **servable** once its version scans `clean` (ADR-0037 §8).
@@ -102,7 +161,7 @@ unset and the drain-dependent steps skip cleanly, the same way
 
 | | |
 |---|---|
-| Purpose | Any scenario needing a SECOND real identity acting against the same report/org — the `@phase-2 @wip` scenarios in `tests/e2e/features/sharing-modes.feature` (owner-only ACL read, org-mode unlock) and `tests/e2e/features/report-write-grants.feature` (the write-grant lifecycle) all need this and are blocked on more than just the fixture — see "Current status" below. |
+| Purpose | Any scenario needing a SECOND real identity acting against the same report/org. `sharing-modes.feature` and `report-write-grants.feature` used to be listed here as the consumers; both were deleted on 2026-08-06 (their behaviour is covered by `resolve-access.test.ts`, `unlock-route.test.ts` and the write-grant use-case + contract suites). The live consumers are the run-scoped team fixtures below. |
 | Email | `silver+clerk_test@agranado.com` — hardcoded as `SECOND_FIXTURE_EMAIL` in `tests/e2e/support/clerk-session.ts` (not a secret; a stable, documented fixture address, same rationale as fixture 1). |
 | Why `+clerk_test`? | Clerk treats any address containing `+clerk_test` as **test mode**: it always verifies with the fixed code **`424242`**, no real inbox needed, no email actually sent. This only works on Clerk **test** instances (dev/staging here), never on `pk_live`. |
 | Org (ADR-0068 §1) | Domain `agranado.com` is **not** on the public-provider list (`packages/domain/src/org-key.ts`), so this address resolves to a **`team`** org keyed by `agranado.com` — deliberately chosen so it exercises the team-org / multi-member paths, not another personal org. |
@@ -195,38 +254,132 @@ Missing any of the three grep-excludes `@browser` entirely (never runs
 half-configured) — see the `grep`/`grepInvert` logic at the top of
 `playwright.config.ts`.
 
-## Current status — what's wired vs what's still blocked
+## The 2026-08-06 corpus resolution — 33 files, 1 of which ran
 
-Fixture 2 (this PR) makes it POSSIBLE to mint a session for a second identity. It
-does **not**, by itself, make `sharing-modes.feature` / `report-write-grants.feature`
-executable, because of a pre-existing gap that predates this PR:
+`tests/e2e/features/` held **33** `.feature` files. Exactly **one**
+(`folder-sharing.feature`) was opted into `playwright.config.ts`'s `features`
+array, which is the only thing that makes a feature run. The other 32 were
+step-less `@wip` skeletons. `docs-conformance` was green throughout, because it
+validated a **bijection between the catalog and the directory** — a fact about
+file names, which says nothing about execution.
 
-- Neither feature file has ANY step definitions (unlike `tests/e2e/smoke/*.steps.ts`).
-- `playwright.config.ts`'s `testDir` glob only includes `tests/e2e/smoke/**/*.feature`
-  — the 29 product `.feature` files under `tests/e2e/features/` are not even
-  collected by playwright-bdd yet (a long-standing TODO predating this PR — see
-  the comment at the top of `playwright.config.ts` and `.github/workflows/e2e.yml`).
+**That is worse than an empty catalog.** A `.feature` file describing a
+behaviour is precisely what stops the next person writing the test for it: the
+coverage looks accounted for. So every one of the 32 was resolved with evidence,
+and `status: "full"` now means one thing only — *this executes in CI*.
 
-Authoring a full BDD step-definition layer for these two features (API client
-helpers, two-session fixtures, org/ACL scenario wiring) is a distinct, sizeable
-piece of work — comparable in scope to standing up the product-feature e2e layer
-itself — and is out of scope for the ADR-0068 team-orgs PR. Both scenario files
-stay `@wip` with this precise blocker noted inline; un-`@wip`-ing them, widening
-`playwright.config.ts`'s `testDir`, and writing their step definitions is tracked
-as separate follow-up work.
+### Deleted (23) — the behaviour is genuinely verified elsewhere
+
+The evidence for each is recorded as a tombstone in
+`scripts/docs-conformance/config.mjs`, naming the tests that actually cover it.
+Summarised by why:
+
+| Deleted | Verified instead by |
+| --- | --- |
+| `upload-report-via-api` | the smoke `auth-upload.feature` — 201 + slug + canonical `view_url`, against real infrastructure |
+| `view-report-while-scanning` | `view-report.test.ts`, `gate.server.test.ts` interstitial, `drain-scans.test.ts` — and the smoke `editor-auth` scenario drives the real `/internal/scan-drain` |
+| `view-version-by-ordinal`, `view-published-report`, `report-flagged-unavailable`, `report-taken-down` | `view-report.test.ts` + `gate.server.test.ts` (451/410/404 precedence, `?v=N`, reason-opacity), `version-query.test.ts` |
+| `sharing-modes`, `report-write-grants`, `cross-org-collaboration` | `resolve-access.test.ts` (every Examples row), `unlock-route.test.ts`, `grant-write`/`revoke-write`/`load-owned`/`get-acl` `.test.ts`, `write-grant-store.contract.ts` (two-runner) |
+| `organize-reports-in-folders` | `move-report.test.ts`, `folder-repository.contract.ts`; the smoke `team-org-upload` creates a folder and moves a report for real |
+| `idempotent-write-api` | `idempotent-write.test.ts` (all five scenarios), `idempotency-store.contract.ts`, `handle.server.test.ts` end-to-end through the seam |
+| `problem-json-error-model`, `enforce-api-key-scopes`, `enforce-plan-limits` | `upload-response.test.ts` `CASES` (every error kind, each asserting the problem+json wire shape), `problem.test.ts`, `resolve-actor.server.test.ts` |
+| `list-report-versions`, `comment-on-a-report` | `list-report-versions.test.ts`, `list-response.test.ts`; `reply-to-comment`/`list-comments`/`resolve-comment` `.test.ts`, `comment-repository.contract.ts` |
+| `audit-log-every-action` | `audit-logger.contract.ts` (two-runner) + per-action rows in `set-acl`/`grant-write`/`move-report`; secret redaction in `create-api-key.test.ts` |
+| `sign-up-and-switch-orgs` | `provision-identity.test.ts`, `report-repository.contract.ts` visibility; the smoke `team-org-upload` proves the one-org join on real infrastructure |
+| `viewer-security-headers`, `viewer-origin-isolation`, `trusted-types-dashboard` | `view-headers.test.ts` / `app-headers.test.ts` / `cors.test.ts` — **plus** the deployed gate `view-headers.live.test.ts`, run by `security-headers.yml` against the real preview |
+| `re-upload-keeps-url-stable` | `upload-report.test.ts` (`update_slug`, non-owner 403), `process-scan-result.test.ts`, `view-report.test.ts` |
+| `upload-report-via-mcp` | `apps/mcp` `client.test.ts` + `tools.test.ts` — the tool is a thin wrapper over the same HTTP API |
+
+### Wired (1)
+
+`block-service-worker.feature` — the clearest hole in the corpus. Both
+middlewares implement the ADR-0014 refusal correctly in four lines each, and
+**nothing in the repo tested either of them**. It now runs on both origins,
+asserting the middleware's own refusal body and `x-edge-marker` (never a bare
+status — Deployment Protection also answers 4xx), plus a negative scenario so a
+middleware that refused everything could not pass.
+
+### Kept as declared coverage gaps (8)
+
+Each is real, user-visible, and covered by **nothing** in any tier. They stay
+`status: "wip"`, are not opted into the run, and each carries its note below.
+Three of them (`upload-guardrails`, `reject-svg-upload`, `upload-report-via-web`)
+were catalogued `"full"` before this pass, which was simply false.
+
+| Use-case | What is missing, and why it cannot just be wired |
+| --- | --- |
+| `upload-guardrails` | **Not implemented.** `packages/adapters/src/bundle-processor.ts` is a single-document wrapper whose own header says the zip-extraction + MIME-sniff + caps processor "is a later slice". Zip-slip, decompression ratio, nested archives and all three hard caps (25 MiB / 20,000 entries / 250 MB inflated) have **zero** repo hits. Only the `PayloadTooLarge` → 413 wire mapping is tested. The most serious mismatch found: a security guardrail catalogued as fully covered with no enforcement behind it. |
+| `reject-svg-upload` | **Not implemented**, same root cause. The only "coverage" is `upload-report.test.ts` passing a **stubbed** processor failure through the seam; nothing sniffs `image/svg+xml`. |
+| `upload-report-via-web` | `apps/app/app/routes/upload.tsx` has **no test at all**, and no `*.test.ts` exists anywhere under `apps/app/app/routes/`. The `/upload` auth gate is smoke-covered (`dashboard-auth.feature`); choose-file → submit → see the view URL is not. Wiring it needs an authenticated browser form POST — feasible, but a distinct piece of work. Its scenario 3 is also **stale**: ADR-0075 made reports private by default, so the "anyone with the link" copy now describes the explicit `public` mode only. |
+| `malware-scan-eicar` | **Not implemented.** The only scanner is `CleanStubScanner`, which always returns clean; `grep -r EICAR` finds nothing. The *pipeline* around it is covered (`process-scan-result.test.ts`), but nothing derives a bad verdict from content. |
+| `submit-abuse-report` | **Not implemented.** The `abuse_reports` table exists (pinned structurally by `schema.test.ts`); there is no use case, port, route, or MCP tool, and `AbuseReported` is never emitted. |
+| `enforce-rate-limits` | **Not implemented.** Both middlewares carry a literal `// TODO Phase 1: … rate limit via Upstash`. Only the `RateLimited` → 429 mapping is tested. |
+| `detect-api-key-anomaly` | **Not implemented.** `grep -ri anomaly packages apps` returns nothing; `ApiKeyAnomalyDetected` exists only in the events registry. |
+| `enforce-mfa` | **Not implemented.** Zero hits for `mfa` / `totp` / `multi-factor`. |
+
+### Uncovered slices inside features that WERE deleted
+
+Deleting a file whose narrative is 95% covered would bury the other 5%, so those
+slices are recorded here instead:
+
+- **`X-Robots-Tag: noindex`** is set by `apps/view/app/routes/$slug.tsx` and was
+  asserted by three of the deleted feature files — and by **no test in the
+  repo**. It is absent from the live header gate too. Cheapest real win on this
+  list: one assertion in `packages/headers/src/view-headers.live.test.ts`.
+- **CSP violation reporting.** `CspViolationReported` is a canonical event and
+  `csp_reports` is a real table, but **there is no `/csp-report` route**. Only
+  the `Report-To` header value is tested.
+- **Denied-action auditing.** `uploadReport` returns `err(insufficientScope)`
+  before reaching `deps.audit.record`, so a refused action leaves no audit row.
+  No test, no implementation.
+- **Route-level request validation.** Nothing under `apps/app/app/routes/` has a
+  unit test, which is why the re-upload "content-only fields" 422 rule is
+  unverified.
+- **No real plan quota.** The production `PlanLimiter` is `AllowAllPlanLimiter`.
+  The 402 mapping is well covered; the limit itself does not exist.
+- **`UserCreated`** is in the events registry and is emitted nowhere.
+
+### The mechanical guard that stops this recurring
+
+`docs-conformance`'s **`feature-executes`** validator (with
+`scripts/docs-conformance/test/feature-executes.test.mjs`) now requires, for
+every catalogued use-case with `status: "full"`:
+
+1. it is listed in `playwright.config.ts`'s `features` array;
+2. a `<slug>.steps.ts` sits beside it;
+3. it does not carry `@wip` (which `grepInvert` would silently exclude);
+
+and the converse — a `"wip"` use-case must **not** be opted in, and a feature the
+config runs must be catalogued. If the `features` array cannot be parsed at all,
+that is a violation rather than a silent pass.
+
+The authoritative "every step is defined" check is `pnpm e2e:gen` (`bddgen`
+errors on an undefined step), run by `.github/workflows/unit.yml` on every PR.
+
+## Historical note — the ADR-0068 blocker, now resolved
+
+Fixture 2 makes it possible to mint a session for a second identity. It did
+not, by itself, make `sharing-modes.feature` / `report-write-grants.feature`
+executable: neither had step definitions, and `playwright.config.ts` only
+collected `tests/e2e/smoke/**`. Both files were **deleted** in the 2026-08-06
+pass above — their behaviour is covered by `resolve-access.test.ts`,
+`unlock-route.test.ts`, the write-grant use-case tests and the two-runner
+`write-grant-store.contract.ts`, and the org-write leg runs end-to-end against
+real infrastructure in the smoke `team-org-upload.feature`.
 
 ## Product-feature scenarios that RUN (`tests/e2e/features/`)
 
-The "not even collected" statement above is no longer absolute. `playwright.
-config.ts` now opts features in **by name**, one at a time, rather than by a
-directory glob — a glob over `tests/e2e/features/**` would still fail at
+`playwright.config.ts` opts features in **by name**, one at a time, rather than
+by a directory glob — a glob over `tests/e2e/features/**` would fail at
 collection, because playwright-bdd errors on a generated spec with undefined
-steps and most of that corpus is still a step-less `@wip` skeleton. Listing a
-feature in that array is therefore the difference between coverage and
-decoration: an unlisted `.feature` does not run, no matter how good it reads.
+steps and the remaining corpus is declared-gap skeletons. Listing a feature in
+that array is the difference between coverage and decoration: an unlisted
+`.feature` does not run, no matter how good it reads. That is now **enforced**,
+not merely stated — see `feature-executes` above.
 
 | Feature | Tags | Covers |
 | --- | --- | --- |
+| `block-service-worker.feature` (`block-service-worker.steps.ts`) | `@phase-1 @security @smoke` | ADR-0014 — the edge middleware refusing a `Service-Worker: script` fetch on **both** origins, asserted through the middleware's own refusal body and `x-edge-marker` rather than a bare status (Vercel Deployment Protection also answers 4xx on a preview, so a status-only check would pass on a deployment where the edge never ran). Plus the negative: an ordinary request is served, so a middleware that refused everything cannot pass. Deliberately an e2e and not a unit test — the middleware body is not the interesting part, the fact that the platform REACHES it is, and a mis-scoped `matcher` or an unbundled file is exactly what a direct call would miss. |
 | `folder-sharing.feature` (`folder-sharing.steps.ts`) | `@phase-2 @smoke @auth` + `@run-scoped` | ADR-0076 §6 — the dashboard folder visibility + sharing UI. Two **run-scoped** identities at the same team domain (same fixture pattern as `team-org-upload.steps.ts`), driving the dashboard's OWN cookie-authenticated Remix action (a form POST to `/`) and asserting on the server-rendered sidebar markup: private-by-default on create; the Root renders no sharing kebab while a manageable folder on the same page does; the org toggle revealing a folder to a colleague; a colleague's menu refused with the server's own reason; the **nested-folder gap** (a parent going private leaves an already-org child visible) and the opt-in cascade closing it; share-by-email, the roster, the "Shared with 1" badge, and unshare. |
 
 **A Bearer session DOES reach document routes.** The `@auth` table above notes that a
@@ -250,4 +403,5 @@ on the server rule that UI mirrors.
 
 `tests/e2e/features/share-folders.feature` was **deleted** with that PR: it was a
 step-less `@wip` skeleton whose own preamble pointed at the coverage that
-actually runs, and its narrative is now carried by a feature that executes.
+actually runs, and its narrative is now carried by a feature that executes. The
+2026-08-06 pass above applied the same reasoning to the other 32 files.
