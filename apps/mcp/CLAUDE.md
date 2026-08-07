@@ -20,5 +20,22 @@ ADR-0072 layers as source code under test:
    stay short.
 4. **Any prompt-surface delta is Axis-2 confirm-list material** — a human decides whether
    the new wording says the right thing; a reviewer agent may not sign it off.
-5. **Evals are the target function here**, as tests are for code. They do not exist yet
-   (issue #264) — until they land, this surface carries more human review, not less.
+5. **Evals are the target function here**, as tests are for code — and they are live
+   (ADR-0083, issue #264). The suite is `tests/evals/`; read its `README.md` before
+   editing any of the three layers.
+   - The golden set is **generated from** `src/instructions.ts` and `src/tools.ts`, not
+     copied out of them. Change either and you must run `pnpm evals:sync` — the keyless
+     smoke tier in the ordinary `pnpm test` gate pins the fixtures and fails otherwise.
+     The regenerated fixture diff is what makes the prompt-surface delta reviewable.
+   - Adding an `OVERCLAIM_PATTERNS` entry also fails the fast gate until the over-claim
+     cases in `tests/evals/golden-set/overclaim-guard.yaml` grow with it; the forbidden
+     phrases are derived from those patterns, never restated.
+   - `pnpm evals:validate` checks the suite with no API key. `pnpm evals` runs it for
+     real and needs `ANTHROPIC_API_KEY`; CI runs it path-scoped in
+     `.github/workflows/prompt-evals.yml`, which **skips green** until the operator
+     provisions that secret (Terraform-managed — decision still open).
+   - The behavioural signal is advisory, not a merge gate. Rule 4 still stands: a
+     prompt-surface delta is Axis-2 confirm-list material, and a green eval run does not
+     sign it off.
+   - A regression you find by hand becomes a case. `tests/evals/README.md` carries the
+     procedure; the suite is seeded at 25 and grows from **real** failures only.
