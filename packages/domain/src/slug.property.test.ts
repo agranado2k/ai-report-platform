@@ -75,6 +75,8 @@ describe("Slug (ADR-0038) — properties", () => {
   it("accepts exactly the strings matching the documented nanoid shape", () => {
     fc.assert(
       fc.property(slugCandidate, (raw) => {
+        // Hand-copied oracle, deliberately NOT imported from slug.ts: a mutant
+        // of SLUG_RE must move only one side of this equation to be caught.
         expect(makeSlug(raw).ok).toBe(/^[A-Za-z0-9_-]{10}$/.test(raw));
       }),
     );
