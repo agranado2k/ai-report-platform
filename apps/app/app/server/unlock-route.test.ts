@@ -20,6 +20,10 @@
 // in the Remix flat-routes directory becomes a ROUTE (`unlock.$slug.test.ts`
 // would publish `/unlock/:slug/test`). The subject is still the real route
 // module, imported below.
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { InMemoryReportRepository } from "arp-application/testing";
 import {
   type Acl,
@@ -220,6 +224,63 @@ describe("/unlock/{slug} — the page is presented, not raw", () => {
     const body = await ((await loader(args(SLUG))) as Response).text();
 
     expect(body.indexOf("<style>")).toBeLessThan(body.indexOf("<body"));
+  });
+});
+
+// TOKEN DRIFT. The page inlines its palette because a raw Response has no build
+// step to @import `packages/ui/src/theme.css`. Transcribed values are a
+// standing liability: theme.css is the single source of truth for BOTH origins,
+// and nothing about editing it would otherwise tell you this page exists. So
+// the transcription is asserted against the real file — a token retuned there
+// and not here fails the build instead of shipping an unlock page that no
+// longer matches the product around it.
+describe("/unlock/{slug} — the inlined palette tracks packages/ui/src/theme.css", () => {
+  beforeEach(resetSession);
+
+  /** `--name: value;` pairs from the FIRST :root block of a stylesheet. */
+  const rootTokens = (css: string): Map<string, string> => {
+    const root = /:root\s*\{([\s\S]*?)\}/.exec(css);
+    const out = new Map<string, string>();
+    for (const m of (root?.[1] ?? "").matchAll(/(--[a-z-]+)\s*:\s*([^;]+);/g)) {
+      const [, k, v] = m;
+      if (k && v) out.set(k, v.trim());
+    }
+    return out;
+  };
+
+  it("uses the same value for every token it borrows", async () => {
+    const themeCss = readFileSync(
+      path.resolve(__dirname, "../../../../packages/ui/src/theme.css"),
+      "utf-8",
+    );
+    await seed(buildReport(PRIVATE));
+    state.actor = { orgId: ORG, userId: OWNER };
+    const page = await ((await loader(args(SLUG))) as Response).text();
+
+    const theme = rootTokens(themeCss);
+    const inlined = rootTokens(page.slice(page.indexOf("<style>")));
+
+    // Guard the guard: if the page stops declaring tokens, this test must fail
+    // rather than vacuously compare an empty map.
+    expect(inlined.size).toBeGreaterThan(5);
+
+    for (const [name, value] of inlined) {
+      const upstream = theme.get(name);
+      expect(upstream, `${name} is inlined here but absent from theme.css`).toBeDefined();
+      expect(value, `${name} drifted from theme.css`).toBe(upstream);
+    }
+  });
+
+  it("stays dark-only, like the rest of the product", async () => {
+    // The first cut honoured `prefers-color-scheme` and rendered LIGHT in a
+    // browser where the dashboard beside it rendered dark. theme.css sets
+    // `color-scheme: dark` unconditionally; there is no light mode to opt into.
+    await seed(buildReport(PRIVATE));
+    state.actor = { orgId: ORG, userId: OWNER };
+    const page = await ((await loader(args(SLUG))) as Response).text();
+
+    expect(page).toContain("color-scheme: dark");
+    expect(page).not.toContain("prefers-color-scheme");
   });
 });
 

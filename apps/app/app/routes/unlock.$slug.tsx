@@ -58,14 +58,18 @@ const escapeAttr = (s: string) =>
  * is exactly the degraded condition some of these denials accompany.
  *
  * The palette is the arp-ui token set (`packages/ui/src/theme.css`) — the
- * single source of truth shared by BOTH origins — transcribed literally,
- * because a raw Response has no build step to @import it. The product is
- * dark-only (`color-scheme: dark`, `--bg: #1a1410`), so this page is too: an
- * earlier cut of this style honoured `prefers-color-scheme` and rendered LIGHT
- * in a browser where the dashboard next to it rendered dark. Caught by looking
- * at the preview rather than by any test. Transcribed values can drift from the
- * tokens; that is the accepted cost of not framing this page or shipping it a
- * linked asset it may not be able to load.
+ * single source of truth shared by BOTH origins — re-declared here, because a
+ * raw Response has no build step to @import it. The product is dark-only
+ * (`color-scheme: dark`), so this page is too: an earlier cut honoured
+ * `prefers-color-scheme` and rendered LIGHT in a browser where the dashboard
+ * beside it rendered dark.
+ *
+ * Re-declaring is a standing drift risk — nothing about editing `theme.css`
+ * would otherwise tell you this page exists — so the tokens are hoisted into
+ * one `:root` block and `unlock-route.test.ts` parses BOTH files and compares
+ * them. A token retuned upstream and not here fails the build instead of
+ * shipping an unlock page that no longer matches the product around it. Add a
+ * value here only if it exists upstream under the same name.
  *
  * The styling lives HERE, in the one wrapper, and never in a caller's copy:
  * every denial must remain byte-identical across sharing modes (the
@@ -73,36 +77,47 @@ const escapeAttr = (s: string) =>
  * precisely how that uniformity would drift.
  */
 const PAGE_STYLE = `<style>
-:root { color-scheme: dark }
+:root {
+  color-scheme: dark;
+  --bg: #1a1410;
+  --surface: #241c16;
+  --border-strong: rgba(242, 233, 220, 0.16);
+  --fg: #f2e9dc;
+  --muted: #c6b9a6;
+  --subtle: #9a8b78;
+  --brand: #c8762d;
+  --brand-hover: #e8a04c;
+  --on-brand: #231405;
+}
 * { box-sizing: border-box }
 body {
   margin: 0; min-height: 100vh; padding: 2rem 1.5rem;
   display: flex; flex-direction: column; justify-content: center;
-  background: #1a1410; color: #f2e9dc;
+  background: var(--bg); color: var(--fg);
   font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 main { width: 100%; max-width: 34rem; margin: 0 auto }
 .eyebrow {
   font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
-  color: #9a8b78; margin: 0 0 1.75rem;
+  color: var(--subtle); margin: 0 0 1.75rem;
 }
 h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 600; margin: 0 0 .75rem }
-p { margin: 0 0 1rem; color: #c6b9a6 }
-a { color: #f2e9dc; text-underline-offset: .2em }
-a:hover { color: #e8a04c }
-label { display: block; font-size: .875rem; color: #c6b9a6; margin-bottom: 1rem }
+p { margin: 0 0 1rem; color: var(--muted) }
+a { color: var(--fg); text-underline-offset: .2em }
+a:hover { color: var(--brand-hover) }
+label { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 1rem }
 input {
   display: block; width: 100%; margin-top: .375rem; padding: .625rem .75rem;
-  background: #241c16; color: inherit; font: inherit;
-  border: 1px solid rgba(242, 233, 220, 0.16); border-radius: .375rem;
+  background: var(--surface); color: inherit; font: inherit;
+  border: 1px solid var(--border-strong); border-radius: .375rem;
 }
-input:focus-visible { outline: 2px solid #c8762d; outline-offset: 1px; border-color: transparent }
+input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; border-color: transparent }
 button {
   padding: .625rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
-  background: #c8762d; color: #231405; border: 0; border-radius: .375rem;
+  background: var(--brand); color: var(--on-brand); border: 0; border-radius: .375rem;
 }
-button:hover { background: #e8a04c }
+button:hover { background: var(--brand-hover) }
 </style>`;
 
 // These raw Responses bypass entry.server.tsx, so set baseline framing headers here — the
