@@ -1,6 +1,6 @@
 # ADR-0083: Prompt evals with promptfoo — the test tier for the agent-facing surfaces
 
-- **Status**: Accepted (2026-08-07) — AI-SDLC Phase 4 (issue #264). The suite and the CI wiring ship in this PR; the **provider/API-key decision is deliberately left open** (see "Pending" below), and the workflow skips green until it is made.
+- **Status**: Accepted (2026-08-07) — AI-SDLC Phase 4 (issue #264). The suite and the CI wiring ship in this PR; the **budget decision is deliberately left open** (see "Pending" below) — the `ANTHROPIC_API_KEY` secret exists but is unfunded, so the workflow treats an all-errors run as "did not evaluate" and stays green.
 - **Date**: 2026-08-07
 - **Deciders**: agranado2k
 - **Relates to / extends**: makes ADR-0072's three onboarding layers testable; supplies the missing target function `apps/mcp/CLAUDE.md` §5 promised; sits beside ADR-0042 (Vitest node tier), ADR-0079 (browser tier) and ADR-0019 (e2e tier) as a fourth, non-deterministic tier; applies ADR-0081's "measure whether the target function is load-bearing" reasoning to prompts; enforces the ADR-0069/0059/0060 trust boundary behaviourally rather than only lexically. CI triggering follows the ADR-026 docs-trigger-matrix pattern.
@@ -188,11 +188,18 @@ start slipping through. promptfoo namespaces the response cache per repeat
 index, so the k trials are genuinely independent samples rather than one call
 replayed three times.
 
-### 7. Twenty-five seeds, and the rest grown from real failures
+That independence has a cost consequence worth stating plainly: **`--repeat 3`
+triples the judge calls too**, not just the generator calls. The single
+`llm-rubric` case is graded once per trial, so a full run is 26 × 3 = 78
+generator calls **and 3 judge calls**, and raising k raises both. This is the
+main reason the judge is capped at two cases and pinned to the cheaper model —
+a rubric added casually is multiplied by k on every prompt-surface PR.
+
+### 7. Twenty-six seeds, and the rest grown from real failures
 
 The issue's target is 20–50 cases **drawn from real observed failures**
 (Anthropic's primary guidance, not the 100–200 of secondary blogs). The suite
-seeds 25 — 13 positive, 12 negative — and the headroom is deliberately unspent:
+seeds 26 — 14 positive, 12 negative — and the headroom is deliberately unspent:
 a case invented at a desk measures our imagination; a case harvested from a
 failure measures the product. `tests/evals/README.md` carries the six-step
 procedure for turning an observed failure into a case, and records the
@@ -208,7 +215,28 @@ generator and a cheaper judge. A change to the instructions, a tool description,
 the model or the provider config busts the cache key and re-bills — which is
 correct, because that is exactly when the eval needs to actually run.
 
-### Pending: the provider and the key (operator decision, still open)
+**Scope of the trigger paths — what the suite can actually observe.** The
+workflow's `paths:` list must be the set of files this suite *measures*, not
+the set it is *about*; a path that cannot change any outcome is a bill with no
+signal attached, and a path that can change one but is missing is a blind spot.
+
+- **In**, beyond the three Layer-0 files: `apps/mcp/src/server.ts` (where the
+  `instructions` string is wired onto the server — a change here can stop
+  Layer 0 reaching the client at all) and `packages/domain/src/**` (`tools.ts`
+  imports `ACL_MODES`, `COMMENT_INTENTS`, `FOLDER_VISIBILITIES` and
+  `REPORT_SHARING_STATES`, so a domain enum edit changes the tool schemas the
+  model is handed).
+- **Out**: `apps/mcp/skill/**` and `apps/mcp/packaging/**` — ADR-0072 Layers 1
+  and 2. The suite feeds the model the `instructions` string and the generated
+  tool definitions and nothing else; the packaged `SKILL.md` never enters a
+  prompt here, so a run triggered by editing it spends money to re-measure
+  Layer 0. They were listed originally because they are prompt surfaces, which
+  confused "is a prompt surface" with "is under test by this suite". They come
+  back the day a case loads them. Until then, the honest statement is in
+  `tests/evals/README.md`: SKILL.md and the `registerPrompts` layer are **not
+  measured** by this tier.
+
+### Pending: the BUDGET, not the key (operator decision, still open)
 
 `anthropic:claude-sonnet-5` is the **configured default**, with
 `claude-haiku-4-5` as the judge. The reasoning: cheap enough for a per-PR gate,
@@ -216,17 +244,30 @@ capable enough that a failure indicts the prompt rather than the model, and the
 same vendor as the surface's primary consumer. This ADR records it as the
 default **pending the operator's final call** on provider and budget.
 
-CI needs `ANTHROPIC_API_KEY` in repo secrets, and repo secrets here are
-**Terraform-managed** (the Phase 0b pattern, like `GEMINI_API_KEY`) — so
-provisioning it is an `infra/terraform` change plus a real key plus a budget.
-That decision is explicitly not made in this PR, and no Terraform is touched.
+**`ANTHROPIC_API_KEY` already exists** as a repo secret (provisioned
+2026-06-02, alongside `GEMINI_API_KEY`). The open question in issue #264 is
+therefore **funding, not provisioning**: the key carries no credit, so the
+provider returns an error for every call. No Terraform is needed and none is
+touched.
 
-Until it is made, `.github/workflows/prompt-evals.yml` **skips green**: it checks
-out, installs, runs the keyless `promptfoo validate config`, emits a GitHub
-notice naming this ADR and issue #264 as the reason, and exits 0. It is a new
-workflow and is not in `required_status_checks`, so it gates nothing in either
-state. The day the secret lands, the same workflow starts evaluating with no
-further change.
+That distinction changes what the workflow has to do. A present-but-unfunded
+key does not make the job *skip* — it makes the job *run and fail*, for a
+reason that has nothing to do with the diff, on every PR that touches a prompt
+surface. A permanently red check that everyone learns to ignore is worse than
+no check. So `.github/workflows/prompt-evals.yml` distinguishes three outcomes:
+
+1. **No key readable** — run the keyless half, notice, exit 0.
+2. **Key present, provider unusable** — the suite ran but evaluated *nothing*:
+   promptfoo's `.results.stats` reports zero successes, zero failures and a
+   non-zero error count. Emit a notice naming issue #264 and exit 0. This is
+   read off the results file, not guessed from the exit code, so it cannot
+   swallow a real failure.
+3. **Key present and usable** — assertion failures are real and stay red. A
+   *partial* outage (some calls evaluated, some errored) also stays red: the
+   suite measured something, so its verdict counts.
+
+It is not in `required_status_checks`, so it gates nothing in any of the three
+states. The day the account is funded, case 2 stops occurring on its own.
 
 ### New dependencies
 
@@ -257,7 +298,7 @@ dependency-locked domain/application layers:
 - **Trade-off**: the tier is **non-deterministic and costs money**, unlike every
   other gate here. pass^k and caching bound it; they do not eliminate it. It is
   intentionally not a required check.
-- **Trade-off**: 25 seeded cases is coverage of the *discriminations we already
+- **Trade-off**: 26 seeded cases is coverage of the *discriminations we already
   know are hard*, not of the surface. That is the intended starting point, and
   the README's growth procedure is the mechanism — but until failures are
   actually harvested, a green suite means "no known regression", not "correct".

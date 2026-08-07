@@ -22,6 +22,31 @@ The smoke tier deliberately asserts nothing about model behaviour. Faking
 behavioural coverage in the keyless tier would be exactly the "make the test ask
 for less" failure mode ADR-0081 exists to detect.
 
+## What this tier does NOT measure
+
+Read this before concluding a green run means the prompt surface is safe.
+
+- **ADR-0072 Layer 1 (`apps/mcp/skill/centaur-spec/SKILL.md`) and Layer 2 (the
+  `apps/mcp/packaging/**` copies) are not measured.** The eval feeds the model
+  the `instructions` string plus the generated tool definitions and nothing
+  else; no case loads a SKILL.md. `skill-sync.test.ts` pins Layer 2 to Layer 1,
+  but nothing here observes what a model *does* with either. Those paths are
+  deliberately **not** in the workflow's `paths:` list for that reason — see
+  ADR-0083 §8.
+- **`registerPrompts` (`apps/mcp/src/prompts.ts`) is not measured either.** The
+  MCP prompt templates never enter this suite's system or user message. The
+  file is in `paths:` because editing it is a prompt-surface change a reviewer
+  should see the eval re-run for, not because a case covers it.
+- **Tool *annotations* are measured only as a projection.** Anthropic tool
+  definitions have no annotations field, so `surface.ts` folds the
+  `readOnlyHint` / `destructiveHint` values into the description text. A real
+  MCP client receives them structurally; what the eval measures is our
+  best-effort textual equivalent, not the exact bytes a client sees.
+- **Handler behaviour is not measured.** `surface.ts` captures registrations
+  only; no handler is ever invoked and no `ApiClient` exists. This tier grades
+  which tool the model picks and with what arguments — never what the tool then
+  does.
+
 ## Running it
 
 ```bash
@@ -34,8 +59,12 @@ pnpm evals                # the real thing: needs ANTHROPIC_API_KEY, spends mone
 `pnpm evals` runs `promptfoo eval --repeat 3` (see **pass^k** below). To iterate
 on one case while authoring, add `--filter-pattern "<part of the description>"`.
 
-> **Node**: promptfoo requires Node ≥ 22.22. CI runs Node 24. If `pnpm evals`
-> refuses to start, that is why — the rest of the repo is happy on Node 20+.
+> **Node**: promptfoo requires **Node ≥ 22.22**, but this repo's `engines` field
+> says `>=20` — so a checkout that satisfies the repo can still be too old for
+> the evals CLI, and `pnpm evals` / `pnpm evals:validate` fail at startup with
+> no obvious link to the version. Use `nvm use 22.22` (or newer; CI runs 24)
+> before running them. Nothing else in the repo is affected, which is why
+> `engines` was deliberately not raised for one optional tier.
 
 ## Layout
 
@@ -148,7 +177,7 @@ independent samples rather than one call replayed.
 
 ## Growing the set — from real failures, not imagination
 
-The suite seeds **25 cases** (13 positive / 12 negative). The issue's target is
+The suite seeds **26 cases** (14 positive / 12 negative). The issue's target is
 20–50 **drawn from real observed failures** (Anthropic's own guidance, not the
 100–200 of secondary blogs), and the remaining headroom is deliberately unspent:
 a case invented at a desk measures our imagination, a case harvested from a
@@ -177,10 +206,11 @@ finished.
 
 ## Cost
 
-Per full run: 25 cases × k repeats × 1 request, plus one judge call per repeat
-on the single rubric case. At `--repeat 3` that is 75 generator calls and 3
-judge calls, on a ~1k-token system prompt plus ~9k tokens of tool definitions,
-with short outputs. Controls:
+Per full run: 26 cases × k repeats × 1 request, plus one judge call per repeat
+on the single rubric case. At `--repeat 3` that is **78 generator calls and 3
+judge calls** — note that k multiplies the judge calls too, which is why the
+rubric is capped at two cases — on a ~1k-token system prompt plus ~9k tokens of
+tool definitions, with short outputs. Controls:
 
 - **Response caching is on by default** (14-day TTL). CI persists
   `.promptfoo-cache/` between runs with `actions/cache`, so a PR that does not
@@ -190,19 +220,31 @@ with short outputs. Controls:
   needs to actually run.
 - **Path-scoped triggering.** The workflow only runs on PRs touching
   `apps/mcp/src/instructions.ts`, `apps/mcp/src/tools.ts`, `apps/mcp/src/prompts.ts`,
-  `apps/mcp/skill/**`, `apps/mcp/packaging/**`, or `tests/evals/**`.
+  `apps/mcp/src/server.ts`, `packages/domain/src/**`, or `tests/evals/**` — the
+  files this suite can actually observe. See "What this tier does NOT measure".
 - **A cheap generator and a cheaper judge**, both recorded in ADR-0083 as
   defaults pending the operator's provider call.
 
-## The pending blocker
+## The pending blocker — funding, not the key
 
-CI needs `ANTHROPIC_API_KEY` in repo secrets. Repo secrets are **Terraform-managed**
-(the Phase 0b pattern, like `GEMINI_API_KEY`), so provisioning it is an
-`infra/terraform` change plus a real key and a budget — an operator decision
-that is explicitly still open (issue #264, ADR-0083 §"Pending").
+`ANTHROPIC_API_KEY` **already exists** as a repo secret (provisioned
+2026-06-02, alongside `GEMINI_API_KEY`). No Terraform change is outstanding.
+What is still open in issue #264 is the **budget**: the key carries no credit,
+so the provider returns an error for every call.
 
-Until then the workflow **skips green**: it checks out, installs, runs the
-keyless `promptfoo validate config`, emits a GitHub notice explaining what was
-skipped and why, and exits 0. It is not in the required-checks path, so nothing
-is blocked either way. The day the secret lands, the same workflow starts
-evaluating with no further change.
+That is why the workflow classifies rather than just runs. Three outcomes:
+
+| Situation | What the job does |
+| --- | --- |
+| No key readable | runs the keyless half, emits a notice, exits 0 |
+| Key present, provider unusable (all calls error, **zero** assertions executed) | emits a notice naming issue #264, exits 0 |
+| Key present and usable | assertion failures are real and the job goes **red** |
+
+The middle row is read off `eval-results.json` — promptfoo's `.results.stats`
+reporting zero successes, zero failures and a non-zero error count — not
+guessed from the exit code, so it cannot swallow a genuine failure. A *partial*
+outage (some calls evaluated, some errored) stays red: the suite measured
+something, so its verdict counts.
+
+The job is not in the required-checks path, so nothing is blocked in any state.
+The day the account is funded, the middle row stops occurring on its own.
