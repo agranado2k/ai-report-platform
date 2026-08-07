@@ -17,7 +17,8 @@
       "!**/playwright-report",
       "!**/test-results",
       "!**/.stryker-tmp",
-      "!**/reports/mutation"
+      "!**/reports/mutation",
+      "!**/tests/evals/fixtures/mcp-tools.json"
     ]
   },
   "formatter": {

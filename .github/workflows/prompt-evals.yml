@@ -105,7 +105,10 @@ jobs:
         if: steps.key.outputs.available == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pnpm evals -- --no-progress-bar --output eval-results.json
+        # No `--` before the flags: pnpm v10 forwards a literal `--` to the
+        # script, and promptfoo's CLI then reads everything after it as
+        # positional arguments ("too many arguments for 'eval'").
+        run: pnpm evals --no-progress-bar --output eval-results.json
 
       - name: Upload eval results
         if: ${{ always() && steps.key.outputs.available == 'true' }}
