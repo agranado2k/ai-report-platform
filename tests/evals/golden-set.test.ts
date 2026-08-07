@@ -236,6 +236,20 @@ describe("golden set", () => {
             true,
           );
         }
+        // At least one citation must be a surface this suite actually feeds
+        // the model (ADR-0083 §8): a case grounded only in SKILL.md or
+        // packaging would pass the fast gate while measuring nothing.
+        const MEASURED = [
+          "apps/mcp/src/instructions.ts",
+          "apps/mcp/src/tools.ts",
+          "apps/mcp/src/prompts.ts",
+          "apps/mcp/src/server.ts",
+          "packages/domain/src/",
+        ];
+        expect(
+          grounded.some((path) => MEASURED.some((m) => path.startsWith(m))),
+          `${file}[${index}]: grounded_in cites no MEASURED surface — the suite never feeds the model ${grounded.join(", ")}`,
+        ).toBe(true);
       });
     }
   });
