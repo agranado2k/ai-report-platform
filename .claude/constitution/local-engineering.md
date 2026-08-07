@@ -46,6 +46,11 @@ Package-scoped purity rules for the domain layer live in `packages/domain/CLAUDE
 - Mounted-editor / real-browser behaviour → `pnpm test:browser`, the hermetic Chromium
   tier in `tests/browser/` (ADR-0079). It is a fast signal, **not** a merge gate.
 - Anything needing a deployment → `pnpm e2e`.
+- The docs gate's own validators → `pnpm docs:check:test` (node:test, fixture trees under a
+  temp root). A first-class tier, not a side one: `.husky/pre-push`'s TDD pairing guard
+  counts `scripts/docs-conformance/` as source, so a validator change with no fixture test
+  is blocked exactly like a `src/` change would be; CI re-runs it in
+  `.github/workflows/docs-conformance.yml`.
 
 Conventions and the red-green-refactor procedure itself live in `.claude/skills/tdd/SKILL.md` —
 that skill is the single home for them, not this file.
@@ -63,6 +68,6 @@ that skill is the single home for them, not this file.
   a loud warning into the push output. CI re-runs the **docs** gate, so a docs bypass only
   defers the failure; the TDD pairing guard has no CI counterpart yet, so a tests bypass
   is local-only and rests entirely on the operator's judgment.
-- **Not a place to auto-trust MCP servers.** If this repo ever gains a project-scoped MCP
-  config (e.g. `.mcp.json`), it must require explicit user trust before first use — never
-  auto-spawn servers from a freshly opened or cloned project. None exists today.
+- **Not a place to auto-trust MCP servers.** The rule is in the root's trust-boundary
+  paragraph, where the rest of the ADR-0069 obligations live; it is named here only as a
+  boundary-list member. None exists today.

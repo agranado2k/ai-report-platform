@@ -55,6 +55,7 @@ in the loop.
 | A new domain event            | `docs/events.md`                                    |
 | A new ADR                     | `docs/adr/INDEX.md` link                            |
 | `.claude/skills/**` or `.claude/hooks/**` | `CLAUDE.md` (or the article that owns the rule) |
+| `.claude/constitution/**` or any `CLAUDE.md` | the other layers, so one home per rule survives: a root rule that grew gets its article; an article rule that became binding gets the root; a package rule gets the nested file. Never leave the same rule in two homes (ADR-0082) |
 | `infra/terraform/**`          | `docs/infra.md` + the ops runbook                   |
 
 ## Automated review (ADR-030 — fully wired)
