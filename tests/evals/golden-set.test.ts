@@ -48,7 +48,19 @@ interface GoldenCase {
      *  blocklist; see the tests below for what it must provide instead. */
     guard_mode?: unknown;
   };
-  assert?: { type?: unknown; value?: unknown }[];
+  assert?: AssertNode[];
+}
+
+interface AssertNode {
+  type?: unknown;
+  value?: unknown;
+  /** `assert-set` groups alternatives; its members live here. */
+  assert?: AssertNode[];
+}
+
+/** Depth-first: every node including `assert-set` groups AND their members. */
+function flattenAsserts(nodes: AssertNode[]): AssertNode[] {
+  return nodes.flatMap((node) => [node, ...flattenAsserts(node.assert ?? [])]);
 }
 
 interface PromptfooConfig {
@@ -306,7 +318,9 @@ describe("golden set", () => {
     ).toBeGreaterThan(0);
 
     exempt.forEach((testCase) => {
-      const asserts = testCase.assert ?? [];
+      // An assert-set groups alternatives (either-passes) — its members count
+      // the same as top-level assertions for both checks here.
+      const asserts = flattenAsserts(testCase.assert ?? []);
       const at = `describe-boundary case "${testCase.description}"`;
       expect(
         asserts.map((a) => a.type),
@@ -338,12 +352,15 @@ describe("golden set", () => {
       "icontains-any",
       "regex",
       "tool-call-f1",
+      // Grouping node, verified via `promptfoo validate config`: its nested
+      // asserts are flattened below so their types are checked individually.
+      "assert-set",
     ]);
     const config = readConfig();
-    const declared = [
+    const declared = flattenAsserts([
       ...(config.defaultTest?.assert ?? []),
       ...allCases(config).flatMap((c) => c.assert ?? []),
-    ];
+    ]);
     expect(declared.length, "the suite must declare assertions").toBeGreaterThan(0);
     for (const assertion of declared) {
       expect(KNOWN_ASSERT_TYPES, `unknown assert type: ${String(assertion.type)}`).toContain(
