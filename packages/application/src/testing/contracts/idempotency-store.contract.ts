@@ -44,6 +44,64 @@ export function describeIdempotencyStoreContract(
       key,
     });
 
+    // ── purgeExpired ────────────────────────────────────────────────────
+    //
+    // Added after a cross-tenant deletion bug reached the Drizzle adapter while
+    // the in-memory fake was correct (PR #259 review). That divergence is
+    // exactly what this two-tier contract (ADR-0046) exists to catch, and it
+    // only escaped because `purgeExpired` was implemented in both tiers and
+    // pinned in neither. Retention is housekeeping — but housekeeping that can
+    // delete the wrong row is not.
+    it("purges nothing when every record is inside the window", async () => {
+      await h.store.begin(ref(), "fp1");
+
+      const purged = await h.store.purgeExpired(new Date(Date.now() - 60_000), 100);
+
+      expect(purged.ok && purged.value).toBe(0);
+      expect((await h.store.begin(ref(), "fp1")).ok).toBe(true);
+    });
+
+    it("purges a record once it is outside the window", async () => {
+      await h.store.begin(ref(), "fp1");
+      await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+
+      // Everything claimed so far is "older than" a cutoff in the future.
+      const purged = await h.store.purgeExpired(new Date(Date.now() + 60_000), 100);
+
+      expect(purged.ok && purged.value).toBe(1);
+      // Gone: the key claims fresh instead of replaying.
+      const after = await h.store.begin(ref(), "fp1");
+      expect(after.ok && after.value.outcome).toBe("proceed");
+    });
+
+    it("honours the limit, so one sweep cannot run unbounded", async () => {
+      await h.store.begin(ref("k-a"), "fp1");
+      await h.store.begin(ref("k-b"), "fp1");
+      await h.store.begin(ref("k-c"), "fp1");
+
+      const purged = await h.store.purgeExpired(new Date(Date.now() + 60_000), 2);
+
+      expect(purged.ok && purged.value).toBe(2);
+    });
+
+    it("NEVER deletes a row that merely shares the key string on another route", async () => {
+      // The identity of a record is (actingUserId, route, key) — `key` alone is
+      // a client-chosen string. Matching on it alone deletes other people's
+      // live claims, whose owners then re-execute instead of replaying.
+      const mine: IdempotencyKeyRef = { ...ref("shared"), route: "POST /api/v1/reports" };
+      const other: IdempotencyKeyRef = { ...ref("shared"), route: "DELETE /api/v1/reports/{slug}" };
+      await h.store.begin(mine, "fp1");
+      await h.store.complete(mine, { responseStatus: 200, responseBody: { v: 1 } });
+
+      const purged = await h.store.purgeExpired(new Date(Date.now() + 60_000), 1);
+
+      expect(purged.ok && purged.value).toBe(1);
+      // `other` was never claimed, so it must still be claimable — proving the
+      // sweep did not reach across the route boundary.
+      const stillFree = await h.store.begin(other, "fp1");
+      expect(stillFree.ok && stillFree.value.outcome).toBe("proceed");
+    });
+
     it("claims a fresh key with outcome 'proceed'", async () => {
       const r = await h.store.begin(ref(), "fp1");
       expect(r.ok && r.value.outcome).toBe("proceed");

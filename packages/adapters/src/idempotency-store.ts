@@ -27,8 +27,10 @@ import { type AppError, ok, type Result } from "arp-domain";
 import { and, eq, lte, sql } from "drizzle-orm";
 import type { DbContext } from "./client";
 
-/** ADR-0039's stated window. A record older than this is treated as absent. */
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+/** ADR-0039's stated window. A record older than this is treated as absent.
+ *  Exported so the retention sweep uses the SAME window `begin` enforces —
+ *  the route used to re-declare it and assert in a comment that they matched. */
+export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class DrizzleIdempotencyStore implements IdempotencyStore {
   constructor(private readonly ctx: DbContext) {}

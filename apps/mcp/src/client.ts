@@ -53,6 +53,8 @@ export interface ApiClientConfig {
   readonly authorization: string | null;
   /** Injectable for tests; defaults to the global fetch. */
   readonly fetch?: typeof fetch;
+  /** Injectable for tests so backoff does not make the suite sleep. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export interface SearchReportsParams extends CursorParams {
@@ -70,9 +72,25 @@ function appendCursor(qs: URLSearchParams, p: CursorParams): void {
 /** Bounded: two retries after the first try. Enough to ride out a redeploy or a
  *  dropped connection; small enough that a genuinely down API fails fast. */
 const MAX_ATTEMPTS = 3;
-/** Transients only — never a 4xx. 408 request-timeout, 429 too-many-requests,
- *  and the 5xx a rolling deploy produces. */
+/** Transients only — never a CLIENT-FAULT 4xx. (408 and 429 are 4xx but are
+ *  about timing, not about the request being wrong.) */
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+/**
+ * `IdempotencyInFlight`. Retryable ONLY because we back off first.
+ *
+ * `beginIdempotentWrite` claims the key BEFORE the mutation's transaction, and
+ * that INSERT autocommits — so a first attempt that reached the server and then
+ * failed leaves an `in_flight` row behind. Retrying with no delay therefore
+ * answers 409 "request in flight" and BURIES the real error. With a delay the
+ * first attempt has usually settled, and the retry gets what it came for: the
+ * recorded response, replayed.
+ */
+const IN_FLIGHT_STATUS = 409;
+/** Backoff base; attempt N waits ~BASE * 2^(N-1) with jitter. */
+const BASE_RETRY_DELAY_MS = 250;
+/** Never wait longer than this for a `Retry-After`, so a throttled call still
+ *  returns inside an agent's tool-call budget instead of hanging. */
+const MAX_RETRY_DELAY_MS = 5_000;
 
 export class ApiClient {
   constructor(private readonly cfg: ApiClientConfig) {}
@@ -216,6 +234,17 @@ export class ApiClient {
       "POST",
       `/api/v1/folders/${encodeURIComponent(id)}/reports/sharing`,
       { json: { sharing } },
+      // NOT retried. This route deliberately ignores `Idempotency-Key`
+      // (ADR-0078 §10): it is a LOOP of individually idempotent-in-effect state
+      // sets, and a replayed summary would describe a run whose per-report
+      // outcomes no longer match reality. Re-running it leaves the END STATE
+      // correct but reports every report changed on the first attempt as
+      // `skipped` ("already at the destination") — so the agent is told
+      // `changed: []` for a run that changed N — and writes a second audit row
+      // per re-applied report. It is also the slowest write in the API (up to
+      // 50 sequential per-report transactions), which makes it the endpoint
+      // MOST likely to draw a 504 and be retried.
+      { retry: false },
     );
   }
 
@@ -391,10 +420,31 @@ export class ApiClient {
     return this.request<T>("GET", path);
   }
 
+  /** Wall-clock pause between retry attempts; injectable so tests stay fast. */
+  private pause(ms: number): Promise<void> {
+    const sleep = this.cfg.sleep ?? ((d: number) => new Promise<void>((r) => setTimeout(r, d)));
+    return sleep(ms);
+  }
+
+  /** How long to wait before the next attempt: the server's `Retry-After` when
+   *  it sent one (capped), else exponential backoff with jitter so a fleet of
+   *  agents retrying the same failure does not resonate. */
+  private retryDelayMs(attempt: number, res?: Response): number {
+    const header = res?.headers.get("retry-after");
+    if (header) {
+      const seconds = Number(header);
+      const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now(); // HTTP-date form
+      if (Number.isFinite(ms) && ms > 0) return Math.min(ms, MAX_RETRY_DELAY_MS);
+    }
+    const backoff = BASE_RETRY_DELAY_MS * 2 ** (attempt - 1);
+    return Math.min(backoff + Math.random() * BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS);
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: { readonly json?: unknown; readonly form?: FormData },
+    opts?: { readonly retry?: boolean },
   ): Promise<ApiResult<T>> {
     const doFetch = this.cfg.fetch ?? fetch;
     const headers: Record<string, string> = { accept: "application/json" };
@@ -432,19 +482,28 @@ export class ApiClient {
 
     // A FormData body is a one-shot stream in some runtimes, so replaying it is
     // not guaranteed safe — uploads keep the old single-attempt behaviour.
-    const attempts = body?.form ? 1 : MAX_ATTEMPTS;
+    const attempts = body?.form || opts?.retry === false ? 1 : MAX_ATTEMPTS;
+    const idempotent = headers["idempotency-key"] !== undefined;
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const res = await doFetch(`${this.cfg.baseUrl}${path}`, { method, headers, body: payload });
         // Retry only what a retry can fix: transport-level and server-side
-        // transients. A 4xx is the caller's request being wrong, and repeating
-        // it just burns the key.
-        if (!RETRYABLE_STATUS.has(res.status) || attempt === attempts) return this.parse<T>(res);
+        // transients, plus an in-flight collision with our OWN first attempt.
+        // Any other 4xx is the caller's request being wrong; repeating it only
+        // burns the key.
+        const retryable =
+          RETRYABLE_STATUS.has(res.status) || (idempotent && res.status === IN_FLIGHT_STATUS);
+        if (!retryable || attempt === attempts) return this.parse<T>(res);
+        // Release the socket: an unread body keeps the connection checked out,
+        // and this client runs inside a long-lived process (ADR-0051).
+        await res.body?.cancel().catch(() => undefined);
+        await this.pause(this.retryDelayMs(attempt, res));
       } catch (e) {
         lastError = e;
         if (attempt === attempts) break;
+        await this.pause(this.retryDelayMs(attempt));
       }
     }
 

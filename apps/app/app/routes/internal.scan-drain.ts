@@ -9,6 +9,7 @@
 // work rather than double-process, and the reconcile/processing is idempotent.
 
 import type { ActionFunctionArgs } from "@remix-run/node";
+import { IDEMPOTENCY_TTL_MS } from "arp-adapters";
 import { drainScans } from "arp-application";
 import { methodNotAllowed } from "arp-domain";
 import { defineEnv } from "arp-env";
@@ -30,10 +31,10 @@ const BATCH_SIZE = 20;
  * scheduled trigger for a job whose worst outcome is "the table is bigger than
  * it needs to be" would add an operational surface with no reliability gain.
  *
- * The window matches the one `begin` enforces; the batch is bounded so the tick
+ * The window is IMPORTED from the store rather than re-declared, so the sweep
+ * and the claim-time check cannot drift apart. The batch is bounded so the tick
  * stays well inside the same 300s budget the drain is sized against.
  */
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const IDEMPOTENCY_PURGE_BATCH = 500;
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {

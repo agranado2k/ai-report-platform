@@ -554,9 +554,13 @@ describe("ApiClient comments", () => {
 // logical call and REUSED across transport retries of that same call — which
 // is what makes the retry safe rather than merely repeated.
 describe("ApiClient — idempotency", () => {
-  const retryable = new Response("", { status: 503 });
-
-  /** A stub that fails `failures` times, then succeeds. */
+  /** A stub that fails `failures` times, then succeeds.
+   *
+   *  Builds a FRESH Response per call rather than cloning a shared one: the
+   *  client now cancels the body of a response it is about to discard (to free
+   *  the socket), and cancelling one branch of a cloned body stalls the tee —
+   *  which hangs the test rather than the product. A real fetch hands back a
+   *  new response every time, so the fake must too. */
   function flaky(failures: number, ok: Response) {
     const calls: { headers: Record<string, string>; method: string }[] = [];
     let n = 0;
@@ -566,19 +570,21 @@ describe("ApiClient — idempotency", () => {
         method: init?.method ?? "GET",
       });
       n += 1;
-      // Clone BOTH: a Response body is single-use, so returning the same
-      // object twice fails on the second read — a defect in the stub, not
-      // in the client under test.
-      return n <= failures ? retryable.clone() : ok.clone();
+      return n <= failures ? new Response("", { status: 503 }) : ok.clone();
     }) as unknown as typeof fetch;
     return { fn, calls };
   }
 
+  /** Records the backoff the client asks for, and never actually sleeps. */
+  const slept: number[] = [];
   const client = (fetchImpl: typeof fetch) =>
     new ApiClient({
       baseUrl: "https://app.example.com",
       authorization: "Bearer x",
       fetch: fetchImpl,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
     });
 
   it("sends an Idempotency-Key on a mutating request", async () => {
@@ -646,6 +652,123 @@ describe("ApiClient — idempotency", () => {
     }) as unknown as typeof fetch;
 
     await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(1);
+  });
+
+  it("BACKS OFF between attempts — without a delay the retry only meets its own in-flight claim", async () => {
+    slept.length = 0;
+    const { fn } = flaky(2, json({ object: "report", slug: "aaaaaaaaaa" }));
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    // One pause per retry, and growing.
+    expect(slept.length).toBe(2);
+    expect(slept[1]).toBeGreaterThan(slept[0] as number);
+  });
+
+  it("retries a 409 in-flight — that IS our own first attempt still settling", async () => {
+    // `beginIdempotentWrite` claims the key before the mutation's transaction
+    // and that INSERT autocommits, so a first attempt that reached the server
+    // and then failed leaves an in_flight row. Without this the agent gets
+    // "request in flight" instead of the recorded response.
+    const calls: string[] = [];
+    let n = 0;
+    const fn = (async () => {
+      calls.push("x");
+      n += 1;
+      return n === 1
+        ? json({ title: "Request in flight" }, 409)
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(calls.length).toBe(2);
+    expect(r.ok).toBe(true);
+  });
+
+  it("does NOT retry a 409 on a request that carried no key", async () => {
+    // Nothing of ours is in flight, so the 409 is somebody else's news.
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Request in flight" }, 409);
+    }) as unknown as typeof fetch;
+
+    await client(fn).uploadReport({ html: "<html><body>x</body></html>" });
+
+    expect(calls.length).toBe(1);
+  });
+
+  it("honours Retry-After instead of its own backoff", async () => {
+    slept.length = 0;
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "2" } })
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(slept[0]).toBe(2000);
+  });
+
+  it("caps a hostile Retry-After so a tool call cannot hang", async () => {
+    slept.length = 0;
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "86400" } })
+        : json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(slept[0]).toBeLessThanOrEqual(5000);
+  });
+
+  it("reports the LAST network error when every attempt throws", async () => {
+    // The catch branch this change rewrote had no coverage at all.
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      throw new Error(`boom-${n}`);
+    }) as unknown as typeof fetch;
+
+    const r = await client(fn).deleteReport("aaaaaaaaaa");
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.problem.status).toBe(502);
+      expect(r.problem.detail).toContain("boom-3");
+    }
+  });
+
+  it("recovers when fetch throws once and then succeeds", async () => {
+    let n = 0;
+    const fn = (async () => {
+      n += 1;
+      if (n === 1) throw new Error("dropped");
+      return json({ object: "report", slug: "aaaaaaaaaa" });
+    }) as unknown as typeof fetch;
+
+    expect((await client(fn).deleteReport("aaaaaaaaaa")).ok).toBe(true);
+  });
+
+  it("does NOT retry the folder-sharing apply — a replayed summary would misreport it", async () => {
+    // ADR-0078 §10: a LOOP of per-report state sets. Re-running leaves the end
+    // state right but reports reports changed on attempt 1 as `skipped`.
+    const calls: string[] = [];
+    const fn = (async () => {
+      calls.push("x");
+      return json({ title: "Bad gateway" }, 502);
+    }) as unknown as typeof fetch;
+
+    await client(fn).applyFolderSharingToReports("folder_1", "org_view");
 
     expect(calls.length).toBe(1);
   });
