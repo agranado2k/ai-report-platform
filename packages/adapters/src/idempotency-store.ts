@@ -24,7 +24,7 @@ import type {
 } from "arp-application";
 import { idempotencyKeys } from "arp-db/schema";
 import { type AppError, ok, type Result } from "arp-domain";
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { DbContext } from "./client";
 
 /** ADR-0039's stated window. A record older than this is treated as absent. */
@@ -126,16 +126,26 @@ export class DrizzleIdempotencyStore implements IdempotencyStore {
   async purgeExpired(olderThan: Date, limit: number): Promise<Result<number, AppError>> {
     try {
       const db = this.ctx.current();
-      const doomed = db
-        .select({ key: idempotencyKeys.key })
-        .from(idempotencyKeys)
-        .where(lte(idempotencyKeys.createdAt, olderThan))
-        .limit(limit);
-      const deleted = await db
-        .delete(idempotencyKeys)
-        .where(inArray(idempotencyKeys.key, doomed))
-        .returning({ key: idempotencyKeys.key });
-      return ok(deleted.length);
+      // Match the FULL primary key. `key` alone does not identify a row — the
+      // PK is (acting_user_id, route, key), and an explicit client-supplied key
+      // is just a string, so two users can hold the same one. Deleting by
+      // `key IN (…)` would take another user's row with it, including a FRESH
+      // in-flight claim, whose owner would then re-execute instead of replaying.
+      const deleted = await db.execute(sql`
+        DELETE FROM ${idempotencyKeys}
+        WHERE (${idempotencyKeys.actingUserId}, ${idempotencyKeys.route}, ${idempotencyKeys.key})
+          IN (
+            SELECT ${idempotencyKeys.actingUserId}, ${idempotencyKeys.route}, ${idempotencyKeys.key}
+            FROM ${idempotencyKeys}
+            WHERE ${idempotencyKeys.createdAt} <= ${olderThan}
+            LIMIT ${limit}
+          )
+        RETURNING ${idempotencyKeys.key}
+      `);
+      // `rowCount` is not populated by every driver (pglite leaves it 0), so
+      // count what RETURNING actually gave back.
+      const rows = (deleted as { readonly rows?: readonly unknown[] }).rows;
+      return ok(Array.isArray(rows) ? rows.length : 0);
     } catch (e) {
       return thrown("idempotency.purgeExpired", e);
     }

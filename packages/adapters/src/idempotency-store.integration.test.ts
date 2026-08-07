@@ -1,5 +1,6 @@
 // Integration tests for DrizzleIdempotencyStore against real Postgres (pglite).
 import type { IdempotencyKeyRef } from "arp-application";
+import { users } from "arp-db/schema";
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DrizzleIdempotencyStore } from "./idempotency-store";
@@ -172,6 +173,32 @@ describe("DrizzleIdempotencyStore (pglite integration)", () => {
       const purged = await store.purgeExpired(new Date(Date.now() - 24 * 60 * 60 * 1000), 2);
 
       expect(purged.ok && purged.value).toBe(2);
+    });
+
+    it("does NOT take another user's row that shares the same key string", async () => {
+      // The PK is (acting_user_id, route, key). An explicit client key is just
+      // a string, so a collision across users is ordinary — and deleting by
+      // `key` alone would purge a FRESH in-flight claim belonging to someone
+      // else, whose owner would then re-execute instead of replaying.
+      const OTHER_USER = "00000000-0000-4000-8000-0000000000b2";
+      await tdb.ctx
+        .current()
+        .insert(users)
+        .values({ id: OTHER_USER, clerkUserId: "user_other", email: "o@test.local" });
+      const mine = { ...ref(), key: "shared-key" };
+      const theirs = { ...ref(), actingUserId: OTHER_USER as typeof ids.userId, key: "shared-key" };
+
+      await store.begin(mine, "fp1");
+      await store.complete(mine, { responseStatus: 200, responseBody: { v: 1 } });
+      await ageRow(25); // ages BOTH rows-to-be; theirs is claimed after.
+      await store.begin(theirs, "fp1");
+
+      const purged = await store.purgeExpired(new Date(Date.now() - 24 * 60 * 60 * 1000), 500);
+
+      expect(purged.ok && purged.value).toBe(1);
+      // Their claim must survive: a second begin still reports in_flight.
+      const survived = await store.begin(theirs, "fp1");
+      expect(survived.ok && survived.value.outcome).toBe("in_flight");
     });
   });
 });
