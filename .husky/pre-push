@@ -1,0 +1,60 @@
+# Pre-push guard (plan Phase 1.3 — the enforcement CLAUDE.md promises).
+# Two checks, each with a logged escape hatch:
+#   1. docs guard   — `pnpm docs:check` (ADR-026/0041 trigger matrix + CLAUDE.md refs)
+#                     bypass: PUSH_WITHOUT_DOCS=1
+#   2. TDD pairing  — pushed source changes must come with test changes
+#                     bypass: PUSH_WITHOUT_TESTS=1
+# Bypasses print a loud warning into the push output so they are visible in
+# the terminal history; CI re-runs the docs gate regardless, so a bypass only
+# defers the failure, it cannot hide it.
+
+# --- 1. docs guard -----------------------------------------------------------
+if [ "$PUSH_WITHOUT_DOCS" = "1" ]; then
+  echo "⚠️  PUSH_WITHOUT_DOCS=1 — docs-conformance guard BYPASSED for this push." >&2
+else
+  pnpm docs:check || {
+    echo "" >&2
+    echo "✗ pre-push: docs conformance failed (see above)." >&2
+    echo "  Fix the docs, or bypass once with PUSH_WITHOUT_DOCS=1 git push (CI will still gate)." >&2
+    exit 1
+  }
+fi
+
+# --- 2. TDD pairing guard ----------------------------------------------------
+# For each ref being pushed, diff the outgoing commits. Source files are the
+# vitest-covered production trees; a push that touches them without touching
+# any test tier (*.test.ts, *.spec.ts, *.feature, *.test.mjs) is blocked.
+if [ "$PUSH_WITHOUT_TESTS" = "1" ]; then
+  echo "⚠️  PUSH_WITHOUT_TESTS=1 — TDD pairing guard BYPASSED for this push." >&2
+  exit 0
+fi
+
+zero=0000000000000000000000000000000000000000
+fail=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+  [ "$local_sha" = "$zero" ] && continue # deleting a remote ref — nothing outgoing
+  if [ "$remote_sha" = "$zero" ]; then
+    # New remote branch: diff against where it forked from the default branch.
+    base=$(git merge-base "$local_sha" origin/main 2>/dev/null) || base=""
+  else
+    base=$remote_sha
+  fi
+  [ -z "$base" ] && continue # cannot resolve a base — do not block on a guess
+
+  changed=$(git diff --name-only --diff-filter=ACMR "$base" "$local_sha" 2>/dev/null)
+  [ -z "$changed" ] && continue
+
+  src=$(echo "$changed" | grep -E '^(packages/[^/]+/src/|apps/mcp/src/|apps/app/app/server/|apps/view/app/(server|edit)/|scripts/docs-conformance/).*\.(ts|tsx|mjs)$' | grep -Ev '\.(test|spec)\.(ts|tsx|mjs)$|\.d\.ts$' || true)
+  tests=$(echo "$changed" | grep -E '\.(test|spec)\.(ts|tsx|mjs)$|\.feature$' || true)
+
+  if [ -n "$src" ] && [ -z "$tests" ]; then
+    echo "" >&2
+    echo "✗ pre-push: source changes with no test changes (TDD pairing guard):" >&2
+    echo "$src" | sed 's/^/    /' >&2
+    echo "  Write the failing test first (/tdd), or bypass once with PUSH_WITHOUT_TESTS=1 git push." >&2
+    fail=1
+  fi
+done
+
+exit $fail

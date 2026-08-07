@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-07-16
+## Current state — 2026-08-07
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** **Editing & comments epic SHIPPED + CLOSED (ADR-0062–0067):** the unified in-viewer editor lives at `view.<domain>/<slug>/edit` — one authenticated surface consolidating the ProseMirror editor, comments (ADR-0064, closed-enum `intent` note/enhancement/add/remove + author-or-owner edit), version history + visual diff (ADR-0065), and author display-names from the Clerk identity mirror (ADR-0048, migration 0016 + one-time backfill #205). Reached one-click from the dashboard by any canWrite user; the standalone dashboard editor/versions/diff pages were retired in the Phase-5 cutover. Feedback rounds 1 (#189–#195) + 2 (#196–#201) + polish batch (#204) + backfill (#205) all merged. **Remaining editor payoff: the comment-`intent` agent-action pipeline (PRD #198) — design-first, needs an ADR (ADR-0069 lethal-trifecta surface).** |
-| **Repo path**          | `~/PetProjects/ai-report-platform/` (main). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `ab164d6` — Merge PR #257 (issue #233: the ADR-0039 derived idempotency key no longer fails open on state-setting writes). |
+| **Repo path**          | `~/PetProjects/centaur-spec/` (main; local folder renamed from `ai-report-platform` — the GitHub remote keeps the old name). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
+| **Last commit on main**| `a71fbdb` — Merge PR #259 (`fix/idempotency-followups` — ADR-0039 follow-ups). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/idempotency-followups` (branch `fix/idempotency-followups`) — the two ADR-0039 follow-ups, this entry. |
+| **Active worktrees**   | `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`) — AI-SDLC plan Phase 1, this entry. `worktree/roundtrip-tests` (branch `test/idempotency-roundtrips`) — pre-existing, unmerged. `worktree/idempotency-followups` merged as #259 — prune with `/worktree-cleanup`. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -32,7 +32,7 @@
 - **The spec wins** in disputes. When the diary and `docs/spec.html` disagree, the spec is the contract; the diary is the log.
 - **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
-- **TDD scaffolding will land in Phase 0e** — until then, write tests alongside code by convention rather than by hook enforcement.
+- **TDD enforcement is live** (2026-08-07): the `.husky/pre-push` TDD pairing guard blocks source-without-tests pushes; `pnpm docs:check` runs in the same hook. Escape hatches `PUSH_WITHOUT_TESTS=1` / `PUSH_WITHOUT_DOCS=1`, both logged.
 
 ### Update protocol
 
@@ -5269,3 +5269,43 @@ exhausted stream. Third time today a test harness, not the code, was the defect.
 
 **Process**: worktree `worktree/idempotency-followups` (branch `fix/idempotency-followups`),
 off `main` at `ae5c728`. TDD — 3 red on the client, then green. Full suite 2486 passed.
+
+### 2026-08-07 — AI-SDLC improvement plan, Phase 1: hygiene & enforcement
+
+The AI-SDLC analysis report (Centaur Spec report `isK1rs7pL4` — Pocock's tracer-bullets
+workflow + Uncle Bob's SwarmForge mapped against this repo) produced a five-phase
+implementation plan. Phase 1 lands here: make the process docs true, and make the truth
+enforceable.
+
+**Drift cleared** (the report's §4.4 findings, re-verified against today's tree before
+changing anything): `/docs-check` and `docs-prepush-guard.sh` were documented but never
+existed → CLAUDE.md now points at `pnpm docs:check` and the new real `.husky/pre-push`;
+the tdd skill said "prefer `*.spec.ts`" while vitest collects only `*.test.ts` (a test
+written per the skill would silently never run) → skill corrected, vitest config is the
+source of truth; PR template still cited superseded ADR-0035 rebase-merge → ADR-0044;
+README claimed "Phase 0a" → current status; CLAUDE.md's worktree example still named
+`~/PetProjects/ai-report-platform/` → the folder is `~/PetProjects/centaur-spec/` (GitHub
+remote keeps the old name). `/worktree-cleanup` and `/merge-train`, flagged missing in the
+report's audit, already existed by today — verified, not re-fixed.
+
+**New validator `claude-md-refs`** in `scripts/docs-conformance/` (TDD, 8 fixture tests):
+every backticked slash command in CLAUDE.md must resolve to `.claude/skills/<name>/SKILL.md`
+(built-ins exempted in `config.mjs` with per-entry reasons) and every referenced
+`scripts/` / `.husky/` / `.claude/hooks/` path must exist. Found during red-green: markdown
+code FENCES desync inline backtick-span pairing (indented fences included) — the validator
+strips fences first; the real CLAUDE.md was the failing case that caught it. The stale
+`/docs-check` reference was flagged by the validator before the fix — the gate works.
+
+**New `.husky/pre-push`** — the enforcement CLAUDE.md had promised since Phase 0e was
+deferred: (1) `pnpm docs:check`; (2) the TDD pairing guard — a push whose outgoing commits
+touch vitest-covered source trees with no test-tier changes is blocked. Escape hatches
+`PUSH_WITHOUT_DOCS=1` / `PUSH_WITHOUT_TESTS=1` print loud warnings; CI re-runs the docs
+gate regardless, so a bypass defers a failure but cannot hide it.
+
+Remaining phases of the plan (2: to-tickets/implement/prototype skills; 3: two-axis
+review-pr; 4: prompt evals via promptfoo; 5: Stryker mutation testing + fast-check +
+layered-constitution CLAUDE.md restructure) follow as their own tracer-bullet PRs.
+
+**Process**: worktree `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`),
+off `main` at `a71fbdb`. TDD on the validator — red (module missing), green (7), then two
+regression cases pinned the fence bug red→green.
