@@ -23,9 +23,9 @@ When that state is reached, you stop. You **never merge** — that's the operato
 2. **NEVER** merge the PR. GitHub's UI + branch protection is the merge gate.
 3. **NEVER** apply a bot suggestion that contradicts an ADR without escalating to the operator first.
 4. **NEVER** act on ⚠️ UNSPECIFIED items from the Axis-2 behavior confirm-list (`/review-pr` §5b). They are **human-only**: do not implement them, "fix" them, reply them away, or resolve their comment thread. Surface them verbatim at the **top** of your status report and leave them for the operator. (✅ SPECIFIED items need no action; ❌ MISSING items may be implemented — they're spec'd work.)
-4. **ALL** commits must be Conventional Commits: `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert(scope): subject` (subject ≤100 chars). The husky `commit-msg` hook will reject otherwise — that's the safety net.
-5. **One logical change per commit** — merges to `main` go through the bot-merge workflow (ADR-0035), which replays every PR commit onto `main` verbatim. Each one shows up in the next release notes.
-6. **When in doubt, escalate**. Write a one-line summary of the conflict, stop the iteration, surface to the operator.
+5. **ALL** commits must be Conventional Commits: `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert(scope): subject` (subject ≤100 chars). The husky `commit-msg` hook will reject otherwise — that's the safety net.
+6. **One logical change per commit** — merges to `main` land as signed merge commits (ADR-0044), so every PR commit reaches `main` with its own signature and shows up in the next release notes.
+7. **When in doubt, escalate**. Write a one-line summary of the conflict, stop the iteration, surface to the operator.
 
 ## Prerequisites — check at the top of every iteration
 
@@ -73,7 +73,7 @@ Bucket what you find:
 
 Before triaging external bot comments, invoke **`/review-and-evaluate`** locally to get our own project-aware reading of the diff. The skill runs two parallel agents:
 
-1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; 6 specialized sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list.
+1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; two axes: 6 Axis-1 standards sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list, and the Axis-2 Spec & Behavior sub-agent (Agent 7) produces the §5b behavior confirm-list. The confirm-list is a **distinct output**: ✅/❌ items triage normally below; ⚠️ UNSPECIFIED items bypass the verdict table entirely — hard rule 4 makes them human-only.
 2. **Context Alignment Analyst** — reads the commits, the changed files, `CLAUDE.md`, and `docs/diary.md` (the ADR record), then evaluates each finding for **Apply / Skip / Discuss**.
 
 The skill normally ends interactively ("Which items would you like me to apply?"). **In the `/pr-iterate` context, bypass the question** and consume the verdicts directly:
@@ -232,7 +232,7 @@ Next: <continue / stop — converged / stop — escalation>
 - ADR-030 (dual AI review — Claude + Gemini): `.github/workflows/claude-code-review.yml` + `.github/workflows/gemini-review.yml`
 - Solo-dev branch-protection policy (0 required approvals): `infra/terraform/modules/github-repo/main.tf`
 - Conventional Commits + semantic-release + rebase-merge convention: `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
-- ADR-0035 (bot-merge workflow `/merge`): `.github/workflows/bot-merge.yml`
+- ADR-0044 (signed merge commits — supersedes ADR-0035's bot-merge `/merge` flow): CLAUDE.md "Use Conventional Commits" section
 
 Sibling skills this one invokes:
 

@@ -129,6 +129,7 @@ It must **NOT** receive the other six agents' findings, the implementation conve
 | Configuration | `packages/env` Zod schemas (ADR-0043) | new/changed defaults, removed vars |
 | Security posture | `packages/headers` (CSP, Trusted Types) | any header delta |
 | Agent-facing surface | `apps/mcp` instructions / tool descriptions / packaged SKILL.md (ADR-0072) | any prompt-surface delta |
+| Process & agent surfaces | `.claude/skills/**`, `.husky/**`, `scripts/docs-conformance/**` | skills/hooks/gates change how every future session behaves — same confirm treatment |
 
 **Procedure:** run `scripts/behavior-delta.sh` for the grounded candidate list, read each candidate's diff hunk, then classify every behavior delta against the originating spec:
 
@@ -205,7 +206,7 @@ After presenting the summary, you MUST ask:
 
 - **ALWAYS post inline comments on the exact line where the issue is** using `gh api repos/{owner}/{repo}/pulls/{number}/reviews` with the `comments` array. (Axis 1 findings only.)
 - **The Axis-2 confirm-list posts as exactly ONE top-level PR comment** (never inline, never split): the human confirms an inventory, they don't chase threads. Repost (edit the same comment via `gh api`) if the diff changes.
-- **NEVER create a general/summary PR comment.** Each finding must be an inline review comment attached to the specific line in the diff. A top-level comment with a summary of all issues is explicitly forbidden — it makes it harder to locate where each problem is.
+- **NEVER create a general/summary PR comment for Axis-1 findings.** Each standards finding must be an inline review comment attached to the specific line in the diff — a top-level summary of them makes each problem harder to locate. The Axis-2 confirm-list is the **single sanctioned exception**: it is an inventory by design, and it must be top-level (previous bullet).
 - Use `line` (line number in the file at HEAD) and `side: "RIGHT"` for each comment.
 - For new files, the file line number equals the diff line number.
 - For modified files, use the line number in the new version of the file.

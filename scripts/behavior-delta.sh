@@ -24,9 +24,11 @@ section() {
   printf '%s\n' "$2" | sed 's/^/  /'
 }
 
-status=$(git diff --name-status "$base"...HEAD)
-all=$(printf '%s\n' "$status" | awk '{print $2}')
-modified=$(printf '%s\n' "$status" | awk '$1 ~ /^M/ {print $2}')
+# $NF, not $2: rename/copy rows are `R100\told\tnew` — the LAST field is the
+# path that exists at HEAD ($2 would silently report the pre-rename path).
+status=$(git diff --name-status "$base" HEAD)
+all=$(printf '%s\n' "$status" | awk '{print $NF}')
+modified=$(printf '%s\n' "$status" | awk '$1 ~ /^M/ {print $NF}')
 
 # Edited (not added) test-tier files: an edit to an EXISTING assertion is by
 # definition a behavior change; additions are new coverage, not a red flag.
@@ -39,6 +41,10 @@ db=$(printf '%s\n' "$all" | grep -E '^packages/db/|^docs/db-design\.md$' || true
 env=$(printf '%s\n' "$all" | grep -E '^packages/env/' || true)
 headers=$(printf '%s\n' "$all" | grep -E '^packages/headers/' || true)
 mcp=$(printf '%s\n' "$all" | grep -E '^apps/mcp/(src/(instructions|prompts|tools)|skill/|packaging/)' || true)
+# Process & agent surfaces: skills, hooks and the docs gate change how every
+# future session behaves — that is behavior an operator wants on the list too
+# (this script's own introducing PR would otherwise have reported "no deltas").
+process=$(printf '%s\n' "$all" | grep -E '^\.claude/skills/|^\.husky/|^scripts/docs-conformance/' || true)
 
 echo "# Behavior-delta candidates — $(git rev-parse --abbrev-ref HEAD) vs $base_ref (merge-base $(git rev-parse --short "$base"))"
 
@@ -50,7 +56,8 @@ section "Persistence (packages/db, docs/db-design.md)" "$db"
 section "Configuration (packages/env — ADR-0043)" "$env"
 section "Security posture (packages/headers — CSP / Trusted Types)" "$headers"
 section "Agent-facing prompt surfaces (apps/mcp — ADR-0072)" "$mcp"
+section "Process & agent surfaces (.claude/skills, .husky, docs gate — ADR-026)" "$process"
 
-if [ -z "$edited_tests$api$errors$events$db$env$headers$mcp" ]; then
+if [ -z "$edited_tests$api$errors$events$db$env$headers$mcp$process" ]; then
   printf '\nNo contract-artifact deltas on this branch.\n'
 fi
