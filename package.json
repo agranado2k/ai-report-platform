@@ -18,6 +18,7 @@
     "e2e:gen": "bddgen",
     "e2e": "bddgen && playwright test",
     "test:browser": "playwright test --config tests/browser/playwright.config.ts",
+    "test:mutation": "pnpm --filter arp-domain test:mutation",
     "clean": "turbo clean && rm -rf node_modules",
     "docs:check": "node scripts/docs-conformance/index.mjs",
     "docs:check:test": "node --test scripts/docs-conformance/test/*.test.mjs",

@@ -15,7 +15,9 @@
       "!**/.features-gen",
       "!**/*.gen.ts",
       "!**/playwright-report",
-      "!**/test-results"
+      "!**/test-results",
+      "!**/.stryker-tmp",
+      "!**/reports/mutation"
     ]
   },
   "formatter": {
