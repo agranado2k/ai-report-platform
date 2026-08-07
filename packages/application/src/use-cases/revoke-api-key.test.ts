@@ -89,47 +89,20 @@ describe("revokeApiKey idempotency (ADR-0039)", () => {
     const second = await revokeApiKey(deps, { userId: alice, orgId: orgA }, input);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
+    // NOTE — why this route has no A -> B -> A sibling. A revoked key is never
+    // un-revoked, so there is no second state to return to and no observable
+    // difference between "re-applied" and "replayed" in the store. #233's
+    // acceptance is satisfied here by its FIRST clause ("either skips the
+    // derived-key fallback or is proven by a round-trip"): this use case skips
+    // it, and this count is the evidence that the retry really executes.
+    // A separate call-counting test was written and then removed — it measured
+    // the same thing at a different port (the store's revoke and the audit row
+    // are in one uow.run with no branch between them), so it was duplication
+    // wearing the costume of extra coverage.
     // #233: was 1, when the derived-key fallback replayed instead of
     // re-applying. The retry now really runs — same end state (these are
     // naturally idempotent), one more audit row. An explicit
     // Idempotency-Key still claims and replays exactly as before.
     expect(deps.audit.recorded().length).toBe(2);
-  });
-});
-
-// ── #233 acceptance: no STALE replay ───────────────────────────────────────
-//
-// revokeApiKey has no inverse either (a revoked key is never un-revoked), so
-// the round-trip is expressed the same way as resolveComment: a keyless retry
-// must reflect the store NOW, not a snapshot the first call recorded. Under the
-// derived-key fallback the second revoke never executed, so a key revoked out
-// of band and re-issued could be reported revoked while it was live.
-describe("revokeApiKey — a keyless retry must reach the store again (#233)", () => {
-  it("really executes the second revoke instead of replaying the first", async () => {
-    const deps = makeDeps();
-    const created = await deps.apiKeys.create({
-      actingUserId: alice,
-      issuedInOrgId: orgA,
-      name: "k",
-      scopes: ["reports:write"],
-    });
-    if (!created.ok) throw new Error("seed failed");
-    const input = { id: created.value.summary.id };
-
-    // A revoked key is already revoked after call 1, so asserting the END STATE
-    // passes whether or not the retry ran — an earlier version of this test did
-    // exactly that and was a tautology. Count the store interaction instead:
-    // that is the thing a derived-key replay skips.
-    let revocations = 0;
-    const revoke = deps.apiKeys.revoke.bind(deps.apiKeys);
-    deps.apiKeys.revoke = async (...args: Parameters<typeof revoke>) => {
-      revocations += 1;
-      return revoke(...args);
-    };
-
-    expect((await revokeApiKey(deps, { userId: alice, orgId: orgA }, input)).ok).toBe(true);
-    expect((await revokeApiKey(deps, { userId: alice, orgId: orgA }, input)).ok).toBe(true);
-
-    expect(revocations, "a replayed response would never reach the store twice").toBe(2);
   });
 });

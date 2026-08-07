@@ -214,6 +214,15 @@ describe("deleteFolder idempotency (ADR-0039)", () => {
 // recorded response and never runs. The keyless-retry test above asserts that a
 // repeat FAILS; this asserts the thing is actually GONE, which is the property
 // that matters.
+//
+// REACHABILITY, stated honestly: step 2 restores the entity through the
+// repository, which no API path can do — ids and slugs are server-generated,
+// and arming the key needs a SUCCESSFUL first delete (deleting a missing target
+// returns NotFound and never completes a record). So this probes the mechanism,
+// not a sequence a client can drive. The fully reachable version of this shape
+// is `share-folder.test.ts`'s pre-emptive unshare, which works only because
+// unshare-of-nothing succeeds. `grant-write`'s is reachable too — a real
+// revoke-write use case exists.
 describe("deleteFolder — a pre-emptive delete must not burn the key (#233)", () => {
   it("a delete fired BEFORE the folder exists does not swallow the real delete", async () => {
     const deps = await setup();
@@ -222,24 +231,19 @@ describe("deleteFolder — a pre-emptive delete must not burn the key (#233)", (
 
     // 1. Arm: delete it for real, so a key for this exact payload is recorded.
     expect((await deleteFolder(deps, actor, { folderId: target })).ok).toBe(true);
-    // 2. It comes back (recreated, or restored out-of-band).
+    // 2. The entity is live again — restored via the repository (see above).
+    await deps.folders.save(folder(SUB, orgA, "Sub", folderId(ROOT), actorA));
     const restored = await deps.folders.findById(target);
-    expect(restored.ok).toBe(true);
-    await deps.folders.save({
-      id: target,
-      orgId: orgA,
-      name: "Sub",
-      slug: "sub",
-      parentId: folderId(ROOT),
-      ownerId: actorA,
-      visibility: "private",
-      deletedAt: null,
-    });
+    expect(restored.ok && restored.value, "precondition: the folder is back").not.toBeNull();
     // 3. The real delete. A derived-key replay would answer 204 and leave it.
     const real = await deleteFolder(deps, actor, { folderId: target });
 
     expect(real.ok, "the second delete must actually run, not replay").toBe(true);
     const after = await deps.folders.findById(target);
-    expect(after.ok && after.value?.deletedAt, "the folder must really be gone").not.toBeNull();
+    // `.not.toBeNull()` would also pass on `false` (ok === false) or
+    // `undefined` (entity absent) — assert the soft-delete stamp itself.
+    expect(after.ok && after.value?.deletedAt, "the folder must really be gone").toEqual(
+      expect.any(Number),
+    );
   });
 });

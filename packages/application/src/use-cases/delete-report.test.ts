@@ -120,6 +120,15 @@ describe("deleteReport idempotency (ADR-0039)", () => {
 });
 
 // ── #233 acceptance: the pre-emptive burn ──────────────────────────────────
+//
+// REACHABILITY, stated honestly: step 2 restores the entity through the
+// repository, which no API path can do — ids and slugs are server-generated,
+// and arming the key needs a SUCCESSFUL first delete (deleting a missing target
+// returns NotFound and never completes a record). So this probes the mechanism,
+// not a sequence a client can drive. The fully reachable version of this shape
+// is `share-folder.test.ts`'s pre-emptive unshare, which works only because
+// unshare-of-nothing succeeds. `grant-write`'s is reachable too — a real
+// revoke-write use case exists.
 describe("deleteReport — a pre-emptive delete must not burn the key (#233)", () => {
   it("a delete fired before the report is re-created does not swallow the real one", async () => {
     const deps = makeDeps();
@@ -128,13 +137,17 @@ describe("deleteReport — a pre-emptive delete must not burn the key (#233)", (
 
     // 1. Arm: a real delete records a key for this exact payload.
     expect((await deleteReport(deps, ownerActor, target)).ok).toBe(true);
-    // 2. The slug is live again (re-uploaded, or restored out-of-band).
+    // 2. The entity is live again — restored via the repository (see above).
     await deps.reports.save(report(orgA, "ffffffffff"));
     // 3. The real delete. A derived-key replay would answer 204 and leave it.
     const real = await deleteReport(deps, ownerActor, target);
 
     expect(real.ok, "the second delete must actually run, not replay").toBe(true);
     const after = await deps.reports.findBySlug(slug("ffffffffff"));
-    expect(after.ok && after.value?.deletedAt, "the report must really be gone").not.toBeNull();
+    // `.not.toBeNull()` would also pass on `false` (ok === false) or
+    // `undefined` (entity absent) — assert the soft-delete stamp itself.
+    expect(after.ok && after.value?.deletedAt, "the report must really be gone").toEqual(
+      expect.any(Number),
+    );
   });
 });

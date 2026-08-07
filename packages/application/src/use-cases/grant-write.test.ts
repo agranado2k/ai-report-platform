@@ -216,15 +216,20 @@ describe("grantWrite — grant -> revoke -> re-grant must restore the grant (#23
     const { reports, grants, identities, audit, uow } = await seed();
     const deps = { reports, grants, identities, audit, uow, ...idempotencyTestDeps() };
     const input = { slug: grantSlug(), email: "invitee@corp.com" };
+    // Read the id back rather than restating seed()'s literal — a change to the
+    // fixture must not break this test for the wrong reason.
+    const seeded = await reports.findBySlug(grantSlug());
+    if (!seeded.ok || !seeded.value) throw new Error("seed failed");
+    const target = seeded.value.id;
 
     expect((await grantWrite(deps, ACTOR, input)).ok).toBe(true);
     // Revoked out-of-band: the derived key for the re-grant below is identical
     // to the first call's, so a fallback would replay it and never re-persist.
-    await grants.revoke(reportId("00000000-0000-7000-8000-0000000000c1"), "invitee@corp.com");
+    await grants.revoke(target, "invitee@corp.com");
     const regranted = await grantWrite(deps, ACTOR, input);
 
     expect(regranted.ok).toBe(true);
-    const listed = await grants.listByReport(reportId("00000000-0000-7000-8000-0000000000c1"));
+    const listed = await grants.listByReport(target);
     expect(
       listed.ok && listed.value.map((g) => g.granteeEmail),
       "the grant must exist again — a replayed response would leave none",

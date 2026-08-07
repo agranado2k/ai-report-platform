@@ -188,8 +188,8 @@ describe("renameFolder idempotency (ADR-0039)", () => {
 // ── #233 acceptance: the round-trip, not the audit count ───────────────────
 describe("renameFolder — A -> B -> A must land on A (#233)", () => {
   it("re-applying the original name actually re-persists it", async () => {
-    const { folders, ...rest } = await setup();
-    const deps = { folders, ...rest };
+    const deps = await setup();
+    const { folders } = deps;
     const actor = { orgId: orgA, userId: actorA };
     const at = (name: string) => renameFolder(deps, actor, { folderId: folderId(F1), name });
 

@@ -285,6 +285,12 @@ describe("resolveComment idempotency (ADR-0039)", () => {
 // the derived-key fallback the retry replayed a body captured BEFORE any later
 // edit, so the caller was handed stale content while the store held something
 // else. That is the same defect wearing a different shape.
+//
+// WEAKER than its siblings, deliberately and unavoidably: it asserts the
+// RESPONSE, not the store. With no inverse there is no state to regress to, so
+// there is nothing persisted to compare — it would not catch a retry that
+// re-executes and writes something wrong. The stale response IS the observable
+// harm for this shape, which is why it is the property under test.
 describe("resolveComment — a keyless retry must not replay a stale snapshot (#233)", () => {
   it("returns the comment as it is NOW, not as it was at the first resolve", async () => {
     const deps = makeDeps();
