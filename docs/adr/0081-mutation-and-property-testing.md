@@ -50,7 +50,7 @@ Chosen: **Stryker on demand, calibrated on `packages/domain`, plus `fast-check` 
 
 ### 1. Mutation testing is a diagnostic, not a gate
 
-`pnpm test:mutation` (root) → `pnpm --filter arp-domain test:mutation` → `stryker run` against `packages/domain/stryker.config.json`. It runs:
+`pnpm test:mutation` (root) → `pnpm --filter arp-domain test:mutation` → `stryker run` against `packages/domain/stryker.config.mjs`. It runs:
 
 - **on demand**, when someone wants to know whether an area's tests are load-bearing;
 - **differentially**, scoped to the files a PR touched (`stryker run --mutate 'src/acl.ts'`), which is what makes it affordable inside a review;
@@ -98,6 +98,7 @@ The "after" column includes both the strengthened `access-token.test.ts` (§6) a
 - Stryker reports **181 static mutants (17 % of the total) consuming ~84 % of the run time** — mutants in module-level initialisation, which force a full re-run of the file's tests. `ignoreStatic` would cut the wall-clock sharply at the cost of a blind spot. It is deliberately **left off**: at ~51 s the run is cheap enough that correctness of the measurement beats speed.
 - The 29 no-coverage mutants are concentrated in `errors.ts` (16) — constructors for error kinds nothing yet raises. They are honest zeros, not a tooling artefact.
 - The score is **not a target**. 85 % here means the domain's tests kill roughly six of every seven behaviour changes; the remaining seventh is the interesting reading material, and some of it is equivalent mutants that can never be killed.
+- The table above is a record of **that dated run**, not a live figure. The property tests seed `fast-check` from the clock, so a re-run drifts by a mutant or two either way (86.24 % on the round-1 review re-run, with `slug.ts` and `email-address.ts` unchanged at 85.71 % / 83.33 %). Read a movement of ~0.1 pp as noise; read a movement of several points as signal.
 
 ### 6. The finding this calibration actioned
 
@@ -118,7 +119,7 @@ The two that remain are **equivalent mutants**, deliberately left alive rather t
 
 **What landed**
 
-- `packages/domain/stryker.config.json` — mutate `src/**/*.ts` minus tests and the barrel `index.ts`; `concurrency: 4`; HTML report to the gitignored `packages/domain/reports/mutation/`.
+- `packages/domain/stryker.config.mjs` — mutate `src/**/*.ts` minus tests and the barrel `index.ts`; `concurrency: 4`; HTML report to the gitignored `packages/domain/reports/mutation/`.
 - `packages/domain/vitest.config.ts` — a package-scoped Vitest config. The repo-wide suite still runs from the root config; this exists so Stryker's runner can drive **one package's** tests per mutant. Its `include` glob must stay in sync with the root config's `packages/*/src/**/*.test.ts`.
 - Scripts: `pnpm test:mutation` (root) and `pnpm --filter arp-domain test:mutation`; `pnpm --filter arp-domain test` for the package's own Vitest run.
 - Property tests: `slug.property.test.ts`, `external-id.property.test.ts`, `email-address.property.test.ts`, `acl.property.test.ts` — 19 properties over `Slug`, `External Id`, `EmailAddress` and `Acl`.

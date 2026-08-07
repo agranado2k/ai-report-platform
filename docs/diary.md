@@ -5434,7 +5434,7 @@ agents could only offer taste. A surviving mutant is that same claim stated obje
 
 **Stryker (`@stryker-mutator/core` 9.6.1 + `@stryker-mutator/vitest-runner`)**, scoped
 to `packages/domain` — pure by ADR-024, so a mutant costs a function call. Config in
-`packages/domain/stryker.config.json`, plus a package-scoped `vitest.config.ts` so the
+`packages/domain/stryker.config.mjs`, plus a package-scoped `vitest.config.ts` so the
 runner can drive one package per mutant (the repo-wide suite still runs from the root
 config). `pnpm test:mutation` at the root, `pnpm --filter arp-domain test:mutation`
 in the package. Deliberately **on-demand / differential, never a per-push gate** and not
