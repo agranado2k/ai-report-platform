@@ -23,6 +23,47 @@
 // and the reason string says which. `metadata.min_score` (default 1) is the
 // per-case bar.
 
+/**
+ * Every `{…}` run in `text` whose braces balance, outermost-first.
+ *
+ * String-aware (a `{` inside a JSON string value must not open a run, and an
+ * escaped quote must not close the string) so a description containing a brace
+ * cannot desync the depth count. Cheap and approximate on purpose: whatever it
+ * returns is handed to `JSON.parse`, which is the real arbiter.
+ */
+function balancedJsonRuns(text) {
+  const runs = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          runs.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+  }
+  return runs;
+}
+
 /** Pull every `tool_use` block out of whatever shape the provider returned. */
 function extractToolCalls(output) {
   const calls = [];
@@ -42,8 +83,22 @@ function extractToolCalls(output) {
   };
 
   if (typeof output === "string") {
+    // Whole-document first: an output that is itself one JSON value (a raw
+    // message envelope, or a single pretty-printed block) parses here and the
+    // line scan below would never see it — every brace sits on its own line.
+    const trimmedAll = output.trim();
+    if (trimmedAll.startsWith("{") || trimmedAll.startsWith("[")) {
+      try {
+        visit(JSON.parse(trimmedAll));
+        if (calls.length > 0) return calls;
+      } catch {
+        // Not a single JSON document — fall through to the line scan.
+      }
+    }
+
     // The Anthropic provider renders a tool-using turn as the text blocks plus
     // one JSON-stringified block per non-text block, joined by blank lines.
+    // Each block is normally on ONE line, which is what the line scan handles.
     for (const line of output.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
@@ -51,6 +106,20 @@ function extractToolCalls(output) {
         visit(JSON.parse(trimmed));
       } catch {
         // Prose that merely looks like JSON — not a tool call.
+      }
+    }
+    if (calls.length > 0) return calls;
+
+    // Last resort: prose interleaved with a PRETTY-PRINTED block, so neither
+    // path above sees it. Scan for balanced brace runs and try each one.
+    // Deliberately last — it is the loosest reader, and failing OPEN here
+    // (reporting "no tools called") would score a negative case as a pass,
+    // which is the one direction this grader must never fail in.
+    for (const candidate of balancedJsonRuns(output)) {
+      try {
+        visit(JSON.parse(candidate));
+      } catch {
+        // Braces that balance but are not JSON.
       }
     }
     return calls;

@@ -126,6 +126,58 @@ describe("tool-selection grader", () => {
     expect(wrong.reason).toContain("org_edit");
   });
 
+  // The line-by-line scan only sees a tool call whose JSON sits on ONE line.
+  // Nothing guarantees that: a provider that pretty-prints, or any change to
+  // how promptfoo renders non-text blocks, silently yields "no tools called" —
+  // which scores a negative case as a PASS. Failing open is the worst possible
+  // direction for this grader, so parse the whole output first.
+  it("extracts tool calls from pretty-printed (multi-line) provider output", () => {
+    const output = [
+      "I'll delete that report now.",
+      "",
+      JSON.stringify(
+        { type: "tool_use", id: "toolu_03", name: "reports_delete", input: { slug: "draft-v1" } },
+        null,
+        2,
+      ),
+    ].join("\n");
+
+    const negative = grade(
+      output,
+      withMetadata({ expected_tools: [], forbidden_tools: ["reports_delete"] }),
+    );
+    expect(negative.pass, "a pretty-printed forbidden call must still be caught").toBe(false);
+    expect(negative.reason).toContain("reports_delete");
+  });
+
+  it("extracts tool calls from a whole-output JSON document (not one block per line)", () => {
+    const output = JSON.stringify(
+      {
+        content: [
+          { type: "text", text: "Publishing." },
+          {
+            type: "tool_use",
+            id: "toolu_04",
+            name: "reports_upload",
+            input: { html: "<html/>", update_slug: "q3-revenue" },
+          },
+        ],
+      },
+      null,
+      2,
+    );
+
+    const result = grade(
+      output,
+      withMetadata({
+        expected_tools: ["reports_upload"],
+        expected_args: { reports_upload: { required: ["html", "update_slug"] } },
+      }),
+    );
+    expect(result.pass).toBe(true);
+    expect(result.score).toBe(1);
+  });
+
   it("ignores prose that merely looks like JSON", () => {
     const output = "The payload would be {not really json, honest} — I have not sent it.";
     const result = grade(output, withMetadata({ expected_tools: [] }));

@@ -16,7 +16,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { INSTRUCTIONS, overclaimPhrases, registeredToolNames, toolsForProvider } from "./surface";
+import {
+  captureRegisteredTools,
+  INSTRUCTIONS,
+  overclaimPhrases,
+  registeredToolNames,
+  toolsForProvider,
+} from "./surface";
 
 const EVALS_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(EVALS_DIR, "..", "..");
@@ -38,6 +44,9 @@ interface GoldenCase {
     grounded_in?: unknown;
     rationale?: unknown;
     guard?: unknown;
+    /** `describe-boundary` opts a guard case out of the negation-blind phrase
+     *  blocklist; see the tests below for what it must provide instead. */
+    guard_mode?: unknown;
   };
   assert?: { type?: unknown; value?: unknown }[];
 }
@@ -236,6 +245,13 @@ describe("golden set", () => {
     expect(new Set(descriptions).size).toBe(descriptions.length);
   });
 
+  // `not-icontains-any` is negation-blind: it matches the substring, not the
+  // sentence. On a scenario that asks the model to DESCRIBE the boundary, the
+  // correct answer ("it cannot read all reports in your org") contains a
+  // forbidden phrase and would be scored a failure. Those cases opt out with
+  // `metadata.guard_mode: describe-boundary` — an explicit, greppable field, so
+  // the exemption is visible in the data rather than buried in an assertion —
+  // and the test below makes them pay for it with a positive requirement.
   it("forbids every OVERCLAIM_PATTERN phrase on every over-claim guard case", () => {
     const guardCases = allCases(readConfig()).filter((c) => c.metadata?.guard === "overclaim");
     expect(guardCases.length, "the suite must probe the over-claim guard").toBeGreaterThanOrEqual(
@@ -245,7 +261,13 @@ describe("golden set", () => {
     const phrases = overclaimPhrases();
     expect(phrases.length, "OVERCLAIM_PATTERNS expanded to nothing").toBeGreaterThan(0);
 
-    guardCases.forEach((testCase) => {
+    const blocklistCases = guardCases.filter((c) => c.metadata?.guard_mode !== "describe-boundary");
+    expect(
+      blocklistCases.length,
+      "the phrase blocklist must still be exercised by most guard cases",
+    ).toBeGreaterThanOrEqual(3);
+
+    blocklistCases.forEach((testCase) => {
       const forbidden = new Set(
         (testCase.assert ?? [])
           .filter((a) => a.type === "not-icontains-any")
@@ -258,6 +280,87 @@ describe("golden set", () => {
         ).toContain(phrase);
       }
     });
+  });
+
+  it("makes every describe-boundary exemption pay for itself with a positive requirement", () => {
+    const exempt = allCases(readConfig()).filter(
+      (c) => c.metadata?.guard === "overclaim" && c.metadata?.guard_mode === "describe-boundary",
+    );
+    expect(
+      exempt.length,
+      "the negation-blind exemption must be used, or deleted as dead policy",
+    ).toBeGreaterThan(0);
+
+    exempt.forEach((testCase) => {
+      const asserts = testCase.assert ?? [];
+      const at = `describe-boundary case "${testCase.description}"`;
+      expect(
+        asserts.map((a) => a.type),
+        `${at} must not re-apply the negation-blind blocklist it is exempt from`,
+      ).not.toContain("not-icontains-any");
+      // Exemption from "must not say X" is only safe alongside "must say Y":
+      // otherwise the case asserts nothing but the default tool grader.
+      const positive = asserts.filter(
+        (a) => a.type === "icontains-any" || a.type === "icontains" || a.type === "llm-rubric",
+      );
+      expect(
+        positive.length,
+        `${at} must REQUIRE the scoping language (icontains-any / llm-rubric), not merely stop forbidding phrases`,
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  // A typo in an `assert.type` is not an error in promptfoo — an unknown type
+  // is a case that quietly grades nothing, which reads as a green suite. The
+  // allowlist is the set this repo has verified against the installed
+  // promptfoo (see README "Verified assertion types"); widening it is a
+  // deliberate edit, not a typo.
+  it("uses only assertion types this repo has verified against promptfoo", () => {
+    const KNOWN_ASSERT_TYPES = new Set([
+      "javascript",
+      "llm-rubric",
+      "not-icontains-any",
+      "icontains",
+      "icontains-any",
+      "regex",
+      "tool-call-f1",
+    ]);
+    const config = readConfig();
+    const declared = [
+      ...(config.defaultTest?.assert ?? []),
+      ...allCases(config).flatMap((c) => c.assert ?? []),
+    ];
+    expect(declared.length, "the suite must declare assertions").toBeGreaterThan(0);
+    for (const assertion of declared) {
+      expect(KNOWN_ASSERT_TYPES, `unknown assert type: ${String(assertion.type)}`).toContain(
+        assertion.type,
+      );
+    }
+  });
+
+  // The reference solution lives in `metadata.expected_tools`; `tool-call-f1`
+  // restates it as an assertion value. Two copies of one fact drift, and the
+  // drift is invisible — f1 would grade against a stale list while the code
+  // grader graded against the live one.
+  it("keeps tool-call-f1 values identical to the case's expected_tools", () => {
+    for (const { file, cases } of loadGoldenSet(readConfig())) {
+      cases.forEach((testCase, index) => {
+        const f1 = (testCase.assert ?? []).filter((a) => a.type === "tool-call-f1");
+        if (f1.length === 0) return;
+        const expectedTools = stringList(testCase.metadata?.expected_tools);
+        for (const assertion of f1) {
+          const value = Array.isArray(assertion.value)
+            ? stringList(assertion.value)
+            : String(assertion.value)
+                .split(",")
+                .map((s) => s.trim());
+          expect(
+            [...value].sort(),
+            `${file}[${index}]: tool-call-f1 value disagrees with metadata.expected_tools`,
+          ).toEqual([...expectedTools].sort());
+        }
+      });
+    }
   });
 
   it("keeps LLM judging to a minority of cases, on a different model than the generator", () => {
@@ -282,6 +385,48 @@ describe("golden set", () => {
         expect(rubric.threshold, "a judge needs an explicit score threshold").toBeTypeOf("number");
       }
     }
+  });
+});
+
+describe("tool annotations reach the model (ADR-0051 hints)", () => {
+  it("captures the title and annotations every registration sets", () => {
+    const tools = captureRegisteredTools();
+    expect(tools.length, "the MCP server must register tools").toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(typeof tool.title, `${tool.name}: title`).toBe("string");
+      expect(tool.title.length, `${tool.name}: title must not be empty`).toBeGreaterThan(0);
+      expect(
+        typeof tool.annotations.readOnlyHint,
+        `${tool.name}: readOnlyHint must be set deliberately (SDK defaults assume destructive)`,
+      ).toBe("boolean");
+      expect(typeof tool.annotations.destructiveHint, `${tool.name}: destructiveHint`).toBe(
+        "boolean",
+      );
+    }
+  });
+
+  it("projects the destructive hint into the description the model actually sees", () => {
+    // Anthropic tool definitions carry no annotations field, so a hint that is
+    // not written into the description is a hint the model never receives —
+    // and a negative case leaning on it would be testing something that does
+    // not ship.
+    const destroyer = captureRegisteredTools().find((t) => t.name === "reports_delete");
+    expect(destroyer, "reports_delete must be registered").toBeDefined();
+    expect(destroyer?.annotations.destructiveHint).toBe(true);
+
+    const wire = toolsForProvider().find((t) => t.name === "reports_delete");
+    expect(wire?.description, "the destructive hint must be visible on the wire").toMatch(
+      /destructive/i,
+    );
+  });
+
+  it("projects the read-only hint too, and never marks a read tool destructive", () => {
+    // Match the projected marker, not the word "read-only" — several read tool
+    // descriptions already say "Read-only." in prose, so a looser assertion
+    // would pass with the projection removed.
+    const wire = toolsForProvider().find((t) => t.name === "reports_get");
+    expect(wire?.description).toMatch(/Tool safety hints: read-only \(makes no changes\)\./);
+    expect(wire?.description).not.toMatch(/DESTRUCTIVE/);
   });
 });
 
