@@ -32,8 +32,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     // KEEP IN SYNC with the TDD pairing guard's source-tree regex in
-    // .husky/pre-push — it is a hand-maintained mirror of these globs; adding
-    // a covered tree here without updating it silently un-guards that tree.
+    // .husky/pre-push — it hand-mirrors these globs (plus the node:test tree
+    // scripts/docs-conformance/, which vitest does not cover); adding a
+    // covered tree here without updating it silently un-guards that tree.
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",

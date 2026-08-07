@@ -26,8 +26,9 @@ fi
 # For each ref being pushed, diff the outgoing commits. Source files are the
 # vitest-covered production trees; a push that touches them without touching
 # any test tier (*.test.ts, *.spec.ts, *.feature, *.test.mjs) is blocked.
-# KEEP IN SYNC with the `include` globs in vitest.config.ts (which carries the
-# matching reminder) — nothing ties them together mechanically yet.
+# KEEP IN SYNC with the test-covered source trees: the `include` globs in
+# vitest.config.ts (which carries the matching reminder) PLUS the node:test
+# tree scripts/docs-conformance/ — nothing ties them together mechanically yet.
 # docs-conformance/config.mjs is excluded: it is reviewable policy DATA
 # (ADR-0041 — "validators hold no policy"), so editing it needs no test change.
 # Renames are excluded (--diff-filter=ACM): a pure move is not new behavior.
