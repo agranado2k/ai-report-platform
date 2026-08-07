@@ -1,0 +1,116 @@
+name: Prompt evals
+
+# The prompt-eval tier for apps/mcp's agent-facing surfaces (ADR-0083, issue
+# #264). Evals are to these prompts what tests are to code: a one-line edit to
+# the server `instructions` string or a tool description can move agent
+# behaviour dramatically, and no other gate in this repo would see it.
+#
+# Path-scoped on purpose — the same pattern as the ADR-026 docs-trigger matrix.
+# It runs only when a PR actually touches a prompt surface (or the suite that
+# measures it), because it is the only workflow here that spends money per run.
+#
+# BLOCKED, DELIBERATELY GREEN: the eval step needs a model-provider key in repo
+# secrets, and repo secrets are Terraform-managed (Phase 0b, like
+# GEMINI_API_KEY) — provisioning one is an infra change plus a budget decision
+# that is still open. Until then this job runs the KEYLESS half (config
+# validation), prints a notice saying what was skipped and why, and exits 0.
+# It is a new workflow and is not in `required_status_checks`, so it gates
+# nothing either way; the day the secret lands it starts evaluating with no
+# further change here.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      # Layer 0 — the server instructions and the tool/prompt descriptions.
+      - "apps/mcp/src/instructions.ts"
+      - "apps/mcp/src/tools.ts"
+      - "apps/mcp/src/prompts.ts"
+      # Layer 1 — the canonical packaged skill.
+      - "apps/mcp/skill/**"
+      # Layer 2 — the per-host distribution copies.
+      - "apps/mcp/packaging/**"
+      # The suite itself.
+      - "tests/evals/**"
+      - ".github/workflows/prompt-evals.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prompt-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prompt-evals:
+    name: Prompt evals (apps/mcp surfaces)
+    runs-on: ubuntu-latest
+    env:
+      # Keep the cache inside the workspace so actions/cache can persist it
+      # verbatim; promptfoo's default location is outside it.
+      PROMPTFOO_CACHE_PATH: ${{ github.workspace }}/.promptfoo-cache
+      PROMPTFOO_CACHE_ENABLED: "true"
+      # 14 days, matching promptfoo's own default guidance: a prompt-surface PR
+      # busts the key anyway, so a long TTL only helps unrelated re-runs.
+      PROMPTFOO_CACHE_TTL: "1209600"
+      PROMPTFOO_DISABLE_TELEMETRY: "1"
+      PROMPTFOO_DISABLE_UPDATE: "1"
+    steps:
+      - name: Is the provider key provisioned?
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Prompt evals skipped::No ANTHROPIC_API_KEY secret is provisioned, so the prompt-eval suite did not run. This is expected: repo secrets are Terraform-managed and the provider/budget decision is still open (issue #264, docs/adr/0083-prompt-evals-promptfoo.md). The keyless checks below still ran; this job is green on purpose and gates nothing."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Runs with or without a key: proves the suite is loadable in CI, not just
+      # on a developer's machine.
+      - name: Validate the eval config (keyless)
+        run: pnpm evals:validate
+
+      - name: Restore promptfoo response cache
+        if: steps.key.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .promptfoo-cache
+          key: promptfoo-cache-${{ runner.os }}-${{ hashFiles('tests/evals/**') }}
+          restore-keys: |
+            promptfoo-cache-${{ runner.os }}-
+
+      # pass^3: --repeat runs every case three times and the command exits
+      # non-zero if ANY trial fails, so a case only counts as passing if it
+      # passes all three (issue #264 success criterion 3).
+      - name: Run the prompt evals
+        if: steps.key.outputs.available == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm evals -- --no-progress-bar --output eval-results.json
+
+      - name: Upload eval results
+        if: ${{ always() && steps.key.outputs.available == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-eval-results
+          path: eval-results.json
+          if-no-files-found: ignore
