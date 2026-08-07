@@ -15,6 +15,13 @@ export interface IdempotencyStoreContractHarness {
   readonly store: IdempotencyStore;
   /** An acting user the implementation accepts refs for (the real adapter's FK). */
   readonly actingUserId: UserId;
+  /**
+   * Age this record past the retention window, however that tier does it — the
+   * fake rewrites its stamp, the adapter backdates the row. Expiry is the one
+   * behaviour a contract cannot exercise without help, and leaving it
+   * unexercised is what let the two tiers diverge (#233 finding 2).
+   */
+  expire(ref: IdempotencyKeyRef): Promise<void>;
   /** Release whatever the harness allocated; a no-op for the in-memory fake. */
   teardown(): Promise<void>;
 }
@@ -42,6 +49,86 @@ export function describeIdempotencyStoreContract(
       actingUserId: h.actingUserId,
       route: "POST /api/v1/reports",
       key,
+    });
+
+    // ── Expiry and reclaim ──────────────────────────────────────────────
+    //
+    // ADR-0039 always described a 24h window. Nothing enforced it until #233
+    // finding 2, and the enforcement landed on the DRIZZLE adapter only — these
+    // six behaviours lived in `adapters/src/idempotency-store.integration.test.ts`
+    // and nowhere else. The in-memory fake, which every one of the 20 mutating
+    // use-case suites runs against, had no expiry at all: it replayed forever,
+    // which is exactly the production behaviour the ADR calls "fiction".
+    //
+    // A behaviour pinned on one tier is not pinned. These run on both.
+    describe("expiry", () => {
+      it("still replays inside the window", async () => {
+        await h.store.begin(ref(), "fp1");
+        await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+
+        const r = await h.store.begin(ref(), "fp1");
+
+        expect(r.ok && r.value.outcome).toBe("replay");
+      });
+
+      it("RECLAIMS an expired completed record instead of replaying it", async () => {
+        await h.store.begin(ref(), "fp1");
+        await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+        await h.expire(ref());
+
+        const r = await h.store.begin(ref(), "fp1");
+
+        expect(r.ok && r.value.outcome).toBe("proceed");
+      });
+
+      it("does NOT answer in_flight forever once expired — the key works again", async () => {
+        // The regression the reclaim exists to prevent. Hiding a stale row
+        // instead of reclaiming it makes the SELECT miss and every retry 409
+        // for good, which is worse than the staleness it fixes.
+        await h.store.begin(ref(), "fp1");
+        await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+        await h.expire(ref());
+
+        const reclaimed = await h.store.begin(ref(), "fp1");
+        expect(reclaimed.ok && reclaimed.value.outcome).toBe("proceed");
+        await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 2 } });
+
+        const after = await h.store.begin(ref(), "fp1");
+        expect(after.ok && after.value.outcome).toBe("replay");
+        if (after.ok && after.value.outcome === "replay") {
+          expect(after.value.record.responseBody).toEqual({ v: 2 });
+        }
+      });
+
+      it("reclaims an expired record that was still in_flight (a crashed request)", async () => {
+        await h.store.begin(ref(), "fp1");
+        await h.expire(ref());
+
+        const r = await h.store.begin(ref(), "fp1");
+
+        expect(r.ok && r.value.outcome).toBe("proceed");
+      });
+
+      it("does NOT clobber a FRESH in-flight record", async () => {
+        await h.store.begin(ref(), "fp1");
+
+        const r = await h.store.begin(ref(), "fp1");
+
+        expect(r.ok && r.value.outcome).toBe("in_flight");
+      });
+
+      it("an expired key reused with a DIFFERENT body proceeds rather than 422ing", async () => {
+        // Deliberate: past the window the key is genuinely free, so the
+        // reuse-different-body guard no longer applies. A wire-contract change
+        // recorded in the ADR-0039 amendment.
+        await h.store.begin(ref(), "fp1");
+        await h.store.complete(ref(), { responseStatus: 200, responseBody: { v: 1 } });
+        await h.expire(ref());
+
+        const r = await h.store.begin(ref(), "fp2-different");
+
+        expect(r.ok && r.value.outcome).toBe("proceed");
+      });
     });
 
     // ── purgeExpired ────────────────────────────────────────────────────
