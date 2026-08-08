@@ -5735,3 +5735,14 @@ half: a Remix form's key must be stable across the resubmit, so it has to be min
 form-render and carried as a hidden input — which means a long-lived open tab replays
 against a stale key. Form-render-scoped key vs. a client-side submit guard vs. accepting
 the duplicate is a product call, not a refactor.
+
+**C4 dismissed (operator, 2026-08-08).** Closing the loop on the entry above: the request-encoder
+candidate is not being built, and the idempotency-key gap it surfaced is **not scheduled**. The
+finding itself stays on the record — in the entry above and in the published architecture review
+(`view.centaurspec.com/QlYnbx5fPp`) — so it can be picked up deliberately rather than rediscovered.
+Anyone reopening it should start from the product decision, not the code: a Remix form's
+idempotency key must be stable across a resubmit, so it would be minted per form-render and carried
+as a hidden input, which means a long-lived tab replays against a stale key. Form-render-scoped key
+vs. a client-side submit guard vs. accepting the duplicate is the fork. C6 ("bring the dashboard
+write path through `handle()`") owns the same write path and is the natural vehicle if it is ever
+revisited.
