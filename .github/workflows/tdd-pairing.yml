@@ -1,0 +1,76 @@
+name: TDD pairing
+
+# The CI half of the TDD pairing guard: a PR whose source changes carry no test
+# changes goes red here, exactly as `.husky/pre-push` would have blocked the
+# push. Until this existed, `PUSH_WITHOUT_TESTS=1` was a LOCAL-ONLY bypass with
+# nothing downstream to catch it — the one gate in this repo with no CI
+# counterpart. Escape hatch: label the PR `tdd-exempt` and the job goes green
+# with a `::notice::`, so the override is a reviewable fact on the PR rather
+# than an env var in someone's shell history.
+#
+# The rule is scripts/tdd-pairing-guard.sh (shared with the hook, issue #278);
+# the CI-specific parts — the merge-base range and the label hatch — are
+# scripts/tdd-pairing-guard-ci.sh, which is unit-tested against a simulated
+# event payload rather than debugged through PR pushes. Issue #280.
+#
+# WHY ITS OWN WORKFLOW, and not a job in unit.yml alongside the tests:
+#   1. The label hatch only works if the gate re-runs on `labeled`/`unlabeled`.
+#      Putting those triggers on unit.yml would re-run the whole Vitest suite
+#      AND the Chromium install of `Editor browser tests` every time any label
+#      is touched on any PR — and this repo labels PRs routinely.
+#   2. The merge base needs `fetch-depth: 0`. unit.yml checks out shallow, and
+#      deepening it would tax the fast gate on every run for this job's benefit.
+#   3. This job needs no `pnpm install` at all — git, Node, two shell scripts.
+#      Inside unit.yml it would sit behind a frozen-lockfile install for no gain.
+#   4. Repo precedent: every other single-purpose gate is its own workflow
+#      (docs-conformance, commitlint, biome). Same tier as the unit tests
+#      (fast, hermetic, per-PR); separate file.
+#
+# Two operator follow-ups, deliberately NOT done from inside this change:
+#   · `tdd-exempt` does not exist as a repo label yet (labels are not Terraform-
+#     managed here — `gh label create tdd-exempt -d "TDD pairing guard: source
+#     changes may land without test changes on this PR"`). Until it does, the
+#     hatch is only reachable by creating the label while applying it.
+#   · This is not in branch protection. `required_status_checks` is Terraform-
+#     managed (infra/terraform/envs/shared/main.tf); adding the context
+#     "TDD pairing" there is the operator's call. Worth making — a gate nobody
+#     is required to pass is advisory — but it should follow a run or two of
+#     real signal, not ship blind in the same commit that introduces the job.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tdd-pairing-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tdd-pairing:
+    name: TDD pairing
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — the guard resolves `git merge-base BASE_SHA HEAD_SHA`,
+      # which a shallow clone cannot answer (it exits 2 and fails the job rather
+      # than guessing).
+      - name: Checkout (full history for the merge base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Only for the payload parse inside the guard; nothing is installed.
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # GITHUB_EVENT_PATH is set by the runner — that is where the `tdd-exempt`
+      # label is read from, so this job needs no token and makes no API call.
+      - name: Source changes carry test changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: sh scripts/tdd-pairing-guard-ci.sh

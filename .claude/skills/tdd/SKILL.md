@@ -12,7 +12,7 @@ description: Test-driven development with red-green-refactor loop. Use when user
 > - **Domain layer is pure** (ADR-024): `packages/domain/` and `packages/application/` have NO I/O. Aggregate invariants and use-case happy paths are unit-testable with no mocks needed. The preferred pattern is real objects + readonly types, *not* mocks.
 > - **Adapter / integration tests**: real implementations against ephemeral fixtures wherever possible (Postgres via Drizzle test schema, R2 via local mock or a CI-only bucket). Use mocks only at the system boundary.
 > - **Domain language**: assertions and test names use the names defined in `docs/domain-glossary.md` (e.g., `Report`, `ReportVersion`, `Acl`, `Scope`). Do not invent local aliases inside test files.
-> - **TDD enforcement layer**: the `.husky/pre-push` TDD pairing guard blocks a push whose source changes carry no test changes (bypass `PUSH_WITHOUT_TESTS=1`, logged). This skill provides the *procedure*; the hook provides the *enforcement*.
+> - **TDD enforcement layer**: the `.husky/pre-push` TDD pairing guard blocks a push whose source changes carry no test changes (bypass `PUSH_WITHOUT_TESTS=1`, logged), and `.github/workflows/tdd-pairing.yml` runs the same rule over the PR (hatch: the `tdd-exempt` label, which goes green with a notice). This skill provides the *procedure*; the hook and the workflow provide the *enforcement*.
 >
 > The rest of this file is Matt Pocock's upstream skill — universal advice; the project context above adapts it to our stack.
 

@@ -65,9 +65,13 @@ that skill is the single home for them, not this file.
   ADR — especially for the domain and application layers, which are dependency-locked.
 - **Not a place to bypass branch protection.** `PUSH_WITHOUT_DOCS=1` and
   `PUSH_WITHOUT_TESTS=1` are the only escape hatches for `.husky/pre-push`, and both print
-  a loud warning into the push output. CI re-runs the **docs** gate, so a docs bypass only
-  defers the failure; the TDD pairing guard has no CI counterpart yet, so a tests bypass
-  is local-only and rests entirely on the operator's judgment.
+  a loud warning into the push output. Neither ends the matter: CI re-runs the **docs**
+  gate (`docs-conformance.yml`) and, since issue #280, the **TDD pairing** gate
+  (`tdd-pairing.yml`, the same `scripts/tdd-pairing-guard.sh` over the PR's merge-base
+  range), so a local bypass only defers the failure to the PR. Getting past the CI half
+  takes the `tdd-exempt` PR label, which turns the job green with a `::notice::` naming
+  the PR — a bypass anyone reviewing the PR can see, unlike an env var in a shell.
+  It still rests on the operator's judgment; it just no longer rests on it invisibly.
 - **Not a place to auto-trust MCP servers.** The rule is in the root's trust-boundary
   paragraph, where the rest of the ADR-0069 obligations live; it is named here only as a
   boundary-list member. None exists today.

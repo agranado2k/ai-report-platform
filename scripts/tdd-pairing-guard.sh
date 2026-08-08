@@ -23,6 +23,12 @@
 # vitest.config.ts (which carries the matching reminder) — nothing ties them
 # together mechanically yet, so a newly covered tree added there without a line
 # here is silently un-guarded.
+# The rule does NOT cover itself: this script and its CI caller are shell, and
+# SOURCE only matches .ts/.tsx/.mjs, so editing the guard trips no guard. Left
+# that way on purpose — widening the regex to scripts/*.sh would also capture
+# behavior-delta.sh and worktree-cleanup.sh, which have no tests, so it is a
+# rule expansion (with its own blast radius) rather than a gap to patch in
+# passing. What covers the guard today is tdd-pairing-guard{,-ci}.test.ts.
 # docs-conformance/config.mjs is excluded: it is reviewable policy DATA
 # (ADR-0041 — "validators hold no policy"), so editing it needs no test change.
 # Renames are excluded (--diff-filter=ACM): a pure move is not new behavior.
