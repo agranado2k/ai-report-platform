@@ -19,20 +19,26 @@
 // list, so it resolves to a `team` org — see `tests/e2e/README.md` for the full
 // fixture writeup (identifiers, expected org, reconstruction steps).
 
-const CLERK_API = "https://api.clerk.com/v1";
+import { clerkFetch, deleteClerkObject } from "./clerk-backend-api";
+// The fixture IDENTITY contract (which addresses we mint, which are standing
+// fixtures, which a sweep may delete) lives in one pure module so the sweep
+// workflow and the e2e support layer cannot drift apart — issue #266. These
+// re-exports keep every existing `from "../support/clerk-session"` import
+// working; the definitions themselves moved.
+import { SECOND_FIXTURE_EMAIL } from "./clerk-fixture-identity";
+import { recordProvisionedIdentity } from "./clerk-fixture-registry";
+
+export {
+  runScopedTeamEmail,
+  SECOND_FIXTURE_EMAIL,
+  TEAM_ORG_DOMAIN,
+} from "./clerk-fixture-identity";
 
 export interface TestSession {
   /** A signed session JWT (carries the `email` custom claim, ADR-0048). */
   readonly jwt: string;
   /** The test user's Clerk user id (for asserting server-side resolution). */
   readonly userId: string;
-}
-
-async function clerkFetch(path: string, secretKey: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${CLERK_API}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${secretKey}`, ...(init?.headers ?? {}) },
-  });
 }
 
 /**
@@ -117,27 +123,6 @@ export async function mintSecondTestSession(): Promise<TestSession> {
   return mintTestSessionFor(secretKey, SECOND_FIXTURE_EMAIL);
 }
 
-/** ADR-0068 §6 — the hand-provisioned second identity (Clerk test-mode address,
- *  verification code 424242). See `tests/e2e/README.md`. */
-export const SECOND_FIXTURE_EMAIL = "silver+clerk_test@agranado.com";
-
-/** The corporate domain the team-org scenarios exercise (NOT on the
- *  public-provider list, so it resolves to a `team` org — ADR-0068 §1). */
-export const TEAM_ORG_DOMAIN = "agranado.com";
-
-/** A RUN-SCOPED team-fixture address (ADR-0074 shared-team-org scenario):
- *  `<prefix>-<runId>+clerk_test@agranado.com`. Fresh identities per run are
- *  the contamination fix from PR #222 round 3: a REUSED fixture can carry a
- *  poisoned mirror from an earlier run / older code in the (persistent,
- *  prod-forked) preview DB branch, and ADR-0074's sticky-after-mirror policy
- *  then CORRECTLY honors that mirror forever — masking the canonical chain
- *  this scenario exists to prove. A user that didn't exist before this run
- *  cannot be mirrored anywhere, on any branch state. Keeps `+clerk_test`
- *  (test-mode: no real inbox, code 424242) and the team domain. */
-export function runScopedTeamEmail(prefix: string, runId: string): string {
-  return `${prefix}-${runId}+clerk_test@${TEAM_ORG_DOMAIN}`;
-}
-
 /** What `ensureTeamFixtureUser` provisioned — the ids the cleanup hook needs. */
 export interface TeamFixture {
   readonly email: string;
@@ -196,6 +181,13 @@ export async function ensureTeamFixtureUser(
       );
     }
     userId = ((await created.json()) as { id: string }).id;
+    // Record BEFORE anything else can throw (issue #266). Everything below —
+    // the membership lookup, the decoy-org create — can fail with the very
+    // 402/429 a saturated instance produces, and this function's caller only
+    // assigns its `TeamFixture` variable on a clean RETURN. Without this line
+    // the user just created is invisible to every cleanup path there is, and
+    // its membership consumes the shared org's cap forever.
+    recordProvisionedIdentity({ kind: "user", id: userId, label: email });
   }
 
   // The pending-session heal (see the doc comment): a zero-membership user
@@ -226,32 +218,44 @@ export async function ensureTeamFixtureUser(
     );
   }
   const decoyOrgId = ((await decoy.json()) as { id: string }).id;
+  // Same reasoning as the user record above: deleting a Clerk user does NOT
+  // delete an organization it created, so an unrecorded decoy outlives
+  // everything.
+  recordProvisionedIdentity({
+    kind: "organization",
+    id: decoyOrgId,
+    label: `arp-e2e-decoy-${localPart}`,
+  });
   return { email, userId, decoyOrgId };
 }
 
 /**
- * Best-effort cleanup for a run-scoped team fixture (the accumulation bound):
+ * PROMPT cleanup for a run-scoped team fixture (the accumulation bound):
  * deletes the Clerk user (which removes its memberships — keeping the shared
  * canonical org's member count flat across runs) and its decoy org. NEVER
  * throws — a cleanup failure must not fail (or mask) the scenario; it logs
- * loudly instead, and a leaked user is caught by the periodic sweep
- * (follow-up; see the PR). A 404 is success (already cleaned / retried).
+ * loudly instead. A 404 is success (already cleaned / retried).
+ *
+ * No longer the ONLY bound (issue #266). It runs first because it is the
+ * cheapest and most precise, but a scenario hook can only ever delete what a
+ * step assigned — so `global-teardown.ts` re-deletes from the on-disk ledger
+ * (`clerk-fixture-registry.ts`) and then sweeps anything older than
+ * `SWEEP_MIN_AGE_HOURS`. What changed HERE is the retry: `deleteClerkObject`
+ * retries 429/5xx, and a swallowed 429 under parallel-PR contention was one of
+ * the leak's two mouths.
  */
 export async function cleanupTeamFixture(secretKey: string, fixture: TeamFixture): Promise<void> {
   const results: string[] = [];
   const del = async (path: string, label: string) => {
-    try {
-      const res = await clerkFetch(path, secretKey, { method: "DELETE" });
-      if (!res.ok && res.status !== 404) results.push(`${label}: HTTP ${res.status}`);
-    } catch (e) {
-      results.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    const outcome = await deleteClerkObject(secretKey, path);
+    if (!outcome.ok) results.push(`${label}: ${outcome.reason}`);
   };
   await del(`/users/${fixture.userId}`, `user ${fixture.email}`);
   if (fixture.decoyOrgId) await del(`/organizations/${fixture.decoyOrgId}`, "decoy org");
   if (results.length > 0) {
     console.warn(
-      `team-fixture cleanup incomplete (will accumulate on the dev instance until swept): ${results.join("; ")}`,
+      "team-fixture cleanup incomplete (the global teardown and the age-gated sweep will retry; " +
+        `run .github/workflows/clerk-sweep.yml if the org hits its cap): ${results.join("; ")}`,
     );
   }
 }
