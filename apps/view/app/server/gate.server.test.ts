@@ -38,8 +38,10 @@ import {
   type Decision,
   decideServe,
   degradeTargetFor,
+  type EditDecision,
   editUnopenableLine,
   type GateDeps,
+  type ViewDecision,
 } from "./gate.server";
 
 const SECRET = "view-access-secret";
@@ -145,7 +147,7 @@ async function decideView(
     reports?: ReportRepository;
     now?: number;
   } = {},
-): Promise<Decision> {
+): Promise<ViewDecision> {
   const deps = makeDeps({
     reports: opts.reports ?? (await repoWith(report)),
     ...(opts.grants ? { grants: opts.grants } : {}),
@@ -167,7 +169,7 @@ async function decideEdit(
     now?: number;
     warn?: (line: string) => void;
   } = {},
-): Promise<Decision> {
+): Promise<EditDecision> {
   const deps = makeDeps({
     reports: opts.reports ?? (await repoWith(report)),
     secret: "secret" in opts ? opts.secret : SECRET,
@@ -259,7 +261,11 @@ describe("decideServe view — resolveViewableReport outcome mapping", () => {
     if (decision.kind === "serve") {
       expect(decision.report.id).toBe(RID);
       expect(decision.version.id).toBe(VID);
-      expect(decision.edit).toBeUndefined();
+      // "no edit payload" is now a TYPE guarantee, not a runtime assertion:
+      // ViewDecision's serve arm has no `edit` field at all, so the line that
+      // used to read `expect(decision.edit).toBeUndefined()` would not compile.
+      // Asserting a property the type forbids only proves the compiler works.
+      expect(Object.keys(decision).sort()).toEqual(["kind", "report", "version"]);
     }
   });
 
@@ -1143,8 +1149,9 @@ describe("degradeTargetFor", () => {
 
   // The decision kinds the edit purpose cannot produce, but whose types the
   // route still has to narrow past — the branch that used to answer silently.
-  it.each<[string, Decision]>([
-    ["interstitial", { kind: "interstitial" }],
+  // `interstitial` is absent by TYPE now, not by convention: EditDecision has
+  // no such arm, so the row that used to sit here would not compile.
+  it.each<[string, EditDecision]>([
     ["error", { kind: "error", status: 404, message: "Not found" }],
     ["redirect", { kind: "redirect", to: "/elsewhere" }],
     ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
