@@ -17,14 +17,18 @@
 // this iframe that kill PM's own MouseDown tracker). Real user drags are fine
 // in production; this tier simply cannot drive one. Double-click is the same
 // real-input gesture anchor-scroll.spec.ts already relies on, and it
-// exercises the identical toolbar seam end-to-end: real input → PM selection
-// → the `mouseup`/dispatch re-report → geometry out of the iframe → placed
-// toolbar. One nuance measured here (a split double-click shows the word
-// selection arriving only AFTER the release in this environment — the same
-// tracker quirk): the mid-drag "geometry withheld while the pointer is down"
-// gate is not OBSERVABLE in this tier, so it lives as the `dragging` guard on
-// ReportEditor's dispatch path with no browser contract pinning it — revisit
-// if this harness ever gains real drags.
+// exercises the seam end-to-end: real input → PM selection → geometry out of
+// the iframe → placed toolbar. Two honesty notes, measured not assumed:
+// in THIS environment the word selection lands only after the release (the
+// same tracker quirk), so the geometry these contracts see comes off the
+// DISPATCH path — the `mouseup` re-report in ReportEditor exists for real
+// drags, whose final selection transaction fires before the release, and is
+// NOT exercised by any tier (deleting it keeps this suite green; it is
+// production-drag-only code, guarded by the node-tier gate tests instead).
+// Likewise the mid-drag "geometry withheld while the pointer is down" gate
+// is not observable here — it is pinned at the node tier
+// (`shouldComputeGeometry`, selection-rect.test.ts). Revisit both if this
+// harness ever gains real drags.
 import { expect, test } from "@playwright/test";
 import { buildHarness } from "./harness/build.mjs";
 
@@ -50,7 +54,7 @@ const FIXTURES: readonly ToolbarFixture[] = [
   },
   {
     file: "plain-report.html",
-    label: "a report with no scroll-behavior at all",
+    label: "a report with no scroll-behavior at all (the measured production document)",
     tag: "@synthetic-fixture",
     paragraph: "#filler p",
   },
@@ -234,6 +238,36 @@ for (const fixture of FIXTURES) {
       await toolbar.getByRole("button", { name: "Bold" }).click();
       await expect(toolbar).toBeVisible();
       await expect(page.getByTestId("pending-selection")).toHaveText(before ?? "");
+      // The load-bearing observation is INSIDE the iframe (claude-review
+      // #301 H-5): host React state cannot change when the iframe blurs (no
+      // PM transaction fires), so only the iframe's own DOM selection can
+      // prove the mousedown-preventDefault kept the real selection alive.
+      // Deleting that preventDefault must fail THIS line.
+      const iframeSelection = await page.evaluate(() => {
+        const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+        const sel = doc?.getSelection();
+        return { exists: sel !== null && sel !== undefined, collapsed: sel?.isCollapsed ?? true };
+      });
+      expect(iframeSelection.exists).toBe(true);
+      expect(iframeSelection.collapsed).toBe(false);
+    });
+
+    test("a keyboard-extended selection shows the toolbar too", async ({ page }) => {
+      // Caret in the paragraph, then Shift+ArrowRight — selection built by
+      // TRANSACTIONS with no pointer involved. This is the dispatch-path
+      // geometry report (dragging=false) observed end-to-end, and it guards
+      // the drag flag against getting stuck: a wedged-true flag would
+      // withhold geometry from exactly this gesture.
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + 10, rect.y + Math.min(10, rect.height / 2));
+      for (let i = 0; i < 4; i++) {
+        await page.keyboard.press("Shift+ArrowRight");
+      }
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      expect((await page.getByTestId("pending-selection").textContent())?.length).toBeGreaterThan(
+        0,
+      );
     });
   });
 }
