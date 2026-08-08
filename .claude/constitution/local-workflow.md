@@ -20,6 +20,10 @@ belt-and-braces.
   reads cleanly. A "fix typo" or "address review feedback" commit gets squashed locally
   first.
 - Refactor-only and behavior-changing work never share a commit (`shared-invariants.md` §10).
+  Checked, not merely asserted: `scripts/behavior-delta.sh` has a **Commit separation**
+  section listing every commit on the branch whose type claims `refactor`/`style` while its
+  own diff touches a contract artifact, and `/review-pr`'s Axis-2 confirm-list carries each
+  one as a 🔀 MIXED COMMIT item for the human to split or relabel.
 
 ## Merging to `main` (ADR-0044, supersedes ADR-0035)
 

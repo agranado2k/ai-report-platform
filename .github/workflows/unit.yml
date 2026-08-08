@@ -38,6 +38,13 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Self-tests for the review-assist shell scripts (scripts/*.sh). They read
+      # real git history, so their fixtures are real throwaway repositories —
+      # dependency-free node:test, same tier as the docs-conformance harness
+      # self-tests, just a different subject.
+      - name: Review-script self-tests
+        run: pnpm test:scripts
+
       # THE AUTHORITATIVE "every step is defined" CHECK, and it belongs in the
       # fast gate because it needs nothing but the repo: `bddgen` generates a
       # Playwright spec per opted-in .feature and ERRORS on any step with no
