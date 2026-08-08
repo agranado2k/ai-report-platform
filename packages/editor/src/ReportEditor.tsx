@@ -76,6 +76,7 @@ import type { EditorSelection } from "./editor-state";
 import {
   anchorScrollTransaction,
   createEditorState,
+  currentSelection,
   docJson,
   jumpToCommentTransaction,
   reportableSelection,
@@ -87,6 +88,7 @@ import {
   linkMarkAtPos,
   scrollAnchorIntoView,
 } from "./link-activation";
+import { type SelectionGeometry, selectionGeometry } from "./selection-rect";
 
 // Re-exported for callers that import it from this module (the type moved to
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
@@ -116,8 +118,28 @@ export interface ReportEditorProps {
    *  enough; no need to re-render on every keystroke) for Save. */
   readonly onChange: (doc: PMDocJson) => void;
   /** Fired after every transaction with the current selection, or `null` when
-   *  the selection is collapsed (nothing to comment on). */
-  readonly onSelectionChange?: (selection: EditorSelection | null) => void;
+   *  the selection is collapsed (nothing to comment on). The second argument
+   *  is WHERE that selection sits — its bounding rect + the editing surface's
+   *  rect, both already translated into the HOST page's viewport coordinates
+   *  (selection-rect.ts) — for selection-anchored floating UI (the Selection
+   *  toolbar, ticket #296). It is `null` whenever the selection is, and ALSO
+   *  null mid-drag: a floating bar must not appear under a moving pointer, so
+   *  geometry is withheld until the mouseup re-report. Callers that only care
+   *  about the selection itself can ignore the argument entirely. */
+  readonly onSelectionChange?: (
+    selection: EditorSelection | null,
+    geometry: SelectionGeometry | null,
+  ) => void;
+  /** Fired when Escape is pressed inside the editing surface (observed, never
+   *  consumed — PM's own handling still runs). The iframe's key events never
+   *  reach the host window, so a host hiding selection-anchored UI on Escape
+   *  needs this seam. */
+  readonly onEscape?: () => void;
+  /** Fired when the report document scrolls inside the editing iframe.
+   *  Scrolling produces NO ProseMirror transaction, so previously-reported
+   *  selection geometry silently goes stale — hosts use this to dismiss
+   *  selection-anchored UI rather than let it drift (ticket #296). */
+  readonly onDocScroll?: () => void;
   /** Comments to render as highlight decorations (best-effort — see the file
    *  doc comment). Read reactively: a new array reference re-seeds the
    *  decoration set, mapped against the CURRENT doc's bounds. */
@@ -158,6 +180,8 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
     className,
     onOpenExternalLink,
     onAnchorNavigate,
+    onEscape,
+    onDocScroll,
   },
   ref,
 ) {
@@ -177,6 +201,10 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
   onOpenExternalLinkRef.current = onOpenExternalLink;
   const onAnchorNavigateRef = useRef(onAnchorNavigate);
   onAnchorNavigateRef.current = onAnchorNavigate;
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+  const onDocScrollRef = useRef(onDocScroll);
+  onDocScrollRef.current = onDocScroll;
 
   // Item B's "Jump": resolve the comment against the CURRENT doc and move
   // the selection there — `scrollIntoView` on the transaction makes the
@@ -228,6 +256,7 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
     if (!iframe) return;
 
     let cancelled = false;
+    let removeScrollListener: (() => void) | null = null;
 
     function mount() {
       if (cancelled || viewRef.current) return; // idempotent: a double signal is safe.
@@ -247,6 +276,33 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       // drag-vs-click discrimination (`clickedCommentId`) is ours. Both
       // handlers return false — they observe, never consume.
       let pointerDown: ClickPoint | null = null;
+
+      // The one path every selection report takes (ticket #296). Geometry —
+      // where the selection sits, in HOST viewport coordinates — rides along
+      // with the selection so hosts can float UI over it, EXCEPT mid-drag
+      // (`dragging`): a bar appearing under a moving pointer would flicker
+      // and swallow the drag's own mouse events, so drags report their
+      // geometry only from the `mouseup` handler below, Notion-style.
+      // `coordsAtPos` speaks iframe-viewport coordinates; the pure
+      // `selectionGeometry` unions start/end and translates by the iframe's
+      // own bounding rect. Side `-1` on `to` reads the coords of the
+      // selection's LAST character rather than the position after it (which
+      // on a line break would be the start of the next line).
+      function reportSelection(
+        selection: EditorSelection | null,
+        forView: EditorView,
+        dragging: boolean,
+      ) {
+        let geometry: SelectionGeometry | null = null;
+        if (selection && !dragging && iframe) {
+          geometry = selectionGeometry(
+            forView.coordsAtPos(selection.from),
+            forView.coordsAtPos(selection.to, -1),
+            iframe.getBoundingClientRect(),
+          );
+        }
+        onSelectionChangeRef.current?.(selection, geometry);
+      }
 
       // The two link-activation EFFECTS (ADR-0062 Amendment 3). Both defer
       // to an injected prop when the caller supplied one; the defaults below
@@ -388,11 +444,30 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             const next = view.state.apply(tr);
             view.updateState(next);
             if (tr.docChanged) onChangeRef.current(docJson(next));
-            onSelectionChangeRef.current?.(reportableSelection(tr, next));
+            reportSelection(reportableSelection(tr, next), view, pointerDown !== null);
           },
           handleDOMEvents: {
             mousedown(_view, event) {
               pointerDown = { x: event.clientX, y: event.clientY };
+              return false;
+            },
+            mouseup(upView) {
+              // The drag's own selection transactions fired during mousemove
+              // with geometry withheld (see reportSelection); the release is
+              // when the Selection toolbar may appear, and no new transaction
+              // fires here — so re-report from the STATE (`currentSelection`,
+              // the same trimmed reading minus the transaction gate).
+              // Deliberately does NOT clear `pointerDown`: the `click` handler
+              // below still needs the down point for its click-vs-drag
+              // discrimination, and it fires after mouseup.
+              reportSelection(currentSelection(upView.state), upView, false);
+              return false;
+            },
+            keydown(_view, event) {
+              // Observed, never consumed: Escape dismisses selection-anchored
+              // host UI (ticket #296); the iframe's key events don't reach
+              // the host window, so this is the host's only seam for it.
+              if (event.key === "Escape") onEscapeRef.current?.();
               return false;
             },
             click(clickedView, event) {
@@ -447,6 +522,20 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       );
       viewRef.current = view;
 
+      // A scroll inside the editing iframe produces NO ProseMirror
+      // transaction, so a host floating UI over previously-reported selection
+      // geometry has no way to learn it went stale — tell it (ticket #296).
+      // On the WINDOW because the report's scroll container varies by
+      // document (the fixture scrolls the window, a report could scroll a
+      // nested box); `capture` catches nested scrolls too, since scroll
+      // events don't bubble but do run ancestors' capture phase.
+      const win = iframe?.contentWindow;
+      if (win) {
+        const onScroll = () => onDocScrollRef.current?.();
+        win.addEventListener("scroll", onScroll, { capture: true, passive: true });
+        removeScrollListener = () => win.removeEventListener("scroll", onScroll, { capture: true });
+      }
+
       // Seed the initial comment highlight decorations (Fix 2) — the
       // `comments`-keyed effect below only re-seeds on a LATER change, so
       // whatever comments are already present at mount time need seeding
@@ -482,6 +571,7 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
     return () => {
       cancelled = true;
       iframe.removeEventListener("load", tryMount);
+      removeScrollListener?.();
       viewRef.current?.destroy();
       viewRef.current = undefined;
     };

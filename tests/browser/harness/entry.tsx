@@ -1,17 +1,23 @@
 // The harness page's app: the REAL `ReportEditor`, mounted the way
 // apps/view's `/edit` route mounts it (same props, same surrounding
 // full-height / overflow-hidden pane layout), over a report parsed by the
-// REAL `parseBody`. Nothing about link activation, comment highlighting or the
-// anchor scroll is stubbed — that is the entire point of this tier.
+// REAL `parseBody`. Nothing about link activation, comment highlighting, the
+// anchor scroll or the Selection toolbar is stubbed — that is the entire
+// point of this tier.
 import {
   type CommentForHighlight,
   type CommentRange,
   type EditorSelection,
   ReportEditor,
+  type ReportEditorHandle,
+  type SelectionGeometry,
 } from "arp-editor";
 import { type PMDocJson, parseBody, splitShell } from "arp-report-html";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
+// Resolved against apps/view (the harness bundles with `resolveDir` there —
+// build.mts), so this is the REAL route component, not a copy.
+import { SelectionToolbar } from "./app/edit/components/SelectionToolbar";
 
 const raw = (document.getElementById("report-src") as HTMLScriptElement).textContent ?? "";
 const { shell, bodyHtml } = splitShell(raw);
@@ -21,6 +27,9 @@ function App() {
   // Mirrors the route's own state wiring, so the React re-render churn a real
   // click produces is present here too.
   const [selection, setSelection] = React.useState<EditorSelection | null>(null);
+  // The Selection toolbar's driver (ticket #296) — same contract as the
+  // route: null mid-drag / on Escape / on document scroll means no toolbar.
+  const [selectionGeometry, setSelectionGeometry] = React.useState<SelectionGeometry | null>(null);
   const [, setRanges] = React.useState<readonly CommentRange[]>([]);
   const [focused, setFocused] = React.useState<string | null>(null);
   // Comments are STATE, not a frozen empty array: click-to-highlight shares
@@ -29,6 +38,7 @@ function App() {
   // comments leaves half of that handler's dispatch matrix unexercised in the
   // one tier that can see a real click.
   const [comments, setComments] = React.useState<readonly CommentForHighlight[]>([]);
+  const editorRef = React.useRef<ReportEditorHandle>(null);
 
   return (
     <div className="root-layout">
@@ -55,6 +65,20 @@ function App() {
         >
           Comment
         </button>
+        {/* The panel's "Jump" — a PROGRAMMATIC selection reveal. The one way
+            the Selection toolbar contract "a programmatic selection never
+            shows the toolbar" can be driven from a real page. */}
+        <button
+          type="button"
+          data-testid="jump-to-comment"
+          disabled={comments.length === 0}
+          onClick={() => {
+            const first = comments[0];
+            if (first) editorRef.current?.jumpToComment(first);
+          }}
+        >
+          Jump
+        </button>
         <span data-testid="focused-comment">{focused ?? ""}</span>
         <span data-testid="pending-selection">{selection?.text ?? ""}</span>
       </header>
@@ -62,6 +86,7 @@ function App() {
         <main className="doc-pane">
           <div className="editor-slot">
             <ReportEditor
+              ref={editorRef}
               initialDoc={doc}
               shell={shell}
               comments={comments}
@@ -80,7 +105,7 @@ function App() {
               //
               // Armed from the test rather than always-on: every other
               // contract in this suite needs the normal, non-throwing wiring.
-              onSelectionChange={(next) => {
+              onSelectionChange={(next, geometry) => {
                 if (
                   (window as unknown as { __throwOnSelectionChange?: boolean })
                     .__throwOnSelectionChange
@@ -88,11 +113,17 @@ function App() {
                   throw new Error("the caller's onSelectionChange threw");
                 }
                 setSelection(next);
+                setSelectionGeometry(geometry);
               }}
+              onEscape={() => setSelectionGeometry(null)}
+              onDocScroll={() => setSelectionGeometry(null)}
               onCommentRangesChange={setRanges}
               onCommentClick={setFocused}
               className="editor-iframe"
             />
+            {selection && selectionGeometry ? (
+              <SelectionToolbar geometry={selectionGeometry} />
+            ) : null}
           </div>
         </main>
         <aside className="side-panel">panel</aside>

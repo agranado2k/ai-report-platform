@@ -18,6 +18,7 @@ export {
 export {
   anchorScrollTransaction,
   createEditorState,
+  currentSelection,
   docJson,
   type EditorSelection,
   editorPlugins,
@@ -35,3 +36,17 @@ export {
   linkMarkAtPos,
 } from "./link-activation";
 export { ReportEditor, type ReportEditorHandle, type ReportEditorProps } from "./ReportEditor";
+export {
+  type FrameRect,
+  type PositionCoords,
+  type SelectionGeometry,
+  selectionGeometry,
+} from "./selection-rect";
+export {
+  placeToolbar,
+  type SelectionRect,
+  TOOLBAR_GAP_PX,
+  TOOLBAR_MARGIN_PX,
+  type ToolbarPlacementInput,
+  type ToolbarPosition,
+} from "./toolbar-placement";
