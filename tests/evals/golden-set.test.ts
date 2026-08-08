@@ -32,6 +32,22 @@ const CONFIG_PATH = join(EVALS_DIR, "promptfooconfig.yaml");
 const POLARITIES = ["positive", "negative"] as const;
 type Polarity = (typeof POLARITIES)[number];
 
+// The PRD's target (issue #264, ADR-0083 §7) is 20–50 cases drawn from REAL
+// observed failures. The suite originally shipped a looser seed range (≥15) so
+// the first commit could land under it; the window below is the target itself,
+// so a suite that shrinks back below the target fails the fast gate instead of
+// quietly measuring less.
+const MIN_CASES = 20;
+const MAX_CASES = 50;
+
+// Polarity balance is a PROPORTION, not a pair of absolutes. An absolute floor
+// of 5 is only meaningful at the bottom of the window: at 40 cases it accepts a
+// 34/6 split — a suite that is nominally balanced and effectively one-sided,
+// because the minority polarity stops buying discrimination as the set grows.
+// The floor scales with the suite instead.
+const MIN_POLARITY_SHARE = 0.3;
+const polarityFloor = (total: number): number => Math.ceil(total * MIN_POLARITY_SHARE);
+
 interface GoldenCase {
   description?: unknown;
   vars?: { scenario?: unknown };
@@ -171,20 +187,35 @@ describe("promptfoo config (tests/evals/promptfooconfig.yaml)", () => {
 });
 
 describe("golden set", () => {
-  it("holds a seeded, growable number of tasks", () => {
+  it("holds a number of tasks inside the PRD's 20–50 window", () => {
     const cases = allCases(readConfig());
-    // The issue targets 20–50 grown from REAL observed failures; this repo
-    // seeds 15–25 and grows the rest from CI failures (see README.md).
-    expect(cases.length).toBeGreaterThanOrEqual(15);
-    expect(cases.length).toBeLessThanOrEqual(50);
+    expect(cases.length, `at least ${MIN_CASES} cases (issue #264 target)`).toBeGreaterThanOrEqual(
+      MIN_CASES,
+    );
+    expect(cases.length, `at most ${MAX_CASES} cases`).toBeLessThanOrEqual(MAX_CASES);
   });
 
-  it("balances positive and negative cases", () => {
+  it("balances positive and negative cases against a floor proportional to the suite", () => {
     const cases = allCases(readConfig());
+    const floor = polarityFloor(cases.length);
     const byPolarity = (p: Polarity) => cases.filter((c) => c.metadata?.polarity === p);
-    expect(byPolarity("positive").length, "positive cases").toBeGreaterThanOrEqual(5);
-    expect(byPolarity("negative").length, "negative cases").toBeGreaterThanOrEqual(5);
+    expect(byPolarity("positive").length, `positive cases (floor ${floor})`).toBeGreaterThanOrEqual(
+      floor,
+    );
+    expect(byPolarity("negative").length, `negative cases (floor ${floor})`).toBeGreaterThanOrEqual(
+      floor,
+    );
     expect(byPolarity("positive").length + byPolarity("negative").length).toBe(cases.length);
+  });
+
+  it("scales the polarity floor with the suite, so growth cannot dilute one side", () => {
+    // At the bottom of the window the proportional floor is close to the old
+    // absolute 5; at the top it is three times it.
+    expect(polarityFloor(MIN_CASES)).toBe(6);
+    expect(polarityFloor(MAX_CASES)).toBe(15);
+    // The discriminating split: 34 positive / 6 negative at 40 cases cleared
+    // the old absolute floor of 5 and is rejected by the proportional one.
+    expect(6, "a 34/6 split at 40 cases must not pass as balanced").toBeLessThan(polarityFloor(40));
   });
 
   it("gives every case a description, a scenario, a polarity and a rationale", () => {
