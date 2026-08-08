@@ -37,7 +37,23 @@ pnpm docs:check:test   # run the harness's own fixture tests (node:test)
 | `gherkin-structure` | each `.feature` has Feature + Scenario + exactly one known phase tag |
 | `openapi-structure` | `openapi.yaml` exists and carries the required contract tokens |
 | `feature-executes` | every `status: 'full'` use-case is wired into `playwright.config.ts` and has step definitions |
-| `claude-md-refs` | every slash command / script / hook path referenced in `CLAUDE.md` exists on disk |
+| `claude-md-refs` | every layer of the agent manual (root `CLAUDE.md`, `.claude/constitution/*.md`, the nested package manuals in `config.claudeMdRefs.nestedManuals`) references only commands and paths that exist; each article is reachable from the root; the shared article stays free of product / vendor / path / command names |
+
+### `claude-md-refs` path resolution
+
+A backticked token whose **first segment** is one of `config.claudeMdRefs.pathRoots`
+resolves **repo-relative**, from whichever manual names it — so `tests/evals/` in
+`apps/mcp/CLAUDE.md` is the repo's eval suite. Any other path-shaped token inside a
+**nested** manual resolves against that manual's own directory (`src/tools.ts` →
+`apps/mcp/src/tools.ts`). Repo-level manuals (root + articles) never resolve
+package-relative. To keep prose out of the check, a package-relative token must contain a
+`/` and either end in `/` or have a dotted final segment, so bare filenames
+(`server.test.ts`), globs (`*.test.ts`) and identifiers are left alone.
+
+The portability deny-list (`config.claudeMdRefs.portability`) carries one entry per
+category of local vocabulary with the reason it may not appear in
+`.claude/constitution/shared-invariants.md`; `prose`-scoped entries are matched against
+the whole file, `spans`-scoped entries only against markdown code spans.
 
 ## Adding a use-case
 
