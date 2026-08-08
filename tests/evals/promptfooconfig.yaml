@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Prompt evals for the agent-facing surfaces of apps/mcp (ADR-0072 Layer 0 +
+# Layer 1). Evals are to these prompts what tests are to code (ADR-0083): a
+# one-line edit to a tool description can move agent behaviour dramatically,
+# and nothing else in the repo would catch it.
+#
+# Run:      pnpm evals            (needs ANTHROPIC_API_KEY)
+# Validate: pnpm evals:validate   (no key, no spend)
+# CI:       .github/workflows/prompt-evals.yml — path-scoped to the prompt
+#           surfaces, and skips green until the operator provisions the key.
+#
+# See README.md in this directory for how to add a case from a real failure.
+description: Centaur Spec MCP prompt-surface evals (issue #264)
+
+prompts:
+  # System message = the shipped `instructions` string; user message = the
+  # scenario. Generated fixtures, never hand-copied text.
+  - file://prompts/mcp-client.js
+
+providers:
+  # The model acts as an MCP client holding the REAL tool definitions, so
+  # "which tool fires" is a measurement of the shipped descriptions.
+  #
+  # claude-sonnet-5 is the recorded default — cheap enough for a per-PR gate,
+  # capable enough that a failure indicts the prompt rather than the model.
+  # ADR-0083 records this as pending the operator's final provider call.
+  - id: anthropic:claude-sonnet-5
+    label: mcp-client
+    config:
+      max_tokens: 2048
+      tools: file://fixtures/mcp-tools.json
+      # `auto`, deliberately: forcing a tool call would make every negative
+      # case unmeasurable.
+      tool_choice:
+        type: auto
+
+defaultTest:
+  assert:
+    # Code-graded, on every case. Outcomes not paths, with partial credit.
+    - type: javascript
+      value: file://asserts/tool-selection.js
+      metric: tool-selection
+
+tests:
+  - file://golden-set/tool-selection.yaml
+  - file://golden-set/tool-selection-negative.yaml
+  - file://golden-set/overclaim-guard.yaml

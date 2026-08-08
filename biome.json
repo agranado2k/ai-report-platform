@@ -15,7 +15,10 @@
       "!**/.features-gen",
       "!**/*.gen.ts",
       "!**/playwright-report",
-      "!**/test-results"
+      "!**/test-results",
+      "!**/.stryker-tmp",
+      "!**/reports/mutation",
+      "!**/tests/evals/fixtures/mcp-tools.json"
     ]
   },
   "formatter": {

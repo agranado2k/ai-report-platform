@@ -13,7 +13,7 @@
 | **Last commit on main**| `a71fbdb` — Merge PR #259 (`fix/idempotency-followups` — ADR-0039 follow-ups). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/sdlc-phase1-hygiene` (branch `chore/sdlc-phase1-hygiene`, PR #261) and `worktree/sdlc-phase2-workflow` (branch `chore/sdlc-phase2-workflow`, stacked on Phase 1) — AI-SDLC plan Phases 1–2. `worktree/roundtrip-tests` (branch `test/idempotency-roundtrips`) — pre-existing, unmerged. `worktree/idempotency-followups` merged as #259 — prune with `/worktree-cleanup`. |
+| **Active worktrees**   | `worktree/sdlc-phase5-quality` (branch `chore/sdlc-phase5-quality`, stacked on the constitution branch) — AI-SDLC Phase 5.1/5.2, mutation + property testing (ADR-0081). `worktree/sdlc-phase5-constitution` (branch `docs/sdlc-phase5-constitution`, PR #267) — Phase 5.3 layered constitution (ADR-0082). `worktree/sdlc-phase4-evals` (branch `feat/sdlc-phase4-evals`, stacked on the quality branch) — AI-SDLC Phase 4, the promptfoo prompt-eval tier for `apps/mcp` (ADR-0083, issue #264). `worktree/contract-seam` (branch `test/idempotency-contract-seam`) — pre-existing, unmerged. AI-SDLC Phases 1–3 merged as PRs #261/#262/#263; their worktrees pruned. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5423,3 +5423,161 @@ package-local paths outside the validator's root list; tracked as a follow-up.
 three of which edited `CLAUDE.md`). **ADR-0081 was deliberately skipped** and left for the
 concurrent Phase-5.1/5.2 sibling task, which needs a dependency ADR. `pnpm docs:check`
 green; `node --test scripts/docs-conformance/test/*.test.mjs` green.
+### 2026-08-07 — AI-SDLC plan, Phase 5.1/5.2: mutation testing + property tests (ADR-0081)
+
+The plan's answer to "the tests are the agent's target function, and nothing measures
+whether the target is load-bearing". A green suite proves nothing about assertion
+strength, and the specific LLM failure mode is an agent that can't make a test pass
+making the test ask for less instead. Coverage doesn't see it (the line still runs),
+the pre-push pairing guard doesn't see it (a test file did change), and the review
+agents could only offer taste. A surviving mutant is that same claim stated objectively.
+
+**Stryker (`@stryker-mutator/core` 9.6.1 + `@stryker-mutator/vitest-runner`)**, scoped
+to `packages/domain` — pure by ADR-024, so a mutant costs a function call. Config in
+`packages/domain/stryker.config.mjs`, plus a package-scoped `vitest.config.ts` so the
+runner can drive one package per mutant (the repo-wide suite still runs from the root
+config). `pnpm test:mutation` at the root, `pnpm --filter arp-domain test:mutation`
+in the package. Deliberately **on-demand / differential, never a per-push gate** and not
+a required check — `thresholds.break` is `null`, the run reports rather than fails.
+
+**Calibration — the whole package, nothing narrowed.** 28 source files, **1054 mutants,
+~51 s** wall-clock at `concurrency: 4` with `perTest` coverage analysis. Baseline
+**85.01 %** total / 87.41 % covered (890 killed, 129 survived, 6 timeout, 29 no-coverage,
+0 errors). After this branch's test work: **86.34 %** / 88.69 % (904 killed, 116 survived,
+28 no-coverage) in ~52 s — the suite grew 343 → 372 tests and the clock barely moved,
+because with `perTest` the cost tracks mutants, not tests. Honest caveats: that's a warm
+local 4-way run on Apple Silicon, so CI will be slower; Stryker reports 181 static mutants
+(17 %) eating ~84 % of the time and `ignoreStatic` is left OFF on purpose.
+
+**The finding, actioned.** 13 survivors sat in `access-token.ts`, ten inside
+`parseAccessClaims` — the narrow `claims-codec.ts` calls "the security boundary between
+token types sharing the same secret". Every type guard in it could be deleted with the
+suite still green **except** the `owner` one, which a hand-crafted-payload test covered.
+The module doc promises it rejects a mistyped `mode`/`email`/`owner`; one third of that
+was enforced, and `mode` is the ADR-0056 revocation-C binding that stops a stale cookie
+surviving an `Acl` mode switch. Red-green in that order: the mutant was applied to the
+source by hand, the new test shown to fail against it, the source restored. 13 survivors
+→ 2, and both remaining ones are provably equivalent (reasoned through in ADR-0081 §6).
+**No production source changed** — the behaviour was already right, only the evidence
+was missing, which is exactly the class of gap the tool exists to find.
+
+**fast-check property tests** (`packages/domain/src/*.property.test.ts`, 19 properties):
+`Slug` accept/reject over the real nanoid alphabet, `External Id` round-trip /
+fixed-width / prefix-binding / injectivity over the whole 128-bit space, `EmailAddress`
+normalization idempotence + dedupe + order-preservation (the shape of the three-way drift
+bug from claude-review #114), and `Acl` construction safety — mode never widens, no
+password hash outside `password` mode, allowlist TTL in range for exactly the in-range
+integers. `*.test.ts` naming is load-bearing (vitest collects only that); fast-check
+defaults, random seed per run, no pinning — a flaky property here is a real edge case.
+
+ADR-0081 also records the **refactor-vs-behaviour commit-separation rule**: a commit is
+either a behaviour-preserving refactor or a behaviour change, never both, because mixing
+them makes the mutation delta unattributable and the behaviour diff unreadable.
+
+**Process**: worktree `worktree/sdlc-phase5-quality` (branch `chore/sdlc-phase5-quality`),
+off `main` at `20ec897`. Phase 5.3 (layered-constitution CLAUDE.md) is a sibling worktree
+and owns CLAUDE.md — untouched here on purpose. Follow-ups left open: wiring the
+differential `--mutate` run into `/review-and-evaluate`'s Test Hygiene sub-agent so it
+cites mutants instead of opinions, a periodic scheduled run for score history, and
+calibrating `packages/application`.
+
+### 2026-08-07 — AI-SDLC plan, Phase 4: the prompt-eval tier for `apps/mcp` (ADR-0083)
+
+The plan's answer to "our constitution demands tests **and evals** wherever there
+is an AI prompt", and we only had the first half. `apps/mcp` is not a service
+with a prompt attached — its product surface **is** prompt text (ADR-0072): the
+server `instructions` string, 27 tool descriptions, `SKILL.md`, and the packaging
+copies. The only automated guard was `OVERCLAIM_PATTERNS`, three regexes over our
+own strings. That proves we never *wrote* an over-claim; it cannot observe what a
+model *does* with the text we did write, and it says nothing at all about which
+tool an agent picks when `reports_set_sharing` and `reports_set_acl` overlap, or
+whether it re-uploads to the same slug instead of quietly breaking a link that is
+already in a customer's inbox. Evals are TDD for the prompts.
+
+**promptfoo 0.122.0** as the backbone, plus `yaml` and `zod` at the root — three
+devDependencies, all test-tier. Suite in `tests/evals/`, split by cost:
+
+- **Keyless smoke tier in the ordinary `pnpm test` gate** (`tests/evals/**/*.test.ts`,
+  added to `vitest.config.ts`; test-only tree, so nothing to mirror into
+  `.husky/pre-push`). 24 tests. It asserts the harness is well-formed — the config
+  *parses* as YAML, every `file://` it names exists, every case carries a reference
+  solution + polarity + `grounded_in`, positives and negatives are both present,
+  every named tool is one the server registers, the judge constraints hold — and
+  deliberately **nothing** about model behaviour. Written red first: 14 failing
+  before the config existed.
+- **Paid eval suite** (`promptfooconfig.yaml`) in a new path-scoped workflow.
+
+**The golden set is generated from, not copied out of, the surfaces.**
+`tests/evals/surface.ts` captures every `server.registerTool(...)` through a
+recording stub and emits the Anthropic tool definitions from the same zod shapes
+the server ships; `pnpm evals:sync` writes them plus `INSTRUCTIONS` into
+`tests/evals/fixtures/` (27 tools, ~30 KB). Checked in — the CI job must run from
+a bare checkout — and **pinned by the smoke tier**, so editing `instructions.ts`
+or `tools.ts` without re-syncing fails the fast gate, and the fixture diff makes
+the prompt-surface delta reviewable. The system prompt under eval is the shipped
+`instructions` string verbatim; nothing is paraphrased anywhere in the loop.
+
+**25 seed cases, 13 positive / 12 negative.** Tool selection is **code-graded,
+never LLM-judged**: `asserts/tool-selection.js` scores outcomes not paths, with
+partial credit over coverage (0.6) / restraint (0.2) / arg-shape (0.2), so
+"right tool, forgot `update_slug`" (0.9) reads differently from "never called it"
+(0.4). `acceptable_tools` means a documented lookup on the way costs nothing;
+`expected_any_of` expresses "two answers are both right". `tool-call-f1` layers
+on the single-answer cases. Negatives are a third of the suite on purpose —
+positives alone measure only eagerness, which is exactly what sharpening a tool
+description creates.
+
+**Over-claim went from lexical to behavioural.** Five cases push on claimed reach
+(admin-entitlement framing, same-team framing, a plain question, a leading
+compliance question, a free-form security paragraph). Their assertions are
+*derived* from `OVERCLAIM_PATTERNS` — `surface.ts` expands each pattern into the
+phrases it matches and the smoke tier requires every guard case to forbid all of
+them, so adding a fourth pattern to `instructions.ts` fails the fast gate until
+the golden set grows with it. `llm-rubric` is used on **one** case, with an
+isolated dimension, `threshold: 0.8`, an Unknown escape hatch and
+`claude-haiku-4-5` judging `claude-sonnet-5` — a different model, enforced by the
+smoke tier along with a hard cap of two judged cases.
+
+**Verified against the installed promptfoo rather than assumed**: `tool-call-f1`
+exists and its extractor understands the Anthropic provider's stringified
+`tool_use` blocks; `is-valid-function-call` is **unusable** here (it delegates to
+a `validateFunctionToolCall` the Anthropic provider does not implement, so it
+fails regardless of output); `regex` compiles with no flags and so cannot carry
+the patterns' `/i`. pass^k is `--repeat 3` with the job failing if any trial
+fails, and promptfoo namespaces the response cache per repeat index, so the three
+trials are independent samples rather than one call replayed.
+
+**Validated end-to-end without spending anything.** `promptfoo validate config` →
+"Configuration is valid". An `echo`-provider dry run drove the whole harness:
+prompt function loaded, golden set parsed, the JS grader ran and produced
+`score 0.40 < 1: did not call reports_upload` on the republish case and
+`tool selection ok (score 1.00); called [none]` on a no-tool negative — exactly
+the right verdicts for a provider that cannot call tools. **No real model call was
+made**; `ANTHROPIC_API_KEY` is not set locally. NB promptfoo needs Node ≥ 22.22
+(CI runs 24; the local default here is 22.20, so the CLI must be run under nvm's
+24 — `pnpm test` is unaffected).
+
+**The blocker is unchanged and deliberately not resolved here.** CI needs
+`ANTHROPIC_API_KEY` in repo secrets, which are Terraform-managed (the Phase 0b
+pattern, like `GEMINI_API_KEY`) — an `infra/terraform` change plus a real key
+plus a budget. No Terraform was touched. `.github/workflows/prompt-evals.yml`
+triggers only on PRs touching a prompt surface (`instructions.ts`, `tools.ts`,
+`prompts.ts`, `skill/**`, `packaging/**`, `tests/evals/**`), runs the keyless
+config validation regardless, and when the secret is absent emits a GitHub notice
+naming issue #264 and ADR-0083 and **exits 0 green**. It is a new workflow and is
+not in `required_status_checks`, so it gates nothing in either state; the day the
+secret lands it starts evaluating with no further change.
+
+`apps/mcp/CLAUDE.md` §5's "they do not exist yet" now points at the live tier and
+carries the sync obligation. Rule 4 still stands: a prompt-surface delta remains
+Axis-2 confirm-list material, and a green eval run does not sign it off.
+
+**Process**: worktree `worktree/sdlc-phase4-evals` (branch `feat/sdlc-phase4-evals`),
+stacked on `chore/sdlc-phase5-quality`. `pnpm docs:check` green; `biome ci` clean;
+full `pnpm test` green (2569 passed). Honest caveats: the 25 seeds cover the
+discriminations we already knew were hard, not the surface — the 20–50 target is
+reached by harvesting **real** failures (procedure in `tests/evals/README.md`),
+and until that starts, green means "no known regression", not "correct". The set
+is authored against `claude-sonnet-5`, so changing provider is a re-baselining
+event. And no case has ever been run against a real model, so the suite's
+calibration — which cases a good model actually passes — is still unknown.

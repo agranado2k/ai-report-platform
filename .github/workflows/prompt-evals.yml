@@ -1,0 +1,181 @@
+name: Prompt evals
+
+# The prompt-eval tier for apps/mcp's agent-facing surfaces (ADR-0083, issue
+# #264). Evals are to these prompts what tests are to code: a one-line edit to
+# the server `instructions` string or a tool description can move agent
+# behaviour dramatically, and no other gate in this repo would see it.
+#
+# Path-scoped on purpose — the same pattern as the ADR-026 docs-trigger matrix.
+# It runs only when a PR actually touches a prompt surface (or the suite that
+# measures it), because it is the only workflow here that spends money per run.
+#
+# FUNDING-BLOCKED, DELIBERATELY GREEN. `ANTHROPIC_API_KEY` IS provisioned (repo
+# secret since 2026-06-02) — what is open in issue #264 is the BUDGET: the key
+# carries no credit, so every provider call comes back as an error. That gives
+# this job three outcomes, not two, and it must tell them apart:
+#
+#   1. No key at all          → skip the eval half, notice, exit 0.
+#   2. Key present, unusable  → the suite ran but evaluated NOTHING (100 %
+#                               provider errors, zero assertions executed).
+#                               Notice, exit 0 — a billing problem is not a
+#                               prompt regression, and failing red here would
+#                               train everyone to ignore this job.
+#   3. Key present and usable → assertion failures are REAL and stay red.
+#
+# Outcome 2 is the one that matters: without the classification step below,
+# an unfunded key turns every run of this workflow permanently red for a
+# reason that has nothing to do with the diff.
+#
+# It is not in `required_status_checks`, so it gates nothing either way.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      # Layer 0 — the server instructions and the tool/prompt descriptions.
+      - "apps/mcp/src/instructions.ts"
+      - "apps/mcp/src/tools.ts"
+      - "apps/mcp/src/prompts.ts"
+      # Where the instructions string is actually wired onto the server: a
+      # change here can stop the Layer-0 text reaching the client at all.
+      - "apps/mcp/src/server.ts"
+      # A real input, not a guess: tools.ts imports ACL_MODES, COMMENT_INTENTS,
+      # FOLDER_VISIBILITIES and REPORT_SHARING_STATES from arp-domain, so a
+      # domain enum edit changes the tool schemas the model is handed.
+      - "packages/domain/src/**"
+      # The suite itself.
+      - "tests/evals/**"
+      - ".github/workflows/prompt-evals.yml"
+      #
+      # NOT listed, deliberately: `apps/mcp/skill/**` and
+      # `apps/mcp/packaging/**` (ADR-0072 Layers 1 and 2). This suite feeds the
+      # model the `instructions` string plus the generated tool definitions and
+      # nothing else — the packaged SKILL.md never enters a prompt here. Paying
+      # for a run on a file the suite cannot observe is pure cost with no
+      # signal. They come back the day a case actually loads them.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prompt-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prompt-evals:
+    name: Prompt evals (apps/mcp surfaces)
+    runs-on: ubuntu-latest
+    env:
+      # Keep the cache inside the workspace so actions/cache can persist it
+      # verbatim; promptfoo's default location is outside it.
+      PROMPTFOO_CACHE_PATH: ${{ github.workspace }}/.promptfoo-cache
+      PROMPTFOO_CACHE_ENABLED: "true"
+      # 14 days, matching promptfoo's own default guidance: a prompt-surface PR
+      # busts the key anyway, so a long TTL only helps unrelated re-runs.
+      PROMPTFOO_CACHE_TTL: "1209600"
+      PROMPTFOO_DISABLE_TELEMETRY: "1"
+      PROMPTFOO_DISABLE_UPDATE: "1"
+    steps:
+      - name: Is a provider key present?
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Prompt evals skipped::No ANTHROPIC_API_KEY secret is readable from this job, so the prompt-eval suite did not run. The keyless checks below still ran; this job is green on purpose and gates nothing. See issue #264 and docs/adr/0083-prompt-evals-promptfoo.md."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Runs with or without a key: proves the suite is loadable in CI, not just
+      # on a developer's machine.
+      - name: Validate the eval config (keyless)
+        run: pnpm evals:validate
+
+      - name: Restore promptfoo response cache
+        if: steps.key.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .promptfoo-cache
+          key: promptfoo-cache-${{ runner.os }}-${{ hashFiles('tests/evals/**') }}
+          restore-keys: |
+            promptfoo-cache-${{ runner.os }}-
+
+      # pass^3: --repeat runs every case three times and the command exits
+      # non-zero if ANY trial fails, so a case only counts as passing if it
+      # passes all three (issue #264 success criterion 3).
+      - name: Run the prompt evals
+        id: run
+        if: steps.key.outputs.available == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # No `--` before the flags: pnpm v10 forwards a literal `--` to the
+        # script, and promptfoo's CLI then reads everything after it as
+        # positional arguments ("too many arguments for 'eval'").
+        #
+        # The exit code is captured rather than allowed to fail the step, so
+        # the classification step below can decide what it MEANT. `set +e` only
+        # (no `set -e` anywhere in this script) — a bare `|| true` would lose
+        # the code entirely.
+        run: |
+          set +e
+          pnpm evals --no-progress-bar --output eval-results.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # Did the suite EVALUATE anything, or did the provider refuse every call?
+      #
+      # promptfoo's JSON output carries `.results.stats` with three counters:
+      # successes and failures are assertion outcomes, errors are calls that
+      # never produced a completion (auth, quota, network). "Zero assertions
+      # executed and at least one error" is precisely the unfunded-key
+      # signature, and it is the one case where a non-zero exit must not turn
+      # this job red.
+      - name: Did the suite actually evaluate?
+        if: ${{ steps.key.outputs.available == 'true' }}
+        env:
+          EVAL_EXIT: ${{ steps.run.outputs.exit_code }}
+        run: |
+          if [ ! -f eval-results.json ]; then
+            echo "::error title=Prompt evals::the eval run produced no eval-results.json (exit ${EVAL_EXIT}); cannot tell a provider outage from a real failure."
+            exit "${EVAL_EXIT:-1}"
+          fi
+
+          stats=$(jq -c '.results.stats // {}' eval-results.json)
+          successes=$(printf '%s' "$stats" | jq -r '.successes // 0')
+          failures=$(printf '%s' "$stats" | jq -r '.failures // 0')
+          errors=$(printf '%s' "$stats" | jq -r '.errors // 0')
+          echo "successes=${successes} failures=${failures} errors=${errors} exit=${EVAL_EXIT}"
+
+          if [ "$((successes + failures))" -eq 0 ] && [ "${errors}" -gt 0 ]; then
+            echo "::notice title=Prompt evals did not evaluate::Provider unavailable — the ANTHROPIC_API_KEY secret is present but unusable (e.g. no credit), so all ${errors} calls came back as provider errors and ZERO assertions were executed. This is a funding/budget question, not a prompt regression: see issue #264. Exiting 0 so a billing problem does not read as a failing gate."
+            exit 0
+          fi
+
+          # Anything else is a real result: assertions ran, so the exit code
+          # means what it says.
+          exit "${EVAL_EXIT:-0}"
+
+      - name: Upload eval results
+        if: ${{ always() && steps.key.outputs.available == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-eval-results
+          path: eval-results.json
+          if-no-files-found: ignore
