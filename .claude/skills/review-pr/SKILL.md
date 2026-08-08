@@ -105,6 +105,41 @@ Common examples of duplication to flag:
 - Re-stubbing globals (e.g., `console`, `fetch`) already stubbed in setup files.
 - Duplicating `beforeAll` / `beforeEach` hooks that mirror global setup behavior.
 
+**Cite surviving mutants, not taste, whenever `packages/domain` source changed.** Points 5–7
+ask you to judge whether a test is *load-bearing*, and an opinion on that ("this assertion
+looks weak") is cheap for an author to argue with. There is a machine answer, so use it:
+
+```
+scripts/mutation-delta.sh
+```
+
+It scopes a Stryker run to the pure-domain source files **this branch** changed and prints
+the mutation score plus every surviving mutant with `file:line` and the mutator — a mutant
+that survives is production behavior Stryker deleted or inverted with **no test failing**
+(ADR-0081). When the branch changed no domain source it says so in under a second and runs
+nothing, which is the common case.
+
+How to use its output:
+
+- **A survivor is a finding; an unbacked "this test looks weak" no longer is.** Report each
+  as `[file:line] <Mutator> survives — <what the mutant changed>, no test failed`. **HIGH**
+  when the mutant sits in code this branch added or changed (the branch shipped behavior
+  nothing checks); **MEDIUM** when it is pre-existing (real, but not this PR's regression).
+- **Assertion weakening is the failure mode this exists to catch.** An *edited existing*
+  assertion in the diff plus a new survivor in the code that assertion covers is the
+  signature of a test made to ask for less so it would pass. Name it as that, explicitly,
+  and cite both the assertion hunk and the mutant.
+- **Never report the score itself as a finding.** `thresholds.break` is `null` on purpose:
+  this is a diagnostic, not a gate, and the score drifts run to run (the property tests
+  seed from the clock — ADR-0081 §5). Report mutants, which are reproducible; a score
+  movement of ~0.1 pp is noise.
+- **"The mutant is equivalent" is a legitimate resolution** — some mutants provably cannot
+  be killed (ADR-0081 §6 leaves two alive with reasons). If the author has already argued
+  equivalence for a mutant, that closes it; do not re-raise it.
+- **Skip silently when the script reports no domain source changed**, and do not treat its
+  silence as a clean bill of health: it covers `packages/domain` only (ADR-0081 §2), so
+  points 1–8 still apply across every other tree in the diff.
+
 #### Agent 7 — Spec & Behavior Reviewer (Opus, Axis 2 — fresh context)
 
 The one agent whose job is the question the other six never ask: **did anything change that nobody asked for?**
@@ -113,7 +148,8 @@ The one agent whose job is the question the other six never ask: **did anything 
 
 1. The diff (`merge-base...HEAD`) scoped to the **contract artifacts** below.
 2. The originating spec: the PRD/ticket issue body (from the branch name / PR description / `Part of #N` references) and any ADRs the diff touches.
-3. The output of `scripts/behavior-delta.sh` (the deterministic candidate list).
+3. The output of `scripts/behavior-delta.sh` (the deterministic candidate list) and of
+   `scripts/mutation-delta.sh` (the mutation delta over the changed domain source).
 
 It must **NOT** receive the other six agents' findings, the implementation conversation, or this skill's earlier summarization — anchoring on the implementer's narrative is exactly what it exists to avoid.
 
@@ -131,7 +167,9 @@ It must **NOT** receive the other six agents' findings, the implementation conve
 | Agent-facing surface | `apps/mcp` instructions / tool descriptions / packaged SKILL.md (ADR-0072) | any prompt-surface delta |
 | Process & agent surfaces | `.claude/skills/**`, `.claude/constitution/**`, root and nested `CLAUDE.md`, `.husky/**`, `scripts/docs-conformance/**` | skills/hooks/gates/standing instructions change how every future session behaves — same confirm treatment; an edited constitution rule with no spec reference is an unapproved policy change, not a docs tidy-up |
 
-**Procedure:** run `scripts/behavior-delta.sh` for the grounded candidate list, read each candidate's diff hunk, then classify every behavior delta against the originating spec:
+**Procedure:** run `scripts/behavior-delta.sh` for the grounded candidate list and
+`scripts/mutation-delta.sh` for the mutation delta, read each candidate's diff hunk, then
+classify every behavior delta against the originating spec:
 
 - ✅ **SPECIFIED** — the spec asked for it. Cite the exact line: PRD acceptance criterion, ticket body, or ADR number.
 - ⚠️ **UNSPECIFIED — confirm** — no spec reference found. This is the finding class the human must see; do not soften it, do not resolve it yourself.
@@ -139,6 +177,8 @@ It must **NOT** receive the other six agents' findings, the implementation conve
 Missing requirements (spec asked, diff doesn't deliver) are also Axis-2 findings, tagged ❌ **MISSING**.
 
 **Commit separation** (`shared-invariants.md` §10 — refactoring and behavior never share a commit) is the one Axis-2 finding class that is *about the history rather than the diff*, so it is classified per commit, not per surface. `scripts/behavior-delta.sh` emits it as its own **Commit separation** section: commits whose Conventional Commit type claims structure-only work (`refactor`, `style`) while that commit's own diff touches a contract artifact. Each listed commit is a confirm-list item tagged 🔀 **MIXED COMMIT**. The script has already established the fact — do not re-derive it and do not resolve it yourself; report the commit, the artifacts it touches, and let the human choose between splitting the commit and relabelling it. An empty section is the normal result and needs no mention.
+
+**The mutation delta** closes the list with the one thing the other tags cannot state: whether the behavior above is actually *enforced*. `scripts/mutation-delta.sh` mutates the pure-domain source this branch changed and reports the score plus every surviving mutant (ADR-0081 §1 — the diagnostic that feeds this list). Emit its result as exactly **one** 🧬 **MUTATION** line, always — including the skip, because "this branch changed no domain source" is itself information the human wants confirmed. It is **not** a classification and takes no ✅/⚠️: it is a measurement of the list, so it goes last, after the tagged items it qualifies. Never assign it a severity, never let a score decide anything, and do not restate the individual mutants here — Agent 6 owns those as Axis-1 findings (a surviving mutant is a *standards* problem: the tests are not load-bearing). Axis 2's use of the number is narrower and specific: a ⚠️ UNSPECIFIED behavior change in a file that also carries survivors is unrequested behavior that nothing is checking, and the human should see those two facts on the same screen.
 
 ### 4. High-Signal Filtering
 
@@ -197,9 +237,18 @@ Immediately after (and visually separate from) the severity report, present Agen
                 → <PRD/ticket/ADR citation>; <artifact updated>
 
 ❌ MISSING      <spec line the diff does not deliver>
+
+🧬 MUTATION     <score> over <N> changed domain source file(s) — <M> surviving mutant(s)
+                → the branch's domain behavior, as enforced by its tests (ADR-0081)
 ```
 
-Rules: never assign severities to these items, never mix them into the C/H/M/L lists, never omit a ✅ (the human should see the whole behavioral footprint, not just the suspects). 🔀 items come first — they are the cheapest to act on and the reason the rest of the list is hard to read. If Agent 7 found no behavior deltas, say exactly that — an empty confirm-list is a meaningful result.
+The 🧬 line when the branch touched no pure-domain source — still printed, never omitted:
+
+```
+🧬 MUTATION     no domain source changed — mutation run skipped
+```
+
+Rules: never assign severities to these items, never mix them into the C/H/M/L lists, never omit a ✅ (the human should see the whole behavioral footprint, not just the suspects). 🔀 items come first — they are the cheapest to act on and the reason the rest of the list is hard to read. 🧬 comes last and appears exactly once: it measures the list rather than joining it, and it is the only line that is never a question for the human. If Agent 7 found no behavior deltas, say exactly that — an empty confirm-list is a meaningful result (the 🧬 line is still printed under it).
 
 After presenting the summary, you MUST ask:
 

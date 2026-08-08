@@ -131,7 +131,7 @@ The two that remain are **equivalent mutants**, deliberately left alive rather t
 
 **Follow-ups, explicitly not done here.**
 
-- Wiring the differential (`--mutate` on changed files) invocation into `/review-and-evaluate`'s Test Hygiene sub-agent so it cites mutants instead of opinions.
+- ~~Wiring the differential (`--mutate` on changed files) invocation into `/review-and-evaluate`'s Test Hygiene sub-agent so it cites mutants instead of opinions.~~ **Landed** (issue #282): `scripts/mutation-delta.sh` + `scripts/mutation-delta-report.mjs`; `/review-pr`'s Agent 6 cites survivors and Agent 7's confirm-list carries the 🧬 mutation-delta line. Struck through rather than deleted — a "not done here" that is done reads, to the next agent, as work still waiting.
 - A periodic (weekly / labelled-PR) scheduled run to track the score over time, once there is a place to put the history.
 - Calibrating `packages/application`, which is pure but has more collaborators.
 - The remaining 116 survivors are a reading list, not a backlog. `anchor.ts` (66.67 %) and `brand.ts` (62.50 %) are the weakest files; `errors.ts`'s 27.59 % is mostly the no-coverage constructors above. `comment.ts` (14 survivors) and `folder.ts` (21) are the largest absolute clusters and the obvious next read.

@@ -52,6 +52,14 @@ Package-scoped purity rules for the domain layer live in `packages/domain/CLAUDE
   is blocked exactly like a `src/` change would be; CI re-runs it in
   `.github/workflows/docs-conformance.yml`.
 
+**Measuring a tier is not a tier** (ADR-0081). Mutation testing asks whether the first
+bullet's tests are load-bearing, and it runs on demand, never on push: `pnpm test:mutation`
+for the whole `arp-domain` calibration (~1050 mutants, ~51 s), `scripts/mutation-delta.sh`
+for the differential form a review can afford — Stryker scoped to the pure-domain source
+files the branch changed, printing the score and every surviving mutant with `file:line`.
+It is a diagnostic and exits 0 whatever the score; `/review-pr`'s Agent 6 cites its
+survivors instead of offering an opinion, and Agent 7's confirm-list carries its 🧬 line.
+
 Conventions and the red-green-refactor procedure itself live in `.claude/skills/tdd/SKILL.md` —
 that skill is the single home for them, not this file.
 
