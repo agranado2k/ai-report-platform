@@ -161,7 +161,18 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // `interstitial` arm and its serve arm's `edit` is required, so after the
     // three early returns above TypeScript has already narrowed `decision` to
     // exactly one shape. The comment here used to read "the types can't prove
-    // it"; now they do. Degrade EXACTLY the way the gate would: through
+    // it"; now they do.
+    //
+    // The reason stays "gate-decision-unusable" rather than the more specific
+    // "app-origin-unset" (claude-review #276). They are NOT interchangeable
+    // here: `appOrigin` is destructured at :123 and passed straight into
+    // `deps` at :135, so it is the SAME value the gate tested. The gate
+    // degrades an unset appOrigin itself — it cannot return "serve" on one.
+    // So this branch firing does not mean the env is unset; it means the gate
+    // and the route disagreed about one variable, and "app-origin-unset" would
+    // send an incident responder to check an env var that is demonstrably set.
+    //
+    // Degrade EXACTLY the way the gate would: through
     // the gate's own target (which carries the owner `?access=` fallback when
     // one is in play), and with a log line. This branch used to hard-code
     // `/${params.slug}` and say nothing — the same silent, owner-stranding
