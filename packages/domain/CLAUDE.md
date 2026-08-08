@@ -16,7 +16,11 @@ This package is the reason the rest of the test strategy is cheap. Keep it pure.
 6. **This is where property tests and mutation calibration live** (issue #265). Purity is
    what makes both affordable: invariants are expressible as properties, and mutation
    runs are fast with no infrastructure. A surviving mutant here is a real gap in the
-   target function, not noise — fix the test, not the score.
+   target function, not noise — fix the test, not the score. Two ways to run it, both on
+   demand and neither a gate (ADR-0081): `pnpm test:mutation` mutates the whole package
+   (~1050 mutants, ~51 s — the calibration), and `scripts/mutation-delta.sh` mutates only
+   the source files the current branch changed (seconds), which is the form `/review-pr`
+   consumes. Run the differential one before you push a change in this tree.
 
 Tests are `*.test.ts` co-located with source; `pnpm test` from this directory runs them.
 
