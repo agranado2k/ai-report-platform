@@ -17,6 +17,7 @@
 // report stayed LISTED to them through the §8 org-write leg, and the ADR-0063
 // edit-token door (which never consults the Acl) served them its content. See
 // `pruneStaleOrgWriteGrant` for the exact rule and why `org` is left alone.
+
 import {
   ACL_WRITE_SCOPE,
   type AclMode,
@@ -31,6 +32,7 @@ import {
   validationError,
 } from "arp-domain";
 import type { AuditEntry } from "../audit";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -141,76 +143,83 @@ export async function setAcl(
     idemRef = idem.value.ref;
   }
 
-  return deps.uow.run(async () => {
-    // Prune BEFORE persisting. Fail-closed both ways: if pruning fails
-    // nothing changed and a retry re-prunes; if the persist then fails, the
-    // whole transaction rolls back together (prune + persist + audit are now
-    // one UnitOfWork) — so a partial prune-without-persist can no longer
-    // strand the Acl and the grants out of sync. Persist-first would still be
-    // worse in spirit: pruning stays logically "first" so a fresh retry after
-    // any failure re-derives the diff from the (unchanged) previous mode.
-    const pruned = await pruneStaleGrants(deps.grants, found.value.id, found.value.acl, acl.value);
-    if (!pruned.ok) return pruned;
-
-    // The SAME rule, applied to the second grant family (ADR-0078 §11).
-    const prunedOrgWrite = await pruneStaleOrgWriteGrant(
-      deps.orgWriteGrants,
-      found.value.id,
-      acl.value.mode,
-    );
-    if (!prunedOrgWrite.ok) return prunedOrgWrite;
-
-    const saved = await deps.reports.setAcl(found.value.id, acl.value);
-    if (!saved.ok) return saved;
-
-    const entries: AuditEntry[] = [
-      {
-        action: "acl.set",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-        meta: { mode: acl.value.mode },
+  // The mutation returns BOTH the updated report and whether the org-write
+  // grant was actually revoked, because the audit rows depend on the latter and
+  // commitWrite derives them from what the mutation returns. Mapped back to the
+  // report below so this use case's signature is unchanged.
+  const committed = await commitWrite<{
+    readonly report: Report;
+    readonly orgWriteRevoked: boolean;
+  }>(
+    deps,
+    {
+      idemRef,
+      audit: ({ orgWriteRevoked }) => {
+        const entries: AuditEntry[] = [
+          {
+            action: "acl.set",
+            orgId: actor.orgId,
+            actorUserId: actor.userId,
+            targetType: "report",
+            targetId: found.value.id,
+            meta: { mode: acl.value.mode },
+          },
+        ];
+        // Only when a row actually moved — the log records revocations, not
+        // every narrowing call, exactly as `setReportSharing` does.
+        if (orgWriteRevoked) {
+          entries.push({
+            action: "grant.org_write.revoked",
+            orgId: actor.orgId,
+            actorUserId: actor.userId,
+            targetType: "report",
+            targetId: found.value.id,
+            // The Acl mode that no longer authorizes it — the reason, not just
+            // the fact. `setAcl` has no sharing-state vocabulary for a `to`.
+            meta: { revokedBy: "acl.set", mode: acl.value.mode },
+          });
+        }
+        return entries;
       },
-    ];
-    // Only when a row actually moved — the log records revocations, not every
-    // narrowing call, exactly as `setReportSharing` does.
-    if (prunedOrgWrite.value) {
-      entries.push({
-        action: "grant.org_write.revoked",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-        // The Acl mode that no longer authorizes it — the reason, not just the
-        // fact. `setAcl` has no sharing-state vocabulary to report a `to` in.
-        meta: { revokedBy: "acl.set", mode: acl.value.mode },
-      });
-    }
-    const audited = await deps.audit.record(entries);
-    if (!audited.ok) return audited;
+      // never carries a password hash
+      response: ({ report }) => ({ responseStatus: 200, responseBody: reportReplayBody(report) }),
+    },
+    async () => {
+      // Prune BEFORE persisting. Fail-closed both ways: if pruning fails
+      // nothing changed and a retry re-prunes; if the persist then fails, the
+      // whole transaction rolls back together (prune + persist + audit are one
+      // UnitOfWork) — so a partial prune-without-persist can no longer strand
+      // the Acl and the grants out of sync. Persist-first would still be worse
+      // in spirit: pruning stays logically "first" so a fresh retry after any
+      // failure re-derives the diff from the (unchanged) previous mode.
+      const pruned = await pruneStaleGrants(
+        deps.grants,
+        found.value.id,
+        found.value.acl,
+        acl.value,
+      );
+      if (!pruned.ok) return pruned;
 
-    const updated = { ...found.value, acl: acl.value };
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 200,
-        responseBody: reportReplayBody(updated), // never carries a password hash
+      // The SAME rule, applied to the second grant family (ADR-0078 §11).
+      const prunedOrgWrite = await pruneStaleOrgWriteGrant(
+        deps.orgWriteGrants,
+        found.value.id,
+        acl.value.mode,
+      );
+      if (!prunedOrgWrite.ok) return prunedOrgWrite;
+
+      const saved = await deps.reports.setAcl(found.value.id, acl.value);
+      if (!saved.ok) return saved;
+
+      return ok({
+        report: { ...found.value, acl: acl.value },
+        orgWriteRevoked: prunedOrgWrite.value,
       });
-      if (!done.ok) return done;
-    }
-    return ok(updated);
-  });
+    },
+  );
+  return committed.ok ? ok(committed.value.report) : committed;
 }
 
-/**
- * Revoke `report_grants` rows the new Acl no longer authorizes (ADR-0056 "5e"):
- * mode switched away from `allowlist` → revoke every grant; mode stays
- * `allowlist` → revoke just the emails dropped from the roster. Any other
- * transition (including allowlist → allowlist with only additions) leaves
- * grants untouched — the previous grants are a strict superset restriction of
- * the new allowlist, so a re-added email should NOT need to re-redeem a
- * magic link.
- */
 export async function pruneStaleGrants(
   grants: GrantStore,
   reportId: Report["id"],

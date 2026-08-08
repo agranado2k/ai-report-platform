@@ -9,6 +9,7 @@
 // email at check time) → upsert via WriteGrantStore + a `grant.write.granted`
 // audit_log row (ADR-0070), committed together in one UnitOfWork (ADR-0037 §5)
 // → return the grant.
+
 import {
   ACL_WRITE_SCOPE,
   type AppError,
@@ -19,6 +20,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -88,51 +90,50 @@ export async function grantWrite(
   if (idem.value.outcome === "replay") return reviveWriteGrantReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const g = await deps.grants.grant(
-      found.value.id,
-      email.value,
-      actor.userId,
-      granteeUserId.value,
-    );
-    if (!g.ok) return g;
-    const audited = await deps.audit.record([
-      {
-        action: "grant.write.granted",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-        // Always record the grantee EMAIL (the grant key) — `granteeUserId` is
-        // opportunistic (null until the invitee signs up, ADR-0060 §2), so the
-        // email is the only attribution present for a grant to a not-yet-
-        // registered user. Consistent with revoke-write's audit meta.
-        meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
-      },
-    ]);
-    if (!audited.ok) return audited;
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "grant.write.granted",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "report",
+          targetId: found.value.id,
+          // Always record the grantee EMAIL (the grant key) — `granteeUserId` is
+          // opportunistic (null until the invitee signs up, ADR-0060 §2), so the
+          // email is the only attribution present for a grant to a not-yet-
+          // registered user. Consistent with revoke-write's audit meta.
+          meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
+        },
+      ],
+      response: (grant) => ({ responseStatus: 201, responseBody: grant }),
+    },
+    async () => {
+      const g = await deps.grants.grant(
+        found.value.id,
+        email.value,
+        actor.userId,
+        granteeUserId.value,
+      );
+      if (!g.ok) return g;
 
-    // Re-read via listByReport for the canonical persisted row (grantedAt is
-    // server-assigned) rather than constructing one client-side. Inside the
-    // transaction so the recorded replay body IS the committed row (ADR-0039).
-    const listed = await deps.grants.listByReport(found.value.id);
-    if (!listed.ok) return listed;
-    const grant = listed.value.find((it) => it.granteeEmail === email.value);
-    if (!grant) {
-      return err({
-        kind: "Unexpected",
-        message: "write grant not found immediately after granting",
-      });
-    }
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 201,
-        responseBody: grant,
-      });
-      if (!done.ok) return done;
-    }
-    return ok(grant);
-  });
+      // Re-read via listByReport for the canonical persisted row (grantedAt is
+      // server-assigned) rather than constructing one client-side. Inside the
+      // transaction so the recorded replay body IS the committed row (ADR-0039).
+      // It precedes the audit row now rather than following it — commitWrite
+      // derives both the audit entries and the replay body from what the
+      // mutation returns, and neither step depends on the other.
+      const listed = await deps.grants.listByReport(found.value.id);
+      if (!listed.ok) return listed;
+      const grant = listed.value.find((it) => it.granteeEmail === email.value);
+      return grant
+        ? ok(grant)
+        : err({
+            kind: "Unexpected" as const,
+            message: "write grant not found immediately after granting",
+          });
+    },
+  );
 }
