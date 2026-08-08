@@ -121,9 +121,7 @@ function App() {
               onCommentClick={setFocused}
               className="editor-iframe"
             />
-            {selection && selectionGeometry ? (
-              <SelectionToolbar geometry={selectionGeometry} />
-            ) : null}
+            {selectionGeometry ? <SelectionToolbar geometry={selectionGeometry} /> : null}
           </div>
         </main>
         <aside className="side-panel">panel</aside>

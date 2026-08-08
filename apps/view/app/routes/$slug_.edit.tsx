@@ -618,7 +618,11 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               the public viewer (which this route does not touch). Fixed
               positioning, so where it sits in the tree is immaterial; it
               lives next to the editor it annotates. */}
-          {mode === "edit" && selection && selectionGeometry ? (
+          {/* Geometry alone gates the render: non-null geometry implies a
+              non-null selection (the editor only builds geometry for one) —
+              a second `selection &&` conjunct would imply an independence
+              that doesn't exist. `mode` IS load-bearing: never in Compare. */}
+          {mode === "edit" && selectionGeometry ? (
             <SelectionToolbar geometry={selectionGeometry} />
           ) : null}
 

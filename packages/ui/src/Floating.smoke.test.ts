@@ -25,4 +25,12 @@ describe("Floating", () => {
     expect(html).toContain("bg-surface-raised");
     expect(html).toContain("p-1");
   });
+
+  it("a caller style cannot defeat the fixed positioning (spreads first)", () => {
+    const html = renderToStaticMarkup(
+      createElement(Floating, { left: 5, top: 6, style: { position: "absolute", left: 999 } }),
+    );
+    expect(html).toContain("position:fixed");
+    expect(html).toContain("left:5px");
+  });
 });

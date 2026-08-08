@@ -19,7 +19,12 @@
 // and the selection — in the editing surface, which is also what makes the
 // "clicking the toolbar does not collapse the selection" browser contract
 // hold.
-import { placeToolbar, type SelectionGeometry } from "arp-editor";
+import {
+  placeToolbar,
+  type SelectionGeometry,
+  type ToolbarPlacementInput,
+  type ToolbarPosition,
+} from "arp-editor";
 import { Floating, MoreIcon } from "arp-ui";
 import { useEffect, useRef, useState } from "react";
 
@@ -30,14 +35,20 @@ export interface SelectionToolbarProps {
 
 /** Rendered-but-unmeasured (and SSR) position: parked far offscreen so the
  *  measuring first paint is never visible. */
-const OFFSCREEN = { left: -9999, top: -9999, placement: "above" as const };
+const OFFSCREEN: ToolbarPosition = { left: -9999, top: -9999, placement: "above" };
 
+// Not arp-ui's `Button`: the bar sits on `bg-surface-raised`, so ghost's
+// `hover:bg-surface-raised` would be an invisible hover — this inverts to
+// `hover:bg-surface` — and these are square icon slots, not text buttons.
+// The focus-visible ring matches Button's exactly (claude-review #301 H-7):
+// a `role="toolbar"` full of buttons with no visible keyboard focus would be
+// the only such buttons in the product.
 const buttonClass =
-  "inline-flex h-7 min-w-7 items-center justify-center rounded-control px-1.5 text-sm text-muted hover:bg-surface hover:text-fg";
+  "inline-flex h-7 min-w-7 items-center justify-center rounded-control px-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 export function SelectionToolbar({ geometry }: SelectionToolbarProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const [size, setSize] = useState<ToolbarPlacementInput["toolbar"] | null>(null);
 
   // Measure once on mount: this slice's content is static, so the size can't
   // change afterwards. Re-placement on geometry changes is plain arithmetic
