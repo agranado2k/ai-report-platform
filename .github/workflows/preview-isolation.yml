@@ -331,10 +331,34 @@ jobs:
           echo "view_url=https://$view_url" >> "$GITHUB_OUTPUT"
 
   # ── Smoke: run the e2e reusable workflow against the now-READY isolated URL ───
+  #
+  # SHARED CONCURRENCY, SCOPED TO THE SMOKE LEG ONLY (issue #266, 2nd comment).
+  # Every PR's smoke authenticates against the SAME Clerk dev instance and
+  # provisions run-scoped identities into the SAME anchored `agranado.com` org.
+  # Three stacked PRs pushing at once ran three suites in parallel and the
+  # instance answered `clerk users lookup failed: 429`. The `isolate` /
+  # `security-headers` / `teardown` jobs contend for nothing shared (their Neon
+  # branch, Vercel env and R2 prefix are all per-PR), so the group goes HERE,
+  # on the one job that touches a shared external resource — the workflow-level
+  # `concurrency` above stays per-PR, and nothing else is serialized.
+  #
+  # `cancel-in-progress: false` because a half-run smoke leaks fixtures: the
+  # global teardown only runs when the process is allowed to finish.
+  #
+  # KNOWN LIMIT: GitHub keeps at most ONE pending run per concurrency group —
+  # "any existing pending job or workflow in the same concurrency group will be
+  # canceled and the new queued job will take its place". So with three PRs
+  # arriving together, the first runs, the second waits, and the third EVICTS
+  # the second. That is a cancelled required check needing a re-run, which is
+  # visible and one click to fix — traded against a 429 mid-suite, which is a
+  # red herring failure that also leaks the fixtures it had already created.
   smoke:
     needs: isolate
     if: github.event.action != 'closed'
     name: Smoke the isolated preview
+    concurrency:
+      group: preview-smoke-shared
+      cancel-in-progress: false
     uses: ./.github/workflows/e2e.yml
     with:
       base_url: ${{ needs.isolate.outputs.app_url }}
