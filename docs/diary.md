@@ -10,10 +10,10 @@
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** **Editing & comments epic SHIPPED + CLOSED (ADR-0062–0067):** the unified in-viewer editor lives at `view.<domain>/<slug>/edit` — one authenticated surface consolidating the ProseMirror editor, comments (ADR-0064, closed-enum `intent` note/enhancement/add/remove + author-or-owner edit), version history + visual diff (ADR-0065), and author display-names from the Clerk identity mirror (ADR-0048, migration 0016 + one-time backfill #205). Reached one-click from the dashboard by any canWrite user; the standalone dashboard editor/versions/diff pages were retired in the Phase-5 cutover. Feedback rounds 1 (#189–#195) + 2 (#196–#201) + polish batch (#204) + backfill (#205) all merged. **Remaining editor payoff: the comment-`intent` agent-action pipeline (PRD #198) — design-first, needs an ADR (ADR-0069 lethal-trifecta surface).** |
 | **Repo path**          | `~/PetProjects/centaur-spec/` (main; local folder renamed from `ai-report-platform` — the GitHub remote keeps the old name). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `a71fbdb` — Merge PR #259 (`fix/idempotency-followups` — ADR-0039 follow-ups). |
+| **Last commit on main**| `2ecff0e` — Merge PR #276 (`refactor/decision-by-purpose`). Landed by `/merge-train` (ADR-0077) with #275; both web-flow-signed, `migrate-db` + `release` green after each. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `worktree/sdlc-phase5-quality` (branch `chore/sdlc-phase5-quality`, stacked on the constitution branch) — AI-SDLC Phase 5.1/5.2, mutation + property testing (ADR-0081). `worktree/sdlc-phase5-constitution` (branch `docs/sdlc-phase5-constitution`, PR #267) — Phase 5.3 layered constitution (ADR-0082). `worktree/sdlc-phase4-evals` (branch `feat/sdlc-phase4-evals`, stacked on the quality branch) — AI-SDLC Phase 4, the promptfoo prompt-eval tier for `apps/mcp` (ADR-0083, issue #264). `worktree/contract-seam` (branch `test/idempotency-contract-seam`) — pre-existing, unmerged. AI-SDLC Phases 1–3 merged as PRs #261/#262/#263; their worktrees pruned. |
+| **Active worktrees**   | Six, each with an open PR at the time of writing: `commit-separation` (#290), `eval-smoke-tighten` (#288), `tdd-guard-extract` (#289), `validator-hardening` (#291), `review-workflow-adr0044` (#286) — the SDLC-hardening tickets T0–T7 under PRD #277 — and `diary-merge-train` (#287, this entry). `/worktree-cleanup` pruned eight on 2026-08-08: the AI-SDLC Phase 4/5 worktrees, `contract-seam`, `clerk-e2e-hygiene`, `commit-write` and `commit-write-final`. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5651,3 +5651,98 @@ shapes the existing fixture code already relies on, but the paging and delete ca
 verified only by construction. The sweep workflow's bash was simulated locally with a
 stubbed `curl`, and its jq filter cross-checked against the same positive/negative corpus
 as the TypeScript predicate — identical verdicts.
+
+### 2026-08-08 — The commitWrite migration completes (20/20), and the gate Decision splits by purpose
+
+Two refactors from the `/improve-codebase-architecture` review landed together via
+`/merge-train` (#275 → #276, both signed, `migrate-db` + `release` green after each).
+Neither changes behaviour; `release` published no new version, which is correct —
+`refactor` and `docs` do not bump under semantic-release.
+
+**C1 — one commit tail for every idempotent write (#275).** `grantWrite`, `setAcl` and
+`setReportSharing` were the last three of twenty use cases still hand-rolling the
+`uow.run` → mutate → audit → `idempotency.complete` sequence. All twenty now go through
+`commitWrite`, so the ADR-0070 (audit commit-last) and ADR-0039 (idempotent replay)
+ordering guarantees are asserted in one place instead of re-derived per use case.
+
+The three were last because each needed the audit entries to see something the mutation
+produces. The interesting pair is `setAcl` vs `setReportSharing`: same domain concern,
+but only `setAcl` genuinely needs a composite `{report, orgWriteRevoked}` return (its
+`grant.org_write.revoked` row depends on whether the prune actually fired) plus an
+explicit `commitWrite<…>` type parameter, because the spec argument precedes the mutation
+so TS cannot infer `T` from a later argument. `setReportSharing` needs neither — every
+value its audit rows read is computed before the transaction opens, so the spec closes
+over them. Using the composite in both would have been cargo-culting.
+
+Deliberately **not** migrated: `uploadReport`, `processScanResult` and
+`applyFolderSharingToReports` still call `uow.run` directly. None claims an idempotency
+key, so `commitWrite`'s completion step has nothing to do for them. `commitWrite` also
+still does not own the idempotency *claim* — the three existing orderings (deletes claim
+before the load, most claim after, `uploadReport` mid-pipeline) are real.
+
+**C3 — `ViewDecision` / `EditDecision` (#276).** One `Decision` union described both
+viewer purposes, so four fields were optional for everyone even though each is either
+always-present or never-present once the purpose is known. The `/edit` loader paid for
+that with a three-condition defensive branch whose own comment read *"the types can't
+prove it"*, and with an `EditDegradeReason` variant — `gate-decision-unusable` — naming a
+state the gate cannot reach. The prose was correct; it just was not checkable.
+
+`decideServe` is now overloaded on the purpose literal, so both routes get the narrow type
+with no call-site change. `EditDecision` has no `interstitial` arm (the edit chain degrades
+a mid-scan report rather than holding on it) and its serve arm's `edit` / `degradeTo` /
+`ownerFallback` are required. The loader's defensive branch collapses to one condition,
+`!appOrigin`, which survives only because `appOrigin` is the route's own local.
+
+Review asked whether that branch should now log the more specific `app-origin-unset`.
+It should not, and the reasoning is recorded in the code: `appOrigin` is destructured at
+`$slug_.edit.tsx:123` and passed straight into `deps` at `:135`, so it is the *same value*
+the gate tested, and the gate degrades an unset `appOrigin` itself rather than returning
+`serve` on one. The branch firing therefore means gate and route disagreed about a single
+variable — `app-origin-unset` would send an incident responder to check an env var that is
+demonstrably set. **Follow-up:** if that reason is ever relabelled, the
+`gate-decision-unusable` variant loses its only emitter and becomes prunable.
+
+**A process lesson worth keeping.** Both PRs were assembled by slicing each write tail out
+**by text** (start-of-`uow.run` to end-of-file) rather than by structure. That silently
+deleted whatever trailed the replaced region. Earlier in the series it cost `create-folder`
+its `parentDepth` helper and `set-acl` its two prune helpers — those failed loudly, because
+they were code. On #275 it took two **comment** blocks instead: the `pruneStaleGrants`
+JSDoc (the only written record of the ADR-0056 "5e" allowlist-superset invariant, and
+`setReportSharing` calls that same function) and the issue #233 "no ref → nothing to
+complete" rule. Nothing failed. `claude-review` caught the first; auditing the diff for the
+same failure mode found the second. The rule restored to `commit-write.ts` rather than back
+to `grant-write`'s call site — it now governs all twenty use cases, and restating it per
+caller is what let it rot. **Slice by structure, and diff deleted comments, not just
+deleted code.**
+
+**C4 was explored and rejected as scoped.** The review proposed one request encoder shared
+by three clients. Verification did not support it: `_index.tsx` has **zero** mutating
+`fetch` calls — the dashboard mutates through Remix actions in-process, so it is not an
+HTTP client and an encoder cannot reach it — and the third "problem-parser",
+`apps/app/app/server/http.server.ts`, is a server-side response *producer*. That leaves two
+real HTTP clients in different runtimes with different auth schemes, which is a thin case
+for a shared package.
+
+The defect underneath it **is** real and is not fixed by an encoder: only the MCP client
+sends an `Idempotency-Key`. The viewer edit client has 4 mutating fetches (3 in
+`comments-client.ts`, 1 in `save-edit.ts`) with none, and the dashboard action has 10
+mutating intents that pass no `idempotencyKey` to the use case at all —
+`handle.server.ts:83` confirms the key is optional server-side, so absent means no dedup.
+Per ADR-0039's amendment the mitigation is "clients send an Idempotency-Key"; two of them
+do not. A double-submitted delete returns 404 for an action that succeeded, and every
+double-submit writes a second audit row. **Open decision** before fixing the dashboard
+half: a Remix form's key must be stable across the resubmit, so it has to be minted per
+form-render and carried as a hidden input — which means a long-lived open tab replays
+against a stale key. Form-render-scoped key vs. a client-side submit guard vs. accepting
+the duplicate is a product call, not a refactor.
+
+**C4 dismissed (operator, 2026-08-08).** Closing the loop on the entry above: the request-encoder
+candidate is not being built, and the idempotency-key gap it surfaced is **not scheduled**. The
+finding itself stays on the record — in the entry above and in the published architecture review
+(`view.centaurspec.com/QlYnbx5fPp`) — so it can be picked up deliberately rather than rediscovered.
+Anyone reopening it should start from the product decision, not the code: a Remix form's
+idempotency key must be stable across a resubmit, so it would be minted per form-render and carried
+as a hidden input, which means a long-lived tab replays against a stale key. Form-render-scoped key
+vs. a client-side submit guard vs. accepting the duplicate is the fork. C6 ("bring the dashboard
+write path through `handle()`") owns the same write path and is the natural vehicle if it is ever
+revisited.
