@@ -19,6 +19,7 @@
     "e2e": "bddgen && playwright test",
     "test:browser": "playwright test --config tests/browser/playwright.config.ts",
     "test:mutation": "pnpm --filter arp-domain test:mutation",
+    "test:scripts": "node --test scripts/test/*.test.mjs",
     "evals": "promptfoo eval --config tests/evals/promptfooconfig.yaml --repeat 3",
     "evals:validate": "promptfoo validate config --config tests/evals/promptfooconfig.yaml",
     "evals:sync": "node tests/evals/fixtures/sync-fixtures.mjs",
