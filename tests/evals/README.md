@@ -111,7 +111,7 @@ under `metadata`, and the shape is enforced by `golden-set.test.ts`.
         required: [html, update_slug]
         forbidden: []
         equals: {}
-    min_score: 1                # optional; the per-case bar (default 1.0)
+    min_score: 1                # optional; the per-case pass bar (default 1.0)
     grounded_in:                # the shipped file(s) this was drawn from — must exist
       - apps/mcp/src/instructions.ts
     rationale: >-
@@ -135,6 +135,32 @@ the path, with partial credit:
 
 Partial credit is the point: 0.9 ("right tool, missing `update_slug`") and 0.4
 ("never called it") are different failures, and the `reason` string says which.
+
+#### The per-case bar (`metadata.min_score`)
+
+Partial credit only changes anything if a case can act on it. `min_score` is
+that lever — the score a run must reach for the case to pass:
+
+- **Default 1.0, and deliberately unchanged**: with no `min_score`, every
+  component must be perfect. Lowering the bar is an opt-in a case makes for
+  itself, in the case data, where a reviewer sees it in the diff — not a global
+  loosening.
+- **Lower it only for a known, accepted partial answer**, and say why in
+  `rationale`. `min_score: 0.8` on a case whose arg shape has one genuinely
+  optional key turns "0.9, so red" into a pass; it does not turn a wrong tool
+  into a pass, because coverage alone is worth 0.6.
+- **It is validated, not trusted.** A value outside `(0, 1]` — or a non-number,
+  e.g. the YAML quoting slip `min_score: "0.8"` — is *ignored*: the grader falls
+  back to the strict 1.0 and appends a warning to `reason` on **both** verdicts.
+  `min_score: 0` would otherwise pass literally every run, including one that
+  fires a forbidden tool, silently deleting the case; failing closed is the same
+  direction the tool-call extractor takes. The warning rides on passes too,
+  because a misconfigured bar on a case that happens to pass is exactly the one
+  a failure report would never show.
+
+`asserts/tool-selection.test.ts` pins all of this — default, honoured bar,
+missed bar, and each rejected value — keylessly, so none of it is discovered on
+a paid run.
 
 Tool selection is **code-graded, never LLM-judged** (issue #264 criterion 2).
 `tool-call-f1` is layered on the cases with exactly one defensible answer.
@@ -182,6 +208,19 @@ The suite seeds **26 cases** (14 positive / 12 negative). The issue's target is
 100–200 of secondary blogs), and the remaining headroom is deliberately unspent:
 a case invented at a desk measures our imagination, a case harvested from a
 failure measures the product.
+
+`golden-set.test.ts` pins that target rather than the looser seed range the
+suite first shipped with:
+
+- **The window is 20–50**, checked on every `pnpm test`. A suite that shrinks
+  below 20 fails the fast gate instead of quietly measuring less.
+- **Each polarity must hold at least 30% of the suite** (`Math.ceil`), not a
+  fixed 5. An absolute floor is only meaningful at the bottom of the window: at
+  40 cases it would accept a 34/6 split — nominally balanced, effectively
+  one-sided. The proportional floor is 6 at 20 cases and 15 at 50, so the
+  minority polarity keeps buying discrimination as the set grows. In practice
+  that means harvesting a run of positive failures obliges you to harvest
+  negative ones too.
 
 When a prompt-surface change makes an agent do the wrong thing — in CI, in
 dogfooding, in a bug report:

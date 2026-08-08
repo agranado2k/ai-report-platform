@@ -21,7 +21,9 @@
 // Partial credit is the point — a run that scores 0.8 on "called the right
 // tool but omitted update_slug" is a different failure from one that scored 0,
 // and the reason string says which. `metadata.min_score` (default 1) is the
-// per-case bar.
+// per-case bar, and it is what makes partial credit change OUTCOMES rather
+// than merely decorate reasons: a case with a known, accepted partial answer
+// lowers its own bar, in the case data, where a reviewer sees it.
 
 /**
  * Every `{…}` run in `text` whose braces balance, outermost-first.
@@ -168,6 +170,28 @@ function scoreArgs(spec, calls) {
   return [Math.max(best.satisfied, 0), checks, best.notes];
 }
 
+/**
+ * The per-case pass bar, read off `metadata.min_score` and VALIDATED.
+ *
+ * The default is 1 — every component perfect — and stays there for any value
+ * this grader cannot honour: a non-number (`min_score: "0.8"` is a plausible
+ * YAML quoting slip), a bar of 0 (which passes literally every run, including
+ * one that fires a forbidden tool — silently deleting the case), or a bar
+ * above 1 (which no run can ever clear). Falling back to the strict default is
+ * the fail-CLOSED direction, the same one `extractToolCalls` takes; the
+ * warning it pushes is what stops a typo from living forever behind a pass.
+ */
+function resolveMinScore(raw, warnings) {
+  if (raw === undefined || raw === null) return 1;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0 || raw > 1) {
+    warnings.push(
+      `ignored unusable metadata.min_score ${JSON.stringify(raw)} (want a number in (0, 1]); graded at the strict default 1`,
+    );
+    return 1;
+  }
+  return raw;
+}
+
 export default function gradeToolSelection(output, context) {
   const metadata = context?.test?.metadata ?? {};
   const expected = asList(metadata.expected_tools);
@@ -175,7 +199,8 @@ export default function gradeToolSelection(output, context) {
   const acceptable = asList(metadata.acceptable_tools);
   const expectedArgs = metadata.expected_args ?? {};
   const anyOf = metadata.expected_any_of === true;
-  const minScore = typeof metadata.min_score === "number" ? metadata.min_score : 1;
+  const warnings = [];
+  const minScore = resolveMinScore(metadata.min_score, warnings);
 
   const calls = extractToolCalls(output);
   const called = [...new Set(calls.map((c) => c.name))];
@@ -229,11 +254,15 @@ export default function gradeToolSelection(output, context) {
   const score = 0.6 * coverage + 0.2 * restraint + 0.2 * args;
   const pass = score + 1e-9 >= minScore;
 
+  const verdict = pass
+    ? `tool selection ok (score ${score.toFixed(2)} ≥ ${minScore}); called [${called.join(", ") || "none"}]`
+    : `score ${score.toFixed(2)} < ${minScore}: ${reasons.join("; ") || "no reason recorded"}`;
+
   return {
     pass,
     score,
-    reason: pass
-      ? `tool selection ok (score ${score.toFixed(2)}); called [${called.join(", ") || "none"}]`
-      : `score ${score.toFixed(2)} < ${minScore}: ${reasons.join("; ") || "no reason recorded"}`,
+    // Warnings ride on BOTH verdicts: a misconfigured bar on a case that
+    // happens to pass is exactly the one a failure report would never show.
+    reason: warnings.length > 0 ? `${verdict} [${warnings.join("; ")}]` : verdict,
   };
 }
