@@ -151,11 +151,28 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     headers.set("x-robots-tag", "noindex, nofollow");
     return new Response(null, { status: 303, headers });
   }
-  if (decision.kind !== "serve" || !decision.edit || !appOrigin) {
-    // Defensive narrowing only: for purpose "edit" the gate never emits
-    // `interstitial`, never a "serve" without the edit capability, and never
-    // a "serve" with appOrigin unset (it degrades those itself) — but the
-    // types can't prove it. Degrade EXACTLY the way the gate would: through
+  if (!appOrigin) {
+    // The gate never returns "serve" with appOrigin unset — it degrades those
+    // itself. This is the last defensive narrowing left in this branch, and it
+    // is here only because `appOrigin` is the ROUTE's own local (the editor
+    // needs it as its Save/API target), not something read back off the
+    // Decision. The other two conditions this branch used to carry —
+    // `kind !== "serve"` and `!decision.edit` — are gone: EditDecision has no
+    // `interstitial` arm and its serve arm's `edit` is required, so after the
+    // three early returns above TypeScript has already narrowed `decision` to
+    // exactly one shape. The comment here used to read "the types can't prove
+    // it"; now they do.
+    //
+    // The reason stays "gate-decision-unusable" rather than the more specific
+    // "app-origin-unset" (claude-review #276). They are NOT interchangeable
+    // here: `appOrigin` is destructured at :123 and passed straight into
+    // `deps` at :135, so it is the SAME value the gate tested. The gate
+    // degrades an unset appOrigin itself — it cannot return "serve" on one.
+    // So this branch firing does not mean the env is unset; it means the gate
+    // and the route disagreed about one variable, and "app-origin-unset" would
+    // send an incident responder to check an env var that is demonstrably set.
+    //
+    // Degrade EXACTLY the way the gate would: through
     // the gate's own target (which carries the owner `?access=` fallback when
     // one is in play), and with a log line. This branch used to hard-code
     // `/${params.slug}` and say nothing — the same silent, owner-stranding
