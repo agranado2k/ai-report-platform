@@ -43,6 +43,16 @@ const hasBrowserCreds = hasAuthCreds && Boolean(process.env.E2E_CLERK_PUBLISHABL
 
 export default defineConfig({
   testDir,
+  // Run-scoped Clerk identity hygiene (issue #266). These run ONCE in the
+  // top-level process, so they survive what the per-scenario `After({ tags:
+  // "@run-scoped" })` hooks cannot: a worker restart, a provisioning call that
+  // threw before its `TeamFixture` was ever assigned, a scenario that never
+  // started. Setup clears the ledger and sweeps identities older than 24h off
+  // the shared dev instance; teardown deletes everything THIS run recorded and
+  // sweeps again. Both no-op without E2E_CLERK_SECRET_KEY, so a local
+  // `pnpm e2e` stays offline, and neither can fail the run.
+  globalSetup: "./tests/e2e/support/global-setup.ts",
+  globalTeardown: "./tests/e2e/support/global-teardown.ts",
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
