@@ -5,10 +5,11 @@
 #   2. TDD pairing  — pushed source changes must come with test changes
 #                     bypass: PUSH_WITHOUT_TESTS=1
 # Bypasses print a loud warning into the push output so they are visible in
-# the terminal history. Asymmetry to know about: CI re-runs the DOCS gate
-# (docs-conformance.yml), so PUSH_WITHOUT_DOCS only defers that failure — but
-# no workflow re-checks TDD pairing, so PUSH_WITHOUT_TESTS is a local-only
-# bypass and its use is on the operator's judgment.
+# the terminal history. Both only DEFER their failure: CI re-runs the docs gate
+# (docs-conformance.yml) and the TDD pairing gate (tdd-pairing.yml, the same
+# scripts/tdd-pairing-guard.sh over the PR's merge-base range — issue #280).
+# Getting past the CI half of the pairing rule needs the `tdd-exempt` PR label,
+# where the override is visible to whoever reviews the PR.
 
 # --- 1. docs guard -----------------------------------------------------------
 if [ "$PUSH_WITHOUT_DOCS" = "1" ]; then
