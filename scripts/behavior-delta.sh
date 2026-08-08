@@ -81,7 +81,15 @@ process=$(printf '%s\n' "$all" | grep -E "$re_process" || true)
 #   - merge commits are skipped: a merge's first-parent diff is the whole merged
 #     branch, not this commit's own work.
 #   - pure renames and copies are skipped (`A`/`M`/`D` only) — a move is not a
-#     behavior change, the same call .husky/pre-push's TDD guard makes.
+#     behavior change, the same call .husky/pre-push's TDD guard makes with
+#     `--diff-filter=ACM`. Note what that costs, deliberately: `--find-renames`
+#     also reports a rename WITH edits as `R<score>` whenever the two files stay
+#     similar enough, so a commit that moves a contract file and tweaks it in the
+#     same breath is invisible here. Widening to `R` would instead fire on every
+#     honest move, which is the failure mode this section is built to avoid — and
+#     the pairing guard already accepts the identical trade. A refactor pass that
+#     edits behavior while moving the file is mislabelled at the source; this
+#     check is the second line, not the first.
 #   - the unit test tier is skipped entirely: call-site churn in `*.test.ts` is
 #     what a rename IS, so flagging it would fire on almost every honest
 #     refactor. `.feature` files are kept, and only when EDITED: Gherkin is the
