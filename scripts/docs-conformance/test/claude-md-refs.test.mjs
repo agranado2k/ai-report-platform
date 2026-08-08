@@ -372,6 +372,22 @@ test("does not treat bare filenames, globs or identifiers in a nested manual as 
   cleanup(ctx);
 });
 
+// The portability deny-list's repo-path regex admits `@`, so `@internal/foo.ts`
+// counts as a path there. Package-relative resolution did not, so the same
+// token inside a nested manual was silently unchecked — a dead reference that
+// one guard calls a path and the other cannot see at all.
+test("resolves an @-scoped package-relative path in a nested manual", () => {
+  const ctx = ctxFor({
+    ...NESTED_BASE,
+    "apps/mcp/CLAUDE.md": "The shim lives at `@internal/ghost/bar.ts`.",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.match(out[0].message, /apps\/mcp\/@internal\/ghost\/bar\.ts/);
+  cleanup(ctx);
+});
+
 test("stays silent when a configured nested manual does not exist", () => {
   const ctx = ctxFor(CONFORMANT);
   const out = run(ctx);
@@ -540,6 +556,26 @@ test("flags a slash command in the shared article even when the skill exists", (
   assert.equal(out.length, 1);
   assert.ok(hasRule(out, "portability-leak"));
   assert.match(out[0].message, /slash-command/);
+  cleanup(ctx);
+});
+
+// `sh` used to sit in the product-hostname TLD alternation, so every script
+// filename in the article — `worktree-cleanup.sh` — read as a hostname. The
+// leak was still caught, but under the wrong id, with a hint about deployment
+// addresses that has nothing to do with a script path. A guard whose reason
+// string sends the reader somewhere else is barely better than one that misses.
+test("classifies a .sh script path as a repo path, not a deployment hostname", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": `${CONFORMANT["CLAUDE.md"]}\nSee \`.claude/constitution/shared-invariants.md\`.`,
+    "scripts/worktree-cleanup.sh": "#!/usr/bin/env bash\n",
+    ".claude/constitution/shared-invariants.md": `${PORTABLE}\nRun \`scripts/worktree-cleanup.sh\` afterwards.`,
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "portability-leak"));
+  assert.match(out[0].message, /repo-path/);
+  assert.doesNotMatch(out[0].message, /product-hostname/);
   cleanup(ctx);
 });
 

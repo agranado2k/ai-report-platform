@@ -314,7 +314,11 @@ export const claudeMdRefs = {
       {
         id: "product-hostname",
         scope: "prose",
-        re: /\b(?:[a-z0-9-]+\.)+(?:com|dev|io|app|sh)\b/i,
+        // No `sh`: every shell script in the tree ends in it, so the TLD
+        // alternation read `worktree-cleanup.sh` as a hostname and reported a
+        // real leak under the wrong id, with a hint about deployment addresses.
+        // Script paths are already covered by `repo-path` / `tool-invocation`.
+        re: /\b(?:[a-z0-9-]+\.)+(?:com|dev|io|app)\b/i,
         reason:
           "A hostname is deployment-specific, and the framework has no deployment. Describe the role ('the published viewer origin'), not the address.",
       },

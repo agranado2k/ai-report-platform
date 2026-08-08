@@ -61,7 +61,13 @@ const COMMAND_TOKEN = /(?:^|[\s([{"'|])\/([a-z][a-z0-9-]*)(?=$|[\s)\]}"'|,.;:!?]
 // either end in `/` (a directory) or carry a dotted final segment (a file).
 // That keeps `src/tools.ts` and `packaging/` checked while leaving bare
 // filenames (`server.test.ts`), globs (`*.test.ts`) and identifiers alone.
-const PKG_RELATIVE = /^[\w.-]+(?:\/[\w.-]+)*\/?$/;
+//
+// `@` is admitted for symmetry with the portability deny-list's `repo-path`
+// regex, which already accepts it: without it `@internal/foo/bar.ts` was a path
+// to one guard and invisible to the other, so a dead scoped reference in a
+// nested manual went unchecked. A bare package specifier (`@scope/name`) is
+// still not a path — the dotted-final-segment rule below sees to that.
+const PKG_RELATIVE = /^[\w.@-]+(?:\/[\w.@-]+)*\/?$/;
 
 export function run(ctx) {
   const cfg = ctx.config.claudeMdRefs ?? {};
