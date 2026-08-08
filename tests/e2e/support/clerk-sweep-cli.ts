@@ -12,10 +12,7 @@
  * Secret: E2E_CLERK_SECRET_KEY (or CLERK_SECRET_KEY_STAGING) in the
  * environment — the DEV instance key, never the live one.
  */
-import {
-  selectSweepableOrganizations,
-  selectSweepableUsers,
-} from "./clerk-fixture-identity.ts";
+import { selectSweepableOrganizations, selectSweepableUsers } from "./clerk-fixture-identity.ts";
 import {
   configuredNeverSweep,
   listAllOrganizations,

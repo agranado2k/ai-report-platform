@@ -114,7 +114,9 @@ export async function listAllUsers(secretKey: string): Promise<readonly Sweepabl
   return users;
 }
 
-export async function listAllOrganizations(secretKey: string): Promise<readonly SweepableOrganization[]> {
+export async function listAllOrganizations(
+  secretKey: string,
+): Promise<readonly SweepableOrganization[]> {
   const organizations: SweepableOrganization[] = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
