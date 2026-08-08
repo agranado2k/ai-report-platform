@@ -90,6 +90,13 @@ mutate=$(printf '%s\n' "$changed" | paste -sd, -)
 # Only the `json` reporter: `clear-text` and `progress` would interleave with the
 # summary this script's stdout is supposed to be. Everything Stryker says goes to
 # stderr; the parsed answer comes back on stdout below.
+#
+# COUPLED TO stryker.config.mjs: this path is Stryker's DEFAULT json-reporter
+# output (`reports/mutation/mutation.json`, relative to the package). Setting
+# `jsonReporter.fileName` there would write the report somewhere else and this
+# script would silently take the "produced no report" branch — a green-looking
+# skip, not an error. If the config ever needs a custom filename, thread it
+# through here rather than hardcoding a second copy of it.
 report="$root/$pkg_dir/reports/mutation/mutation.json"
 rm -f "$report"
 
@@ -98,10 +105,13 @@ status=0
 pnpm --filter "$pkg_name" exec stryker run \
   --mutate "$mutate" \
   --reporters json \
-  --allowEmpty >&2 2>&1 || status=$?
+  --allowEmpty >&2 || status=$?
 
 if [ ! -f "$report" ]; then
   printf '\nStryker produced no report (exit %s) — see the run output above.\n' "$status"
+  printf 'Expected it at %s.\n' "$report"
+  printf 'If the run itself looked fine, check that stryker.config.mjs does NOT set\n'
+  printf '`jsonReporter.fileName` — this script reads the json reporter DEFAULT path.\n'
   exit 0 # diagnostic, never a gate: a failed run is reported, not raised
 fi
 

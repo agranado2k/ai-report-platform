@@ -241,6 +241,30 @@ test("counts a timeout as detected and lists a no-coverage mutant as a survivor"
   assert.match(out, /Survivors \(1\)/);
 });
 
+// The score's denominator is the VALID mutants; a CompileError, RuntimeError or
+// Ignored mutant is evidence of nothing and is excluded from it. Reporting one
+// combined mutant count alongside the percentage made the two irreconcilable —
+// "50.00% … (4 mutants)" with a denominator of 2 reads as a bug in the score.
+test("counts invalid and ignored mutants apart from the scored ones", () => {
+  const out = summarize({
+    "src/slug.ts": {
+      mutants: [
+        mutant("Killed", 1, 1, "BooleanLiteral", "false"),
+        mutant("Survived", 2, 1, "StringLiteral", '""'),
+        mutant("CompileError", 3, 1, "BlockStatement", "{}"),
+        mutant("Ignored", 4, 1, "ArithmeticOperator", "-"),
+      ],
+    },
+  });
+
+  // detected 1 / valid 2 — the two excluded mutants are not in the denominator.
+  assert.match(out, /50\.00%/);
+  assert.match(out, /2 scored across 1 file\(s\)/);
+  assert.match(out, /2 not scored \(invalid or ignored\)/);
+  // Only the Survived one is a reading-list item.
+  assert.match(out, /Survivors \(1\)/);
+});
+
 test("says so plainly when every mutant in the scoped files was killed", () => {
   const out = summarize({
     "src/anchor.ts": { mutants: [mutant("Killed", 1, 1, "BooleanLiteral", "false")] },
