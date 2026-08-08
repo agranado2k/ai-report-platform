@@ -5,9 +5,9 @@
  * registered from the default branch, and the leak itself blocks merging).
  *
  *   Dry run (default — lists, deletes NOTHING):
- *     pnpm exec tsx tests/e2e/support/clerk-sweep-cli.ts
+ *     npx --yes tsx@4.20.3 tests/e2e/support/clerk-sweep-cli.ts
  *   Real deletion, all run-scoped regardless of age:
- *     pnpm exec tsx tests/e2e/support/clerk-sweep-cli.ts --apply --older-than-hours=0
+ *     npx --yes tsx@4.20.3 tests/e2e/support/clerk-sweep-cli.ts --apply --older-than-hours=0
  *
  * Secret: E2E_CLERK_SECRET_KEY (or CLERK_SECRET_KEY_STAGING) in the
  * environment — the DEV instance key, never the live one.
@@ -15,14 +15,14 @@
 import {
   selectSweepableOrganizations,
   selectSweepableUsers,
-} from "./clerk-fixture-identity";
+} from "./clerk-fixture-identity.ts";
 import {
   configuredNeverSweep,
   listAllOrganizations,
   listAllUsers,
   reportCleanup,
   sweepStaleRunScopedIdentities,
-} from "./clerk-fixture-sweep";
+} from "./clerk-fixture-sweep.ts";
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
