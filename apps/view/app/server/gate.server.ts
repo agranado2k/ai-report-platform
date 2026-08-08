@@ -234,8 +234,10 @@ export function editUnopenableLine(
  * Where a route should send a visitor it cannot render for, and whether that
  * target carries an owner fallback (which selects the log event).
  *
- * ONE answer for every Decision shape, including the ones purpose "edit" can't
- * actually produce but whose types the route still has to narrow past. The
+ * ONE answer for every EditDecision shape. The union no longer contains the
+ * arms purpose "edit" cannot produce — that is what the ViewDecision/
+ * EditDecision split bought — so the only shapes left here are ones the gate
+ * really does emit, and the serve arm's fields are no longer optional. The
  * /edit loader used to have two answers: `decision.degradeTo` for its
  * document-load failures, and a hard-coded `/${params.slug}` — silently, with
  * no log line — in its defensive-narrowing branch (review #247 M-2). That is
@@ -243,14 +245,11 @@ export function editUnopenableLine(
  * and it is how an owner ends up at the unlock wall.
  */
 export function degradeTargetFor(
-  decision: Decision,
+  decision: EditDecision,
   slug: string,
 ): { readonly to: string; readonly ownerFallback: boolean } {
   return decision.kind === "serve"
-    ? {
-        to: decision.degradeTo ?? `/${slug}`,
-        ownerFallback: decision.ownerFallback ?? false,
-      }
+    ? { to: decision.degradeTo, ownerFallback: decision.ownerFallback }
     : { to: `/${slug}`, ownerFallback: false };
 }
 
@@ -274,35 +273,10 @@ export interface GateDeps {
   readonly warn?: (line: string) => void;
 }
 
-export type Decision =
-  /** Access granted and there is a clean version: stream it (view) / load the
-   *  editor data for it (edit — `edit` carries the validated capability). */
-  | {
-      readonly kind: "serve";
-      readonly report: Report;
-      readonly version: ReportVersion;
-      readonly edit?: { readonly token: string; readonly claims: EditClaims };
-      /** purpose "edit" only — where the route must send the visitor if IT
-       *  cannot render after all. Carries the owner `?access=` fallback when
-       *  one is in play, so a route-side failure can't strand an owner at the
-       *  unlock wall the way the gate's own degrades no longer can.
-       *
-       *  As of 2026-08-06 the route's DOCUMENT failures (the blob read, the
-       *  shell split, the ProseMirror parse) no longer REDIRECT here: they
-       *  render an explanatory page instead (`edit/unopenable.ts`), which is
-       *  why the unlock wall is unreachable from them by construction rather
-       *  than by carrying the right token. They still consume this value — as
-       *  the `href` of that page's "Open the read-only view" link, so the one
-       *  forward action it offers actually reaches the report for a private
-       *  report's owner. A `Location` the browser follows and an `href` the
-       *  user clicks want the identical destination; giving them two answers is
-       *  how the first one silently rotted. */
-      readonly degradeTo?: string;
-      /** Whether `degradeTo` carries an owner fallback — selects the log event. */
-      readonly ownerFallback?: boolean;
-    }
-  /** Access granted but the report is mid-scan → the ADR-0038 §2 holding page. */
-  | { readonly kind: "interstitial" }
+/** The arms that mean the same thing under either purpose. Shared so the two
+ *  purpose-specific unions below differ ONLY where they genuinely differ — the
+ *  "serve" arm — rather than restating four identical shapes twice. */
+type TerminalArms =
   /** A terminal HTTP error (404 / 410 / 451 / 500 / 503) with its body text. */
   | { readonly kind: "error"; readonly status: number; readonly message: string }
   /** 302: the app unlock hand-off (view) or the degrade-to-public-viewer (edit). */
@@ -318,9 +292,76 @@ export type Decision =
       readonly to: string;
     };
 
+/** What `purpose: "view"` can decide. No `edit` capability and no degrade
+ *  target: the public route has nothing to degrade TO — it IS the degrade
+ *  target. */
+export type ViewDecision =
+  /** Access granted and there is a clean version: stream it. */
+  | { readonly kind: "serve"; readonly report: Report; readonly version: ReportVersion }
+  /** Access granted but the report is mid-scan → the ADR-0038 §2 holding page. */
+  | { readonly kind: "interstitial" }
+  | TerminalArms;
+
+/** What `purpose: "edit"` can decide. Note what is NOT here: `interstitial`.
+ *  The edit chain degrades a mid-scan report to the viewer (`no-servable-
+ *  version`) rather than holding on it, so that arm is unreachable — and now
+ *  unrepresentable.
+ *
+ *  Note also what is no longer optional. Before this split the three edit-only
+ *  fields were `?` because ONE union had to describe both purposes, so the
+ *  /edit loader carried a branch whose own comment read "the types can't prove
+ *  it" and an `EditDegradeReason` (`gate-decision-unusable`) naming a state the
+ *  gate cannot produce. The prose was right; it just wasn't checkable. */
+export type EditDecision =
+  /** Access granted, the capability is validated, and there is a clean version
+   *  to load the editor data for. */
+  | {
+      readonly kind: "serve";
+      readonly report: Report;
+      readonly version: ReportVersion;
+      /** The validated edit capability. ALWAYS present — decideEdit reaches
+       *  this arm only past a verified token/cookie. */
+      readonly edit: { readonly token: string; readonly claims: EditClaims };
+      /** Where the route must send the visitor if IT cannot render after all.
+       *  Carries the owner `?access=` fallback when one is in play, so a
+       *  route-side failure can't strand an owner at the unlock wall the way
+       *  the gate's own degrades no longer can.
+       *
+       *  As of 2026-08-06 the route's DOCUMENT failures (the blob read, the
+       *  shell split, the ProseMirror parse) no longer REDIRECT here: they
+       *  render an explanatory page instead (`edit/unopenable.ts`), which is
+       *  why the unlock wall is unreachable from them by construction rather
+       *  than by carrying the right token. They still consume this value — as
+       *  the `href` of that page's "Open the read-only view" link, so the one
+       *  forward action it offers actually reaches the report for a private
+       *  report's owner. A `Location` the browser follows and an `href` the
+       *  user clicks want the identical destination; giving them two answers is
+       *  how the first one silently rotted. */
+      readonly degradeTo: string;
+      /** Whether `degradeTo` carries an owner fallback — selects the log event. */
+      readonly ownerFallback: boolean;
+    }
+  | TerminalArms;
+
+/** Either purpose's answer. Kept for the few places that are purpose-agnostic;
+ *  prefer the specific one — that is the whole point of the split. */
+export type Decision = ViewDecision | EditDecision;
+
 /** The one viewer gate: decide what the origin should do for `rawSlug` under
  *  `purpose`, given the request's query/cookie capabilities. Pure over `deps`
  *  (all I/O behind the injected ports); never throws. */
+export async function decideServe(
+  request: Request,
+  rawSlug: string,
+  purpose: "view",
+  deps: GateDeps,
+): Promise<ViewDecision>;
+export async function decideServe(
+  request: Request,
+  rawSlug: string,
+  purpose: "edit",
+  deps: GateDeps,
+): Promise<EditDecision>;
 export async function decideServe(
   request: Request,
   rawSlug: string,
@@ -343,7 +384,7 @@ async function decideView(
   url: URL,
   slug: Slug,
   deps: GateDeps,
-): Promise<Decision> {
+): Promise<ViewDecision> {
   // ?v=N (issue #155, ADR-0038 §3): resolve a specific ReportVersion by ordinal
   // instead of the live version. Absent/malformed `v` parses to `undefined`
   // (parseVersionQuery), which resolveViewableReport treats identically to no
@@ -433,7 +474,7 @@ async function decideEdit(
   url: URL,
   slug: Slug,
   deps: GateDeps,
-): Promise<Decision> {
+): Promise<EditDecision> {
   const cookieHeader = request.headers.get("cookie");
   const queryToken = url.searchParams.get("et") ?? undefined;
   // The fallback owner access token `ownerOpenLocation` mints alongside `et=`
@@ -568,7 +609,7 @@ function degradedEdit(
   oa: string | undefined,
   reason: EditDegradeReason,
   deps: GateDeps,
-): Decision {
+): EditDecision {
   (deps.warn ?? console.warn)(editDegradeLine(slug, oa !== undefined, reason));
   return { kind: "redirect", to: degradeLocation(slug, oa) };
 }
@@ -623,7 +664,7 @@ function deniedEdit(
   oa: string | undefined,
   cause: EditDenialCause,
   deps: GateDeps,
-): Decision {
+): EditDecision {
   const canFunnel = Boolean(deps.secret && deps.appOrigin);
   if (canFunnel && (cause === "rejected" || !oa)) {
     // NOT a degrade — the funnel is the happy path for a writer whose token

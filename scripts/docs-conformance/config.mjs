@@ -210,18 +210,148 @@ export const features = {
 };
 
 /**
- * CLAUDE.md executable-reference rules (plan Phase 1.2). Slash commands in
- * backticks must resolve to `.claude/skills/<name>/SKILL.md`; the ignore list
- * names commands that are real but not repo skills. Each entry carries its
- * reason here so the exemption is itself reviewable.
+ * Agent-manual rules (plan Phase 1.2, ADR-0082's layered constitution).
+ *
+ * The manual is a layered set of files, all of them standing instructions the
+ * agent obeys: the root `CLAUDE.md`, the on-demand articles under
+ * `.claude/constitution/`, and the nested package manuals below. Every layer
+ * gets the same two existence checks — slash commands must resolve to
+ * `.claude/skills/<name>/SKILL.md`, referenced repo paths must exist — plus,
+ * for the shared article only, the portability guard further down.
  */
 export const claudeMdRefs = {
+  // Commands that are real but are not repo skills. Each carries its reason
+  // here so the exemption is itself reviewable.
   ignoreCommands: [
     "/loop", // Claude Code global skill (interval runner), not a repo skill
     "/security-review", // Claude Code built-in
     "/install-github-app", // Claude Code built-in (one-time setup, quoted in ADR-030 context)
     "/merge", // historical reference — the obsolete bot-merge flow, quoted as history
   ],
+
+  /**
+   * Repo-anchored path roots — the trees the manual layer points into, and the
+   * reviewed surface of the repo. A backticked token whose FIRST segment is one
+   * of these is resolved repo-relative, from whichever manual names it.
+   *
+   * This list is also half of the nested-manual resolution rule (see
+   * `nestedManuals`): anchored first segment → repo-relative; anything else in a
+   * nested manual → relative to that manual's own directory. Roots deliberately
+   * absent (`node_modules/`, `worktree/`, generated output) are not part of the
+   * reviewed surface, so references into them stay unchecked.
+   */
+  pathRoots: [
+    "scripts",
+    ".husky",
+    ".github",
+    "docs",
+    "apps",
+    "packages",
+    "infra",
+    "tests",
+    ".claude/hooks",
+    ".claude/skills",
+    ".claude/constitution",
+  ],
+
+  /**
+   * Nested package manuals (ADR-0082 layer 4). Claude Code loads one of these
+   * only when an agent works in that tree, which makes them exactly as binding
+   * as the root while it is loaded — and exactly as poisonous when stale.
+   *
+   * THE RESOLUTION RULE, decided here because it is policy: inside a nested
+   * manual, a path token whose first segment is in `pathRoots` above means the
+   * repo-root path (`tests/evals/` in `apps/mcp/CLAUDE.md` is the repo's eval
+   * suite, not a package-local one); every other path token is resolved against
+   * `dir`. To keep prose out of the check, a package-relative token must contain
+   * a `/` AND either end in `/` (a directory) or have a dotted final segment (a
+   * filename) — so `src/tools.ts` and `packaging/` are checked while
+   * `server.test.ts`, `*.test.ts` and `OVERCLAIM_PATTERNS` are not.
+   *
+   * Repo-level manuals (root + articles) never resolve package-relative: they
+   * have no package to be relative to.
+   *
+   * Nested manuals are NOT subject to the `article-unreferenced` reachability
+   * rule — unlike an article, nothing has to point at them to make them load.
+   */
+  nestedManuals: [
+    // Reason: ADR-0072's three prompt layers are shipped behavior; this manual
+    // names the files that carry them (`src/instructions.ts`, `skill/…`).
+    { dir: "apps/mcp" },
+    // Reason: the purity rules restate ADR-024/ADR-0036 for agents that never
+    // load the article, and they cite the glossary and adapter tree by path.
+    { dir: "packages/domain" },
+  ],
+
+  /**
+   * Portability guard for the shared (framework) article.
+   *
+   * ADR-0082 makes `cp shared-invariants.md <other repo>` the *test* of the
+   * article's portability, and the file's own header states the constraint: it
+   * "names no product, no package, no command, and no vendor". That claim is
+   * only worth anything if something checks it — otherwise the first local
+   * detail to leak in silently converts the framework artifact back into a
+   * project document, and nobody notices until the copy fails somewhere else.
+   *
+   * The deny-list below is grounded in that sentence: one entry per category of
+   * local vocabulary, each with the reason it cannot appear. `scope` says where
+   * an entry is looked for:
+   *   - `prose`  — the whole file, fences included. Names leak in sentences.
+   *   - `spans`  — markdown code spans only. Paths and commands are written in
+   *                code spans by convention, and scanning prose for them would
+   *                misread ordinary "either/or" phrasing as a path.
+   */
+  portability: {
+    files: [".claude/constitution/shared-invariants.md"],
+    deny: [
+      {
+        id: "product-name",
+        scope: "prose",
+        re: /\bcentaur[\s-]?spec\b/i,
+        reason:
+          "The product this framework was extracted from. A product name breaks the verbatim copy on line one — move the sentence to a local-* article and state the rule abstractly here.",
+      },
+      {
+        id: "product-hostname",
+        scope: "prose",
+        // No `sh`: every shell script in the tree ends in it, so the TLD
+        // alternation read `worktree-cleanup.sh` as a hostname and reported a
+        // real leak under the wrong id, with a hint about deployment addresses.
+        // Script paths are already covered by `repo-path` / `tool-invocation`.
+        re: /\b(?:[a-z0-9-]+\.)+(?:com|dev|io|app)\b/i,
+        reason:
+          "A hostname is deployment-specific, and the framework has no deployment. Describe the role ('the published viewer origin'), not the address.",
+      },
+      {
+        id: "vendor-name",
+        scope: "prose",
+        re: /\b(?:Anthropic|Claude|Gemini|OpenAI|GitHub|GitLab|Vercel|Cloudflare|Neon|Clerk|Drizzle|Playwright|Terraform|Turborepo|Stryker|Promptfoo|Biome|Vitest|Husky|Postgres(?:QL)?|Cucumber)\b/i,
+        reason:
+          "Naming a vendor or tool binds the rule to this stack. State what the mechanism must achieve; the tool that achieves it belongs in local-engineering / local-workflow.",
+      },
+      {
+        id: "tool-invocation",
+        scope: "prose",
+        re: /\b(?:pnpm|npm|npx|yarn|git|gh|terraform|docker)\s+[a-z][\w:-]*/i,
+        reason:
+          "A concrete command cannot survive a copy into a repo with a different toolchain. Name the obligation ('the docs gate must pass before push'), not the invocation.",
+      },
+      {
+        id: "slash-command",
+        scope: "spans",
+        re: /^[([{"']?\/[a-z][a-z0-9-]*/,
+        reason:
+          "A slash command names a skill that exists in THIS repo's .claude/skills. The portable rule is the practice, not the command that runs it.",
+      },
+      {
+        id: "repo-path",
+        scope: "spans",
+        re: /^[\w.@-]+(?:\/[\w.@*-]+)+\/?$/,
+        reason:
+          "A repo path bakes in this project's layout. Sibling article filenames (no directory separator) are part of the framework and stay legal; anything with a `/` does not.",
+      },
+    ],
+  },
 };
 
 /** OpenAPI structural assertions (lint-lite; full Spectral lint is deferred). */
