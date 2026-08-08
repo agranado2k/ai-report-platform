@@ -20,5 +20,31 @@ ADR-0072 layers as source code under test:
    stay short.
 4. **Any prompt-surface delta is Axis-2 confirm-list material** — a human decides whether
    the new wording says the right thing; a reviewer agent may not sign it off.
-5. **Evals are the target function here**, as tests are for code. They do not exist yet
-   (issue #264) — until they land, this surface carries more human review, not less.
+5. **Evals are the target function here**, as tests are for code — and they are live
+   (ADR-0083, issue #264). The suite is `tests/evals/`; read its `README.md` before
+   editing any of the three layers.
+   - The golden set is **generated from** `src/instructions.ts` and `src/tools.ts`, not
+     copied out of them. Change either and you must run `pnpm evals:sync` — the keyless
+     smoke tier in the ordinary `pnpm test` gate pins the fixtures and fails otherwise.
+     The regenerated fixture diff is what makes the prompt-surface delta reviewable.
+   - Adding an `OVERCLAIM_PATTERNS` entry also fails the fast gate until the over-claim
+     cases in `tests/evals/golden-set/overclaim-guard.yaml` grow with it; the forbidden
+     phrases are derived from those patterns, never restated.
+   - `pnpm evals:validate` checks the suite with no API key. `pnpm evals` runs it for
+     real and needs `ANTHROPIC_API_KEY` — a secret that **already exists** (since
+     2026-06-02); the open decision in issue #264 is **funding, not provisioning**.
+     Because the key is unfunded, every provider call errors, so
+     `.github/workflows/prompt-evals.yml` classifies the run: an all-errors result
+     (zero assertions executed) emits a notice and exits 0, while genuine assertion
+     failures stay red. Both tools need **Node ≥ 22.22** — the repo's `engines` says
+     `>=20`, so `nvm use 22.22` (or newer) before running them.
+   - Layers 1 and 2 (`skill/`, `packaging/`) are **not measured** by the eval tier —
+     no case loads a SKILL.md, and those paths are deliberately out of the
+     workflow's `paths:` list. `skill-sync.test.ts` is still their guard. Same for
+     `registerPrompts`: the MCP prompt templates never enter a golden-set prompt.
+     See `tests/evals/README.md` §"What this tier does NOT measure".
+   - The behavioural signal is advisory, not a merge gate. Rule 4 still stands: a
+     prompt-surface delta is Axis-2 confirm-list material, and a green eval run does not
+     sign it off.
+   - A regression you find by hand becomes a case. `tests/evals/README.md` carries the
+     procedure; the suite is seeded at 26 and grows from **real** failures only.

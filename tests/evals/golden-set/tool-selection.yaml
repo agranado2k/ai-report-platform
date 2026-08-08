@@ -1,0 +1,317 @@
+# POSITIVE tool-selection cases: a realistic user turn where one tool (or one
+# of two defensible tools) should fire, with the reference solution beside it.
+#
+# Every case is drawn from the shipped text named in `grounded_in` — the
+# workflow relationship the instructions teach, the discrimination a tool
+# description spells out, or the "when to use which tool" table in the skill.
+# Nothing here is invented from a generic MCP mental model.
+#
+# Fields beyond promptfoo's own (`description`, `vars`, `assert`) live under
+# `metadata` and are consumed by `../asserts/tool-selection.js`; the shape is
+# pinned by `../golden-set.test.ts`.
+
+- description: republish under the same slug so the shared link survives
+  vars:
+    scenario: >-
+      I regenerated the Q3 revenue report. Publish the new version to the report
+      with slug `q3-revenue` — I already emailed that link to the client, so it
+      must not change. The HTML is
+      <html><body><h1>Q3 revenue</h1><p>Revised.</p></body></html>
+  metadata:
+    polarity: positive
+    expected_tools: [reports_upload]
+    expected_args:
+      reports_upload:
+        required: [html, update_slug]
+    grounded_in:
+      - apps/mcp/src/instructions.ts
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      SKILL.md calls this "the single most important relationship in the whole
+      tool surface": re-upload to the SAME slug, never create a second report.
+      The instructions state it too. If an edit ever weakens that wording, this
+      is the case that goes red first.
+  assert:
+    - type: tool-call-f1
+      value: [reports_upload]
+      threshold: 1
+      metric: tool-selection
+
+- description: create a brand-new report from HTML
+  vars:
+    scenario: >-
+      Here is an HTML document I just generated:
+      <html><body><h1>Onboarding metrics</h1></body></html>
+      Publish it as a new Centaur Spec report and give me the link to share.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_upload]
+    expected_args:
+      reports_upload:
+        required: [html]
+        forbidden: [update_slug]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      The create/re-publish fork is decided by one optional argument. This is
+      the mirror of the republish case: omitting `update_slug` is the whole
+      answer, so the arg shape is the assertion.
+  assert:
+    - type: tool-call-f1
+      value: [reports_upload]
+      threshold: 1
+      metric: tool-selection
+
+- description: locate a report when only the title is known
+  vars:
+    scenario: >-
+      I cannot remember the slug of my report titled "Pipeline health". Find it
+      for me.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_search]
+    expected_args:
+      reports_search:
+        required: [q]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      SKILL.md's table maps "Locate a report you don't have the slug for" to
+      reports_search. Free-text `q` is the point — a search with no query lists
+      everything and answers nothing.
+  assert:
+    - type: tool-call-f1
+      value: [reports_search]
+      threshold: 1
+      metric: tool-selection
+
+- description: rename a report
+  vars:
+    scenario: >-
+      Change the title of the report with slug `q3-revenue` to
+      "Q3 Revenue — Final".
+  metadata:
+    polarity: positive
+    expected_tools: [reports_update]
+    expected_args:
+      reports_update:
+        required: [slug, title]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      reports_update is titled "Rename a report" and its description says title
+      is not set at upload time. A model that re-uploads to change a title has
+      misread the surface.
+  assert:
+    - type: tool-call-f1
+      value: [reports_update]
+      threshold: 1
+      metric: tool-selection
+
+- description: file a report into a folder
+  vars:
+    scenario: >-
+      Move the report with slug `q3-revenue` into my "Q3" folder.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_move]
+    acceptable_tools: [folders_list]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      reports_move's description says to use folders_list to find the folder id,
+      so looking the folder up first is correct, not noise — hence
+      `acceptable_tools` rather than a penalty. The outcome under test is that
+      the move happens.
+
+- description: read reviewer feedback on a report
+  vars:
+    scenario: >-
+      What did the reviewers say on the report with slug `design-review`?
+  metadata:
+    polarity: positive
+    expected_tools: [reports_list_comments]
+    grounded_in:
+      - apps/mcp/src/instructions.ts
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      The instructions name reports_list_comments as the way to read reviewer
+      feedback. Comments are the one part of a report the public viewer never
+      shows, so nothing else can answer this.
+  assert:
+    - type: tool-call-f1
+      value: [reports_list_comments]
+      threshold: 1
+      metric: tool-selection
+
+- description: close out a handled comment thread
+  vars:
+    scenario: >-
+      The comment `comment_01HZX9` on report `design-review` is handled — close
+      it out.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_resolve_comment]
+    forbidden_tools: [reports_delete_comment]
+    expected_args:
+      reports_resolve_comment:
+        required: [slug, comment_id]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      "Close it out" must resolve, not delete. Both tools take the same two
+      arguments and sit next to each other in the tool list; the descriptions
+      are the only thing separating them, and reports_delete_comment is
+      destructive.
+
+- description: let the whole org view and edit a report
+  vars:
+    scenario: >-
+      Let everyone at my company view AND edit the report with slug `roadmap`.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_set_sharing]
+    forbidden_tools: [reports_set_acl]
+    expected_args:
+      reports_set_sharing:
+        required: [slug]
+        equals:
+          sharing: org_edit
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      ADR-0078's three-state control. reports_set_acl mode `org` CANNOT express
+      org_edit — the difference is a write grant the acl has no field for — and
+      the tool description says to prefer set_sharing for org sharing. Picking
+      set_acl here ships a report the org can read but not edit while telling
+      the user it can.
+
+- description: put a password on a report
+  vars:
+    scenario: >-
+      Put a password on the report with slug `board-deck` so only people who
+      know it can open the link. Use the password `hunter2`.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_set_acl]
+    forbidden_tools: [reports_set_sharing]
+    expected_args:
+      reports_set_acl:
+        required: [slug, password]
+        equals:
+          mode: password
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      The inverse discrimination of the org_edit case: reports_set_sharing has
+      no password, so the everyday-control preference must NOT generalise here.
+      Both descriptions say so; this checks the model read both.
+
+- description: give one outside person write access to a single report
+  vars:
+    scenario: >-
+      dana@partner.example.com works at another company. Let her upload new
+      versions of the report with slug `spec` — she should not get access to
+      anything else of mine.
+  metadata:
+    polarity: positive
+    expected_tools: [reports_grant_write]
+    forbidden_tools: [reports_set_sharing, reports_set_acl, folders_share]
+    expected_args:
+      reports_grant_write:
+        required: [slug, email]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      ADR-0060 write grants are per-report, cross-org, and a separate axis from
+      viewing. Reaching for org sharing here over-shares to the whole org; the
+      descriptions state the axes are separate.
+
+- description: reach the reports inside a shared folder
+  vars:
+    scenario: >-
+      I already shared my "Q4" folder with the team, but they say they still
+      cannot open the reports inside it. Make the reports in that folder
+      viewable by my org.
+  metadata:
+    polarity: positive
+    expected_tools: [folders_apply_sharing_to_reports]
+    acceptable_tools: [folders_list, folders_list_shares]
+    forbidden_tools: [folders_share, folders_set_visibility]
+    expected_args:
+      folders_apply_sharing_to_reports:
+        required: [id]
+        equals:
+          sharing: org_view
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      ADR-0076/0078's sharpest trap: sharing a folder shares its NAME, not its
+      contents. The user has already done the folder half and is describing the
+      exact symptom; re-sharing the folder would confidently do nothing.
+
+- description: make a folder itself visible to the org
+  vars:
+    scenario: >-
+      I want everyone in my org to be able to SEE the folder "Q4" in their
+      folder tree. Just the folder — leave the reports inside it alone for now.
+  metadata:
+    polarity: positive
+    expected_tools: [folders_set_visibility]
+    acceptable_tools: [folders_list]
+    forbidden_tools: [folders_apply_sharing_to_reports]
+    expected_args:
+      folders_set_visibility:
+        required: [id]
+        equals:
+          visibility: org
+    grounded_in:
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      The mirror of the previous case, and the reason both exist: "visibility
+      gates the folder itself, not the reports inside it". Over-applying the
+      contents tool here silently changes report ACLs the user did not ask about.
+
+- description: check a report's current sharing before changing it
+  vars:
+    scenario: >-
+      Before I change anything — is the report with slug `q3-revenue` currently
+      shared with my org?
+  metadata:
+    polarity: positive
+    expected_tools: [reports_get, reports_get_acl]
+    expected_any_of: true
+    grounded_in:
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      Outcomes, not paths: reports_get returns the composed `sharing` state and
+      reports_get_acl returns the acl plus the same `sharing`. Both answer the
+      question, so either is correct — what would be wrong is mutating first.
+
+- description: report the upload history of a report
+  vars:
+    scenario: >-
+      How many versions does the report with slug `q3-revenue` have, and when
+      was the most recent one uploaded?
+  metadata:
+    polarity: positive
+    expected_tools: [reports_list_versions]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      reports_list_versions is the only tool that returns version_no and
+      uploaded_at. reports_get returns the report, not its history.
+  assert:
+    - type: tool-call-f1
+      value: [reports_list_versions]
+      threshold: 1
+      metric: tool-selection

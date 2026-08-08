@@ -19,6 +19,9 @@
     "e2e": "bddgen && playwright test",
     "test:browser": "playwright test --config tests/browser/playwright.config.ts",
     "test:mutation": "pnpm --filter arp-domain test:mutation",
+    "evals": "promptfoo eval --config tests/evals/promptfooconfig.yaml --repeat 3",
+    "evals:validate": "promptfoo validate config --config tests/evals/promptfooconfig.yaml",
+    "evals:sync": "node tests/evals/fixtures/sync-fixtures.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "docs:check": "node scripts/docs-conformance/index.mjs",
     "docs:check:test": "node --test scripts/docs-conformance/test/*.test.mjs",
@@ -46,9 +49,12 @@
     "esbuild": "^0.25.12",
     "husky": "^9.1.7",
     "playwright-bdd": "^9.0.0",
+    "promptfoo": "^0.122.0",
     "semantic-release": "^24.2.0",
     "turbo": "^2.5.0",
     "typescript": "^5.6.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   }
 }
