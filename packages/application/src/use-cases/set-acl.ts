@@ -220,6 +220,15 @@ export async function setAcl(
   return committed.ok ? ok(committed.value.report) : committed;
 }
 
+/**
+ * Revoke `report_grants` rows the new Acl no longer authorizes (ADR-0056 "5e"):
+ * mode switched away from `allowlist` → revoke every grant; mode stays
+ * `allowlist` → revoke just the emails dropped from the roster. Any other
+ * transition (including allowlist → allowlist with only additions) leaves
+ * grants untouched — the previous grants are a strict superset restriction of
+ * the new allowlist, so a re-added email should NOT need to re-redeem a
+ * magic link.
+ */
 export async function pruneStaleGrants(
   grants: GrantStore,
   reportId: Report["id"],

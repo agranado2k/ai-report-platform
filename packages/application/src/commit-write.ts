@@ -78,6 +78,10 @@ export async function commitWrite<T>(
     const audited = await deps.audit.record(spec.audit(mutated.value));
     if (!audited.ok) return audited;
 
+    // No ref when the client sent no Idempotency-Key: an `unsound` operation
+    // claims nothing, so there is nothing to complete (issue #233). This rule
+    // used to be restated at each call site; it belongs here now that all 20
+    // idempotent use cases share this tail.
     if (spec.idemRef) {
       const done = await deps.idempotency.complete(spec.idemRef, spec.response(mutated.value));
       if (!done.ok) return done;
