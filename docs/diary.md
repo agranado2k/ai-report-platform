@@ -5746,3 +5746,37 @@ as a hidden input, which means a long-lived tab replays against a stale key. For
 vs. a client-side submit guard vs. accepting the duplicate is the fork. C6 ("bring the dashboard
 write path through `handle()`") owns the same write path and is the natural vehicle if it is ever
 revisited.
+### 2026-08-08 — PRD #277: the unwired items wired, via the chain's own skills
+
+The AI-SDLC plan's five phases were merged but four mechanisms existed only as prose and
+five hardening items sat deferred. This batch closed both lists — and deliberately did it
+through `/to-tickets` + `/implement`, meeting those skills' own done-when criteria for the
+first time (a real PRD decomposed with a quiz gate; eight one-ticket fresh-context
+sessions, every one opening with a restatement, none needing a question).
+
+**Landed** (tickets #278–#285, one PR each):
+- The TDD pairing rule extracted to one shared script (byte-identical no-change proof),
+  then given its CI counterpart (`tdd-pairing.yml`, `tdd-exempt` label hatch — the bypass
+  is no longer invisible or local-only; merge-base proven necessary over `base.sha`).
+- The obsolete ADR-0035 `/merge` instructions purged from the review-bot prompts — one of
+  them was actively telling the mention bot to reject the now-sanctioned merge commits.
+- shared-invariants §10 got teeth: `behavior-delta.sh` flags refactor/style commits that
+  touch contract artifacts (per-commit, false-positive guards each pinned by a test).
+- ADR-0081's promise made real: `mutation-delta.sh` runs Stryker on only the branch's
+  changed domain files (3–8s vs 51s); Test Hygiene cites surviving mutants instead of
+  opinion; the Axis-2 confirm-list carries a 🧬 line; a `mutation-check` label triggers
+  the CI run posting one edited-in-place comment. Demo: a weakened assertion left the
+  suite green while the differential run exposed the guard it stopped killing.
+- Validator hardening: nested manuals checked, a portability guard on shared-invariants
+  (deny-list, honestly not a proof), punctuation/double-backtick regex edges closed.
+- Eval tier: golden-set window pinned to 20–50 with proportional polarity floors; a
+  forbidden tool call is now a hard fail at any per-case bar (review round's one
+  substantive catch — a lowered bar could previously outvote a fired `reports_delete`).
+
+**Review round**: seven bot approvals, zero blocking; the batch's fixes were themselves
+review-driven. One smoke check was evicted by the shared concurrency group (the #274
+documented trade-off) — re-run green, first observed instance.
+
+**Process**: batch worktrees under `worktree/` (one per ticket), pruned after the merge
+train. Deviation, disclosed on the PRD: one consolidated diary entry (this one) instead
+of eight conflicting appends. Labels `tdd-exempt` + `mutation-check` created.

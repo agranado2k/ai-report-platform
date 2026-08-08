@@ -120,6 +120,10 @@ module "github_repo" {
   #     ADVISORY. It does not gate merge, and both failed today on GitHub's own
   #     outage, which is exactly the "a blip blocks the repo" failure this
   #     change is otherwise trying to end.
+  #   - `Mutation delta` — ADR-0081 §1 makes mutation testing a DIAGNOSTIC that
+  #     runs on demand (the `mutation-check` label), so most PRs never report
+  #     this check at all; and a mutation score is explicitly not a number to
+  #     defend, which is what requiring it would make it.
   #   - `Tear down preview data plane` — only runs on `pull_request: closed`.
   #   - `assign` (auto-assign-pr-author) — housekeeping, not a gate.
   #   - The `Vercel – arp-*-prod` commit statuses — third-party, and already

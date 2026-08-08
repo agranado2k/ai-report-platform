@@ -1,0 +1,99 @@
+name: Mutation delta
+
+# The ADR-0081 §1 trigger: run the DIFFERENTIAL mutation diagnostic
+# (scripts/mutation-delta.sh) over a pull request's own changes and publish the
+# summary as exactly ONE pull-request comment, edited in place on every re-run.
+#
+# ON DEMAND, BY LABEL. ADR-0081 §1 says mutation testing runs "on demand …
+# differentially … never on every push, and not as a required status check". A
+# mutation run executes the suite once per mutant; the calibration run was ~51 s
+# for one small package on a warm developer machine and a shared runner is
+# slower. Putting that on every push would buy a slowly-moving signal at a
+# constantly-paid cost — and would turn the score into a target to defend rather
+# than a diagnostic to read. So the operator asks for it, by adding the
+# `mutation-check` label to the PR.
+#
+# THE TRIGGER SHAPE, and why it is these two types and no others:
+#
+#   labeled      — the request itself. The job's `if:` requires that THIS event
+#                  added `mutation-check`, not merely that the PR carries it: a
+#                  labelled PR keeps its label, so `labeled` fires again for
+#                  every other label anyone adds, and re-measuring then would
+#                  charge a run to an event that changed no code.
+#   synchronize  — new commits on an ALREADY-labelled PR. Without it the comment
+#                  would describe a diff that has moved on, which is worse than
+#                  no comment. An unlabelled PR fails the `if:` and no runner is
+#                  ever allocated.
+#
+# There is deliberately no `opened`, no `reopened`, no `push` and no `schedule`:
+# every one of them would spend a mutation run on work that never asked for one.
+# scripts/test/mutation-delta-ci.test.mjs asserts that shape — `on:` has exactly
+# one key, `pull_request` has exactly these two types — because "never per-push"
+# is a property of this file, not of the script it calls.
+#
+# NEVER A GATE. It is absent from `required_status_checks` in
+# infra/terraform/envs/shared/main.tf (a test asserts that too, from both the
+# job key and its display name), and the script exits 0 whatever the score —
+# the same call `thresholds.break: null` makes in stryker.config.mjs.
+#
+# THE LOGIC IS IN THE SCRIPT. Everything this workflow decides — the label rule,
+# the comment body, find-the-marker-or-create — lives in
+# scripts/mutation-delta-ci.sh, where it is driven by simulated event payloads
+# and a recording `gh` stub. What is left here is checkout, install, and one
+# call. The `if:` below is the one deliberate restatement: it is the only place
+# that can stop a runner from being allocated at all, and the script re-checks
+# the same rule so that widening this trigger cannot quietly start spending.
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+# One measurement per PR at a time; a newer push supersedes an in-flight run,
+# and the comment it would have edited is the one the newer run edits instead.
+concurrency:
+  group: mutation-delta-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  mutation-delta:
+    name: Mutation delta
+    if: >-
+      ${{ (github.event.action == 'labeled' && github.event.label.name == 'mutation-check')
+      || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'mutation-check')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # scripts/mutation-delta.sh resolves a merge-base against the PR's
+          # base commit; a shallow clone does not contain one.
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack + pnpm 10
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.5.0 --activate
+
+      # Stryker and its Vitest runner are devDependencies of arp-domain, and the
+      # run drives the real suite — so this needs the full workspace install,
+      # not a cached subset.
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Measure the delta and report it on the PR
+        env:
+          # `gh` reads GH_TOKEN; the job-scoped token carries the
+          # `pull-requests: write` granted above and nothing else.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/mutation-delta-ci.sh
