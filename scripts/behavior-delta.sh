@@ -30,17 +30,18 @@ status=$(git diff --name-status "$base" HEAD)
 all=$(printf '%s\n' "$status" | awk '{print $NF}')
 modified=$(printf '%s\n' "$status" | awk '$1 ~ /^M/ {print $NF}')
 
-# Edited (not added) test-tier files: an edit to an EXISTING assertion is by
-# definition a behavior change; additions are new coverage, not a red flag.
-edited_tests=$(printf '%s\n' "$modified" | grep -E '\.(test|spec)\.(ts|tsx|mjs)$|\.feature$' || true)
-
-api=$(printf '%s\n' "$all" | grep -E '^docs/api/openapi\.yaml$' || true)
-errors=$(printf '%s\n' "$all" | grep -E '^packages/http/' || true)
-events=$(printf '%s\n' "$all" | grep -E '^docs/events\.md$' || true)
-db=$(printf '%s\n' "$all" | grep -E '^packages/db/|^docs/db-design\.md$' || true)
-env=$(printf '%s\n' "$all" | grep -E '^packages/env/' || true)
-headers=$(printf '%s\n' "$all" | grep -E '^packages/headers/' || true)
-mcp=$(printf '%s\n' "$all" | grep -E '^apps/mcp/(src/(instructions|prompts|tools)|skill/|packaging/)' || true)
+# --- The contract artifacts, one pattern per surface -------------------------
+# One home per surface: the sections below and (later) the per-commit separation
+# check both read these, so a surface added here is picked up by every part of
+# the script rather than by whichever copy the editor happened to notice.
+re_tests='\.(test|spec)\.(ts|tsx|mjs)$|\.feature$'
+re_api='^docs/api/openapi\.yaml$'
+re_errors='^packages/http/'
+re_events='^docs/events\.md$'
+re_db='^packages/db/|^docs/db-design\.md$'
+re_env='^packages/env/'
+re_headers='^packages/headers/'
+re_mcp='^apps/mcp/(src/(instructions|prompts|tools)|skill/|packaging/)'
 # Process & agent surfaces: skills, hooks, the docs gate and the constitution
 # (root CLAUDE.md, its .claude/constitution/ articles, and nested per-package
 # CLAUDE.md files) change how every future session behaves — that is behavior an
@@ -48,7 +49,20 @@ mcp=$(printf '%s\n' "$all" | grep -E '^apps/mcp/(src/(instructions|prompts|tools
 # otherwise have reported "no deltas"). The constitution earns its place for the
 # same reason ADR-0082 gave it a validator: a standing instruction edited without
 # a spec reference is an unapproved policy change, not a docs tidy-up.
-process=$(printf '%s\n' "$all" | grep -E '^\.claude/skills/|^\.claude/constitution/|^CLAUDE\.md$|/CLAUDE\.md$|^\.husky/|^scripts/docs-conformance/' || true)
+re_process='^\.claude/skills/|^\.claude/constitution/|^CLAUDE\.md$|/CLAUDE\.md$|^\.husky/|^scripts/docs-conformance/'
+
+# Edited (not added) test-tier files: an edit to an EXISTING assertion is by
+# definition a behavior change; additions are new coverage, not a red flag.
+edited_tests=$(printf '%s\n' "$modified" | grep -E "$re_tests" || true)
+
+api=$(printf '%s\n' "$all" | grep -E "$re_api" || true)
+errors=$(printf '%s\n' "$all" | grep -E "$re_errors" || true)
+events=$(printf '%s\n' "$all" | grep -E "$re_events" || true)
+db=$(printf '%s\n' "$all" | grep -E "$re_db" || true)
+env=$(printf '%s\n' "$all" | grep -E "$re_env" || true)
+headers=$(printf '%s\n' "$all" | grep -E "$re_headers" || true)
+mcp=$(printf '%s\n' "$all" | grep -E "$re_mcp" || true)
+process=$(printf '%s\n' "$all" | grep -E "$re_process" || true)
 
 echo "# Behavior-delta candidates — $(git rev-parse --abbrev-ref HEAD) vs $base_ref (merge-base $(git rev-parse --short "$base"))"
 
