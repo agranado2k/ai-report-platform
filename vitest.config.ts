@@ -32,9 +32,10 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     // KEEP IN SYNC with the TDD pairing guard's source-tree regex in
-    // .husky/pre-push — it hand-mirrors these globs (plus the node:test tree
-    // scripts/docs-conformance/, which vitest does not cover); adding a
-    // covered tree here without updating it silently un-guards that tree.
+    // scripts/tdd-pairing-guard.sh — it hand-mirrors these globs (plus the
+    // node:test tree scripts/docs-conformance/, which vitest does not cover);
+    // adding a covered tree here without updating it silently un-guards that
+    // tree.
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
@@ -63,8 +64,17 @@ export default defineConfig({
       // names exists, every golden-set case carries a reference solution, and
       // the generated tool fixture still matches the live `apps/mcp`
       // registrations. Nothing here calls a model. This is a test-only tree, so
-      // there is nothing to mirror into .husky/pre-push's source-tree regex.
+      // there is nothing to mirror into the guard's source-tree regex.
       "tests/evals/**/*.test.ts",
+      // The repo's own SHELL tooling under scripts/ — today the TDD pairing
+      // guard (scripts/tdd-pairing-guard.sh), driven end-to-end against
+      // throwaway git repositories: real commits, real `git diff`, since what
+      // is asserted IS the diff classification. Only `*.test.ts` DRIVERS live
+      // in this glob, and the guard already classifies `*.test.ts` as a test
+      // file, so this adds nothing to mirror into its source regex (the one
+      // scripts/ tree that IS covered source — scripts/docs-conformance/ —
+      // was already listed there before this glob existed).
+      "scripts/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test
