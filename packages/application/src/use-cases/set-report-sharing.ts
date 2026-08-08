@@ -16,6 +16,7 @@
 // control but never silently overwritten: leaving one requires an explicit
 // `confirmDiscard`, and the refusal carries the sentence naming what would be
 // lost (ADR-0078 §4).
+
 import {
   ACL_WRITE_SCOPE,
   type AppError,
@@ -34,6 +35,7 @@ import {
   validationError,
 } from "arp-domain";
 import type { AuditEntry } from "../audit";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -144,79 +146,85 @@ export async function setReportSharing(
   if (idem.value.outcome === "replay") return reviveSharingReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    // Prune first, exactly as setAcl does (ADR-0056 "5e", issue #137): a
-    // durable allowlist grant must not outlive the Acl that authorized it.
-    // This is the SAME function setAcl calls, not a second implementation —
-    // two copies of a revocation rule is one copy too many.
-    const pruned = await pruneStaleGrants(deps.grants, report.id, report.acl, acl.value);
-    if (!pruned.ok) return pruned;
-
-    const saved = await deps.reports.setAcl(report.id, acl.value);
-    if (!saved.ok) return saved;
-
-    // The org-write row moves only when it actually changes — so the audit log
-    // records grants and revocations, not every time someone re-asserts a state.
-    if (target.orgWrite && !hadOrgWrite) {
-      const granted = await deps.orgWriteGrants.grant(report.id, report.orgId, actor.userId);
-      if (!granted.ok) return granted;
-    } else if (!target.orgWrite && hadOrgWrite) {
-      const revoked = await deps.orgWriteGrants.revoke(report.id);
-      if (!revoked.ok) return revoked;
-    }
-
-    const entries: AuditEntry[] = [
-      {
-        action: "report.sharing_set",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: report.id,
-        // The TRANSITION, not just the endpoint that was hit — `from` degrades
-        // to the raw Acl mode when the report was in an advanced one, which is
-        // the honest answer rather than a state it was never in.
-        meta: { from, to: input.sharing },
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      // Every value the audit rows need (`target`, `hadOrgWrite`, `from`) is
+      // computed before the transaction, so this closes over them directly —
+      // no composite mutation result required, unlike setAcl.
+      audit: () => {
+        const entries: AuditEntry[] = [
+          {
+            action: "report.sharing_set",
+            orgId: actor.orgId,
+            actorUserId: actor.userId,
+            targetType: "report",
+            targetId: report.id,
+            // The TRANSITION, not just the endpoint that was hit — `from`
+            // degrades to the raw Acl mode when the report was in an advanced
+            // one, which is the honest answer rather than a state it was never in.
+            meta: { from, to: input.sharing },
+          },
+        ];
+        if (target.orgWrite && !hadOrgWrite) {
+          entries.push({
+            action: "grant.org_write.granted",
+            orgId: actor.orgId,
+            actorUserId: actor.userId,
+            targetType: "report",
+            targetId: report.id,
+            meta: { from, to: input.sharing },
+          });
+        } else if (!target.orgWrite && hadOrgWrite) {
+          entries.push({
+            action: "grant.org_write.revoked",
+            orgId: actor.orgId,
+            actorUserId: actor.userId,
+            targetType: "report",
+            targetId: report.id,
+            meta: { from, to: input.sharing },
+          });
+        }
+        return entries;
       },
-    ];
-    if (target.orgWrite && !hadOrgWrite) {
-      entries.push({
-        action: "grant.org_write.granted",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: report.id,
-        meta: { from, to: input.sharing },
-      });
-    } else if (!target.orgWrite && hadOrgWrite) {
-      entries.push({
-        action: "grant.org_write.revoked",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: report.id,
-        meta: { from, to: input.sharing },
-      });
-    }
-    const audited = await deps.audit.record(entries);
-    if (!audited.ok) return audited;
-
-    const updated: ReportSharingResult = {
-      report: { ...report, acl: acl.value },
-      sharing: input.sharing,
-    };
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
+      response: (updated) => ({
         responseStatus: 200,
         responseBody: {
           // Never carries a password hash (reportReplayBody's guarantee).
           report: reportReplayBody(updated.report),
           sharing: updated.sharing,
         },
-      });
-      if (!done.ok) return done;
-    }
-    return ok(updated);
-  });
+      }),
+    },
+    async () => {
+      // Prune first, exactly as setAcl does (ADR-0056 "5e", issue #137): a
+      // durable allowlist grant must not outlive the Acl that authorized it.
+      // This is the SAME function setAcl calls, not a second implementation —
+      // two copies of a revocation rule is one copy too many.
+      const pruned = await pruneStaleGrants(deps.grants, report.id, report.acl, acl.value);
+      if (!pruned.ok) return pruned;
+
+      const saved = await deps.reports.setAcl(report.id, acl.value);
+      if (!saved.ok) return saved;
+
+      // The org-write row moves only when it actually changes — so the audit
+      // log records grants and revocations, not every re-assertion of a state.
+      if (target.orgWrite && !hadOrgWrite) {
+        const granted = await deps.orgWriteGrants.grant(report.id, report.orgId, actor.userId);
+        if (!granted.ok) return granted;
+      } else if (!target.orgWrite && hadOrgWrite) {
+        const revoked = await deps.orgWriteGrants.revoke(report.id);
+        if (!revoked.ok) return revoked;
+      }
+
+      const updated: ReportSharingResult = {
+        report: { ...report, acl: acl.value },
+        sharing: input.sharing,
+      };
+      return ok(updated);
+    },
+  );
 }
 
 function reviveSharingReplay(
