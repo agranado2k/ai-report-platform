@@ -10,9 +10,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "test:mutation": "stryker run"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "@stryker-mutator/core": "9.6.1",
+    "@stryker-mutator/vitest-runner": "9.6.1",
+    "fast-check": "^4.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4"
   }
 }

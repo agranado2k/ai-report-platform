@@ -56,6 +56,15 @@ export default defineConfig({
       // and playwright-bdd only collects `*.steps.ts`, so the tiers never
       // overlap.
       "tests/e2e/support/**/*.test.ts",
+      // The prompt-eval tier's own KEYLESS guard (ADR-0083). The evals
+      // themselves need a provider API key and cost money, so they run only in
+      // `.github/workflows/prompt-evals.yml`; what belongs in the fast gate is
+      // the structural claim — the promptfoo config parses, every `file://` it
+      // names exists, every golden-set case carries a reference solution, and
+      // the generated tool fixture still matches the live `apps/mcp`
+      // registrations. Nothing here calls a model. This is a test-only tree, so
+      // there is nothing to mirror into .husky/pre-push's source-tree regex.
+      "tests/evals/**/*.test.ts",
     ],
     environment: "node",
     // The pglite tier (ADR-0046) migrates a fresh in-process Postgres per test
