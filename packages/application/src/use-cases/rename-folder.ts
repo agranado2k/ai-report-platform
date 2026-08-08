@@ -13,6 +13,7 @@ import {
   ok,
   type Result,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -64,29 +65,25 @@ export async function renameFolder(
   if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const saved = await deps.folders.save(renamed.value);
-    if (!saved.ok) return saved;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.renamed",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: found.value.id,
-        meta: { from: fromName, to: renamed.value.name },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 200,
-        responseBody: renamed.value,
-      });
-      if (!done.ok) return done;
-    }
-    return ok(renamed.value);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: (folder) => [
+        {
+          action: "folder.renamed",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: found.value.id,
+          meta: { from: fromName, to: folder.name },
+        },
+      ],
+      response: (folder) => ({ responseStatus: 200, responseBody: folder }),
+    },
+    async () => {
+      const saved = await deps.folders.save(renamed.value);
+      return saved.ok ? ok(renamed.value) : saved;
+    },
+  );
 }

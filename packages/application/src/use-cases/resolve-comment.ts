@@ -11,6 +11,7 @@
 // Comment. A comment belonging to a DIFFERENT report than the slug names
 // reads as NotFound (never leaks cross-report existence). Idempotent — the
 // domain resolveComment transition is a no-op on an already-resolved comment.
+
 import {
   type AppError,
   resolveComment as applyResolve,
@@ -23,6 +24,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -95,28 +97,29 @@ export async function resolveComment(
   const idemRef = idem.value.ref;
 
   const emission = applyResolve(comment, deps.clock.now());
-  const committed = await deps.uow.run(async () => {
-    const saved = await deps.comments.save(emission.comment);
-    if (!saved.ok) return saved;
-    const enqueued = await deps.outbox.enqueue(emission.events);
-    if (!enqueued.ok) return enqueued;
-    const audited = await deps.audit.record([
-      {
-        action: "comment.resolved",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "comment",
-        targetId: comment.id,
-        meta: { reportId: report.value.id },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 200, responseBody: emission.comment })
-      : ok(undefined);
-  });
+  const committed = await commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "comment.resolved",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "comment",
+          targetId: comment.id,
+          meta: { reportId: report.value.id },
+        },
+      ],
+      response: (c) => ({ responseStatus: 200, responseBody: c }),
+    },
+    async () => {
+      const saved = await deps.comments.save(emission.comment);
+      if (!saved.ok) return saved;
+      const enqueued = await deps.outbox.enqueue(emission.events);
+      return enqueued.ok ? ok(emission.comment) : enqueued;
+    },
+  );
   if (!committed.ok) return committed;
 
   return ok(emission.comment);

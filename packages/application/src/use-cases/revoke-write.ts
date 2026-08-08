@@ -15,6 +15,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork, WriteGrantStore } from "../ports";
@@ -66,28 +67,29 @@ export async function revokeWrite(
   if (idem.value.outcome === "replay") return ok(undefined);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const revoked = await deps.grants.revoke(found.value.id, email.value);
-    if (!revoked.ok) return revoked;
-    const audited = await deps.audit.record([
-      {
-        action: "grant.write.revoked",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-        // NOTE: unlike grantWrite, revokeWrite has no IdentityStore dep and
-        // WriteGrantStore.revoke() doesn't return the grant row, so there's
-        // no resolved UserId available here — the email is the actual revoke
-        // key and the only grantee-identifying value on hand.
-        meta: { granteeEmail: email.value },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "grant.write.revoked",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "report",
+          targetId: found.value.id,
+          // NOTE: unlike grantWrite, revokeWrite has no IdentityStore dep and
+          // WriteGrantStore.revoke() doesn't return the grant row, so there's
+          // no resolved UserId available here — the email is the actual revoke
+          // key and the only grantee-identifying value on hand.
+          meta: { granteeEmail: email.value },
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const revoked = await deps.grants.revoke(found.value.id, email.value);
+      return revoked.ok ? ok(undefined) : revoked;
+    },
+  );
 }

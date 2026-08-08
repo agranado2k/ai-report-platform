@@ -8,6 +8,7 @@
 // rather than leaking its existence. Persist + outbox the CommentAdded event
 // + a `comment.replied` audit_log row (ADR-0070) commit together, same shape
 // as addComment.
+
 import {
   type Anchor,
   type AppError,
@@ -21,6 +22,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -109,27 +111,29 @@ export async function replyToComment(
   if (idem.value.outcome === "replay") return reviveCommentReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  const committed = await deps.uow.run(async () => {
-    const saved = await deps.comments.save(emission.value.comment);
-    if (!saved.ok) return saved;
-    const enqueued = await deps.outbox.enqueue(emission.value.events);
-    if (!enqueued.ok) return enqueued;
-    const audited = await deps.audit.record([
-      {
-        action: "comment.replied",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "comment",
-        targetId: emission.value.comment.id,
-        meta: { reportId: report.value.id, parentId: input.parentCommentId },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    return deps.idempotency.complete(idemRef, {
-      responseStatus: 201,
-      responseBody: emission.value.comment,
-    });
-  });
+  const committed = await commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: (comment) => [
+        {
+          action: "comment.replied",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "comment",
+          targetId: comment.id,
+          meta: { reportId: report.value.id, parentId: input.parentCommentId },
+        },
+      ],
+      response: (comment) => ({ responseStatus: 201, responseBody: comment }),
+    },
+    async () => {
+      const saved = await deps.comments.save(emission.value.comment);
+      if (!saved.ok) return saved;
+      const enqueued = await deps.outbox.enqueue(emission.value.events);
+      return enqueued.ok ? ok(emission.value.comment) : enqueued;
+    },
+  );
   if (!committed.ok) return committed;
 
   return ok(emission.value.comment);
