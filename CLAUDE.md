@@ -21,7 +21,9 @@ materially changes state gets a dated diary entry (protocol: `.claude/constituti
 2. **Test first** for any code change — red, green, refactor, via `/tdd`. The procedure
    and this stack's conventions live in `.claude/skills/tdd/SKILL.md` (that skill is their
    only home). Enforcement: the `.husky/pre-push` TDD pairing guard blocks a push whose
-   source changes carry no test changes (`PUSH_WITHOUT_TESTS=1` bypasses once, loudly).
+   source changes carry no test changes (`PUSH_WITHOUT_TESTS=1` bypasses once, loudly),
+   and CI runs the same rule over the PR (`tdd-pairing.yml`) — so that bypass only defers
+   the failure. The CI-side hatch is the `tdd-exempt` PR label: green, with a notice.
 3. **Tracer bullets, never horizontal layers.** Build a tiny end-to-end slice, seek
    feedback, expand from there. Multi-session builds get decomposed first: `/to-prd` →
    `/to-tickets` (demoable slices, blocking DAG, HITL/AFK labels) → `/implement`, one
