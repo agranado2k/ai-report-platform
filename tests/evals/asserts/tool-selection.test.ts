@@ -184,6 +184,124 @@ describe("tool-selection grader", () => {
     expect(result.pass).toBe(true);
   });
 
+  // Partial credit only changes anything if a case can act on it. `min_score`
+  // is that lever: without it every case is graded at 1.0 and a 0.9 run is a
+  // failure whose score merely decorates the reason string.
+  describe("the per-case bar (metadata.min_score)", () => {
+    const partialCase = {
+      expected_tools: ["reports_upload"],
+      expected_args: { reports_upload: { required: ["html", "update_slug"] } },
+    };
+    // coverage 0.6 + restraint 0.2 + half the arg checks (0.1) = 0.9.
+    const partialRun = call("reports_upload", { html: "<html/>" });
+
+    it("defaults to the strict 1.0 bar when the case names no min_score", () => {
+      const result = grade(partialRun, withMetadata(partialCase));
+      expect(result.score).toBeCloseTo(0.9, 5);
+      expect(result.pass, "the default must stay strict").toBe(false);
+    });
+
+    it("passes a run that clears the bar the case set for itself", () => {
+      const result = grade(partialRun, withMetadata({ ...partialCase, min_score: 0.8 }));
+      expect(result.pass).toBe(true);
+      expect(result.score).toBeCloseTo(0.9, 5);
+    });
+
+    it("still fails a run that misses the case's own bar, and names the bar", () => {
+      const result = grade(
+        "I'd need the HTML before I can publish anything — can you send it?",
+        withMetadata({ ...partialCase, min_score: 0.8 }),
+      );
+      expect(result.pass).toBe(false);
+      expect(result.reason).toContain("0.8");
+      expect(result.reason).toContain("did not call reports_upload");
+    });
+
+    // A bar of 0 passes literally every run that stops short of a forbidden
+    // call — i.e. it silently deletes the case. The grader must fail CLOSED on
+    // that, the same direction the tool-call extractor does. (The forbidden
+    // hard fail below is the second, independent line of defence here.)
+    it("refuses a min_score of 0, which would pass even a forbidden call", () => {
+      const result = grade(
+        call("reports_delete", { slug: "draft-v1" }),
+        withMetadata({
+          expected_tools: [],
+          forbidden_tools: ["reports_delete"],
+          min_score: 0,
+        }),
+      );
+      expect(result.pass, "a zero bar must not resurrect a forbidden call").toBe(false);
+      expect(result.reason).toMatch(/min_score/);
+    });
+
+    // A lowered bar is a valid, reviewable opt-in — but restraint is only worth
+    // 0.2, so `min_score: 0.8` would otherwise pass a run that did the right
+    // thing AND fired a forbidden tool (0.6 + 0 + 0.2 = 0.8). The forbidden
+    // list is the one thing a case can never trade away for partial credit.
+    it("hard-fails a forbidden call even when the score clears the case's lowered bar", () => {
+      const output = [
+        call("reports_set_sharing", { slug: "roadmap", sharing: "org_edit" }),
+        call("reports_set_acl", { slug: "roadmap", mode: "org" }),
+      ].join("\n\n");
+
+      const result = grade(
+        output,
+        withMetadata({
+          expected_tools: ["reports_set_sharing"],
+          forbidden_tools: ["reports_set_acl"],
+          min_score: 0.8,
+        }),
+      );
+
+      expect(result.score, "the score itself still clears the bar").toBeCloseTo(0.8, 5);
+      expect(result.pass, "a forbidden call must not be buyable with a lowered bar").toBe(false);
+      expect(result.reason).toContain("reports_set_acl");
+      expect(result.reason, "the verdict must say the forbidden hit is what failed it").toMatch(
+        /forbidden/,
+      );
+    });
+
+    it("hard-fails a forbidden call on an otherwise perfect run at min_score 1", () => {
+      const output = [
+        call("reports_upload", { html: "<html/>", update_slug: "q3-revenue" }),
+        call("reports_delete", { slug: "q3-revenue" }),
+      ].join("\n\n");
+
+      const result = grade(
+        output,
+        withMetadata({
+          expected_tools: ["reports_upload"],
+          forbidden_tools: ["reports_delete"],
+          expected_args: { reports_upload: { required: ["html", "update_slug"] } },
+        }),
+      );
+
+      expect(result.pass).toBe(false);
+      expect(result.reason).toContain("reports_delete");
+    });
+
+    it("ignores a non-numeric min_score and says so even when the run passes", () => {
+      // `min_score: "0.8"` is a plausible YAML quoting slip. Falling back to
+      // the strict default is safe; doing it silently is not — a passing run
+      // would hide the typo forever.
+      const result = grade(
+        call("reports_upload", { html: "<html/>", update_slug: "q3-revenue" }),
+        withMetadata({ ...partialCase, min_score: "0.8" }),
+      );
+      expect(result.pass).toBe(true);
+      expect(result.reason).toMatch(/min_score/);
+    });
+
+    it("ignores a min_score above 1, which no run could ever clear", () => {
+      const result = grade(
+        call("reports_upload", { html: "<html/>", update_slug: "q3-revenue" }),
+        withMetadata({ ...partialCase, min_score: 1.5 }),
+      );
+      expect(result.pass, "a perfect run must not fail an unreachable bar").toBe(true);
+      expect(result.reason).toMatch(/min_score/);
+    });
+  });
+
   it("reads tool calls out of a structured (non-string) provider output too", () => {
     const output = [
       { type: "text", text: "Searching." },

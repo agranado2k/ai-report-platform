@@ -115,9 +115,11 @@ jobs:
               - Conventional Commits: every commit follows
                 feat | fix | docs | style | refactor | perf | test |
                 build | ci | chore | revert, with optional (scope) and
-                subject <= 100 chars. Merges to main are rebase-only
-                via the `/merge` comment workflow (ADR-0035) — not
-                via the GitHub UI Rebase button.
+                subject <= 100 chars. Merges to main land as signed
+                merge commits (ADR-0044): the operator clicks the
+                GitHub "Create a merge commit" button — never "Rebase
+                and merge". Squash merge is a sanctioned secondary
+                option, not a violation. No bot ever merges a PR.
               - ADR-025 + solo-developer policy: PR-only workflow;
                 signed commits; 0 required approvals is intentional.
 

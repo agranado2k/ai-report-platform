@@ -99,9 +99,10 @@ The smoke tier asserts **nothing** about model behaviour. Faking behavioural
 coverage in the keyless tier would be precisely the "make the test ask for less"
 failure ADR-0081 exists to detect. What it does assert is structural and
 load-bearing: the config parses as YAML, every `file://` it names exists, every
-case carries a reference solution and a polarity, positive and negative are both
-represented, every named tool is one the server actually registers, every
-`grounded_in` path exists, and the LLM-judge constraints hold.
+case carries a reference solution and a polarity, the case count sits inside the
+20–50 window of §7 with each polarity holding at least 30% of the suite, every
+named tool is one the server actually registers, every `grounded_in` path
+exists, and the LLM-judge constraints hold.
 
 ### 2. The surfaces are read, not copied
 
@@ -206,6 +207,13 @@ procedure for turning an observed failure into a case, and records the
 saturation rule: **a suite at 100% is a regression gate, not a research tool**,
 so a long green streak is a signal to harvest harder cases, not a signal that
 the surface is finished.
+
+The 20–50 window is enforced by the smoke tier, not merely aspirational, and
+polarity balance with it: each polarity must hold **at least 30% of the suite**
+rather than clear a fixed count. An absolute floor stops discriminating as the
+set grows — at 40 cases a floor of 5 accepts a 34/6 split, which is balanced in
+name only — whereas the proportional floor (6 at 20 cases, 15 at 50) makes
+harvesting one polarity oblige harvesting the other.
 
 ### 8. Cost control
 
