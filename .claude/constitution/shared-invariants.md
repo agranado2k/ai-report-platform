@@ -115,6 +115,12 @@ and it makes a revert impossible to scope.
 If a refactor turns out to be needed to make a behavior change tractable, land the
 refactor first, on its own, with the suite green before and after.
 
+Per §8 this rule is checkable rather than merely asserted, because the claim is machine-
+visible: a commit whose declared type says "structure only" while its own diff touches a
+contract artifact has contradicted itself. Review tooling should surface those commits as
+a confirm item — the author either splits the commit or relabels it, and both outcomes are
+better than a reviewer discovering the mix by reading.
+
 ## 11. The context budget is a real budget
 
 Standing instructions are re-read on every request, so their cost is paid every time and

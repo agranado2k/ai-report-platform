@@ -138,6 +138,8 @@ It must **NOT** receive the other six agents' findings, the implementation conve
 
 Missing requirements (spec asked, diff doesn't deliver) are also Axis-2 findings, tagged ❌ **MISSING**.
 
+**Commit separation** (`shared-invariants.md` §10 — refactoring and behavior never share a commit) is the one Axis-2 finding class that is *about the history rather than the diff*, so it is classified per commit, not per surface. `scripts/behavior-delta.sh` emits it as its own **Commit separation** section: commits whose Conventional Commit type claims structure-only work (`refactor`, `style`) while that commit's own diff touches a contract artifact. Each listed commit is a confirm-list item tagged 🔀 **MIXED COMMIT**. The script has already established the fact — do not re-derive it and do not resolve it yourself; report the commit, the artifacts it touches, and let the human choose between splitting the commit and relabelling it. An empty section is the normal result and needs no mention.
+
 ### 4. High-Signal Filtering
 
 **Constraint**: Ignore nitpicks. Focus on vulnerabilities, broken contracts, major pattern deviations, code duplication / missed reuse of existing helpers, duplicated test setup, missing tests, redundant tests, and simplification opportunities that meaningfully reduce code volume or complexity.
@@ -180,10 +182,13 @@ Then list each finding under its severity header, with each item numbered as INI
 
 ### 5b. Behavior Confirm-List (MANDATORY — Axis 2, never merged with §5)
 
-Immediately after (and visually separate from) the severity report, present Agent 7's output verbatim in this shape — ⚠️ items first:
+Immediately after (and visually separate from) the severity report, present Agent 7's output verbatim in this shape — 🔀 items first, then ⚠️:
 
 ```
 ### Behavior changes in this PR — confirm before merge
+
+🔀 MIXED COMMIT <short-sha> <commit subject>
+                → claims refactor/style but touches <artifacts>. Split or relabel?
 
 ⚠️ UNSPECIFIED  <surface>: <what changed, one line>
                 → no spec reference found. Desired?
@@ -194,7 +199,7 @@ Immediately after (and visually separate from) the severity report, present Agen
 ❌ MISSING      <spec line the diff does not deliver>
 ```
 
-Rules: never assign severities to these items, never mix them into the C/H/M/L lists, never omit a ✅ (the human should see the whole behavioral footprint, not just the suspects). If Agent 7 found no behavior deltas, say exactly that — an empty confirm-list is a meaningful result.
+Rules: never assign severities to these items, never mix them into the C/H/M/L lists, never omit a ✅ (the human should see the whole behavioral footprint, not just the suspects). 🔀 items come first — they are the cheapest to act on and the reason the rest of the list is hard to read. If Agent 7 found no behavior deltas, say exactly that — an empty confirm-list is a meaningful result.
 
 After presenting the summary, you MUST ask:
 
