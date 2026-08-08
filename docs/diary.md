@@ -5806,6 +5806,7 @@ only; the formatting commands and the Floating composer are the follow-up ticket
   ReportEditor's `handleDOMEvents`). The tier cannot drive a real drag; real-user drags in
   production are unaffected. `selection-toolbar.spec.ts` therefore selects by double-click
   (as anchor-scroll.spec.ts always has), and the mid-drag suppression gate is explicitly
-  documented as not browser-pinned. 21 new contracts run over both synthetic fixtures and
-  the real report; the full tier is 53/53 green.
+  documented as not browser-pinned. 8 new contracts (a keyboard-selection contract joined
+  in the review round), each run over both synthetic fixtures and the real report — 24
+  runs; the full tier is 56/56 green.
 - Glossary gained **Selection toolbar** (ADR-0036 same-PR rule).
