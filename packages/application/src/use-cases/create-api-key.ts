@@ -8,6 +8,7 @@
 // create + a `api_key.created` audit_log row (ADR-0070) commit together in
 // one UnitOfWork (ADR-0037 section 5) -- the audit meta deliberately never
 // carries the plaintext token.
+
 import {
   type AppError,
   err,
@@ -21,6 +22,7 @@ import {
   type UserId,
   validationError,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps, reviveReplay } from "../idempotent-write";
 import type { ApiKeyStore, ApiKeySummary, AuditLogger, UnitOfWork } from "../ports";
 
@@ -106,33 +108,30 @@ export async function createApiKey(
   }
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const created = await deps.apiKeys.create({
-      actingUserId: actor.userId,
-      issuedInOrgId: actor.orgId,
-      name,
-      scopes,
-    });
-    if (!created.ok) return created;
-    const audited = await deps.audit.record([
-      {
-        action: "api_key.created",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "api_key",
-        targetId: created.value.summary.id,
-        // Deliberately no plaintext/secret in meta (ADR-0070).
-        meta: {},
-      },
-    ]);
-    if (!audited.ok) return audited;
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 201,
-        responseBody: created.value.summary, // summary ONLY — never the token
-      });
-      if (!done.ok) return done;
-    }
-    return ok(created.value);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: (minted) => [
+        {
+          action: "api_key.created",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "api_key",
+          targetId: minted.summary.id,
+          // Deliberately no plaintext/secret in meta (ADR-0070).
+          meta: {},
+        },
+      ],
+      // summary ONLY — never the token
+      response: (minted) => ({ responseStatus: 201, responseBody: minted.summary }),
+    },
+    async () =>
+      deps.apiKeys.create({
+        actingUserId: actor.userId,
+        issuedInOrgId: actor.orgId,
+        name,
+        scopes,
+      }),
+  );
 }

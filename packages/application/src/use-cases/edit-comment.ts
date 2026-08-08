@@ -15,6 +15,7 @@
 // load+authz → the domain editComment transition → persist + outbox the
 // CommentEdited event + a `comment.edited` audit_log row (ADR-0070), all
 // atomically (mirrors resolveComment's uow.run shape).
+
 import {
   type AppError,
   editComment as applyEdit,
@@ -29,6 +30,7 @@ import {
   type Result,
   type Slug,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -143,31 +145,29 @@ export async function editComment(
   if (idem.value.outcome === "replay") return reviveCommentReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  const committed = await deps.uow.run(async () => {
-    const saved = await deps.comments.save(emission.value.comment);
-    if (!saved.ok) return saved;
-    const enqueued = await deps.outbox.enqueue(emission.value.events);
-    if (!enqueued.ok) return enqueued;
-    const audited = await deps.audit.record([
-      {
-        action: "comment.edited",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "comment",
-        targetId: comment.id,
-        meta: { reportId: report.value.id },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, {
-          responseStatus: 200,
-          responseBody: emission.value.comment,
-        })
-      : ok(undefined);
-  });
+  const committed = await commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "comment.edited",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "comment",
+          targetId: comment.id,
+          meta: { reportId: report.value.id },
+        },
+      ],
+      response: (c) => ({ responseStatus: 200, responseBody: c }),
+    },
+    async () => {
+      const saved = await deps.comments.save(emission.value.comment);
+      if (!saved.ok) return saved;
+      const enqueued = await deps.outbox.enqueue(emission.value.events);
+      return enqueued.ok ? ok(emission.value.comment) : enqueued;
+    },
+  );
   if (!committed.ok) return committed;
 
   return ok(emission.value.comment);

@@ -9,6 +9,7 @@
 // null and matched by email at check time) → upsert via FolderShareStore + a
 // `folder.shared` audit_log row (ADR-0070), committed together (ADR-0037 §5)
 // → return the canonical persisted share.
+
 import {
   ACL_WRITE_SCOPE,
   type AppError,
@@ -22,6 +23,7 @@ import {
   type Result,
   validationError,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -107,46 +109,48 @@ export async function shareFolder(
   if (idem.value.outcome === "replay") return reviveFolderShareReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const shared = await deps.folderShares.grant(
-      found.value.id,
-      email.value,
-      actor.userId,
-      granteeUserId.value,
-    );
-    if (!shared.ok) return shared;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.shared",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: found.value.id,
-        // The email is the share key — granteeUserId is opportunistic (null
-        // until the invitee signs up), same rationale as grantWrite's audit.
-        meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
-      },
-    ]);
-    if (!audited.ok) return audited;
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "folder.shared",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: found.value.id,
+          // The email is the share key — granteeUserId is opportunistic (null
+          // until the invitee signs up), same rationale as grantWrite's audit.
+          meta: { granteeEmail: email.value, granteeUserId: granteeUserId.value },
+        },
+      ],
+      response: (share) => ({ responseStatus: 201, responseBody: share }),
+    },
+    async () => {
+      const shared = await deps.folderShares.grant(
+        found.value.id,
+        email.value,
+        actor.userId,
+        granteeUserId.value,
+      );
+      if (!shared.ok) return shared;
 
-    // Re-read for the canonical persisted row (grantedAt is server-assigned),
-    // inside the tx so the recorded replay body IS the committed row (ADR-0039).
-    const listed = await deps.folderShares.listByFolder(found.value.id);
-    if (!listed.ok) return listed;
-    const share = listed.value.find((it) => it.granteeEmail === email.value);
-    if (!share) {
-      return err({
-        kind: "Unexpected",
-        message: "folder share not found immediately after sharing",
-      });
-    }
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 201,
-        responseBody: share,
-      });
-      if (!done.ok) return done;
-    }
-    return ok(share);
-  });
+      // Re-read for the canonical persisted row (grantedAt is server-assigned),
+      // inside the tx so the recorded replay body IS the committed row
+      // (ADR-0039). It sits in the mutation closure rather than after the audit
+      // because commitWrite derives BOTH the audit rows and the replay body
+      // from what the mutation returns — the ordering within the transaction is
+      // unchanged and neither step depends on the other.
+      const listed = await deps.folderShares.listByFolder(found.value.id);
+      if (!listed.ok) return listed;
+      const share = listed.value.find((it) => it.granteeEmail === email.value);
+      return share
+        ? ok(share)
+        : err({
+            kind: "Unexpected" as const,
+            message: "folder share not found immediately after sharing",
+          });
+    },
+  );
 }

@@ -13,6 +13,7 @@
 // Sibling-slug uniqueness is DB-enforced; a clash surfaces as a ValidationError.
 // Load+authz stays OUTSIDE the tx; persists via save + a `folder.created`
 // audit_log row (ADR-0070), committed together (ADR-0037 §5).
+
 import {
   type AppError,
   createFolder as buildFolder,
@@ -24,6 +25,7 @@ import {
   type Result,
   validationError,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -117,30 +119,29 @@ export async function createFolder(
   if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const saved = await deps.folders.save(built.value);
-    if (!saved.ok) return saved;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.created",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: built.value.id,
-        meta: { parentId: input.parentId },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    const done = await deps.idempotency.complete(idemRef, {
-      responseStatus: 201,
-      responseBody: built.value,
-    });
-    if (!done.ok) return done;
-    return ok(built.value);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: (folder) => [
+        {
+          action: "folder.created",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: folder.id,
+          meta: { parentId: input.parentId },
+        },
+      ],
+      response: (folder) => ({ responseStatus: 201, responseBody: folder }),
+    },
+    async () => {
+      const saved = await deps.folders.save(built.value);
+      return saved.ok ? ok(built.value) : saved;
+    },
+  );
 }
 
-/** Depth of `folder` relative to its Root (Root = 0), by walking parent_id up. */
 async function parentDepth(
   folders: FolderRepository,
   folder: Folder,

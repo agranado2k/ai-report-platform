@@ -4,6 +4,7 @@
 // a no-op success, so a client retry or a stale UI never surfaces a false
 // failure. The revoke + the `folder.unshared` audit_log row (ADR-0070) commit
 // together in one UnitOfWork (ADR-0037 §5).
+
 import {
   ACL_WRITE_SCOPE,
   type AppError,
@@ -15,6 +16,7 @@ import {
   ok,
   type Result,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { type FolderAccessDeps, loadManagedFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, UnitOfWork } from "../ports";
@@ -76,25 +78,25 @@ export async function unshareFolder(
   if (idem.value.outcome === "replay") return ok(undefined);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const revoked = await deps.folderShares.revoke(found.value.id, email.value);
-    if (!revoked.ok) return revoked;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.unshared",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: found.value.id,
-        meta: { granteeEmail: email.value },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    if (!idemRef) return ok(undefined);
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "folder.unshared",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: found.value.id,
+          meta: { granteeEmail: email.value },
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const revoked = await deps.folderShares.revoke(found.value.id, email.value);
+      return revoked.ok ? ok(undefined) : revoked;
+    },
+  );
 }

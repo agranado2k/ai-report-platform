@@ -1,0 +1,223 @@
+name: Clerk dev-instance sweep
+
+# Manual sweep of LEAKED run-scoped e2e identities off the shared Clerk DEV
+# instance (issue #266).
+#
+# WHY IT EXISTS. The `@run-scoped` smoke fixtures mint throwaway Clerk users on
+# the dev instance that previews authenticate against, and each one joins the
+# anchored `agranado.com` team org. Cleanup used to be a single best-effort
+# per-scenario hook, so anything that killed the process — or any provisioning
+# call that threw before its fixture variable was assigned — orphaned a user
+# whose membership consumed the org's finite cap. The org reached that cap and
+# every preview smoke began failing 402 `plan_limit_exceeded`; the smoke is a
+# merge-REQUIRED check, so the repo's whole pipeline stopped.
+#
+# The e2e support layer now cleans up durably (a global teardown over an
+# on-disk ledger, plus an age-gated sweep at setup AND teardown — see
+# tests/e2e/support/clerk-fixture-sweep.ts). THIS workflow is the operator's
+# escalation path: the one-shot recovery for the backlog that already leaked,
+# and the manual lever when the org hits its cap again.
+#
+# SAFETY. It deletes ONLY addresses matching `RUN_SCOPED_EMAIL_PATTERN` below,
+# which is byte-identical to `RUN_SCOPED_EMAIL_PATTERN_SOURCE` in
+# tests/e2e/support/clerk-fixture-identity.ts — a unit test pins that literal
+# so the two cannot drift silently. `NEVER_SWEEP` is a second, exact-match
+# guard over the standing fixtures. It defaults to a DRY RUN. It targets one
+# named org on one named (dev/test) instance, via a `sk_test` secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what WOULD be deleted and delete nothing"
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
+      older_than_hours:
+        description: "Only sweep identities older than N hours (0 = every run-scoped identity)"
+        type: string
+        default: "0"
+
+# Reads nothing from the repo and writes nothing to it — the only credential in
+# play is the Clerk secret, passed explicitly below.
+permissions: {}
+
+jobs:
+  sweep:
+    name: Sweep run-scoped e2e identities
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      CLERK_API: https://api.clerk.com/v1
+      # The SAME secret the e2e workflows use (e2e.yml maps it to
+      # E2E_CLERK_SECRET_KEY): the staging/dev instance's `sk_test_…`. There is
+      # deliberately no path here to the production Clerk instance.
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_STAGING }}
+      # The anchored `agranado.com` team org whose membership cap the leak fills
+      # (ADR-0074). Named explicitly so this workflow can never be pointed at
+      # another org by accident.
+      ORG_ID: org_3HK9gdegaQZ1qdkGPgN3RGOTWVO
+      DRY_RUN: ${{ inputs.dry_run }}
+      OLDER_THAN_HOURS: ${{ inputs.older_than_hours }}
+      # ── KEEP BYTE-IDENTICAL to RUN_SCOPED_EMAIL_PATTERN_SOURCE in ──────────
+      #    tests/e2e/support/clerk-fixture-identity.ts.
+      # `<prefix>-<runId>+clerk_test@agranado.com`, anchored both ends:
+      #   [a-z]{3,12}-   a scenario prefix (silver/gold/bronze/fsown/fscol)
+      #   [0-9a-z]{8,16} the run id — Date.now().toString(36) + 4 random chars.
+      #                  The length floor is what keeps a hyphenated HUMAN local
+      #                  part (`john-smith+clerk_test@…`) out of the sweep.
+      #   \+clerk_test   Clerk's test-mode marker; never a real inbox.
+      RUN_SCOPED_EMAIL_PATTERN: '^[a-z]{3,12}-[0-9a-z]{8,16}\+clerk_test@agranado\.com$'
+      # Exact addresses that must survive regardless of the pattern — the
+      # hand-provisioned ADR-0068 §6 fixture and the primary test user. Mirrors
+      # NEVER_SWEEP_EMAILS + configuredNeverSweep() on the TypeScript side.
+      SECOND_FIXTURE_EMAIL: silver+clerk_test@agranado.com
+      PRIMARY_FIXTURE_EMAIL: ${{ vars.E2E_TEST_USER_EMAIL }}
+    steps:
+      - name: Validate inputs and authenticate
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLERK_SECRET_KEY:-}" ]; then
+            echo "::error::CLERK_SECRET_KEY_STAGING is not set on this repo — cannot sweep."
+            exit 1
+          fi
+          case "$DRY_RUN" in
+            true|false) ;;
+            *) echo "::error::dry_run must be 'true' or 'false' (got '$DRY_RUN')"; exit 1 ;;
+          esac
+          case "$OLDER_THAN_HOURS" in
+            ''|*[!0-9]*) echo "::error::older_than_hours must be a non-negative integer (got '$OLDER_THAN_HOURS')"; exit 1 ;;
+          esac
+
+          # Fail LOUD on auth: a 401/403 here would otherwise read as "0
+          # members matched, nothing to do" — a silent no-op on an incident
+          # workflow is worse than a red run.
+          code=$(curl -s -o /tmp/org.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+            "$CLERK_API/organizations/$ORG_ID")
+          case "$code" in
+            200) ;;
+            401|403) echo "::error::Clerk rejected the secret key (HTTP $code) — check CLERK_SECRET_KEY_STAGING."; exit 1 ;;
+            404) echo "::error::org $ORG_ID does not exist on the instance this key belongs to (HTTP 404) — wrong instance or wrong org id."; exit 1 ;;
+            *) echo "::error::Clerk organization lookup failed: HTTP $code"; cat /tmp/org.json; exit 1 ;;
+          esac
+          echo "::notice::Sweeping org $ORG_ID ($(jq -r '.name // "?"' /tmp/org.json)) — dry_run=$DRY_RUN, older_than_hours=$OLDER_THAN_HOURS"
+
+      - name: Collect the run-scoped memberships
+        id: collect
+        run: |
+          set -euo pipefail
+
+          # `older_than_hours: 0` puts the cutoff at "now", and every existing
+          # membership was created before now — i.e. take them all.
+          now_ms=$(( $(date -u +%s) * 1000 ))
+          cutoff_ms=$(( now_ms - OLDER_THAN_HOURS * 3600000 ))
+
+          : > /tmp/sweep.tsv
+          limit=100
+          offset=0
+          scanned=0
+          for _page in $(seq 1 50); do
+            code=$(curl -s -o /tmp/page.json -w '%{http_code}' \
+              -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+              "$CLERK_API/organizations/$ORG_ID/memberships?limit=$limit&offset=$offset")
+            if [ "$code" != "200" ]; then
+              echo "::error::membership listing failed at offset $offset: HTTP $code"
+              cat /tmp/page.json
+              exit 1
+            fi
+
+            count=$(jq '.data | length' /tmp/page.json)
+            scanned=$(( scanned + count ))
+
+            # The filter is the whole safety story, so it is one expression:
+            #   - lower-case the identifier, then match the shared regex
+            #   - drop the two standing fixtures by EXACT match
+            #   - apply the age cutoff (created_at is a ms epoch)
+            jq -r \
+              --arg pat "$RUN_SCOPED_EMAIL_PATTERN" \
+              --arg second "$SECOND_FIXTURE_EMAIL" \
+              --arg primary "$PRIMARY_FIXTURE_EMAIL" \
+              --argjson cutoff "$cutoff_ms" '
+              .data[]
+              | { user_id: .public_user_data.user_id,
+                  email: (.public_user_data.identifier // ""),
+                  created_at: (.created_at // 0) }
+              | select((.email | ascii_downcase) | test($pat))
+              | select((.email | ascii_downcase) != ($second | ascii_downcase))
+              | select($primary == "" or ((.email | ascii_downcase) != ($primary | ascii_downcase)))
+              | select(.created_at <= $cutoff)
+              | [.user_id, .email, (.created_at | tostring)]
+              | @tsv
+            ' /tmp/page.json >> /tmp/sweep.tsv
+
+            # A plain `[ … ] && break` would trip `set -e` on the last page.
+            if [ "$count" -lt "$limit" ]; then
+              break
+            fi
+            offset=$(( offset + limit ))
+          done
+
+          matched=$(wc -l < /tmp/sweep.tsv | tr -d ' ')
+          echo "matched=$matched" >> "$GITHUB_OUTPUT"
+
+          echo "Scanned $scanned membership(s) in $ORG_ID."
+          echo "Matched $matched run-scoped identit(ies):"
+          if [ "$matched" -gt 0 ]; then
+            while IFS=$'\t' read -r user_id email created_at; do
+              echo "  - $email  ($user_id, created_at=$created_at)"
+            done < /tmp/sweep.tsv
+          else
+            echo "  (none)"
+          fi
+
+      - name: Dry run — report only
+        if: inputs.dry_run == 'true'
+        env:
+          MATCHED: ${{ steps.collect.outputs.matched }}
+        run: |
+          set -euo pipefail
+          echo "::notice::DRY RUN — $MATCHED identit(ies) would be deleted. Nothing was changed."
+          echo "Re-run this workflow with dry_run=false to delete them."
+
+      - name: Delete memberships and users
+        if: inputs.dry_run == 'false'
+        env:
+          MATCHED: ${{ steps.collect.outputs.matched }}
+        run: |
+          set -euo pipefail
+
+          deleted=0
+          failed=0
+          # Deleting the USER removes every membership it holds, so the
+          # membership DELETE is belt-and-braces: it releases the cap slot even
+          # when the user delete is refused (e.g. a locked user).
+          while IFS=$'\t' read -r user_id email created_at; do
+            [ -z "$user_id" ] && continue
+
+            m_code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+              "$CLERK_API/organizations/$ORG_ID/memberships/$user_id")
+            u_code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+              "$CLERK_API/users/$user_id")
+
+            # 404 is success: the object is already gone, which is the goal.
+            if { [ "$m_code" = "200" ] || [ "$m_code" = "204" ] || [ "$m_code" = "404" ]; } \
+               && { [ "$u_code" = "200" ] || [ "$u_code" = "204" ] || [ "$u_code" = "404" ]; }; then
+              echo "deleted $email ($user_id) — membership HTTP $m_code, user HTTP $u_code"
+              deleted=$(( deleted + 1 ))
+            else
+              echo "::warning::FAILED $email ($user_id) — membership HTTP $m_code, user HTTP $u_code"
+              failed=$(( failed + 1 ))
+            fi
+          done < /tmp/sweep.tsv
+
+          echo "::notice::Sweep complete — $deleted deleted, $failed failed, out of $MATCHED matched."
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed identit(ies) could not be deleted; they still consume the org's membership cap."
+            exit 1
+          fi

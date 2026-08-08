@@ -6,6 +6,7 @@
 // (ADR-0037 §5 commit-last atomicity). The slug + blobs are retained for the
 // appeal/purge window (db-design.md).
 import { type AppError, ok, type Result, type Slug } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { loadOwnedReport, type TenancyActor } from "../load-owned";
 import type { AuditLogger, ReportRepository, UnitOfWork } from "../ports";
@@ -50,23 +51,24 @@ export async function deleteReport(
   const found = await loadOwnedReport(deps.reports, actor, input.slug);
   if (!found.ok) return found;
 
-  return deps.uow.run(async () => {
-    const deleted = await deps.reports.softDelete(found.value.id);
-    if (!deleted.ok) return deleted;
-    const audited = await deps.audit.record([
-      {
-        action: "report.deleted",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "report",
-        targetId: found.value.id,
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "report.deleted",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "report",
+          targetId: found.value.id,
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const deleted = await deps.reports.softDelete(found.value.id);
+      return deleted.ok ? ok(undefined) : deleted;
+    },
+  );
 }

@@ -7,6 +7,7 @@
 // sharing is sharing. The Root is always `org` (domain-enforced invariant).
 // Persists via save + a `folder.visibility_set` audit_log row (ADR-0070),
 // committed together (ADR-0037 §5).
+
 import {
   ACL_WRITE_SCOPE,
   type AppError,
@@ -20,6 +21,7 @@ import {
   ok,
   type Result,
 } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import {
   beginIdempotentWrite,
   type IdempotentWriteDeps,
@@ -88,32 +90,30 @@ export async function setFolderVisibility(
   if (idem.value.outcome === "replay") return reviveFolderReplay(idem.value.record);
   const idemRef = idem.value.ref;
 
-  return deps.uow.run(async () => {
-    const saved = await deps.folders.save(changed.value);
-    if (!saved.ok) return saved;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.visibility_set",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: found.value.id,
-        meta: {
-          from: fromVisibility,
-          to: changed.value.visibility,
-          // Record an adoption (legacy → owned by the caller) explicitly.
-          adopted: found.value.ownerId === null,
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: (folder) => [
+        {
+          action: "folder.visibility_set",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: found.value.id,
+          meta: {
+            from: fromVisibility,
+            to: folder.visibility,
+            // Record an adoption (legacy → owned by the caller) explicitly.
+            adopted: found.value.ownerId === null,
+          },
         },
-      },
-    ]);
-    if (!audited.ok) return audited;
-    if (idemRef) {
-      const done = await deps.idempotency.complete(idemRef, {
-        responseStatus: 200,
-        responseBody: changed.value,
-      });
-      if (!done.ok) return done;
-    }
-    return ok(changed.value);
-  });
+      ],
+      response: (folder) => ({ responseStatus: 200, responseBody: folder }),
+    },
+    async () => {
+      const saved = await deps.folders.save(changed.value);
+      return saved.ok ? ok(changed.value) : saved;
+    },
+  );
 }

@@ -198,7 +198,66 @@ deliberately dodged).
 | Decoy org (`arp-e2e-decoy-<localpart>`) | The dev instance runs `force_organization_selection: true` (same as prod), and Clerk gives a **zero-membership** user a `pending` session (task `choose-organization`) whose JWT carries `sts: "pending"` — @clerk/backend treats that as signed-out, so every request 401s (the PR #222 round-2 failure). In prod the ADR-0074 webhook pre-joins the user; e2e previews get no webhook, so the helper creates what the forced task itself would: an **anchorless decoy org** with the user as creator. Sessions then mint `active` — and since Clerk auto-activates the sole membership, the session actively CARRIES the decoy, faithfully reproducing the production duplicate-org shape: the app must ignore it (no `publicMetadata.domain`, so the anchor scan never adopts it) and land the user in the canonical domain org. |
 | ADR-0078 tail (report sharing reaches a shared folder's contents) | The last six steps prove the reported bug and its repair against real infra. The first identity puts a PRIVATE report into the now-org-shared folder — and the move must NOT publish it (ADR-0078 §7: move is `canWrite`-gated, so auto-applying would let a write grantee publish what they cannot read). The third identity then CANNOT see it, which is the bug: a folder share confers visibility of the FOLDER only, and that assertion must keep passing forever — the repair is an EXPLICIT action, not a change to what a folder share means. `POST /folders/{id}/reports/sharing {sharing:"org_edit"}` then changes BOTH reports: the private one, and the already-`org_view` one, which ESCALATES because the candidate rule composes `reportSharingState(aclMode, hasOrgWrite)` and treats "composed state ≠ target" as a candidate. **A skip there is the pre-fix silent no-op, not the honest-partial contract** — the original assertion asserted exactly that skip and shipped the defect to `main` (PR #241 → #244). The honest-partial contract is instead covered by re-applying `org_edit` a second time: both reports then skip with `already shared with your org to view and edit`, the literal read from `ALREADY_AT` in the domain. Finally the third identity must LIST it, GET it (`sharing` reads back `org_edit` — computed server-side, never a value the test held), and PATCH-rename it — a rename goes through the `canWrite` seam, so a 200 there is the org-write leg working through the real HTTP door, not just in a unit test — while DELETE must still 403 (owner-only in every sharing state). |
 | Assertion mechanics | Two-fold. (1) Clerk-side: after the second identity's first upload, the step asserts it holds a membership in the **anchored** `agranado.com` org (`findAnchoredOrgMembership` — BAPI read; absence fails loud, proving the canonical chain didn't join). (2) App-side: its session is **re-minted with that org active** (`POST /v1/sessions` `active_organization_id`, verified against the live BAPI — the v2 token's `o.id` claim reaches the app's `getAuth` as the session org, exactly like a browser session after the forced task's org selection), then a bare `GET /api/v1/reports` must list BOTH identities' uploads. A session *without* an active org can't be used for the read: the read path resolves an org-less session via the user's *oldest* membership — the unmirrored decoy. NOT `POST /settings/api-keys`: that dashboard action is cookie-session territory — a Bearer-token POST gets redirected to the sign-in HTML (the PR #222 round-2 failure). |
-| Cleanup / accumulation | An `After({ tags: "@run-scoped" })` hook best-effort deletes both users (removing their canonical-org memberships — the shared anchored org's member count stays flat; the dev instance cap was raised 5 → 20 to match prod) and their decoy orgs after every attempt, pass or fail. Cleanup failures log loudly but never fail the scenario; leaked users/orgs from crashed runs accumulate slowly on the (test-only) dev instance — a periodic sweep is a noted follow-up. |
+| Cleanup / accumulation | **Three layers, since issue #266** (the "noted follow-up" below stopped being optional when the leak took the pipeline down — see *Run-scoped identity hygiene*). (1) The prompt one: an `After({ tags: "@run-scoped" })` hook deletes both users (removing their canonical-org memberships — the shared anchored org's member count stays flat; the dev instance cap was raised 5 → 20 to match prod) and their decoy orgs after every attempt, pass or fail, now retrying 429/5xx. (2) The durable one: a Playwright **global teardown** deletes everything the run recorded in an on-disk ledger, including objects created by a provisioning call that threw before returning. (3) The self-healing one: an **age-gated sweep** at global setup *and* teardown. Cleanup failures still log loudly and never fail the scenario. |
+
+## Run-scoped identity hygiene (issue #266)
+
+**The incident.** Run-scoped identities leaked into the shared Clerk dev
+instance until the anchored `agranado.com` team org (`org_3HK9gdegaQZ1qdkGPgN3RGOTWVO`)
+hit its membership cap. The preview smoke — a merge-**required** check — began
+failing `402 plan_limit_exceeded` while provisioning the third identity, then
+the second, then would have reached the first. Retrying was the only mitigation
+and it was running out.
+
+**Why it leaked.** `firstFixture = await ensureTeamFixtureUser(…)` assigns only
+on a clean return, and the cleanup hook can only delete what a step assigned.
+But `ensureTeamFixtureUser` creates the Clerk user and *then* looks up
+memberships and creates the decoy org — and those are exactly the calls a
+saturated (402) or contended (429) instance fails. A throw there orphans a user
+that no variable, no hook and no later run knows about. The loop is
+self-reinforcing: the nearer the cap, the more provisioning throws, the faster
+the cap fills. A cancelled or killed job leaked the same way, with no hook
+running at all.
+
+**The shape of the fix.**
+
+| Piece | File |
+|---|---|
+| The pure identity contract — which addresses the suite mints, which are standing fixtures, the sweep predicate + age gate | `tests/e2e/support/clerk-fixture-identity.ts` (+ `.test.ts`) |
+| The append-only ledger, written the instant each remote object exists | `tests/e2e/support/clerk-fixture-registry.ts` (+ `.test.ts`) |
+| The Backend-API shell: paginated listing, tolerant + retrying deletes | `tests/e2e/support/clerk-fixture-sweep.ts`, `clerk-backend-api.ts` |
+| Global setup (reset ledger + age-gated sweep) / teardown (purge ledger + sweep) | `tests/e2e/support/global-setup.ts`, `global-teardown.ts`, wired in `playwright.config.ts` |
+| The operator's escalation lever | `.github/workflows/clerk-sweep.yml` |
+
+**The pattern that decides what a sweep may touch** —
+`^[a-z]{3,12}-[0-9a-z]{8,16}\+clerk_test@agranado\.com$`. It lives in
+`RUN_SCOPED_EMAIL_PATTERN_SOURCE` and is repeated **byte-identically** in the
+sweep workflow's `RUN_SCOPED_EMAIL_PATTERN` env var (bash + curl + jq cannot
+import TypeScript). A unit test pins the literal, so changing one without the
+other fails the build. The run-id length floor is what keeps a hyphenated human
+address like `john-smith+clerk_test@agranado.com` out; the hand-provisioned
+`silver+clerk_test@agranado.com` has no run id at all and additionally sits on
+an exact-match never-sweep list, as does `E2E_TEST_USER_EMAIL`.
+
+**The age gate.** The opportunistic sweeps only take identities older than
+`SWEEP_MIN_AGE_HOURS` (24). Simultaneous PR runs share this instance — that
+contention is the issue's second symptom — so an un-gated sweep would delete a
+concurrent run's live fixtures mid-scenario. Only the manual workflow can sweep
+with `older_than_hours: 0`.
+
+**Running the sweep.** Actions → *Clerk dev-instance sweep* → Run workflow.
+`dry_run` defaults to `true`: it prints the would-delete list and a count and
+changes nothing. Re-run with `dry_run: false` to delete memberships + users.
+`older_than_hours: 0` (the default) takes every run-scoped identity. Auth
+failures fail the job loudly rather than reporting "0 matched".
+
+**Contention.** The `smoke` job in `preview-isolation.yml` carries a shared
+`concurrency: preview-smoke-shared` group (`cancel-in-progress: false`), so
+parallel PRs queue against the one shared Clerk instance instead of colliding.
+Only the smoke leg is grouped — `isolate` / `security-headers` / `teardown`
+contend for nothing shared. Note GitHub keeps at most **one** pending run per
+group, so a third simultaneous PR evicts the second's queued smoke; that's a
+cancelled check needing a re-run, traded against a mid-suite 429.
 
 ## Authenticated-browser scenarios (`@browser`)
 

@@ -9,6 +9,7 @@
 // subfolder or report the deleter cannot see must still block the delete, and
 // a bare boolean surfaces no metadata.
 import { type AppError, err, type FolderId, ok, type Result, validationError } from "arp-domain";
+import { commitWrite } from "../commit-write";
 import { beginIdempotentWrite, type IdempotentWriteDeps } from "../idempotent-write";
 import { type FolderAccessDeps, loadWritableFolder, type TenancyActor } from "../load-owned";
 import type { AuditLogger, FolderRepository, ReportRepository, UnitOfWork } from "../ports";
@@ -75,23 +76,24 @@ export async function deleteFolder(
     );
   }
 
-  return deps.uow.run(async () => {
-    const deleted = await deps.folders.softDelete(input.folderId);
-    if (!deleted.ok) return deleted;
-    const audited = await deps.audit.record([
-      {
-        action: "folder.deleted",
-        orgId: actor.orgId,
-        actorUserId: actor.userId,
-        targetType: "folder",
-        targetId: input.folderId,
-      },
-    ]);
-    if (!audited.ok) return audited;
-    // No ref when the client sent no Idempotency-Key: an `unsound` operation
-    // claims nothing, so there is nothing to complete (issue #233).
-    return idemRef
-      ? deps.idempotency.complete(idemRef, { responseStatus: 204, responseBody: null })
-      : ok(undefined);
-  });
+  return commitWrite(
+    deps,
+    {
+      idemRef,
+      audit: () => [
+        {
+          action: "folder.deleted",
+          orgId: actor.orgId,
+          actorUserId: actor.userId,
+          targetType: "folder",
+          targetId: input.folderId,
+        },
+      ],
+      response: () => ({ responseStatus: 204, responseBody: null }),
+    },
+    async () => {
+      const deleted = await deps.folders.softDelete(input.folderId);
+      return deleted.ok ? ok(undefined) : deleted;
+    },
+  );
 }
