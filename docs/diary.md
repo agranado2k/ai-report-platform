@@ -5368,3 +5368,74 @@ behavior change arrives ranked alongside style notes.
 **Process**: worktree `worktree/sdlc-phase3-review` (branch `chore/sdlc-phase3-review`),
 stacked on `chore/sdlc-phase2-workflow`. Skill/script changes — the docs gate + manual
 script runs are the verification tier.
+
+### 2026-08-07 — PIPELINE DOWN: run-scoped Clerk identities leaked to the org membership cap (issue #266)
+
+**Incident.** The preview smoke — a merge-**required** check — started failing
+`402 plan_limit_exceeded`: `clerk org org_3HK9gdegaQZ1qdkGPgN3RGOTWVO is at its membership
+cap`. First on the third run-scoped identity (PR #262), then on the second (PR #267). Not
+caused by either PR; the same suite passed minutes apart on #261/#263. Every merge in the
+stack was blocked, and the only mitigation was re-running and hoping. A second symptom on
+the same shared fixture: three stacked PRs smoking in parallel got `clerk users lookup
+failed: 429`.
+
+**Root cause, as found in the code.** `ensureTeamFixtureUser` (`tests/e2e/support/
+clerk-session.ts`) creates the Clerk user, *then* looks up memberships and creates the
+pending-session-heal decoy org. Its caller assigns `firstFixture = await
+ensureTeamFixtureUser(…)` only on a clean **return** — and the per-scenario
+`After({ tags: "@run-scoped" })` hook can only delete what that assignment holds. So every
+throw between `POST /users` succeeding and the return orphans a Clerk user that no
+variable, no hook and no later run knows about. Those throws are precisely what a
+saturated (402) or contended (429) instance produces, which makes the leak
+**self-reinforcing**: the nearer the org is to its cap, the more provisioning throws, the
+faster the cap fills — exactly the "third identity → second identity" progression the
+issue recorded. Two smaller mouths on the same leak: `cleanupTeamFixture` swallowed 429s
+with no retry, and a cancelled/killed job runs no hook at all.
+
+**Fix — three layers, on branch `fix/clerk-e2e-hygiene`.**
+
+1. **Durable teardown.** A Playwright `globalSetup`/`globalTeardown` pair (new; wired in
+   `playwright.config.ts`) works off an append-only on-disk ledger,
+   `tests/e2e/support/clerk-fixture-registry.ts`, written the *instant* each remote object
+   exists — before anything else can throw. Cross-process by design: workers restart on
+   failure, so module state cannot carry this. Teardown also re-sweeps; setup sweeps
+   first, so a run about to provision three identities makes room for them.
+2. **Precise, tested predicate.** All "what may be deleted" logic is pure and lives in
+   `tests/e2e/support/clerk-fixture-identity.ts` — the run-scoped email pattern
+   `^[a-z]{3,12}-[0-9a-z]{8,16}\+clerk_test@agranado\.com$`, the decoy-org name rule, an
+   exact-match never-sweep list (the ADR-0068 §6 hand-provisioned fixture +
+   `E2E_TEST_USER_EMAIL`), and a 24h age gate that makes the opportunistic sweeps safe to
+   run while OTHER PRs are mid-smoke. 22 unit tests, written red first, weighted to the
+   negative cases: a real-looking `@agranado.com` human address and the standing fixture
+   must never match, in any casing. The API-calling shell (`clerk-fixture-sweep.ts`,
+   `clerk-backend-api.ts`) chooses no victims.
+3. **Operator lever.** `.github/workflows/clerk-sweep.yml` — `workflow_dispatch`,
+   `dry_run` defaulting to `"true"`, optional `older_than_hours` (0 = all). Pages the org's
+   memberships, filters with a **byte-identical** copy of the same regex (a unit test pins
+   the literal so the two cannot drift), prints the would-delete list + count, deletes
+   nothing on a dry run, fails loud on auth errors. `permissions: {}`.
+
+**Contention.** The `smoke` job in `preview-isolation.yml` gains a shared
+`concurrency: preview-smoke-shared` (`cancel-in-progress: false`) so parallel PRs queue
+against the one shared Clerk instance. Scoped to the smoke leg alone — `isolate` /
+`security-headers` / `teardown` contend for nothing shared (per-PR Neon branch, Vercel env,
+R2 prefix), and serializing them would slow every PR for no benefit. Accepted limit:
+GitHub keeps at most one *pending* run per group, so a third simultaneous PR evicts the
+second's queued smoke — a cancelled check needing a re-run, traded against a mid-suite 429
+that also leaks the fixtures it had already created.
+
+**No ADR.** Per ADR-026 this is a workflow + test-support change that reverses no decision
+and introduces no new architectural constraint: it is the *implementation* of the periodic
+sweep that `tests/e2e/README.md` already recorded as a follow-up under ADR-0074's fixture
+design, in the spirit of ADR-0049 (Clerk instance hygiene). Docs updated instead —
+`tests/e2e/README.md` gains a "Run-scoped identity hygiene" section (root cause, the
+pattern and where its twin lives, the age gate, how to run the sweep) and the cleanup row
+now describes all three layers.
+
+**Caveats carried into review.** No Clerk secret exists locally, so nothing here has been
+exercised against the live Backend API — the BAPI response shapes the sweep reads
+(`GET /users` → array, `GET /organizations` → `{data}`, `created_at` as ms epoch) follow the
+shapes the existing fixture code already relies on, but the paging and delete calls are
+verified only by construction. The sweep workflow's bash was simulated locally with a
+stubbed `curl`, and its jq filter cross-checked against the same positive/negative corpus
+as the TypeScript predicate — identical verdicts.
