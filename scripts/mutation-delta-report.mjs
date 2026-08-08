@@ -77,13 +77,18 @@ export function summarize(report) {
   const detected = counts.Killed + counts.Timeout;
   const valid = detected + counts.Survived + counts.NoCoverage;
   const covered = detected + counts.Survived;
-  const total = valid + counts.other;
+
+  // The tally reports the score's own denominator, not the raw mutant count.
+  // Folding the invalid and ignored mutants into one "N mutants" total made the
+  // two numbers irreconcilable — the total silently exceeded the denominator the
+  // percentage was computed over, which reads as a bug in the score.
+  const unscored = counts.other > 0 ? `, ${counts.other} not scored (invalid or ignored)` : "";
 
   const lines = [
     "## Score",
     `  ${percent(detected, valid)} total · ${percent(detected, covered)} covered — ` +
       `${counts.Killed} killed, ${counts.Timeout} timeout, ${counts.Survived} survived, ` +
-      `${counts.NoCoverage} no-coverage (${total} mutants across ${files.length} file(s))`,
+      `${counts.NoCoverage} no-coverage (${valid} scored across ${files.length} file(s)${unscored})`,
     "",
     `## Survivors (${survivors.length})`,
   ];

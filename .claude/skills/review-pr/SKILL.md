@@ -117,7 +117,10 @@ It scopes a Stryker run to the pure-domain source files **this branch** changed 
 the mutation score plus every surviving mutant with `file:line` and the mutator — a mutant
 that survives is production behavior Stryker deleted or inverted with **no test failing**
 (ADR-0081). When the branch changed no domain source it says so in under a second and runs
-nothing, which is the common case.
+nothing, which is the common case. If this PR is **stacked** on another branch, pass that
+base — `scripts/mutation-delta.sh <base-branch>` — because the `origin/main` default would
+scope the run to everything since main and credit the branch underneath's mutants to this
+PR.
 
 How to use its output:
 

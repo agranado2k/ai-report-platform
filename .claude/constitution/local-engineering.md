@@ -59,6 +59,9 @@ for the differential form a review can afford — Stryker scoped to the pure-dom
 files the branch changed, printing the score and every surviving mutant with `file:line`.
 It is a diagnostic and exits 0 whatever the score; `/review-pr`'s Agent 6 cites its
 survivors instead of offering an opinion, and Agent 7's confirm-list carries its 🧬 line.
+On a **stacked** branch pass the real base explicitly (`scripts/mutation-delta.sh
+<base-branch>`): the `origin/main` default scopes the run to everything since main,
+so the mutants of the branch underneath are attributed to this one.
 
 Conventions and the red-green-refactor procedure itself live in `.claude/skills/tdd/SKILL.md` —
 that skill is the single home for them, not this file.
