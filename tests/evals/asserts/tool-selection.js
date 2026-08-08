@@ -13,7 +13,8 @@
 //                    neither expected nor explicitly acceptable. Reading a
 //                    folder list before moving a report is not a mistake, so
 //                    `acceptable_tools` costs nothing; calling `reports_delete`
-//                    when asked to confirm first does.
+//                    when asked to confirm first does. A FORBIDDEN call is also
+//                    a hard fail on top of the 0.2 it costs — see below.
 //   arguments (0.2) — the reference ARG SHAPE, not exact values: which keys
 //                    must be present, which must be absent, which must equal a
 //                    specific enum member.
@@ -23,7 +24,10 @@
 // and the reason string says which. `metadata.min_score` (default 1) is the
 // per-case bar, and it is what makes partial credit change OUTCOMES rather
 // than merely decorate reasons: a case with a known, accepted partial answer
-// lowers its own bar, in the case data, where a reviewer sees it.
+// lowers its own bar, in the case data, where a reviewer sees it. What a
+// lowered bar can NEVER buy is a forbidden call: that fails the case outright,
+// whatever the score, because restraint's 0.2 is less than any bar worth
+// lowering to.
 
 /**
  * Every `{…}` run in `text` whose braces balance, outermost-first.
@@ -175,8 +179,8 @@ function scoreArgs(spec, calls) {
  *
  * The default is 1 — every component perfect — and stays there for any value
  * this grader cannot honour: a non-number (`min_score: "0.8"` is a plausible
- * YAML quoting slip), a bar of 0 (which passes literally every run, including
- * one that fires a forbidden tool — silently deleting the case), or a bar
+ * YAML quoting slip), a bar of 0 (which passes literally every run that stops
+ * short of a forbidden call — silently deleting the case), or a bar
  * above 1 (which no run can ever clear). Falling back to the strict default is
  * the fail-CLOSED direction, the same one `extractToolCalls` takes; the
  * warning it pushes is what stops a typo from living forever behind a pass.
@@ -252,11 +256,22 @@ export default function gradeToolSelection(output, context) {
   const args = argsChecked === 0 ? 1 : argsSatisfied / argsChecked;
 
   const score = 0.6 * coverage + 0.2 * restraint + 0.2 * args;
-  const pass = score + 1e-9 >= minScore;
+  // A forbidden call is a HARD fail, outside the weighted score entirely.
+  // Restraint is only worth 0.2, so a case that lowers its bar to 0.8 for a
+  // known partial answer would otherwise also buy a pass for a run that called
+  // the expected tool AND a forbidden one (0.6 + 0 + 0.2 = 0.8). The forbidden
+  // list is the one thing partial credit must never be able to trade away.
+  const pass = forbiddenHit.length === 0 && score + 1e-9 >= minScore;
 
-  const verdict = pass
-    ? `tool selection ok (score ${score.toFixed(2)} ≥ ${minScore}); called [${called.join(", ") || "none"}]`
-    : `score ${score.toFixed(2)} < ${minScore}: ${reasons.join("; ") || "no reason recorded"}`;
+  const bar = minScore.toFixed(2);
+  let verdict;
+  if (pass) {
+    verdict = `tool selection ok (score ${score.toFixed(2)} ≥ ${bar}); called [${called.join(", ") || "none"}]`;
+  } else if (forbiddenHit.length > 0) {
+    verdict = `forbidden tool(s) ${forbiddenHit.join(", ")} fired — a hard fail regardless of score (${score.toFixed(2)}) or bar (${bar}): ${reasons.join("; ")}`;
+  } else {
+    verdict = `score ${score.toFixed(2)} < ${bar}: ${reasons.join("; ") || "no reason recorded"}`;
+  }
 
   return {
     pass,

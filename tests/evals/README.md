@@ -105,7 +105,7 @@ under `metadata`, and the shape is enforced by `golden-set.test.ts`.
     expected_tools: [reports_upload]   # the reference solution; [] means "nothing should fire"
     expected_any_of: false      # true ⇒ "any one of expected_tools is correct"
     acceptable_tools: []        # legitimate lookups on the way; never penalised
-    forbidden_tools: []         # calling one of these zeroes the restraint component
+    forbidden_tools: []         # calling one of these is a hard fail, at any score
     expected_args:              # the reference ARG SHAPE, not exact values
       reports_upload:
         required: [html, update_slug]
@@ -136,6 +136,12 @@ the path, with partial credit:
 Partial credit is the point: 0.9 ("right tool, missing `update_slug`") and 0.4
 ("never called it") are different failures, and the `reason` string says which.
 
+One thing sits **outside** the weighted score: calling a `forbidden_tools` entry
+fails the case outright, whatever the score and whatever the bar. Restraint is
+only worth 0.2, so a case that lowered its bar to 0.8 would otherwise also pass
+a run that called the expected tool *and* a forbidden one; the `reason` names
+the forbidden tool and says it is a hard fail.
+
 #### The per-case bar (`metadata.min_score`)
 
 Partial credit only changes anything if a case can act on it. `min_score` is
@@ -148,7 +154,8 @@ that lever — the score a run must reach for the case to pass:
 - **Lower it only for a known, accepted partial answer**, and say why in
   `rationale`. `min_score: 0.8` on a case whose arg shape has one genuinely
   optional key turns "0.9, so red" into a pass; it does not turn a wrong tool
-  into a pass, because coverage alone is worth 0.6.
+  into a pass, because coverage alone is worth 0.6, and it cannot turn a
+  forbidden call into a pass at all — that is a hard fail outside the score.
 - **It is validated, not trusted.** A value outside `(0, 1]` — or a non-number,
   e.g. the YAML quoting slip `min_score: "0.8"` — is *ignored*: the grader falls
   back to the strict 1.0 and appends a warning to `reason` on **both** verdicts.

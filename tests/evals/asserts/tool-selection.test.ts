@@ -217,9 +217,10 @@ describe("tool-selection grader", () => {
       expect(result.reason).toContain("did not call reports_upload");
     });
 
-    // A bar of 0 passes literally every run, including one that fires a
-    // forbidden tool — i.e. it silently deletes the case. The grader must fail
-    // CLOSED on that, the same direction the tool-call extractor does.
+    // A bar of 0 passes literally every run that stops short of a forbidden
+    // call — i.e. it silently deletes the case. The grader must fail CLOSED on
+    // that, the same direction the tool-call extractor does. (The forbidden
+    // hard fail below is the second, independent line of defence here.)
     it("refuses a min_score of 0, which would pass even a forbidden call", () => {
       const result = grade(
         call("reports_delete", { slug: "draft-v1" }),
@@ -231,6 +232,52 @@ describe("tool-selection grader", () => {
       );
       expect(result.pass, "a zero bar must not resurrect a forbidden call").toBe(false);
       expect(result.reason).toMatch(/min_score/);
+    });
+
+    // A lowered bar is a valid, reviewable opt-in — but restraint is only worth
+    // 0.2, so `min_score: 0.8` would otherwise pass a run that did the right
+    // thing AND fired a forbidden tool (0.6 + 0 + 0.2 = 0.8). The forbidden
+    // list is the one thing a case can never trade away for partial credit.
+    it("hard-fails a forbidden call even when the score clears the case's lowered bar", () => {
+      const output = [
+        call("reports_set_sharing", { slug: "roadmap", sharing: "org_edit" }),
+        call("reports_set_acl", { slug: "roadmap", mode: "org" }),
+      ].join("\n\n");
+
+      const result = grade(
+        output,
+        withMetadata({
+          expected_tools: ["reports_set_sharing"],
+          forbidden_tools: ["reports_set_acl"],
+          min_score: 0.8,
+        }),
+      );
+
+      expect(result.score, "the score itself still clears the bar").toBeCloseTo(0.8, 5);
+      expect(result.pass, "a forbidden call must not be buyable with a lowered bar").toBe(false);
+      expect(result.reason).toContain("reports_set_acl");
+      expect(result.reason, "the verdict must say the forbidden hit is what failed it").toMatch(
+        /forbidden/,
+      );
+    });
+
+    it("hard-fails a forbidden call on an otherwise perfect run at min_score 1", () => {
+      const output = [
+        call("reports_upload", { html: "<html/>", update_slug: "q3-revenue" }),
+        call("reports_delete", { slug: "q3-revenue" }),
+      ].join("\n\n");
+
+      const result = grade(
+        output,
+        withMetadata({
+          expected_tools: ["reports_upload"],
+          forbidden_tools: ["reports_delete"],
+          expected_args: { reports_upload: { required: ["html", "update_slug"] } },
+        }),
+      );
+
+      expect(result.pass).toBe(false);
+      expect(result.reason).toContain("reports_delete");
     });
 
     it("ignores a non-numeric min_score and says so even when the run passes", () => {
