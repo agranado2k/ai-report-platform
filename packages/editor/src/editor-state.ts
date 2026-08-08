@@ -278,6 +278,17 @@ function anchorTargetRange($pos: ResolvedPos): { readonly from: number; readonly
  *  (2026-07-29 dogfood paper cut #2). */
 export function reportableSelection(tr: Transaction, state: EditorState): EditorSelection | null {
   if (tr.getMeta(PROGRAMMATIC_SELECTION_META)) return null;
+  return currentSelection(state);
+}
+
+/** `reportableSelection` minus the transaction gate: the state's own trimmed,
+ *  quotable selection (or `null` when collapsed). For re-reports that happen
+ *  OUTSIDE a transaction — the Selection toolbar appears on mouseup (ticket
+ *  #296), and a drag's last selection transaction fired before the button was
+ *  released, so the mouseup reading has only the state to go on. Never use
+ *  this where a transaction is in hand — the programmatic gate above exists
+ *  so a Jump can't open authoring UI. */
+export function currentSelection(state: EditorState): EditorSelection | null {
   const { from, to } = state.selection;
   if (from === to) return null;
   const trimmed = trimSelectionBleed(state.doc, from, to);

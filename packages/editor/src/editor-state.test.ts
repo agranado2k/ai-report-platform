@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
   anchorScrollTransaction,
   createEditorState,
+  currentSelection,
   docJson,
   jumpToCommentTransaction,
   programmaticRevealTransaction,
@@ -149,6 +150,23 @@ describe("jumpToCommentTransaction / reportableSelection", () => {
     const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
     const next = state.apply(tr);
     expect(reportableSelection(tr, next)).toEqual({ from: 1, to: 6, text: "hello" });
+  });
+});
+
+// `currentSelection` is `reportableSelection` minus the transaction gate —
+// the state-only reading a mouseup re-report needs (ticket #296: the
+// Selection toolbar appears on mouseup, when no new transaction fires).
+describe("currentSelection", () => {
+  it("reads the state's trimmed selection with its quote", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const next = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, 6)));
+    expect(currentSelection(next)).toEqual({ from: 1, to: 6, text: "hello" });
+  });
+
+  it("reports null for a collapsed selection", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const next = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3, 3)));
+    expect(currentSelection(next)).toBeNull();
   });
 });
 
