@@ -61,6 +61,10 @@ export function placeToolbar({
   return { left, top, placement };
 }
 
+/** Ordinary clamp, except a DEGENERATE range (`max < min` — a surface
+ *  smaller than the toolbar itself) pins to `min`: the top/left edge is
+ *  where the app chrome (TopBar, panel) sits, and overflowing AWAY from it
+ *  beats painting the z-raised bar over it. */
 function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+  return Math.min(Math.max(value, min), Math.max(max, min));
 }

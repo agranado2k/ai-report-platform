@@ -78,6 +78,7 @@ import {
   createEditorState,
   currentSelection,
   docJson,
+  isProgrammaticSelection,
   jumpToCommentTransaction,
   reportableSelection,
 } from "./editor-state";
@@ -88,7 +89,7 @@ import {
   linkMarkAtPos,
   scrollAnchorIntoView,
 } from "./link-activation";
-import { type SelectionGeometry, selectionGeometry } from "./selection-rect";
+import { type SelectionGeometry, selectionGeometry, shouldComputeGeometry } from "./selection-rect";
 
 // Re-exported for callers that import it from this module (the type moved to
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
@@ -276,25 +277,42 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
       // drag-vs-click discrimination (`clickedCommentId`) is ours. Both
       // handlers return false — they observe, never consume.
       let pointerDown: ClickPoint | null = null;
+      // The drag flag for geometry withholding (ticket #296) — SEPARATE from
+      // `pointerDown` on purpose (claude-review #301 M-1): `pointerDown` is
+      // cleared only in `click`, and a gesture that never yields a click (a
+      // cross-block drag, a right-button press, a release outside the
+      // surface) would leave a shared flag stuck and silently withhold
+      // geometry from every later keyboard-extended selection. This one is
+      // set on mousedown and cleared on EVERY mouseup, so it can wedge only
+      // for a release outside the iframe — which self-heals on the next
+      // press.
+      let dragging = false;
+      // Whether the most recent transaction was a programmatic reveal (Jump,
+      // anchor scroll). The mouseup re-report below reads state, not a
+      // transaction, so without this latch a primary-button release landing
+      // while a Jump-set selection still stands would re-report it as a
+      // GENUINE user selection — re-opening the composer/toolbar the
+      // programmatic gate exists to suppress (claude-review #301 H-1).
+      let lastSelectionProgrammatic = false;
 
       // The one path every selection report takes (ticket #296). Geometry —
       // where the selection sits, in HOST viewport coordinates — rides along
       // with the selection so hosts can float UI over it, EXCEPT mid-drag
-      // (`dragging`): a bar appearing under a moving pointer would flicker
-      // and swallow the drag's own mouse events, so drags report their
-      // geometry only from the `mouseup` handler below, Notion-style.
-      // `coordsAtPos` speaks iframe-viewport coordinates; the pure
-      // `selectionGeometry` unions start/end and translates by the iframe's
-      // own bounding rect. Side `-1` on `to` reads the coords of the
-      // selection's LAST character rather than the position after it (which
-      // on a line break would be the start of the next line).
+      // (`shouldComputeGeometry`, pure): a bar appearing under a moving
+      // pointer would flicker and swallow the drag's own mouse events, so
+      // drags report their geometry only from the `mouseup` handler below,
+      // Notion-style. `coordsAtPos` speaks iframe-viewport coordinates; the
+      // pure `selectionGeometry` unions start/end and translates by the
+      // iframe's own bounding rect. Side `-1` on `to` reads the coords of
+      // the selection's LAST character rather than the position after it
+      // (which on a line break would be the start of the next line).
       function reportSelection(
         selection: EditorSelection | null,
         forView: EditorView,
-        dragging: boolean,
+        midDrag: boolean,
       ) {
         let geometry: SelectionGeometry | null = null;
-        if (selection && !dragging && iframe) {
+        if (shouldComputeGeometry(selection, midDrag) && selection && iframe) {
           geometry = selectionGeometry(
             forView.coordsAtPos(selection.from),
             forView.coordsAtPos(selection.to, -1),
@@ -444,22 +462,33 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             const next = view.state.apply(tr);
             view.updateState(next);
             if (tr.docChanged) onChangeRef.current(docJson(next));
-            reportSelection(reportableSelection(tr, next), view, pointerDown !== null);
+            lastSelectionProgrammatic = isProgrammaticSelection(tr);
+            reportSelection(reportableSelection(tr, next), view, dragging);
           },
           handleDOMEvents: {
             mousedown(_view, event) {
               pointerDown = { x: event.clientX, y: event.clientY };
+              dragging = true;
               return false;
             },
-            mouseup(upView) {
+            mouseup(upView, event) {
               // The drag's own selection transactions fired during mousemove
               // with geometry withheld (see reportSelection); the release is
               // when the Selection toolbar may appear, and no new transaction
               // fires here — so re-report from the STATE (`currentSelection`,
-              // the same trimmed reading minus the transaction gate).
-              // Deliberately does NOT clear `pointerDown`: the `click` handler
-              // below still needs the down point for its click-vs-drag
-              // discrimination, and it fires after mouseup.
+              // the same trimmed reading minus the transaction gate). Three
+              // guards stand in for the gate a transaction would carry:
+              // only a PRIMARY-button release (a right-click's mouseup must
+              // not re-surface whatever selection stands — e.g. one a Jump
+              // just set), only when a press in this surface started the
+              // gesture, and never while the latest transaction was a
+              // programmatic reveal (H-1). Deliberately does NOT clear
+              // `pointerDown`: the `click` handler below still needs the
+              // down point for its click-vs-drag discrimination, and it
+              // fires after mouseup.
+              const startedHere = dragging;
+              dragging = false;
+              if (event.button !== 0 || !startedHere || lastSelectionProgrammatic) return false;
               reportSelection(currentSelection(upView.state), upView, false);
               return false;
             },

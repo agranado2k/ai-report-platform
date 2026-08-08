@@ -31,6 +31,20 @@ export interface SelectionGeometry {
   readonly surface: SelectionRect;
 }
 
+/** Whether a selection report should carry geometry at all: only for a live
+ *  selection, and never mid-drag — a bar appearing under a moving pointer
+ *  would flicker and swallow the drag's own mouse events (the drag's
+ *  geometry comes from the mouseup re-report instead). Pure, because the
+ *  browser tier cannot drive a held-button drag (see
+ *  tests/browser/selection-toolbar.spec.ts's file comment) — this decision
+ *  is only testable here, at the node tier. */
+export function shouldComputeGeometry(
+  selection: { readonly from: number; readonly to: number } | null,
+  midDrag: boolean,
+): boolean {
+  return selection !== null && !midDrag;
+}
+
 export function selectionGeometry(
   start: PositionCoords,
   end: PositionCoords,

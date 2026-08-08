@@ -277,8 +277,18 @@ function anchorTargetRange($pos: ResolvedPos): { readonly from: number; readonly
  *  trimmed range, so the stored anchor and its text_quote always agree
  *  (2026-07-29 dogfood paper cut #2). */
 export function reportableSelection(tr: Transaction, state: EditorState): EditorSelection | null {
-  if (tr.getMeta(PROGRAMMATIC_SELECTION_META)) return null;
+  if (isProgrammaticSelection(tr)) return null;
   return currentSelection(state);
+}
+
+/** Whether a just-applied transaction was a programmatic reveal (Jump /
+ *  anchor scroll). Exposed as a predicate — not the meta key itself — so
+ *  ReportEditor can latch "the standing selection was set programmatically"
+ *  for its transactionless mouseup re-report (a right-button release must
+ *  never re-surface a Jump-set selection as a user selection) without any
+ *  caller being able to FORGE the flag on a transaction it builds. */
+export function isProgrammaticSelection(tr: Transaction): boolean {
+  return Boolean(tr.getMeta(PROGRAMMATIC_SELECTION_META));
 }
 
 /** `reportableSelection` minus the transaction gate: the state's own trimmed,

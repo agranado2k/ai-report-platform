@@ -53,4 +53,28 @@ describe("placeToolbar", () => {
     expect(placed.placement).toBe("below");
     expect(placed.top).toBe(BOUNDS.bottom - TOOLBAR_MARGIN_PX - TOOLBAR.height);
   });
+
+  // The one case stated in LITERAL numbers (claude-review #301 M-6): every
+  // other expectation is computed from TOOLBAR_GAP_PX / TOOLBAR_MARGIN_PX,
+  // so a silent change to the constants themselves would survive the whole
+  // relational suite. This is the constants' witness — if it fails and the
+  // relational cases pass, someone changed the gap or margin.
+  it("witnesses the constants: gap and margin are 8px", () => {
+    expect(TOOLBAR_GAP_PX).toBe(8);
+    expect(TOOLBAR_MARGIN_PX).toBe(8);
+    expect(placeToolbar(input({ left: 100, top: 300, right: 200, bottom: 320 }))).toEqual({
+      placement: "above",
+      top: 256,
+      left: 50,
+    });
+  });
+
+  it("pins to the surface's top edge — never over the chrome above it — when the surface is shorter than the toolbar", () => {
+    const placed = placeToolbar({
+      selection: { left: 100, top: 60, right: 200, bottom: 70 },
+      toolbar: TOOLBAR,
+      bounds: { left: 0, top: 53, right: 680, bottom: 80 },
+    });
+    expect(placed.top).toBe(53 + TOOLBAR_MARGIN_PX);
+  });
 });
