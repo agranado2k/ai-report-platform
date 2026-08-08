@@ -84,7 +84,7 @@ async function deleteAll(
 
 /** `GET /users` answers a bare ARRAY (unlike `/organizations`, which wraps in
  *  `{ data }`) — the same shape `clerk-session.ts` already relies on. */
-async function listAllUsers(secretKey: string): Promise<readonly SweepableUser[]> {
+export async function listAllUsers(secretKey: string): Promise<readonly SweepableUser[]> {
   const users: SweepableUser[] = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -114,7 +114,7 @@ async function listAllUsers(secretKey: string): Promise<readonly SweepableUser[]
   return users;
 }
 
-async function listAllOrganizations(secretKey: string): Promise<readonly SweepableOrganization[]> {
+export async function listAllOrganizations(secretKey: string): Promise<readonly SweepableOrganization[]> {
   const organizations: SweepableOrganization[] = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
