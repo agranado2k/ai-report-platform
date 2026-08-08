@@ -151,11 +151,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     headers.set("x-robots-tag", "noindex, nofollow");
     return new Response(null, { status: 303, headers });
   }
-  if (decision.kind !== "serve" || !decision.edit || !appOrigin) {
-    // Defensive narrowing only: for purpose "edit" the gate never emits
-    // `interstitial`, never a "serve" without the edit capability, and never
-    // a "serve" with appOrigin unset (it degrades those itself) — but the
-    // types can't prove it. Degrade EXACTLY the way the gate would: through
+  if (!appOrigin) {
+    // The gate never returns "serve" with appOrigin unset — it degrades those
+    // itself. This is the last defensive narrowing left in this branch, and it
+    // is here only because `appOrigin` is the ROUTE's own local (the editor
+    // needs it as its Save/API target), not something read back off the
+    // Decision. The other two conditions this branch used to carry —
+    // `kind !== "serve"` and `!decision.edit` — are gone: EditDecision has no
+    // `interstitial` arm and its serve arm's `edit` is required, so after the
+    // three early returns above TypeScript has already narrowed `decision` to
+    // exactly one shape. The comment here used to read "the types can't prove
+    // it"; now they do. Degrade EXACTLY the way the gate would: through
     // the gate's own target (which carries the owner `?access=` fallback when
     // one is in play), and with a log line. This branch used to hard-code
     // `/${params.slug}` and say nothing — the same silent, owner-stranding
