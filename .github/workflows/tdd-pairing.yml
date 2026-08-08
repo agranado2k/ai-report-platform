@@ -8,6 +8,14 @@ name: TDD pairing
 # with a `::notice::`, so the override is a reviewable fact on the PR rather
 # than an env var in someone's shell history.
 #
+# WHAT THIS GATE IS NOT: `pull_request` runs the PR's OWN copy of this workflow
+# and of both guard scripts, so a PR that edits them is checked by its edits —
+# the same stance scripts/tdd-pairing-guard.sh already states about itself ("the
+# rule does NOT cover itself … editing the guard trips no guard"). It guards
+# honest mistakes, not an adversary, and the blast radius of that is nil: the job
+# holds a read-only `contents: read` token, installs nothing, and makes no API
+# call. Human review is what covers a diff that weakens the guard.
+#
 # The rule is scripts/tdd-pairing-guard.sh (shared with the hook, issue #278);
 # the CI-specific parts — the merge-base range and the label hatch — are
 # scripts/tdd-pairing-guard-ci.sh, which is unit-tested against a simulated
