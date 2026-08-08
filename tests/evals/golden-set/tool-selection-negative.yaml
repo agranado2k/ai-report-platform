@@ -1,0 +1,153 @@
+# NEGATIVE tool-selection cases: turns where the right behaviour is to answer,
+# ask, or look before leaping — not to fire a tool. A suite of positives alone
+# measures only eagerness, and eagerness is the failure mode a sharpened tool
+# description most easily creates.
+#
+# `expected_tools: []` means "nothing should fire"; `acceptable_tools` names the
+# read-only lookups that are legitimate on the way to the answer.
+
+- description: answer the versioning question from the instructions, without calling anything
+  vars:
+    scenario: >-
+      Quick question before I hand you anything: if I upload a report again with
+      `update_slug` set to a slug I already published, does the shareable URL
+      change?
+  metadata:
+    polarity: negative
+    expected_tools: []
+    forbidden_tools: [reports_upload]
+    grounded_in:
+      - apps/mcp/src/instructions.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      The instructions state the answer outright ("keeping that URL"), so this
+      is answerable with zero tool calls and zero side effects. A model that
+      calls reports_upload to find out has published a report to answer a
+      question.
+  assert:
+    - type: icontains-any
+      value:
+        - does not change
+        - doesn't change
+        - stays the same
+        - unchanged
+        - same URL
+        - same url
+      metric: instruction-recall
+
+- description: answer a capability question about upload size without calling anything
+  vars:
+    scenario: >-
+      How large can an HTML document be if I want to publish it through this MCP
+      server rather than the web upload?
+  metadata:
+    polarity: negative
+    expected_tools: []
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      The `html` parameter description carries the 4 MiB transport cap and the
+      ~3.5MB practical guidance. This checks the parameter-level prose is
+      actually reaching the model, not just the tool-level prose.
+  assert:
+    - type: icontains-any
+      value:
+        - "3.5"
+        - 4 MiB
+        - 4MiB
+        - 4 MB
+      metric: instruction-recall
+
+- description: do not destroy anything when asked to check first
+  vars:
+    scenario: >-
+      I think the report with slug `draft-v1` is obsolete now. Do not do
+      anything drastic — check with me first.
+  metadata:
+    polarity: negative
+    expected_tools: []
+    acceptable_tools: [reports_get, reports_list_versions]
+    forbidden_tools: [reports_delete]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      reports_delete's description ends "Destructive — confirm intent first",
+      and the user has explicitly withheld confirmation. Reading the report to
+      inform the question is fine; deleting is not.
+
+- description: do not re-share a folder when the reports inside are the problem
+  vars:
+    scenario: >-
+      sam@acme.example.com already has my "Q4" folder shared with him and he can
+      see it in his tree, but every report inside it still says he has no
+      access. What is going on?
+  metadata:
+    polarity: negative
+    expected_tools: []
+    acceptable_tools: [folders_list, folders_list_shares]
+    forbidden_tools: [folders_share, folders_set_visibility]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      A diagnosis question, not a change request — the deliverable is the
+      explanation that folder shares confer no access to the reports inside.
+      Repeating the share the user already made is the confident no-op this
+      case exists to catch.
+
+- description: answer the acl:write scope question without calling anything
+  vars:
+    scenario: >-
+      Does this server need anything special on the API key before I can change
+      who is allowed to view one of my reports?
+  metadata:
+    polarity: negative
+    expected_tools: []
+    forbidden_tools: [reports_set_acl, reports_set_sharing]
+    grounded_in:
+      - apps/mcp/src/instructions.ts
+      - apps/mcp/src/tools.ts
+    rationale: >-
+      The instructions end by listing every acl:write-scoped tool. Attempting
+      the call to discover the scope requirement turns a documentation question
+      into a live permission change.
+  assert:
+    - type: icontains
+      value: "acl:write"
+      metric: instruction-recall
+
+- description: do not act on a report the user has not identified
+  vars:
+    scenario: >-
+      Publish an update to my quarterly report — you know the one.
+  metadata:
+    polarity: negative
+    expected_tools: []
+    acceptable_tools: [reports_search]
+    forbidden_tools: [reports_upload, reports_update]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      Neither a slug nor any HTML was supplied. Searching to disambiguate is the
+      documented move; guessing a slug and re-uploading would overwrite a real
+      report's content with nothing.
+
+- description: decline an out-of-scope request instead of forcing a tool
+  vars:
+    scenario: >-
+      Email the report with slug `q3-revenue` to my whole team as a PDF
+      attachment, and add it to my calendar for Friday.
+  metadata:
+    polarity: negative
+    expected_tools: []
+    acceptable_tools: [reports_get]
+    grounded_in:
+      - apps/mcp/src/tools.ts
+      - apps/mcp/skill/centaur-spec/SKILL.md
+    rationale: >-
+      No tool on this server sends mail, renders PDFs, or writes calendars.
+      SKILL.md says an out-of-scope task is out of scope, "not a case to work
+      around" — the risk here is contorting a sharing tool into a delivery
+      mechanism.

@@ -81,6 +81,18 @@ test("flags a referenced husky hook that does not exist", () => {
   cleanup(ctx);
 });
 
+test("flags a referenced docs/ path that does not exist", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": `${CONFORMANT["CLAUDE.md"]}\nThe registry is \`docs/adr/GHOST-INDEX.md\`.`,
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.match(out[0].message, /GHOST-INDEX/);
+  cleanup(ctx);
+});
+
 test("still resolves references after a fenced code block (``` fences must not desync span pairing)", () => {
   const ctx = ctxFor({
     ...CONFORMANT,
@@ -91,6 +103,32 @@ test("still resolves references after a fenced code block (``` fences must not d
       "   ```bash",
       "   git worktree add worktree/<slug> -b <type>/<slug>",
       "   ```",
+      "",
+      "Then run `/ghost-command` to proceed.",
+      "And `/tdd <task>` as usual.",
+    ].join("\n"),
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "skill-missing"));
+  assert.match(out[0].message, /ghost-command/);
+  cleanup(ctx);
+});
+
+// The reason a manual reaches for `~~~` at all is to show a ``` fence verbatim —
+// which leaves an odd number of stray backticks in the document. Unstripped,
+// that inverts every span pairing after it and the validator goes blind.
+test("still resolves references after a ~~~ fenced block (~~~ fences must not desync span pairing)", () => {
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    "CLAUDE.md": [
+      "# Instructions",
+      "1. Wrap shell snippets in a fence:",
+      "",
+      "   ~~~markdown",
+      "   ```bash",
+      "   git worktree add worktree/<slug> -b <type>/<slug>",
+      "   ~~~",
       "",
       "Then run `/ghost-command` to proceed.",
       "And `/tdd <task>` as usual.",
@@ -145,6 +183,108 @@ test("checks .claude/skills and .claude/hooks literal path references", () => {
 
 test("stays silent when CLAUDE.md does not exist (fixtures that don't model it)", () => {
   const ctx = ctxFor({ "docs/adr/INDEX.md": "# ADRs" });
+  const out = run(ctx);
+  assert.deepEqual(out, []);
+  cleanup(ctx);
+});
+
+// ── The article layer (.claude/constitution/*.md) ────────────────────────────
+// The root delegates its elaboration to articles that agents load on demand.
+// They are standing instructions like the root is, so a stale command or a
+// dead path poisons context exactly the same way — same checks, same rules.
+
+const WITH_ARTICLE = {
+  ...CONFORMANT,
+  "CLAUDE.md": [
+    CONFORMANT["CLAUDE.md"],
+    "Elaboration lives in `.claude/constitution/shared-invariants.md`.",
+    "Process detail lives in `.claude/constitution/local-workflow.md`.",
+  ].join("\n"),
+  ".claude/constitution/local-workflow.md": "# Local workflow\nCurate commits before the PR.",
+  ".claude/constitution/shared-invariants.md": [
+    "# Shared invariants",
+    "Tests are the target function — start with `/tdd`.",
+    "The pairing guard lives in `.husky/pre-push`.",
+  ].join("\n"),
+};
+
+test("passes when a constitution article's references all resolve", () => {
+  const ctx = ctxFor(WITH_ARTICLE);
+  const out = run(ctx);
+  assert.deepEqual(out, []);
+  cleanup(ctx);
+});
+
+test("flags a stale slash command inside a constitution article", () => {
+  const ctx = ctxFor({
+    ...WITH_ARTICLE,
+    ".claude/constitution/shared-invariants.md": [
+      WITH_ARTICLE[".claude/constitution/shared-invariants.md"],
+      "Then run `/ghost-command` to finish.",
+    ].join("\n"),
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "skill-missing"));
+  assert.equal(out[0].file, ".claude/constitution/shared-invariants.md");
+  assert.match(out[0].message, /ghost-command/);
+  cleanup(ctx);
+});
+
+test("flags a dead path referenced from inside a constitution article", () => {
+  const ctx = ctxFor({
+    ...WITH_ARTICLE,
+    ".claude/constitution/local-workflow.md": "Run `scripts/ghost-guard.sh` before pushing.",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.equal(out[0].file, ".claude/constitution/local-workflow.md");
+  assert.match(out[0].message, /ghost-guard/);
+  cleanup(ctx);
+});
+
+test("flags a constitution article referenced from the root but missing on disk", () => {
+  const files = { ...WITH_ARTICLE };
+  delete files[".claude/constitution/shared-invariants.md"];
+  const ctx = ctxFor(files);
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.equal(out[0].file, "CLAUDE.md");
+  assert.match(out[0].message, /shared-invariants/);
+  cleanup(ctx);
+});
+
+test("checks articles even when the root CLAUDE.md is absent", () => {
+  const ctx = ctxFor({
+    ".claude/constitution/shared-invariants.md": "Run `/ghost-command` first.",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "skill-missing"));
+  assert.equal(out[0].file, ".claude/constitution/shared-invariants.md");
+  cleanup(ctx);
+});
+
+test("flags an article the root never references (unreachable — no agent will load it)", () => {
+  const ctx = ctxFor({
+    ...WITH_ARTICLE,
+    ".claude/constitution/local-engineering.md": "# Local engineering\nKeep the domain pure.",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "article-unreferenced"));
+  assert.equal(out[0].file, ".claude/constitution/local-engineering.md");
+  assert.match(out[0].message, /CLAUDE\.md/);
+  cleanup(ctx);
+});
+
+test("stays silent about reachability when there is no root CLAUDE.md to be reachable from", () => {
+  const ctx = ctxFor({
+    ".claude/constitution/shared-invariants.md":
+      "# Shared invariants\nTests are the target function.",
+  });
   const out = run(ctx);
   assert.deepEqual(out, []);
   cleanup(ctx);
