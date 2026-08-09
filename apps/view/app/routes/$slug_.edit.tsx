@@ -55,6 +55,7 @@ import {
   type EditorSelection,
   ReportEditor,
   type ReportEditorHandle,
+  type SelectionGeometry,
 } from "arp-editor";
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, reinjectShell } from "arp-report-html";
@@ -63,6 +64,7 @@ import { listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
 import { PanelHeader, PanelToggle } from "../edit/components/PanelChrome";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
+import { SelectionToolbar } from "../edit/components/SelectionToolbar";
 import { TopBar, type ViewerMode } from "../edit/components/TopBar";
 import { UnopenableDocument } from "../edit/components/UnopenableDocument";
 import { VersionsPanel } from "../edit/components/VersionsPanel";
@@ -375,6 +377,11 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
   const [panel, setPanel] = useState<PanelState>(INITIAL_PANEL_STATE);
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
+  // WHERE the selection sits (host viewport coordinates) — drives the
+  // Selection toolbar (ticket #296). Withheld by the editor mid-drag and
+  // nulled on Escape / document scroll, so `null` here just means "no
+  // toolbar", independent of `selection` (which the comments composer reads).
+  const [selectionGeometry, setSelectionGeometry] = useState<SelectionGeometry | null>(null);
   // The editor's RESOLVED highlight ranges (onCommentRangesChange) — the
   // panel's document-order sort + degraded-anchor badge read these (items
   // C/D) so position resolution stays inside arp-editor.
@@ -591,7 +598,12 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               onChange={(next) => {
                 docRef.current = next;
               }}
-              onSelectionChange={setSelection}
+              onSelectionChange={(next, geometry) => {
+                setSelection(next);
+                setSelectionGeometry(geometry);
+              }}
+              onEscape={() => setSelectionGeometry(null)}
+              onDocScroll={() => setSelectionGeometry(null)}
               onCommentRangesChange={setCommentRanges}
               onCommentClick={(commentId) => {
                 setFocusedCommentId(commentId);
@@ -600,6 +612,19 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               className="h-full w-full border-0"
             />
           </div>
+
+          {/* The Selection toolbar (ticket #296): floats over the current
+              text selection in Edit mode only — never in Compare, never on
+              the public viewer (which this route does not touch). Fixed
+              positioning, so where it sits in the tree is immaterial; it
+              lives next to the editor it annotates. */}
+          {/* Geometry alone gates the render: non-null geometry implies a
+              non-null selection (the editor only builds geometry for one) —
+              a second `selection &&` conjunct would imply an independence
+              that doesn't exist. `mode` IS load-bearing: never in Compare. */}
+          {mode === "edit" && selectionGeometry ? (
+            <SelectionToolbar geometry={selectionGeometry} />
+          ) : null}
 
           {mode === "diff" && diffData && diffHtml ? (
             <div className="flex h-full flex-col">

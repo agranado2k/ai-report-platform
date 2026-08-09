@@ -13,7 +13,7 @@
 | **Last commit on main**| `2ecff0e` — Merge PR #276 (`refactor/decision-by-purpose`). Landed by `/merge-train` (ADR-0077) with #275; both web-flow-signed, `migrate-db` + `release` green after each. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | Six, each with an open PR at the time of writing: `commit-separation` (#290), `eval-smoke-tighten` (#288), `tdd-guard-extract` (#289), `validator-hardening` (#291), `review-workflow-adr0044` (#286) — the SDLC-hardening tickets T0–T7 under PRD #277 — and `diary-merge-train` (#287, this entry). `/worktree-cleanup` pruned eight on 2026-08-08: the AI-SDLC Phase 4/5 worktrees, `contract-seam`, `clerk-e2e-hygiene`, `commit-write` and `commit-write-final`. |
+| **Active worktrees**   | Seven: `commit-separation` (#290), `eval-smoke-tighten` (#288), `tdd-guard-extract` (#289), `validator-hardening` (#291), `review-workflow-adr0044` (#286) — the SDLC-hardening tickets T0–T7 under PRD #277 — `diary-merge-train` (#287), and `selection-toolbar` (ticket #296 under PRD #295, PR pending — see the 2026-08-08 Selection toolbar entry). `/worktree-cleanup` pruned eight on 2026-08-08: the AI-SDLC Phase 4/5 worktrees, `contract-seam`, `clerk-e2e-hygiene`, `commit-write` and `commit-write-final`. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5780,3 +5780,33 @@ documented trade-off) — re-run green, first observed instance.
 **Process**: batch worktrees under `worktree/` (one per ticket), pruned after the merge
 train. Deviation, disclosed on the PRD: one consolidated diary entry (this one) instead
 of eight conflicting appends. Labels `tdd-exempt` + `mutation-check` created.
+
+### 2026-08-08 — Selection toolbar shell lands its tracer bullet (ticket #296, PRD #295)
+
+First slice of the Selection toolbar epic (PRD #295 → tickets #296–#300), in worktree
+`selection-toolbar` (`feat/selection-toolbar`): the floating, selection-anchored bar now
+appears over a text selection in the unified editor's Edit mode — placeholder buttons
+only; the formatting commands and the Floating composer are the follow-up tickets.
+
+- **The coordinate seam is the slice.** `ReportEditor.onSelectionChange` now also carries
+  a `SelectionGeometry` — the selection's rect + the editing surface's rect, translated
+  out of the sandboxed iframe into host viewport coordinates (`selection-rect.ts`, pure).
+  Placement (above/flip-below/clamp, inside the surface so the TopBar is never covered) is
+  `toolbar-placement.ts`, pure. New `onEscape`/`onDocScroll` props exist because the
+  iframe's key and scroll events never reach the host window; scroll produces no PM
+  transaction, so the host hides the bar rather than letting it drift. Geometry is
+  withheld while the pointer is down and re-reported on mouseup (`currentSelection`, the
+  state-only reading extracted from `reportableSelection`), so the bar appears on release,
+  Notion-style. `arp-ui` gained a `Floating` primitive (position inline-style on purpose —
+  the browser harness has no Tailwind). Programmatic reveals (Jump, anchor clicks) show no
+  toolbar: same `reportableSelection` gate that already suppressed the composer.
+- **Browser-tier finding, worth its own line:** a CDP-synthetic `mouse.move` with the
+  button held wedges the harness renderer outright — **verified against pristine HEAD**,
+  so it predates this work (same family as the `buttons === 0` tracker quirk documented on
+  ReportEditor's `handleDOMEvents`). The tier cannot drive a real drag; real-user drags in
+  production are unaffected. `selection-toolbar.spec.ts` therefore selects by double-click
+  (as anchor-scroll.spec.ts always has), and the mid-drag suppression gate is explicitly
+  documented as not browser-pinned. 8 new contracts (a keyboard-selection contract joined
+  in the review round), each run over both synthetic fixtures and the real report — 24
+  runs; the full tier is 56/56 green.
+- Glossary gained **Selection toolbar** (ADR-0036 same-PR rule).

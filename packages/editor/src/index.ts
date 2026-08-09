@@ -15,6 +15,11 @@ export {
   jumpTargetForComment,
   resolvableCommentRanges,
 } from "./comment-decorations";
+// `currentSelection` / `isProgrammaticSelection` are deliberately NOT on
+// this barrel: the first bypasses the programmatic-selection gate (its doc
+// comment says "never use where a transaction is in hand"), and both exist
+// solely for ReportEditor's internal mouseup latch. In-package code imports
+// them from ./editor-state directly; nothing outside should.
 export {
   anchorScrollTransaction,
   createEditorState,
@@ -35,3 +40,15 @@ export {
   linkMarkAtPos,
 } from "./link-activation";
 export { ReportEditor, type ReportEditorHandle, type ReportEditorProps } from "./ReportEditor";
+// Only the toolbar seam's CONSUMED surface is published (claude-review #301
+// L-4): hosts receive a ready-made host-space `SelectionGeometry` and place
+// with `placeToolbar` — the translation internals (`selectionGeometry`,
+// `FrameRect`, `PositionCoords`, the gap/margin constants) stay in-package,
+// so no host is invited to redo the iframe translation itself.
+export type { SelectionGeometry } from "./selection-rect";
+export {
+  placeToolbar,
+  type SelectionRect,
+  type ToolbarPlacementInput,
+  type ToolbarPosition,
+} from "./toolbar-placement";

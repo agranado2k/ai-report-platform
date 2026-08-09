@@ -16,7 +16,9 @@ import { describe, expect, it } from "vitest";
 import {
   anchorScrollTransaction,
   createEditorState,
+  currentSelection,
   docJson,
+  isProgrammaticSelection,
   jumpToCommentTransaction,
   programmaticRevealTransaction,
   reportableSelection,
@@ -149,6 +151,41 @@ describe("jumpToCommentTransaction / reportableSelection", () => {
     const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
     const next = state.apply(tr);
     expect(reportableSelection(tr, next)).toEqual({ from: 1, to: 6, text: "hello" });
+  });
+});
+
+// `currentSelection` is `reportableSelection` minus the transaction gate —
+// the state-only reading a mouseup re-report needs (ticket #296: the
+// Selection toolbar appears on mouseup, when no new transaction fires). The
+// tests pin exactly what DISTINGUISHES the two functions (claude-review
+// #301 M-7) — the plain trimmed-reading cases already live on
+// reportableSelection above, and would only be duplicated here.
+describe("currentSelection / isProgrammaticSelection", () => {
+  it("currentSelection reads a programmatic selection that reportableSelection gates out — the reason ReportEditor must latch isProgrammaticSelection before its mouseup re-report", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = jumpToCommentTransaction(state, {
+      id: "comment_1",
+      anchor: { relative: { from: 1, to: 6 } },
+      intent: "note",
+    });
+    if (!tr) throw new Error("unreachable");
+    const next = state.apply(tr);
+
+    expect(isProgrammaticSelection(tr)).toBe(true);
+    expect(reportableSelection(tr, next)).toBeNull();
+    expect(currentSelection(next)).toEqual({ from: 1, to: 6, text: "hello" });
+  });
+
+  it("an ordinary user selection is not programmatic", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const tr = state.tr.setSelection(TextSelection.create(state.doc, 1, 6));
+    expect(isProgrammaticSelection(tr)).toBe(false);
+  });
+
+  it("currentSelection reports null for a collapsed selection", () => {
+    const state = createEditorState(oneParagraphDoc);
+    const next = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3, 3)));
+    expect(currentSelection(next)).toBeNull();
   });
 });
 
