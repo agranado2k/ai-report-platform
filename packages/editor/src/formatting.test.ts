@@ -156,6 +156,21 @@ describe("validateLinkHref", () => {
     });
   });
 
+  it("rejects entity-encoded schemes the browser would decode in the served href (PR #303 C-1)", () => {
+    // This ingress validates a RAW typed string, and serializeBody writes it
+    // into the served document with no re-parse — so a scheme obfuscated with
+    // HTML character references must be rejected here, or it ships live. Same
+    // shared predicate (isDangerousUrl), now decode-aware.
+    for (const encoded of [
+      "javascript&colon;alert(1)",
+      "&#106;avascript:alert(1)",
+      "&#x6a;avascript:alert(1)",
+      "java&Tab;script:alert(1)",
+    ]) {
+      expect(validateLinkHref(encoded), encoded).toEqual({ ok: false, reason: "unsafe" });
+    }
+  });
+
   it("accepts relative, anchor and mailto URLs — everything the schema itself retains", () => {
     expect(validateLinkHref("/reports/latest")).toEqual({ ok: true, href: "/reports/latest" });
     expect(validateLinkHref("#section-two")).toEqual({ ok: true, href: "#section-two" });
