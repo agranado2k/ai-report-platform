@@ -52,6 +52,7 @@ import { useLoaderData } from "@remix-run/react";
 import { versionIdToWire } from "arp-domain";
 import {
   type ActiveFormats,
+  buildSelectionAnchor,
   type CommentRange,
   type EditorSelection,
   ReportEditor,
@@ -61,8 +62,9 @@ import {
 import { editViewHeaders, viewHeaders } from "arp-headers/view";
 import { type PMDocJson, reinjectShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listComments } from "../edit/comments-client";
+import { addComment, listComments } from "../edit/comments-client";
 import { CommentsPanel } from "../edit/components/CommentsPanel";
+import { FloatingComposer } from "../edit/components/FloatingComposer";
 import { PanelHeader, PanelToggle } from "../edit/components/PanelChrome";
 import { SandboxedHtml } from "../edit/components/SandboxedHtml";
 import { SelectionToolbar } from "../edit/components/SelectionToolbar";
@@ -381,8 +383,17 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
   // WHERE the selection sits (host viewport coordinates) — drives the
   // Selection toolbar (ticket #296). Withheld by the editor mid-drag and
   // nulled on Escape / document scroll, so `null` here just means "no
-  // toolbar", independent of `selection` (which the comments composer reads).
+  // selection-anchored chrome", independent of `selection` (whose stored
+  // {from,to,text} is what the Floating composer's anchor is built from).
   const [selectionGeometry, setSelectionGeometry] = useState<SelectionGeometry | null>(null);
+  // The Floating composer (ticket #298): true swaps the Selection toolbar for
+  // the composer at the same geometry. Lives HERE, not in the toolbar,
+  // because this route owns the selection the composer anchors to and the
+  // comments client it posts through — and because retiring the panel's
+  // pendingSelection auto-open (the composer is now the SOLE creation path
+  // for selection-anchored root comments) is a change to THIS component's
+  // CommentsPanel wiring.
+  const [composing, setComposing] = useState(false);
   // WHAT the selection carries (ticket #297) — the toolbar's live active
   // state, reported by the editor alongside the geometry on every
   // transaction (including the toggle dispatch itself, which is how a
@@ -501,6 +512,14 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
       clearTimeout(timeoutId);
     };
   }, [appOrigin, slug]);
+
+  // The composer follows its anchor's chrome: whatever dismisses the
+  // selection-anchored chrome (Escape in the editor, document scroll,
+  // selection collapse — everything that nulls the geometry) closes an open
+  // composer too, so a stale composer can never survive its own selection.
+  useEffect(() => {
+    if (!selectionGeometry) setComposing(false);
+  }, [selectionGeometry]);
 
   // Only OPEN ROOT comments drive the editor's highlight decorations
   // (claude-review #184): a resolved thread no longer needs its anchor
@@ -627,12 +646,54 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               lives next to the editor it annotates. */}
           {/* Geometry gates the render: non-null geometry implies a non-null
               selection (the editor only builds geometry for one), which in
-              turn implies non-null formats — the `selectionFormats` conjunct
-              exists only to give TypeScript that narrowing, not to express an
-              independent condition. `mode` IS load-bearing: never in Compare.
-              The toggle dispatch goes back through the editor's own handle —
-              the same ref the panel's Jump uses. */}
-          {mode === "edit" && selectionGeometry && selectionFormats ? (
+              turn implies non-null formats — the `selection`/
+              `selectionFormats` conjuncts exist only to give TypeScript that
+              narrowing, not to express independent conditions. `mode` IS
+              load-bearing: never in Compare. The toggle dispatch goes back
+              through the editor's own handle — the same ref the panel's Jump
+              uses. `composing` swaps the bar for the Floating composer at
+              the same geometry (ticket #298). */}
+          {mode === "edit" && selectionGeometry && selection && composing ? (
+            <FloatingComposer
+              geometry={selectionGeometry}
+              quote={selection.text}
+              onSubmit={async ({ body, intent }) => {
+                // The SAME anchor inputs the retired panel composer used:
+                // the route's current versionId + the STORED editor
+                // selection (ProseMirror's state selection — the composer's
+                // focus has blurred the iframe's visual one, see
+                // FloatingComposer's file comment).
+                const anchor = buildSelectionAnchor({
+                  versionId,
+                  from: selection.from,
+                  to: selection.to,
+                  text: selection.text,
+                });
+                const result = await addComment({
+                  appOrigin,
+                  slug,
+                  editToken,
+                  body,
+                  intent,
+                  anchor: {
+                    versionId: anchor.versionId,
+                    textQuote: anchor.textQuote,
+                    relative: anchor.relative,
+                  },
+                });
+                if (!result.ok) return { ok: false, message: result.message };
+                // Optimistic append, same as every panel mutation (no
+                // cross-origin refetch): the highlight and the panel Thread
+                // appear identically to a panel-composed comment.
+                setComments((prev) => [...prev, result.comment]);
+                // Posted: drop the selection-anchored chrome entirely (the
+                // effect above folds `composing` when the geometry goes).
+                setSelectionGeometry(null);
+                return { ok: true };
+              }}
+              onCancel={() => setComposing(false)}
+            />
+          ) : mode === "edit" && selectionGeometry && selectionFormats ? (
             <SelectionToolbar
               geometry={selectionGeometry}
               formats={selectionFormats}
@@ -641,6 +702,7 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               onToggleList={(kind) => editorRef.current?.toggleList(kind)}
               onApplyLink={(href) => editorRef.current?.applyLink(href) ?? false}
               onRemoveLink={() => editorRef.current?.removeLink() ?? false}
+              onCompose={() => setComposing(true)}
             />
           ) : null}
 
@@ -684,7 +746,6 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
                   appOrigin={appOrigin}
                   slug={slug}
                   editToken={editToken}
-                  currentVersionId={versionId}
                   comments={comments}
                   hasMore={commentsHasMore}
                   onCommentsChange={setComments}
@@ -695,8 +756,6 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
                     const comment = comments.find((c) => c.id === commentId);
                     if (comment) editorRef.current?.jumpToComment(comment);
                   }}
-                  pendingSelection={mode === "edit" ? selection : null}
-                  onSelectionConsumed={() => setSelection(null)}
                 />
               ) : (
                 <VersionsPanel

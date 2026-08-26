@@ -1,6 +1,6 @@
 // The in-viewer editor's Comments tab (unified-experience epic, ADR-0064).
 // Modeled on apps/app/app/components/CommentSidebar.tsx's structure
-// (composer + threads + resolve) but adapted to this app's constraints:
+// (threads + resolve) but adapted to this app's constraints:
 // CROSS-ORIGIN `fetch` calls carrying the edit token as `Authorization:
 // Bearer` (../comments-client.ts), NOT Remix `useFetcher`/same-origin
 // resource-route actions (there is no such route on this origin — every
@@ -13,17 +13,24 @@
 // append/replace) rather than triggering a full list refetch — one fewer
 // network round-trip, and no window where a failed refetch would silently
 // leave a stale list after a successful write.
+//
+// NO NEW-COMMENT COMPOSER (ticket #298): the Floating composer — opened from
+// the Selection toolbar's "…" bubble at the selection itself — is the SOLE
+// creation path for selection-anchored root comments. The panel's old
+// pendingSelection-driven composer (auto-opened whenever text was selected)
+// is retired along with its `pendingSelection`/`onSelectionConsumed` route
+// contract; this panel is the home for READING Threads plus replies,
+// resolve and edit.
 // TYPE-ONLY import (erased at build): pulling a VALUE from the `arp-domain`
 // barrel drags its `node:crypto`-using modules (signed-token) into this browser
 // bundle and breaks the Vite/Rollup build. The `Intent` type costs nothing at
 // runtime, and `Record<Intent, …>` below still gives us drift-safety.
 import type { Intent } from "arp-domain";
-import { buildSelectionAnchor, type EditorSelection } from "arp-editor";
 import { Badge, Button, Card, cx, Select, Textarea } from "arp-ui";
 import { useEffect, useRef, useState } from "react";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
 import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
-import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
+import { editComment, replyToComment, resolveComment } from "../comments-client";
 import { handleComposerKeyDown } from "../composer-keys";
 import { INTENT_LABELS, INTENT_OPTIONS } from "../intent-options";
 import type { CommentWire, VersionWire } from "../wire-types";
@@ -32,10 +39,6 @@ export interface CommentsPanelProps {
   readonly appOrigin: string;
   readonly slug: string;
   readonly editToken: string;
-  /** The version id (wire-encoded) currently open in the editor — every NEW
-   *  comment/reply anchors to it (version-pinned fallback, always
-   *  populated). */
-  readonly currentVersionId: string;
   readonly comments: readonly CommentWire[];
   /** True when the comment set was truncated at the fetch-all page cap — renders
    *  a "some older items are hidden" note at the foot of the list. */
@@ -56,14 +59,6 @@ export interface CommentsPanelProps {
    *  The panel only offers the affordance for comments whose anchor RESOLVED
    *  (a degraded, version-pinned comment has nowhere live to jump to). */
   readonly onJump?: (commentId: string) => void;
-  /** The editor's current non-empty selection, or `null` — gates whether the
-   *  "new comment" composer renders at all (only present while `mode ===
-   *  "edit"`, since selection tracking requires the mounted ReportEditor). */
-  readonly pendingSelection: EditorSelection | null;
-  /** Called once the composer's add-comment POST resolves SUCCESSFULLY —
-   *  never on failure, so a failed post leaves the composer mounted with its
-   *  typed body and error visible (mirrors CommentSidebar's PR #157 fix). */
-  readonly onSelectionConsumed: () => void;
 }
 
 /** The human label for a comment's author (ADR-0063 author display): the display
@@ -114,118 +109,6 @@ function IntentChip({ intent }: { readonly intent: string }) {
     <Badge tone="brand" className="text-[10px]">
       {label}
     </Badge>
-  );
-}
-
-function NewCommentComposer({
-  appOrigin,
-  slug,
-  editToken,
-  versionId,
-  selection,
-  comments,
-  onCommentsChange,
-  onSubmitted,
-}: {
-  readonly appOrigin: string;
-  readonly slug: string;
-  readonly editToken: string;
-  readonly versionId: string;
-  readonly selection: EditorSelection;
-  readonly comments: readonly CommentWire[];
-  readonly onCommentsChange: (comments: readonly CommentWire[]) => void;
-  readonly onSubmitted: () => void;
-}) {
-  const [body, setBody] = useState("");
-  const [intent, setIntent] = useState("note");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async () => {
-    if (!body.trim()) return;
-    setBusy(true);
-    setError(null);
-    const anchor = buildSelectionAnchor({
-      versionId,
-      from: selection.from,
-      to: selection.to,
-      text: selection.text,
-    });
-    const result = await addComment({
-      appOrigin,
-      slug,
-      editToken,
-      body,
-      intent,
-      anchor: {
-        versionId: anchor.versionId,
-        textQuote: anchor.textQuote,
-        relative: anchor.relative,
-      },
-    });
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setBody("");
-    setIntent("note");
-    onCommentsChange([...comments, result.comment]);
-    onSubmitted();
-  };
-
-  return (
-    <Card className="mb-4 p-3">
-      <p className="mb-2 text-xs text-subtle">
-        Commenting on: <span className="italic text-muted">"{selection.text.slice(0, 80)}"</span>
-      </p>
-      <Textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        // ⌘/Ctrl+Enter submits, Esc cancels; every other keystroke is
-        // isolated from document-level handlers (../composer-keys.ts, item C).
-        onKeyDown={(e) =>
-          handleComposerKeyDown(e, {
-            onSubmit: () => {
-              if (!busy) void submit();
-            },
-            onCancel: () => {
-              if (!busy) onSubmitted();
-            },
-          })
-        }
-        placeholder="Add a comment…"
-        rows={3}
-        className="w-full"
-      />
-      <ErrorText message={error} />
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-xs text-subtle">
-          <span id="comment-intent-label">Intent</span>
-          <Select
-            size="sm"
-            aria-labelledby="comment-intent-label"
-            value={intent}
-            onChange={(e) => setIntent(e.target.value)}
-            disabled={busy}
-          >
-            {INTENT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={onSubmitted} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="sm" onClick={submit} disabled={busy || !body.trim()}>
-            {busy ? "Posting…" : "Comment"}
-          </Button>
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -717,15 +600,12 @@ export function CommentsPanel({
   appOrigin,
   slug,
   editToken,
-  currentVersionId,
   comments,
   onCommentsChange,
   commentRanges,
   versions,
   focusedCommentId,
   onJump,
-  pendingSelection,
-  onSelectionConsumed,
   hasMore,
 }: CommentsPanelProps) {
   const repliesByRoot = new Map<string, CommentWire[]>();
@@ -746,20 +626,11 @@ export function CommentsPanel({
 
   return (
     <section className="flex w-full flex-col gap-2" aria-label="Comments">
-      {pendingSelection ? (
-        <NewCommentComposer
-          appOrigin={appOrigin}
-          slug={slug}
-          editToken={editToken}
-          versionId={currentVersionId}
-          selection={pendingSelection}
-          comments={comments}
-          onCommentsChange={onCommentsChange}
-          onSubmitted={onSelectionConsumed}
-        />
-      ) : (
-        <p className="mb-2 text-xs text-subtle">Select text in the document to add a comment.</p>
-      )}
+      {/* The read-side hint names the ONE creation path (ticket #298): the
+          Floating composer behind the Selection toolbar's "…" bubble. */}
+      <p className="mb-2 text-xs text-subtle">
+        Select text in the document and use the toolbar's “…” bubble to add a comment.
+      </p>
 
       {orderedRoots.length === 0 ? (
         <p className="text-sm text-muted">No comments yet.</p>
