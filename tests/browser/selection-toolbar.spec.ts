@@ -107,6 +107,42 @@ async function selectedWord(page: Page): Promise<string> {
   return text;
 }
 
+/** Select a word INSIDE AN EXISTING LINK: the same double-click gesture as
+ *  `selectWord`, with Alt held — the editor's own "suppress activation so the
+ *  link can be edited" escape hatch (link-activation.ts). Without Alt, each of
+ *  the double-click's TWO click events would activate the link and open a tab
+ *  (Amendment 3's plain-click-follows behavior), which is exactly not the
+ *  edit gesture. */
+async function altSelectWord(page: Page, selector: string) {
+  const rect = await hostRect(page, selector);
+  const x = rect.x + 10;
+  const y = rect.y + Math.min(10, rect.height / 2);
+  await page.keyboard.down("Alt");
+  await page.mouse.dblclick(x, y);
+  await page.keyboard.up("Alt");
+  return { x, y };
+}
+
+/** Every `<a>` in the editing iframe carrying EXACTLY `href`, with the attrs
+ *  the link contracts assert on. Matching on the test's own unique href (not
+ *  text) keeps the real-report fixture's legitimate links out of the count. */
+async function anchorsWithHref(
+  page: Page,
+  href: string,
+): Promise<ReadonlyArray<{ text: string; target: string | null; rel: string | null }>> {
+  return await page.evaluate((h) => {
+    const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+    if (!doc) throw new Error("the editing surface has not mounted");
+    return Array.from(doc.querySelectorAll("a"))
+      .filter((a) => a.getAttribute("href") === h)
+      .map((a) => ({
+        text: a.textContent ?? "",
+        target: a.getAttribute("target"),
+        rel: a.getAttribute("rel"),
+      }));
+  }, href);
+}
+
 /** How many `<tag>` elements in the editing iframe contain `word`. Counted
  *  (not just "exists") because a real report legitimately carries its own
  *  `<strong>`/`<em>` content — the contracts assert the count GREW. */
@@ -347,6 +383,134 @@ for (const fixture of FIXTURES) {
       await expect(toolbar.getByRole("button", { name: "Italic" })).toHaveAttribute(
         "aria-pressed",
         "false",
+      );
+    });
+
+    // ── Link editing (ticket #299) ──────────────────────────────────────────
+
+    // Unique per-suite href so the real-report fixture's own links never
+    // collide with what these contracts create.
+    const ADDED_HREF = "https://example.com/added-by-toolbar-test";
+
+    /** Select the fixture word and turn it into ADDED_HREF via the toolbar's
+     *  link editor — the shared setup for the edit/remove contracts. */
+    async function createLink(page: Page): Promise<string> {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await input.click();
+      await page.keyboard.type(ADDED_HREF);
+      await page.keyboard.press("Enter");
+      await expect.poll(async () => (await anchorsWithHref(page, ADDED_HREF)).length).toBe(1);
+      return word;
+    }
+
+    test("Link → type URL → Enter links the selected word with the safe attrs and shows pressed", async ({
+      page,
+    }) => {
+      // The typing happens with host focus in the URL input — the iframe is
+      // blurred, its visual selection hidden — and the apply must still land
+      // on the range that WAS selected (PM's state selection persists).
+      const word = await createLink(page);
+
+      const [anchor] = await anchorsWithHref(page, ADDED_HREF);
+      if (!anchor) throw new Error("the applied link is missing");
+      expect(anchor.text).toContain(word);
+      // Nothing beyond the typed href: no target/rel smuggled onto a link
+      // the user created (the schema adds those only when a source document
+      // carried them).
+      expect(anchor.target).toBeNull();
+      expect(anchor.rel).toBeNull();
+
+      // The bar swapped back to its buttons, still up, with Link pressed.
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    test("an unsafe javascript: URL is rejected with visible feedback and the document unchanged", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await input.click();
+      await page.keyboard.type("javascript:alert(1)");
+      await page.keyboard.press("Enter");
+
+      // Visible inline feedback, and the editor stays open for correction.
+      await expect(page.getByTestId("link-url-error")).toBeVisible();
+      await expect(input).toHaveAttribute("aria-invalid", "true");
+      await expect(input).toBeVisible();
+
+      // The document is untouched: no anchor carries the rejected href.
+      expect((await anchorsWithHref(page, "javascript:alert(1)")).length).toBe(0);
+    });
+
+    test("re-selecting inside the link shows pressed and pre-fills the editor with its href", async ({
+      page,
+    }) => {
+      await createLink(page);
+
+      // Collapse the selection away, then arrive back INSIDE the link
+      // (Alt-select — a plain double-click would follow the link).
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+      await altSelectWord(page, fixture.paragraph);
+
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await expect(page.getByTestId("link-url-input")).toHaveValue(ADDED_HREF);
+    });
+
+    test("Remove strips the whole link; the text survives unlinked", async ({ page }) => {
+      const word = await createLink(page);
+
+      // Selection is still on the linked word (applyLink refocused the
+      // editor); open the editor again and remove.
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await toolbar.getByRole("button", { name: "Remove link" }).click();
+
+      await expect.poll(async () => (await anchorsWithHref(page, ADDED_HREF)).length).toBe(0);
+      // The text itself survives, unlinked, and the button reads unpressed.
+      expect(await markCount(page, "p", word)).toBeGreaterThan(0);
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    test("Escape in the URL input backs out to the buttons without dismissing the bar", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await expect(input).toBeVisible();
+
+      await input.press("Escape");
+
+      await expect(input).toHaveCount(0);
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Bold" })).toBeVisible();
+      // The selection the bar operates on is still pending — Escape here
+      // closed the sub-editor, not the toolbar (the iframe-side Escape does
+      // that, and it never fired: focus was in the host input).
+      expect((await page.getByTestId("pending-selection").textContent())?.length).toBeGreaterThan(
+        0,
       );
     });
 

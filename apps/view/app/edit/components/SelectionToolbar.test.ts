@@ -1,10 +1,12 @@
-// Smoke test for the Selection toolbar (tickets #296/#297) — the floating,
-// selection-anchored bar in the unified editor's Edit mode. Bold and Italic
-// are live toggles (#297): active state arrives as the `formats` prop and is
-// mirrored to `aria-pressed`; the Link and "…" bubble stay placeholders for
-// #299/#300. Placement/visibility/toggling behavior is proven in the browser
-// tier (tests/browser/selection-toolbar.spec.ts); this node-tier test pins
-// the accessible surface: a toolbar role, labelled buttons, aria-pressed
+// Smoke test for the Selection toolbar (tickets #296/#297/#299) — the
+// floating, selection-anchored bar in the unified editor's Edit mode. Bold
+// and Italic are live toggles (#297) and Link is a live editor (#299):
+// active state arrives as the `formats` prop and is mirrored to
+// `aria-pressed`; the "…" bubble stays a placeholder for #300. Placement/
+// visibility/interaction behavior (including the whole link add/edit/remove
+// flow) is proven in the browser tier
+// (tests/browser/selection-toolbar.spec.ts); this node-tier test pins the
+// accessible surface: a toolbar role, labelled buttons, aria-pressed
 // mirroring, and the measure-then-place lifecycle's SSR-safe start
 // (offscreen until the mounted effect can measure the rendered size).
 import type { ActiveFormats } from "arp-editor";
@@ -22,13 +24,20 @@ const NO_FORMATS: ActiveFormats = {
   strong: false,
   em: false,
   link: false,
+  linkHref: null,
   headingLevel: null,
   listKind: null,
 };
 
 function render(formats: ActiveFormats): string {
   return renderToStaticMarkup(
-    createElement(SelectionToolbar, { geometry: GEOMETRY, formats, onToggleFormat: () => {} }),
+    createElement(SelectionToolbar, {
+      geometry: GEOMETRY,
+      formats,
+      onToggleFormat: () => {},
+      onApplyLink: () => true,
+      onRemoveLink: () => true,
+    }),
   );
 }
 
@@ -50,6 +59,10 @@ describe("SelectionToolbar", () => {
     const bolded = render({ ...NO_FORMATS, strong: true });
     expect(bolded).toContain('aria-label="Bold" aria-pressed="true"');
     expect(bolded).toContain('aria-label="Italic" aria-pressed="false"');
+
+    // The Link button reads pressed inside an existing link (ticket #299).
+    const linked = render({ ...NO_FORMATS, link: true, linkHref: "https://example.com" });
+    expect(linked).toContain('aria-label="Link" aria-pressed="true"');
   });
 
   it("starts offscreen until the mounted measurement places it", () => {

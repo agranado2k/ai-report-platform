@@ -131,6 +131,8 @@ function App() {
                 geometry={selectionGeometry}
                 formats={selectionFormats}
                 onToggleFormat={(format) => editorRef.current?.toggleFormat(format)}
+                onApplyLink={(href) => editorRef.current?.applyLink(href) ?? false}
+                onRemoveLink={() => editorRef.current?.removeLink() ?? false}
               />
             ) : null}
           </div>
