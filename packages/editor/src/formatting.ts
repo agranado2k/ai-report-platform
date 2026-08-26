@@ -15,7 +15,8 @@
 // what "toggle bold" means. The keymap itself is untouched.
 import { isDangerousUrl, reportSchema } from "arp-report-html";
 import { toggleMark } from "prosemirror-commands";
-import type { MarkType, ResolvedPos } from "prosemirror-model";
+import type { MarkType, NodeType, Node as PMNode, ResolvedPos } from "prosemirror-model";
+import { liftListItem, wrapInList } from "prosemirror-schema-list";
 import type { Command, EditorState } from "prosemirror-state";
 
 /** Look up a mark type `reportSchema` is known to define — throws loudly on a
@@ -261,4 +262,119 @@ export function removeLinkCommand(): Command {
  *  what lets toggles chain (bold then italic) without re-selecting. */
 export function toggleFormatCommand(format: ToggleableFormat): Command {
   return toggleMark(requireMark(format));
+}
+
+/** The heading levels the toolbar exposes (ticket #300). The schema itself
+ *  parses/retains `<h1>`–`<h6>` (prosemirror-schema-basic's heading node), but
+ *  the PRD scopes "heading levels" and the toolbar convention is a small set —
+ *  so the command vocabulary is 1–3. `activeFormats().headingLevel` still
+ *  reports 4–6 (as a number) so a deeper heading simply lights no button.
+ *  Widen this union if the toolbar ever grows more levels. */
+export type HeadingLevel = 1 | 2 | 3;
+
+/** The retained presentation attrs (`class`/`style` via `withClassStyle`,
+ *  `id` via `withId` — arp-report-html's schema) carried ACROSS a block-type
+ *  conversion. Deliberate (ticket #300): `<h2 id="summary">` toggled back to
+ *  a paragraph keeps `id="summary"` — a TOC's `#summary` anchor must survive
+ *  a heading↔paragraph round-trip (ADR-0062 Amendment 3's "dead anchors are
+ *  a product regression"), and bespoke `class`/`style` degrade to "preserved
+ *  but uninterpreted" exactly as the schema's retention promises. Heading-ONLY
+ *  attrs (`level`) and paragraph-only ones (`variant`, recomputed from `class`
+ *  by the schema on the next parse) are dropped — `NodeType.create` ignores
+ *  attr keys the target type does not define. */
+function retainedBlockAttrs(node: PMNode): Record<string, unknown> {
+  return {
+    class: node.attrs.class ?? null,
+    style: node.attrs.style ?? null,
+    id: node.attrs.id ?? null,
+  };
+}
+
+/** prosemirror-commands' `setBlockType` applicability + dispatch shape, with
+ *  PER-NODE attrs (prosemirror-transform's attrs-function form) so each
+ *  converted block keeps its own retained `class`/`style`/`id` — the static
+ *  `Attrs` the prosemirror-commands version takes would stamp every block in
+ *  a mixed selection with one shared attr set (or silently drop retention).
+ *  Blocks whose parent cannot hold `type` are skipped by `tr.setBlockType`
+ *  itself; the command returns `false` (nothing dispatched) when NO textblock
+ *  in the selection can change. */
+function setBlockTypeRetainingAttrs(
+  type: NodeType,
+  attrs: (node: PMNode) => Record<string, unknown>,
+): Command {
+  return (state, dispatch) => {
+    let applicable = false;
+    for (const range of state.selection.ranges) {
+      if (applicable) break;
+      state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
+        if (applicable) return false;
+        if (!node.isTextblock || node.hasMarkup(type, attrs(node))) return true;
+        if (node.type === type) {
+          applicable = true; // same type, different attrs (e.g. h3 → h2).
+        } else {
+          const $pos = state.doc.resolve(pos);
+          const index = $pos.index();
+          applicable = $pos.parent.canReplaceWith(index, index + 1, type);
+        }
+        return true;
+      });
+    }
+    if (!applicable) return false;
+    if (dispatch) {
+      const tr = state.tr;
+      for (const range of state.selection.ranges) {
+        tr.setBlockType(range.$from.pos, range.$to.pos, type, attrs);
+      }
+      // Same dispatch shape as prosemirror-commands' setBlockType (and
+      // toggleMark): scrollIntoView is a no-op for the visible selection the
+      // toolbar operates on. `tr.setBlockType` maps the selection through, so
+      // it survives the conversion — the toolbar's chaining contract.
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  };
+}
+
+/** The command a heading button dispatches (ticket #300): set every textblock
+ *  in the selection to `<h{level}>` — or, when the selection ALREADY reads
+ *  uniformly as that level (`activeFormats().headingLevel`, the same reading
+ *  that lit the button), back to a paragraph. A mixed selection has no active
+ *  level, so the button acts as "make it all this heading", never a blind
+ *  per-block flip. Retained `class`/`style`/`id` survive in both directions
+ *  (`retainedBlockAttrs`). */
+export function toggleHeadingCommand(level: HeadingLevel): Command {
+  return (state, dispatch) => {
+    const heading = requireNode("heading");
+    const paragraph = requireNode("paragraph");
+    const active = uniformHeadingLevel(state) === level;
+    const target = active ? paragraph : heading;
+    return setBlockTypeRetainingAttrs(target, (node) =>
+      active ? retainedBlockAttrs(node) : { ...retainedBlockAttrs(node), level },
+    )(state, dispatch);
+  };
+}
+
+/** The command a list button dispatches (ticket #300): wrap the selection in
+ *  a bullet/ordered list — or, when the selection ALREADY sits in a list of
+ *  that kind (`activeFormats().listKind`, nearest-enclosing-wins — the same
+ *  reading that lit the button), LIFT the items out one level. Both halves
+ *  are prosemirror-schema-list's own commands (`wrapInList` / `liftListItem`
+ *  — the same library the schema's list nodes come from), never a bespoke
+ *  transform:
+ *  - lifting from a NESTED list lifts exactly once (into the parent list),
+ *    never explodes the whole stack — repeat presses walk outward;
+ *  - pressing the OTHER kind inside a list follows `wrapInList`'s own
+ *    semantics: it nests a sublist where the schema allows one, and REFUSES
+ *    (returns `false`, nothing dispatched) where it doesn't — e.g. at the
+ *    top of an existing list. Kept deliberately: a convert-in-place would be
+ *    a new transform this module would then own forever.
+ *  Both commands preserve a mapped selection, so the toolbar's chaining
+ *  contract holds here too. */
+export function toggleListCommand(kind: ListKind): Command {
+  const listNode = kind === "bullet" ? requireNode("bullet_list") : requireNode("ordered_list");
+  return (state, dispatch) => {
+    const active = uniformListKind(state) === kind;
+    if (active) return liftListItem(requireNode("list_item"))(state, dispatch);
+    return wrapInList(listNode)(state, dispatch);
+  };
 }

@@ -14,6 +14,8 @@ import {
   removeLinkCommand,
   setLinkCommand,
   toggleFormatCommand,
+  toggleHeadingCommand,
+  toggleListCommand,
   validateLinkHref,
 } from "./formatting";
 
@@ -258,6 +260,225 @@ describe("removeLinkCommand", () => {
 
     const plain = stateWithSelection("<p>hello world</p>", 1, 6);
     expect(removeLinkCommand()(plain, () => {})).toBe(false);
+  });
+});
+
+describe("toggleHeadingCommand", () => {
+  it("converts a paragraph to the heading and PRESERVES the selection, with the level reading active", () => {
+    const selected = stateWithSelection("<p>hello world</p>", 1, 6);
+
+    let next = selected;
+    const applied = toggleHeadingCommand(2)(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<h2>hello world</h2>");
+    // The selection survives (the chaining contract shared with the mark
+    // toggles) — what keeps the toolbar up with its H2 button lit.
+    expect(next.selection.from).toBe(1);
+    expect(next.selection.to).toBe(6);
+    expect(activeFormats(next).headingLevel).toBe(2);
+  });
+
+  it("toggling the ACTIVE level returns the block to a paragraph", () => {
+    const selected = stateWithSelection("<h2>hello world</h2>", 1, 6);
+
+    let next = selected;
+    const applied = toggleHeadingCommand(2)(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<p>hello world</p>");
+    expect(activeFormats(next).headingLevel).toBeNull();
+  });
+
+  it("a DIFFERENT level converts the heading rather than toggling to paragraph", () => {
+    const selected = stateWithSelection("<h3>hello world</h3>", 1, 6);
+
+    let next = selected;
+    toggleHeadingCommand(2)(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(serializeBody(docJson(next))).toBe("<h2>hello world</h2>");
+    expect(activeFormats(next).headingLevel).toBe(2);
+  });
+
+  it("retained id/class/style SURVIVE the conversion in both directions — anchors must not die", () => {
+    // Heading → paragraph: `level` (heading-only) drops; id/class/style stay.
+    const heading = stateWithSelection(
+      '<h2 id="summary" class="fancy" style="color: red">Findings</h2>',
+      1,
+      5,
+    );
+    let asParagraph = heading;
+    toggleHeadingCommand(2)(heading, (tr) => {
+      asParagraph = heading.apply(tr);
+    });
+    expect(serializeBody(docJson(asParagraph))).toBe(
+      '<p id="summary" style="color: red" class="fancy">Findings</p>',
+    );
+
+    // Paragraph → heading: same retention the other way.
+    const paragraph = stateWithSelection('<p id="intro" class="fancy">Findings</p>', 1, 5);
+    let asHeading = paragraph;
+    toggleHeadingCommand(3)(paragraph, (tr) => {
+      asHeading = paragraph.apply(tr);
+    });
+    expect(serializeBody(docJson(asHeading))).toBe('<h3 id="intro" class="fancy">Findings</h3>');
+  });
+
+  it("a paragraph VARIANT class round-trips through a heading via the retained class attr", () => {
+    // `<p class="sub">` parses to variant "sub" AND class "sub"; the heading
+    // keeps `class` (variant is paragraph-only), and toggling back re-parses
+    // nothing — the paragraph's toDOM emits `variant ?? class`, so the class
+    // survives the full trip.
+    const sub = stateWithSelection('<p class="sub">hello world</p>', 1, 6);
+    let asHeading = sub;
+    toggleHeadingCommand(2)(sub, (tr) => {
+      asHeading = sub.apply(tr);
+    });
+    expect(serializeBody(docJson(asHeading))).toBe('<h2 class="sub">hello world</h2>');
+
+    let back = asHeading;
+    toggleHeadingCommand(2)(asHeading, (tr) => {
+      back = asHeading.apply(tr);
+    });
+    expect(serializeBody(docJson(back))).toBe('<p class="sub">hello world</p>');
+  });
+
+  it("a MIXED selection (paragraph + heading) becomes uniformly the requested level", () => {
+    // No uniform active level → the button means "make it all H2", never a
+    // per-block flip that would invert the mix.
+    const mixed = stateWithSelection("<p>one</p><h3>two</h3>", 1, 9);
+
+    let next = mixed;
+    const applied = toggleHeadingCommand(2)(mixed, (tr) => {
+      next = mixed.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<h2>one</h2><h2>two</h2>");
+    expect(activeFormats(next).headingLevel).toBe(2);
+  });
+
+  it("returns false (nothing dispatched) where the schema cannot hold a heading", () => {
+    // A checklist item's content is inline-only and its parent only holds
+    // checklist items — no textblock in range can become a heading.
+    const checklist = stateWithSelection('<ul class="checklist"><li>item</li></ul>', 2, 5);
+    let dispatched = false;
+    expect(
+      toggleHeadingCommand(2)(checklist, () => {
+        dispatched = true;
+      }),
+    ).toBe(false);
+    expect(dispatched).toBe(false);
+  });
+});
+
+describe("toggleListCommand", () => {
+  it("wraps the selection's paragraph in a bullet list, with the kind reading active", () => {
+    const selected = stateWithSelection("<p>hello world</p>", 1, 6);
+
+    let next = selected;
+    const applied = toggleListCommand("bullet")(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<ul><li><p>hello world</p></li></ul>");
+    expect(activeFormats(next).listKind).toBe("bullet");
+  });
+
+  it("wraps in an ordered list, distinguished from bullet by the active reading", () => {
+    const selected = stateWithSelection("<p>hello world</p>", 1, 6);
+
+    let next = selected;
+    toggleListCommand("ordered")(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(serializeBody(docJson(next))).toBe("<ol><li><p>hello world</p></li></ol>");
+    expect(activeFormats(next).listKind).toBe("ordered");
+    expect(activeFormats(next).headingLevel).toBeNull();
+  });
+
+  it("toggling the ACTIVE kind lifts the item back out to a paragraph", () => {
+    // <ul><li><p>one</p></li></ul>: "one" spans 3..6.
+    const selected = stateWithSelection("<ul><li><p>one</p></li></ul>", 3, 6);
+
+    let next = selected;
+    const applied = toggleListCommand("bullet")(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<p>one</p>");
+    expect(activeFormats(next).listKind).toBeNull();
+  });
+
+  it("lifting from a NESTED list lifts exactly once — into the parent list, never exploding the stack", () => {
+    // <ul><li><p>a</p><ul><li><p>b</p></li></ul></li></ul>: cursor in "b" (8).
+    // The nearest enclosing list is the inner bullet, so toggling bullet
+    // lifts item b ONE level, making it a sibling item of the outer list.
+    const nested = stateWithSelection("<ul><li><p>a</p><ul><li><p>b</p></li></ul></li></ul>", 8);
+
+    let next = nested;
+    const applied = toggleListCommand("bullet")(nested, (tr) => {
+      next = nested.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<ul><li><p>a</p></li><li><p>b</p></li></ul>");
+    // Still a bullet list — one more press would lift the rest of the way.
+    expect(activeFormats(next).listKind).toBe("bullet");
+  });
+
+  it("the OTHER kind at the top of an existing list REFUSES — wrapInList's own semantics, document untouched", () => {
+    // Cursor in the FIRST item of a bullet list: prosemirror-schema-list's
+    // wrapInList declines to nest a sublist there ("don't do anything at the
+    // top of the list"), and this module deliberately does not grow a
+    // convert-in-place transform on top of it.
+    const first = stateWithSelection("<ul><li><p>one</p></li></ul>", 3, 6);
+    let dispatched = false;
+    expect(
+      toggleListCommand("ordered")(first, () => {
+        dispatched = true;
+      }),
+    ).toBe(false);
+    expect(dispatched).toBe(false);
+  });
+
+  it("the OTHER kind on a LATER item nests a sublist of that kind under the previous item", () => {
+    // <ul><li><p>one</p></li><li><p>two</p></li></ul>: cursor in "two" (11).
+    const later = stateWithSelection("<ul><li><p>one</p></li><li><p>two</p></li></ul>", 11);
+
+    let next = later;
+    const applied = toggleListCommand("ordered")(later, (tr) => {
+      next = later.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe(
+      "<ul><li><p>one</p><ol><li><p>two</p></li></ol></li></ul>",
+    );
+    // Nearest-enclosing wins: the caret now types into the ordered sublist.
+    expect(activeFormats(next).listKind).toBe("ordered");
+  });
+
+  it("wrapping PRESERVES a usable selection — the toolbar's chaining contract", () => {
+    const selected = stateWithSelection("<p>hello world</p>", 1, 6);
+
+    let next = selected;
+    toggleListCommand("bullet")(selected, (tr) => {
+      next = selected.apply(tr);
+    });
+
+    // The mapped selection still covers the same text inside the new list.
+    const { from, to } = next.selection;
+    expect(next.doc.textBetween(from, to)).toBe("hello");
   });
 });
 
