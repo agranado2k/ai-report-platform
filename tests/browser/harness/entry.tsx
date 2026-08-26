@@ -2,8 +2,11 @@
 // apps/view's `/edit` route mounts it (same props, same surrounding
 // full-height / overflow-hidden pane layout), over a report parsed by the
 // REAL `parseBody`. Nothing about link activation, comment highlighting, the
-// anchor scroll or the Selection toolbar is stubbed — that is the entire
-// point of this tier.
+// anchor scroll, the Selection toolbar or the Floating composer is stubbed —
+// that is the entire point of this tier. The ONE stub is the composer's POST
+// action, which is an injectable prop BY DESIGN (the route wires the real
+// comments client; this page has no API), wired here to the same local
+// comments state the add-comment button appends to.
 import {
   type ActiveFormats,
   type CommentForHighlight,
@@ -17,7 +20,8 @@ import { type PMDocJson, parseBody, splitShell } from "arp-report-html";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 // Resolved against apps/view (the harness bundles with `resolveDir` there —
-// build.mts), so this is the REAL route component, not a copy.
+// build.mts), so these are the REAL route components, not copies.
+import { FloatingComposer } from "./app/edit/components/FloatingComposer";
 import { SelectionToolbar } from "./app/edit/components/SelectionToolbar";
 
 const raw = (document.getElementById("report-src") as HTMLScriptElement).textContent ?? "";
@@ -42,7 +46,23 @@ function App() {
   // comments leaves half of that handler's dispatch matrix unexercised in the
   // one tier that can see a real click.
   const [comments, setComments] = React.useState<readonly CommentForHighlight[]>([]);
+  // The Floating composer swap (ticket #298) — same contract as the route:
+  // the host owns `composing`, the "…" bubble sets it, and the composer's
+  // POST is the injectable seam. The route wires the real comments client;
+  // this harness wires a LOCAL stub (below) that appends to the same
+  // `comments` state the add-comment button uses — so the browser tier can
+  // assert the highlight + panel side effects with no network.
+  const [composing, setComposing] = React.useState(false);
+  // What the composer stub "posted" — rendered into the side panel so a spec
+  // can assert the panel-side effect of a composer submit.
+  const [posted, setPosted] = React.useState<readonly { body: string; intent: string }[]>([]);
   const editorRef = React.useRef<ReportEditorHandle>(null);
+
+  // Mirrors the route: whatever nulls the selection geometry (Escape in the
+  // editor, document scroll, selection collapse) folds an open composer too.
+  React.useEffect(() => {
+    if (!selectionGeometry) setComposing(false);
+  }, [selectionGeometry]);
 
   return (
     <div className="root-layout">
@@ -126,7 +146,37 @@ function App() {
               onCommentClick={setFocused}
               className="editor-iframe"
             />
-            {selectionGeometry && selectionFormats ? (
+            {selectionGeometry && selection && composing ? (
+              <FloatingComposer
+                geometry={selectionGeometry}
+                quote={selection.text}
+                onSubmit={async ({ body, intent }) => {
+                  // ARMABLE FAILURE: a spec sets this flag to drive the
+                  // failed-post contract (inline error, body preserved) —
+                  // same window-flag pattern as __throwOnSelectionChange.
+                  if ((window as unknown as { __failComposerPost?: boolean }).__failComposerPost) {
+                    return { ok: false, message: "Posting failed (armed by the test)" };
+                  }
+                  // The stub's "server": the same local append the
+                  // add-comment button performs, so the REAL highlight
+                  // pipeline runs; plus the panel-side record.
+                  setComments((prev) => [
+                    ...prev,
+                    {
+                      id: `comment-${prev.length + 1}`,
+                      anchor: { relative: { from: selection.from, to: selection.to } },
+                      intent,
+                    },
+                  ]);
+                  setPosted((prev) => [...prev, { body, intent }]);
+                  // Mirrors the route's post-success dismissal: drop the
+                  // selection-anchored chrome entirely.
+                  setSelectionGeometry(null);
+                  return { ok: true };
+                }}
+                onCancel={() => setComposing(false)}
+              />
+            ) : selectionGeometry && selectionFormats ? (
               <SelectionToolbar
                 geometry={selectionGeometry}
                 formats={selectionFormats}
@@ -135,11 +185,24 @@ function App() {
                 onToggleList={(kind) => editorRef.current?.toggleList(kind)}
                 onApplyLink={(href) => editorRef.current?.applyLink(href) ?? false}
                 onRemoveLink={() => editorRef.current?.removeLink() ?? false}
+                onCompose={() => setComposing(true)}
               />
             ) : null}
           </div>
         </main>
-        <aside className="side-panel">panel</aside>
+        {/* The panel stub: what the composer "posted" shows up here, the way
+            a real post's Thread appears in the Comments panel. */}
+        <aside className="side-panel">
+          panel
+          <ul data-testid="panel-comments">
+            {posted.map((p, i) => (
+              // Append-only stub list — the index IS the identity here.
+              <li key={`posted-${i + 1}`} data-testid="panel-comment">
+                {p.intent}: {p.body}
+              </li>
+            ))}
+          </ul>
+        </aside>
       </div>
     </div>
   );
