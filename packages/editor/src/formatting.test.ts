@@ -62,6 +62,19 @@ describe("activeFormats — marks", () => {
     expect(activeFormats(plain).link).toBe(false);
   });
 
+  it("a range spanning TWO links reads the FIRST href — the documented multi-link convention", () => {
+    // "one" is linked to a.example, "two" (adjacent) to b.example; the
+    // selection covers both. The pre-fill convention is first-occurrence-wins
+    // (activeLinkHref's doc comment) — a last-wins traversal would silently
+    // pre-fill the wrong link's href.
+    const spanning = stateWithSelection(
+      '<p><a href="https://a.example">one</a><a href="https://b.example">two</a></p>',
+      1,
+      7,
+    );
+    expect(activeFormats(spanning).linkHref).toBe("https://a.example");
+  });
+
   it("reports nothing active over plain text", () => {
     const state = stateWithSelection("<p>hello world</p>", 1, 6);
     expect(activeFormats(state)).toEqual({
@@ -229,6 +242,45 @@ describe("setLinkCommand", () => {
     );
   });
 
+  it("a caret at the link's TRAILING boundary still edits the whole link", () => {
+    // <p><a…>hello</a> world</p>: "hello" spans 1..6, so 6 is the boundary
+    // BETWEEN the link and the plain text. childAfter there reads the
+    // unmarked " world" run — markExtent's childBefore fallback is what makes
+    // the caret still belong to the link; without it this caret would be
+    // "outside any link" and the edit would refuse.
+    const trailing = stateWithSelection('<p><a href="https://old.example">hello</a> world</p>', 6);
+
+    let next = trailing;
+    const applied = setLinkCommand("https://new.example")(trailing, (tr) => {
+      next = trailing.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe(
+      '<p><a href="https://new.example">hello</a> world</p>',
+    );
+  });
+
+  it("editing one of two ADJACENT links never bleeds into its neighbor", () => {
+    // Two links touch with no text between them. The extent walk compares
+    // MARK INSTANCES (mark.isInSet), not mark types — a type-level walk would
+    // read both runs as one link and rewrite them both.
+    const cursor = stateWithSelection(
+      '<p><a href="https://a.example">one</a><a href="https://b.example">two</a></p>',
+      2,
+    );
+
+    let next = cursor;
+    const applied = setLinkCommand("https://new.example")(cursor, (tr) => {
+      next = cursor.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe(
+      '<p><a href="https://new.example">one</a><a href="https://b.example">two</a></p>',
+    );
+  });
+
   it("a selection covering PART of a link re-links the link's full extent — editing never splits", () => {
     // Select "hel" (1..4) of the linked "hello": the new href must cover all
     // of "hello", not fracture it into two adjacent links.
@@ -261,6 +313,38 @@ describe("removeLinkCommand", () => {
     expect(applied).toBe(true);
     expect(serializeBody(docJson(next))).toBe("<p>hello world</p>");
     expect(activeFormats(next).link).toBe(false);
+  });
+
+  it("a caret at the link's TRAILING boundary still removes the whole link", () => {
+    // Same childBefore-fallback contract as the setLink twin above: pos 6 is
+    // the boundary between the linked "hello" and the plain " world".
+    const trailing = stateWithSelection('<p><a href="https://example.com">hello</a> world</p>', 6);
+
+    let next = trailing;
+    const applied = removeLinkCommand()(trailing, (tr) => {
+      next = trailing.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe("<p>hello world</p>");
+  });
+
+  it("removing one of two ADJACENT links leaves the other intact", () => {
+    // Cursor in the SECOND link: the extent's backward walk must stop at the
+    // instance boundary (mark.isInSet), or removing b.example's link would
+    // strip a.example's too.
+    const cursor = stateWithSelection(
+      '<p><a href="https://a.example">one</a><a href="https://b.example">two</a></p>',
+      5,
+    );
+
+    let next = cursor;
+    const applied = removeLinkCommand()(cursor, (tr) => {
+      next = cursor.apply(tr);
+    });
+
+    expect(applied).toBe(true);
+    expect(serializeBody(docJson(next))).toBe('<p><a href="https://a.example">one</a>two</p>');
   });
 
   it("removes across a selected range and returns false when no link is touched", () => {

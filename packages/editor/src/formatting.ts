@@ -4,10 +4,11 @@
 // EditorView — so it is node-tested (formatting.test.ts) like the rest of
 // this package's ProseMirror wiring.
 //
-// The reading covers the FULL toolbar vocabulary now (strong/em/link marks,
-// heading level, list kind) even though ticket #297 only wires the bold and
-// italic buttons — the link (#299) and block-type (#300) tickets reuse this
-// module rather than growing their own competing definition of "active".
+// The reading covers the FULL toolbar vocabulary (strong/em/link marks,
+// heading level, list kind). All of its consumers have landed — the bold and
+// italic toggles (#297), the link editor (#299) and the block-type buttons
+// (#300) — and every one reads active state from this module, never a
+// competing definition of "active".
 //
 // The commands are prosemirror-commands' own `toggleMark` against
 // `reportSchema` — the SAME command `editorPlugins()` binds to Mod-b / Mod-i
@@ -56,8 +57,9 @@ export interface ActiveFormats {
   readonly listKind: ListKind | null;
 }
 
-/** The mark toggles the toolbar can dispatch this ticket (#297) — bold and
- *  italic. Link (#299) needs an href editing flow, not a plain toggle. */
+/** The marks the toolbar dispatches as PLAIN toggles — bold and italic
+ *  (#297). Link (#299) is deliberately not here: it has its own href editing
+ *  flow (`setLinkCommand`/`removeLinkCommand` below), not a toggle. */
 export type ToggleableFormat = "strong" | "em";
 
 /** ProseMirror's own "is this mark active here" convention (the one
