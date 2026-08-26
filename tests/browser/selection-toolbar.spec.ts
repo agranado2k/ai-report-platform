@@ -99,6 +99,30 @@ async function selectWord(page: Page, selector: string) {
   return { x, y };
 }
 
+/** The harness's reported (trimmed) selection text — the word the formatting
+ *  contracts below expect to see wrapped in a mark element. */
+async function selectedWord(page: Page): Promise<string> {
+  const text = ((await page.getByTestId("pending-selection").textContent()) ?? "").trim();
+  if (text.length === 0) throw new Error("no selection is pending");
+  return text;
+}
+
+/** How many `<tag>` elements in the editing iframe contain `word`. Counted
+ *  (not just "exists") because a real report legitimately carries its own
+ *  `<strong>`/`<em>` content — the contracts assert the count GREW. */
+async function markCount(page: Page, tag: string, word: string): Promise<number> {
+  return await page.evaluate(
+    ({ tag, word }) => {
+      const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+      if (!doc) throw new Error("the editing surface has not mounted");
+      return Array.from(doc.querySelectorAll(tag)).filter((el) =>
+        (el.textContent ?? "").includes(word),
+      ).length;
+    },
+    { tag, word },
+  );
+}
+
 for (const fixture of FIXTURES) {
   test.describe(`the Selection toolbar — ${fixture.label}`, { tag: fixture.tag }, () => {
     let harnessPage: string;
@@ -250,6 +274,80 @@ for (const fixture of FIXTURES) {
       });
       expect(iframeSelection.exists).toBe(true);
       expect(iframeSelection.collapsed).toBe(false);
+    });
+
+    // ── Formatting toggles (ticket #297) ────────────────────────────────────
+
+    test("the Bold button bolds the selection in the document and shows pressed", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bold = toolbar.getByRole("button", { name: "Bold" });
+      await expect(bold).toHaveAttribute("aria-pressed", "false");
+      const before = await markCount(page, "strong", word);
+
+      await bold.click();
+
+      // Active state updates live, the document really carries the mark
+      // (observed in the iframe's own DOM), and the toolbar stays up.
+      await expect(bold).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(before);
+      await expect(toolbar).toBeVisible();
+    });
+
+    test("bold then italic chain on the same selection without re-selecting", async ({ page }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bold = toolbar.getByRole("button", { name: "Bold" });
+      const italic = toolbar.getByRole("button", { name: "Italic" });
+      const strongBefore = await markCount(page, "strong", word);
+      const emBefore = await markCount(page, "em", word);
+
+      await bold.click();
+      await italic.click();
+
+      await expect(bold).toHaveAttribute("aria-pressed", "true");
+      await expect(italic).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(strongBefore);
+      await expect.poll(() => markCount(page, "em", word)).toBeGreaterThan(emBefore);
+
+      // The chain worked because the selection survived BOTH toggles — the
+      // iframe's own DOM selection is the authority (same reasoning as the
+      // "clicking inside the toolbar" contract above).
+      const iframeSelection = await page.evaluate(() => {
+        const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+        const sel = doc?.getSelection();
+        return { exists: sel !== null && sel !== undefined, collapsed: sel?.isCollapsed ?? true };
+      });
+      expect(iframeSelection.exists).toBe(true);
+      expect(iframeSelection.collapsed).toBe(false);
+    });
+
+    test("re-selecting already-bold text arrives with Bold already pressed", async ({ page }) => {
+      // Make the word bold via the toolbar, then collapse the selection away.
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Bold" }).click();
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(0);
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+
+      // Arriving on already-bold text shows Bold active immediately.
+      await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Bold" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(toolbar.getByRole("button", { name: "Italic" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
     });
 
     test("a keyboard-extended selection shows the toolbar too", async ({ page }) => {

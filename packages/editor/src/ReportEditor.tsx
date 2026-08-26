@@ -82,6 +82,12 @@ import {
   jumpToCommentTransaction,
   reportableSelection,
 } from "./editor-state";
+import {
+  type ActiveFormats,
+  activeFormats,
+  type ToggleableFormat,
+  toggleFormatCommand,
+} from "./formatting";
 import { buildIframeDocument } from "./iframe-document";
 import {
   editorClickOutcome,
@@ -95,13 +101,24 @@ import { type SelectionGeometry, selectionGeometry, shouldComputeGeometry } from
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
 export type { EditorSelection } from "./editor-state";
 
-/** Imperative surface exposed via the forwarded ref (item B's "Jump"). */
+/** Imperative surface exposed via the forwarded ref (item B's "Jump", plus
+ *  the Selection toolbar's command dispatch, ticket #297). */
 export interface ReportEditorHandle {
   /** Scroll the editor to the comment's anchor position, selecting the
    *  anchored range. Returns `false` (and does nothing) when the comment's
    *  relative position no longer resolves against the current doc — the
    *  degraded, version-pinned state has nowhere live to jump to. */
   readonly jumpToComment: (comment: CommentForHighlight) => boolean;
+  /** Toggle a formatting mark over the CURRENT selection — the Selection
+   *  toolbar's dispatch seam (ticket #297). Runs `toggleFormatCommand`
+   *  (formatting.ts): the same prosemirror-commands `toggleMark` the
+   *  Mod-b/Mod-i keymap binds, so toolbar and keyboard stay one behavior.
+   *  `toggleMark` preserves the selection, and the dispatch re-reports
+   *  selection + geometry + active formats through `onSelectionChange` —
+   *  which is what keeps the toolbar up (and its buttons live) so toggles
+   *  chain without re-selecting. Returns whether the command applied
+   *  (`false` also when the editor is not mounted). */
+  readonly toggleFormat: (format: ToggleableFormat) => boolean;
 }
 
 export interface ReportEditorProps {
@@ -125,11 +142,17 @@ export interface ReportEditorProps {
    *  (selection-rect.ts) — for selection-anchored floating UI (the Selection
    *  toolbar, ticket #296). It is `null` whenever the selection is, and ALSO
    *  null mid-drag: a floating bar must not appear under a moving pointer, so
-   *  geometry is withheld until the mouseup re-report. Callers that only care
-   *  about the selection itself can ignore the argument entirely. */
+   *  geometry is withheld until the mouseup re-report. The third argument is
+   *  WHAT formats that selection carries (formatting.ts, ticket #297) — the
+   *  toolbar's live active state; `null` exactly when the selection is (it is
+   *  still computed mid-drag: unlike geometry it can't flicker any UI, and
+   *  one rule — "formats accompany every non-null selection" — is simpler
+   *  than two). Callers that only care about the selection itself can ignore
+   *  the extra arguments entirely. */
   readonly onSelectionChange?: (
     selection: EditorSelection | null,
     geometry: SelectionGeometry | null,
+    formats: ActiveFormats | null,
   ) => void;
   /** Fired when Escape is pressed inside the editing surface (observed, never
    *  consumed — PM's own handling still runs). The iframe's key events never
@@ -228,6 +251,16 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         view.focus();
         return true;
       },
+      // The Selection toolbar's command dispatch (ticket #297). No `focus()`
+      // here, deliberately: the toolbar's mousedown-preventDefault means focus
+      // never left the editing iframe, and the dispatch itself flows through
+      // `dispatchTransaction` below — which re-reports selection, geometry and
+      // active formats, keeping the toolbar in place and its buttons live.
+      toggleFormat(format) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleFormatCommand(format)(view.state, view.dispatch);
+      },
     }),
     [],
   );
@@ -319,7 +352,12 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             iframe.getBoundingClientRect(),
           );
         }
-        onSelectionChangeRef.current?.(selection, geometry);
+        // WHAT the selection carries rides along with WHERE it sits (ticket
+        // #297): pure, cheap, and recomputed on every report — including the
+        // toggle dispatch itself, which is how the toolbar's buttons light up
+        // immediately after a toggle.
+        const formats = selection ? activeFormats(forView.state) : null;
+        onSelectionChangeRef.current?.(selection, geometry, formats);
       }
 
       // The two link-activation EFFECTS (ADR-0062 Amendment 3). Both defer

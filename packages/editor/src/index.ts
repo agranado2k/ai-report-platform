@@ -29,6 +29,12 @@ export {
   jumpToCommentTransaction,
   reportableSelection,
 } from "./editor-state";
+// The formatting seam's CONSUMED surface (ticket #297): the SelectionToolbar
+// (apps/view) needs the TYPES to declare its props — the functions themselves
+// (`activeFormats`, `toggleFormatCommand`) stay in-package, reached only
+// through ReportEditor's selection reports and `toggleFormat` handle, so no
+// host is invited to grow a second active-state or command path.
+export type { ActiveFormats, ToggleableFormat } from "./formatting";
 export { buildIframeDocument, buildReadOnlyIframeDocument } from "./iframe-document";
 export {
   type EditorClickOutcome,
