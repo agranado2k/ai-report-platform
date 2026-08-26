@@ -215,7 +215,11 @@ describe("setLinkCommand", () => {
   it("a selection covering PART of a link re-links the link's full extent — editing never splits", () => {
     // Select "hel" (1..4) of the linked "hello": the new href must cover all
     // of "hello", not fracture it into two adjacent links.
-    const partial = stateWithSelection('<p><a href="https://old.example">hello</a> world</p>', 1, 4);
+    const partial = stateWithSelection(
+      '<p><a href="https://old.example">hello</a> world</p>',
+      1,
+      4,
+    );
 
     let next = partial;
     setLinkCommand("https://new.example")(partial, (tr) => {

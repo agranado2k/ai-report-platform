@@ -85,6 +85,8 @@ import {
 import {
   type ActiveFormats,
   activeFormats,
+  removeLinkCommand,
+  setLinkCommand,
   type ToggleableFormat,
   toggleFormatCommand,
 } from "./formatting";
@@ -119,6 +121,20 @@ export interface ReportEditorHandle {
    *  chain without re-selecting. Returns whether the command applied
    *  (`false` also when the editor is not mounted). */
   readonly toggleFormat: (format: ToggleableFormat) => boolean;
+  /** Apply a link with `href` over the current selection — the toolbar link
+   *  editor's Apply seam (ticket #299). Runs `setLinkCommand`: refused hrefs
+   *  (the schema-shared `validateLinkHref` rule) and empty selections outside
+   *  a link return `false` with NO dispatch, so the document is untouched.
+   *  Unlike `toggleFormat`, the dispatch happens while host focus sits in the
+   *  toolbar's URL input — the iframe is blurred and its VISUAL selection
+   *  hidden — but ProseMirror's STATE selection persists across that blur,
+   *  and the command reads `view.state.selection` at dispatch time, so the
+   *  originally selected range is exactly what gets linked. */
+  readonly applyLink: (href: string) => boolean;
+  /** Remove the link the current selection sits in (widened to the link's
+   *  full extent — see `removeLinkCommand`). `false` when the selection
+   *  touches no link, or the editor is not mounted. */
+  readonly removeLink: () => boolean;
 }
 
 export interface ReportEditorProps {
@@ -260,6 +276,28 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         const view = viewRef.current;
         if (!view) return false;
         return toggleFormatCommand(format)(view.state, view.dispatch);
+      },
+      // The link editor's Apply/Remove (ticket #299). These DO refocus the
+      // view on success — the opposite call from toggleFormat's deliberate
+      // no-focus — because here focus genuinely left the iframe (the URL
+      // input needed it to accept typing). `view.focus()` re-syncs the
+      // iframe's DOM selection from PM's state selection, making the
+      // just-linked range visibly selected again; the dispatch itself flows
+      // through `dispatchTransaction`, re-reporting selection + geometry +
+      // formats, which is what lights the Link button and closes the loop.
+      applyLink(href) {
+        const view = viewRef.current;
+        if (!view) return false;
+        const applied = setLinkCommand(href)(view.state, view.dispatch);
+        if (applied) view.focus();
+        return applied;
+      },
+      removeLink() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const applied = removeLinkCommand()(view.state, view.dispatch);
+        if (applied) view.focus();
+        return applied;
       },
     }),
     [],

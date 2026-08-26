@@ -29,12 +29,18 @@ export {
   jumpToCommentTransaction,
   reportableSelection,
 } from "./editor-state";
-// The formatting seam's CONSUMED surface (ticket #297): the SelectionToolbar
-// (apps/view) needs the TYPES to declare its props — the functions themselves
-// (`activeFormats`, `toggleFormatCommand`) stay in-package, reached only
-// through ReportEditor's selection reports and `toggleFormat` handle, so no
-// host is invited to grow a second active-state or command path.
-export type { ActiveFormats, ToggleableFormat } from "./formatting";
+// The formatting seam's CONSUMED surface (tickets #297/#299): the
+// SelectionToolbar (apps/view) needs the TYPES to declare its props — the
+// command/reading functions (`activeFormats`, `toggleFormatCommand`,
+// `setLinkCommand`, `removeLinkCommand`) stay in-package, reached only
+// through ReportEditor's selection reports and its handle, so no host is
+// invited to grow a second active-state or command path. `validateLinkHref`
+// IS exported (with its result type): the link editor must reject an unsafe
+// URL with visible feedback BEFORE any dispatch, and this is the schema's own
+// safety rule (arp-report-html's `isDangerousUrl` under the hood) — exporting
+// it is what prevents apps/view from inventing a second URL policy.
+export type { ActiveFormats, LinkHrefValidation, ToggleableFormat } from "./formatting";
+export { validateLinkHref } from "./formatting";
 export { buildIframeDocument, buildReadOnlyIframeDocument } from "./iframe-document";
 export {
   type EditorClickOutcome,
