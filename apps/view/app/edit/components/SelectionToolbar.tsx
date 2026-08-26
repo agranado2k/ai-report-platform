@@ -70,13 +70,25 @@ export interface SelectionToolbarProps {
   readonly formats: ActiveFormats;
   /** Dispatch a mark toggle back to the editor (ReportEditorHandle
    *  .toggleFormat). The toolbar never touches the editor directly — the
-   *  host owns the ref, this component only asks. */
+   *  host owns the ref, this component only asks.
+   *
+   *  The three toggle props are `void` ON PURPOSE, even though the handle
+   *  methods behind them return a refusal boolean: a refused toggle is a
+   *  DELIBERATE silent no-op. The one refusal reachable from a live toolbar
+   *  is `toggleListCommand`'s — pressing the OTHER list kind at the top of an
+   *  existing list, where `wrapInList` declines (pinned in arp-editor's
+   *  formatting.test.ts) — and the honest feedback is already on screen: the
+   *  pressed button doesn't change, because the dispatch that would have
+   *  re-reported the active state never happened. The LINK props below are
+   *  different (booleans, surfaced as inline errors) because their failures
+   *  are invisible without a message. */
   readonly onToggleFormat: (format: ToggleableFormat) => void;
   /** Dispatch a heading toggle (ReportEditorHandle.toggleHeading, ticket
    *  #300): convert to the level, or back to a paragraph when the button was
-   *  already active. */
+   *  already active. `void` — refusals are silent, see `onToggleFormat`. */
   readonly onToggleHeading: (level: HeadingLevel) => void;
-  /** Dispatch a list wrap/lift (ReportEditorHandle.toggleList, ticket #300). */
+  /** Dispatch a list wrap/lift (ReportEditorHandle.toggleList, ticket #300).
+   *  `void` — refusals are silent, see `onToggleFormat`. */
   readonly onToggleList: (kind: ListKind) => void;
   /** Apply a link over the current selection (ReportEditorHandle.applyLink).
    *  Called only with an href `validateLinkHref` accepted; returns whether
@@ -93,6 +105,7 @@ const LINK_ERROR_MESSAGES = {
   empty: "Enter a URL.",
   unsafe: "That URL type isn't allowed.",
   refused: "The link couldn't be applied — reselect the text and try again.",
+  removeRefused: "The link couldn't be removed — reselect the text and try again.",
 } as const;
 
 type LinkError = keyof typeof LINK_ERROR_MESSAGES;
@@ -182,6 +195,13 @@ export function SelectionToolbar({
     setLinkOpen(true);
   }
 
+  // Closing WITHOUT applying (Cancel, Escape) leaves keyboard focus where it
+  // sits — on the just-clicked button, or nowhere (document.body) after
+  // Escape — while Apply/Remove refocus the editor (applyLink/removeLink call
+  // view.focus()). The asymmetry is deliberate for now: ProseMirror's STATE
+  // selection persists either way (the bar stays up over it), and this
+  // component has no handle to the editor to refocus with — that seam
+  // (a focusEditor handle) is #298/later, not worth growing early.
   function closeLinkEditor() {
     setLinkOpen(false);
     setLinkError(null);
@@ -266,7 +286,13 @@ export function SelectionToolbar({
                 aria-label="Remove link"
                 className={buttonClass}
                 onClick={() => {
-                  onRemoveLink();
+                  // Same refusal contract as Apply (submitLink): a `false`
+                  // from the editor keeps the sub-editor open with feedback,
+                  // never a silent close that looks like success.
+                  if (!onRemoveLink()) {
+                    setLinkError("removeRefused");
+                    return;
+                  }
                   closeLinkEditor();
                 }}
               >
