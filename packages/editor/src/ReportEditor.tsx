@@ -85,10 +85,14 @@ import {
 import {
   type ActiveFormats,
   activeFormats,
+  type HeadingLevel,
+  type ListKind,
   removeLinkCommand,
   setLinkCommand,
   type ToggleableFormat,
   toggleFormatCommand,
+  toggleHeadingCommand,
+  toggleListCommand,
 } from "./formatting";
 import { buildIframeDocument } from "./iframe-document";
 import {
@@ -121,6 +125,19 @@ export interface ReportEditorHandle {
    *  chain without re-selecting. Returns whether the command applied
    *  (`false` also when the editor is not mounted). */
   readonly toggleFormat: (format: ToggleableFormat) => boolean;
+  /** Convert the current selection's blocks to `<h{level}>` — or back to
+   *  paragraphs when the selection already reads as that level — the heading
+   *  buttons' dispatch seam (ticket #300). Runs `toggleHeadingCommand`
+   *  (formatting.ts); same no-refocus contract as `toggleFormat` (the
+   *  toolbar's mousedown-preventDefault means focus never left the iframe),
+   *  and the dispatch re-reports selection + geometry + formats, so the bar
+   *  stays up over the converted block with the right button lit. */
+  readonly toggleHeading: (level: HeadingLevel) => boolean;
+  /** Wrap the current selection in a bullet/ordered list — or lift it back
+   *  out when it already sits in a list of that kind (ticket #300; semantics
+   *  pinned on `toggleListCommand`). Same dispatch/no-refocus contract as
+   *  `toggleHeading`. */
+  readonly toggleList: (kind: ListKind) => boolean;
   /** Apply a link with `href` over the current selection — the toolbar link
    *  editor's Apply seam (ticket #299). Runs `setLinkCommand`: refused hrefs
    *  (the schema-shared `validateLinkHref` rule) and empty selections outside
@@ -276,6 +293,19 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         const view = viewRef.current;
         if (!view) return false;
         return toggleFormatCommand(format)(view.state, view.dispatch);
+      },
+      // The block-type toggles (ticket #300): same shape as toggleFormat —
+      // no focus() (focus never left the iframe), dispatch through the pure
+      // command, active state re-reported by dispatchTransaction.
+      toggleHeading(level) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleHeadingCommand(level)(view.state, view.dispatch);
+      },
+      toggleList(kind) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleListCommand(kind)(view.state, view.dispatch);
       },
       // The link editor's Apply/Remove (ticket #299). These DO refocus the
       // view on success — the opposite call from toggleFormat's deliberate
