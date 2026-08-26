@@ -514,6 +514,66 @@ for (const fixture of FIXTURES) {
       );
     });
 
+    // ── Block actions (ticket #300) ─────────────────────────────────────────
+
+    test("the H2 button converts the paragraph, distinguishes levels, and toggles back to a paragraph", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const h2 = toolbar.getByRole("button", { name: "Heading 2" });
+      const h3 = toolbar.getByRole("button", { name: "Heading 3" });
+      await expect(h2).toHaveAttribute("aria-pressed", "false");
+      const h2Before = await markCount(page, "h2", word);
+      const pBefore = await markCount(page, "p", word);
+
+      await h2.click();
+
+      // The block really converted in the iframe's DOM, the ACTIVE LEVEL is
+      // distinguished (H2 pressed, H3 not), and the toolbar survived the
+      // conversion — the dispatch path re-reported geometry + formats.
+      await expect(h2).toHaveAttribute("aria-pressed", "true");
+      await expect(h3).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "h2", word)).toBeGreaterThan(h2Before);
+      await expect(toolbar).toBeVisible();
+
+      // Clicking the ACTIVE level returns the block to a paragraph.
+      await h2.click();
+      await expect(h2).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "h2", word)).toBe(h2Before);
+      await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
+    });
+
+    test("the bullet list button wraps the selection, distinguishes kinds, and lifts back out", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bullet = toolbar.getByRole("button", { name: "Bullet list" });
+      const ordered = toolbar.getByRole("button", { name: "Ordered list" });
+      await expect(bullet).toHaveAttribute("aria-pressed", "false");
+      const ulBefore = await markCount(page, "ul", word);
+      const pBefore = await markCount(page, "p", word);
+
+      await bullet.click();
+
+      // Wrapped in the iframe's DOM, with the KIND distinguished (bullet
+      // pressed, ordered not) and the toolbar still up.
+      await expect(bullet).toHaveAttribute("aria-pressed", "true");
+      await expect(ordered).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "ul", word)).toBeGreaterThan(ulBefore);
+      await expect(toolbar).toBeVisible();
+
+      // Clicking the ACTIVE kind lifts the item back out; the text survives
+      // as a plain paragraph.
+      await bullet.click();
+      await expect(bullet).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "ul", word)).toBe(ulBefore);
+      await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
+    });
+
     test("a keyboard-extended selection shows the toolbar too", async ({ page }) => {
       // Caret in the paragraph, then Shift+ArrowRight — selection built by
       // TRANSACTIONS with no pointer involved. This is the dispatch-path

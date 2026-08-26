@@ -1,16 +1,27 @@
-// The Selection toolbar (tickets #296/#297/#299): a Notion-style floating bar
-// anchored over the editor's text selection in the unified experience's Edit
-// mode. The Bold and Italic buttons are live (ticket #297): `formats` is the
-// editor's own active-state reading (arp-editor's `activeFormats`, riding
-// every selection report), `onToggleFormat` dispatches the toggle back
-// through the editor's handle, and `aria-pressed` mirrors the active state.
+// The Selection toolbar (tickets #296/#297/#299/#300): a Notion-style
+// floating bar anchored over the editor's text selection in the unified
+// experience's Edit mode. The Bold and Italic buttons are live (ticket #297):
+// `formats` is the editor's own active-state reading (arp-editor's
+// `activeFormats`, riding every selection report), `onToggleFormat`
+// dispatches the toggle back through the editor's handle, and `aria-pressed`
+// mirrors the active state.
 // The Link button is live too (ticket #299): clicking it swaps the button row
 // for a small URL editor (input + Apply / Remove-when-linked / Cancel);
 // submitting validates through `validateLinkHref` — arp-editor's re-export of
 // the SAME dangerous-URL rule the schema's `withSafeHref` enforces, never a
 // second URL policy — and only a valid href is dispatched (`onApplyLink`).
 // An invalid one gets inline feedback (aria-invalid + message) with the
-// document untouched. The More button remains a placeholder for #300.
+// document untouched.
+// The block actions are live too (ticket #300): H1–H3 convert the selection's
+// blocks (pressing the ACTIVE level returns them to paragraphs) and the two
+// list buttons wrap/lift (semantics pinned in arp-editor's formatting.test.ts)
+// — `aria-pressed` mirrors `headingLevel`/`listKind`, which distinguish
+// levels and kinds. The schema itself retains <h1>–<h6>; the bar exposes 1–3
+// only (arp-editor's `HeadingLevel` — the PRD scopes "heading levels", and
+// the toolbar convention is a small set). Adding these buttons changes the
+// bar's RESTING width, which the mount-time measurement covers; they add no
+// open/closed sub-state, so the re-measure stays keyed on the link editor
+// alone. The More button remains a placeholder (composer, #298).
 //
 // Placement is measure-then-place: the bar first renders OFFSCREEN (also the
 // SSR output — effects don't run on the server), a layout effect measures the
@@ -37,6 +48,8 @@
 // re-reveals it).
 import {
   type ActiveFormats,
+  type HeadingLevel,
+  type ListKind,
   placeToolbar,
   type SelectionGeometry,
   type ToggleableFormat,
@@ -59,6 +72,12 @@ export interface SelectionToolbarProps {
    *  .toggleFormat). The toolbar never touches the editor directly — the
    *  host owns the ref, this component only asks. */
   readonly onToggleFormat: (format: ToggleableFormat) => void;
+  /** Dispatch a heading toggle (ReportEditorHandle.toggleHeading, ticket
+   *  #300): convert to the level, or back to a paragraph when the button was
+   *  already active. */
+  readonly onToggleHeading: (level: HeadingLevel) => void;
+  /** Dispatch a list wrap/lift (ReportEditorHandle.toggleList, ticket #300). */
+  readonly onToggleList: (kind: ListKind) => void;
   /** Apply a link over the current selection (ReportEditorHandle.applyLink).
    *  Called only with an href `validateLinkHref` accepted; returns whether
    *  the editor applied it. */
@@ -106,10 +125,16 @@ const activeButtonClass = `${buttonBase} bg-surface text-fg`;
 const inputClass =
   "h-7 rounded-control border border-border bg-surface px-2 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 aria-[invalid=true]:border-danger";
 
+/** The heading levels the bar exposes, in button order — arp-editor's
+ *  `HeadingLevel` (1–3) spelled out so the render below can map over it. */
+const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3];
+
 export function SelectionToolbar({
   geometry,
   formats,
   onToggleFormat,
+  onToggleHeading,
+  onToggleList,
   onApplyLink,
   onRemoveLink,
 }: SelectionToolbarProps) {
@@ -296,6 +321,47 @@ export function SelectionToolbar({
             onClick={openLinkEditor}
           >
             <span className="underline">↗</span>
+          </button>
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
+          {/* Block actions (ticket #300). aria-pressed distinguishes the
+              LEVEL, not just "some heading": only the button matching
+              formats.headingLevel reads pressed (an H4-H6 in the document —
+              retained by the schema, not exposed here — lights nothing). */}
+          {HEADING_LEVELS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              aria-label={`Heading ${level}`}
+              aria-pressed={formats.headingLevel === level}
+              className={formats.headingLevel === level ? activeButtonClass : buttonClass}
+              onClick={() => onToggleHeading(level)}
+            >
+              <span className="text-xs font-semibold">H{level}</span>
+            </button>
+          ))}
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
+          <button
+            type="button"
+            aria-label="Bullet list"
+            aria-pressed={formats.listKind === "bullet"}
+            className={formats.listKind === "bullet" ? activeButtonClass : buttonClass}
+            onClick={() => onToggleList("bullet")}
+          >
+            {/* Text glyphs, not icon components: the browser harness loads no
+                Tailwind/asset pipeline, and the buttons must stay measurable
+                there (same reasoning as the URL input's size attribute). */}
+            <span aria-hidden="true">•</span>
+          </button>
+          <button
+            type="button"
+            aria-label="Ordered list"
+            aria-pressed={formats.listKind === "ordered"}
+            className={formats.listKind === "ordered" ? activeButtonClass : buttonClass}
+            onClick={() => onToggleList("ordered")}
+          >
+            <span aria-hidden="true" className="text-xs font-semibold">
+              1.
+            </span>
           </button>
           <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
           <button type="button" aria-label="More actions" className={buttonClass}>

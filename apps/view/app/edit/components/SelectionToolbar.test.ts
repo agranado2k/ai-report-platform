@@ -35,6 +35,8 @@ function render(formats: ActiveFormats): string {
       geometry: GEOMETRY,
       formats,
       onToggleFormat: () => {},
+      onToggleHeading: () => {},
+      onToggleList: () => {},
       onApplyLink: () => true,
       onRemoveLink: () => true,
     }),
@@ -46,9 +48,41 @@ describe("SelectionToolbar", () => {
     const html = render(NO_FORMATS);
     expect(html).toContain('role="toolbar"');
     expect(html).toContain('data-testid="selection-toolbar"');
-    for (const label of ["Bold", "Italic", "Link", "More actions"]) {
+    for (const label of [
+      "Bold",
+      "Italic",
+      "Link",
+      "Heading 1",
+      "Heading 2",
+      "Heading 3",
+      "Bullet list",
+      "Ordered list",
+      "More actions",
+    ]) {
       expect(html).toContain(`aria-label="${label}"`);
     }
+  });
+
+  it("mirrors the heading level to aria-pressed, distinguishing levels (ticket #300)", () => {
+    const h2 = render({ ...NO_FORMATS, headingLevel: 2 });
+    expect(h2).toContain('aria-label="Heading 2" aria-pressed="true"');
+    expect(h2).toContain('aria-label="Heading 3" aria-pressed="false"');
+    expect(h2).toContain('aria-label="Heading 1" aria-pressed="false"');
+
+    // A level the toolbar does not expose (schema allows 1-6) lights nothing.
+    const h4 = render({ ...NO_FORMATS, headingLevel: 4 });
+    expect(h4).toContain('aria-label="Heading 2" aria-pressed="false"');
+    expect(h4).toContain('aria-label="Heading 3" aria-pressed="false"');
+  });
+
+  it("mirrors the list kind to aria-pressed, distinguishing bullet from ordered (ticket #300)", () => {
+    const bullet = render({ ...NO_FORMATS, listKind: "bullet" });
+    expect(bullet).toContain('aria-label="Bullet list" aria-pressed="true"');
+    expect(bullet).toContain('aria-label="Ordered list" aria-pressed="false"');
+
+    const ordered = render({ ...NO_FORMATS, listKind: "ordered" });
+    expect(ordered).toContain('aria-label="Bullet list" aria-pressed="false"');
+    expect(ordered).toContain('aria-label="Ordered list" aria-pressed="true"');
   });
 
   it("mirrors the active formats to the toggles' aria-pressed", () => {
