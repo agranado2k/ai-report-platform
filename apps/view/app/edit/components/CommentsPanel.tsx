@@ -25,6 +25,7 @@ import { authorInitials, isEdited, relativeTime, truncationNote } from "../comme
 import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { addComment, editComment, replyToComment, resolveComment } from "../comments-client";
 import { handleComposerKeyDown } from "../composer-keys";
+import { INTENT_LABELS, INTENT_OPTIONS } from "../intent-options";
 import type { CommentWire, VersionWire } from "../wire-types";
 
 export interface CommentsPanelProps {
@@ -76,26 +77,6 @@ export function authorLabel(c: Pick<CommentWire, "author">): string {
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
-
-/** Human-facing labels, keyed by the domain `Intent` union. Typed as
- *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
- *  fifth member to the domain enum breaks the build here until it gets a label
- *  — the same drift-safety a runtime `COMMENT_INTENTS` import would give, but
- *  without dragging the domain barrel (and its `node:crypto` deps) into the
- *  browser bundle. */
-const INTENT_LABELS: Record<Intent, string> = {
-  note: "Note",
-  enhancement: "Enhance",
-  add: "Add",
-  remove: "Remove",
-};
-
-/** The comment-intent options surfaced in the composer (ADR-0064 Decision 8),
- *  derived from the exhaustive label map so they never drift. `note` is the
- *  default; the value is the wire enum, the label is human-facing. */
-const INTENT_OPTIONS: readonly { readonly value: Intent; readonly label: string }[] = (
-  Object.keys(INTENT_LABELS) as Intent[]
-).map((value) => ({ value, label: INTENT_LABELS[value] }));
 
 function ErrorText({ message }: { readonly message: string | null }) {
   if (!message) return null;
