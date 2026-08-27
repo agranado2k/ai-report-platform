@@ -150,7 +150,7 @@ describe("tdd-pairing-guard.sh", () => {
     const head = commit(dir, { "packages/domain/src/report.ts": "export const a = 1;\n" });
     const res = runGuard(dir, [base, head, "--label", "pre-push", "--hint", "Bypass with FOO=1."]);
     expect(res.status).toBe(1);
-    expect(res.stderr).toContain("✗ pre-push: source changes with no test changes");
+    expect(res.stderr).toContain("x pre-push: source changes with no test changes");
     expect(res.stderr).toContain("Bypass with FOO=1.");
   });
 });
