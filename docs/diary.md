@@ -13,7 +13,7 @@
 | **Last commit on main**| `2ecff0e` — Merge PR #276 (`refactor/decision-by-purpose`). Landed by `/merge-train` (ADR-0077) with #275; both web-flow-signed, `migrate-db` + `release` green after each. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | Seven: `commit-separation` (#290), `eval-smoke-tighten` (#288), `tdd-guard-extract` (#289), `validator-hardening` (#291), `review-workflow-adr0044` (#286) — the SDLC-hardening tickets T0–T7 under PRD #277 — `diary-merge-train` (#287), and `selection-toolbar` (ticket #296 under PRD #295, PR pending — see the 2026-08-08 Selection toolbar entry). `/worktree-cleanup` pruned eight on 2026-08-08: the AI-SDLC Phase 4/5 worktrees, `contract-seam`, `clerk-e2e-hygiene`, `commit-write` and `commit-write-final`. |
+| **Active worktrees**   | One: `toolbar-formatting` (tickets #297/#299/#300 under PRD #295, one batched PR — see the 2026-08-26 entry). All seven previously listed (the PRD #277 SDLC batch + `selection-toolbar`) merged and were pruned by `/worktree-cleanup` on 2026-08-26; the row had gone stale in between — noted here per the update protocol rather than rewritten in place. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5812,6 +5812,40 @@ only; the formatting commands and the Floating composer are the follow-up ticket
   runs; the full tier is 56/56 green.
 - Glossary gained **Selection toolbar** (ADR-0036 same-PR rule).
 
+### 2026-08-26 — Selection toolbar grows real formatting (tickets #297 + #299 + #300, PRD #295)
+
+The shell from #296 (merged as PR #301) gains its commands — three tickets built serially
+on one branch (`feat/toolbar-formatting`, worktree `toolbar-formatting`) and shipped as
+ONE batched PR by operator preference, each ticket its own commit trio (pure commands →
+handle seam → UI + contracts):
+
+- **#297 Bold/Italic**: `packages/editor/src/formatting.ts` is the single home of format
+  state + commands — `activeFormats` reads the FULL vocabulary (strong/em/link marks,
+  uniform heading level, enclosing list kind) so later tickets reuse one definition of
+  "active"; `toggleFormatCommand` wraps the same `toggleMark` the untouched Mod-B/Mod-I
+  keymap binds. Dispatch rides a widened `ReportEditorHandle`; active state rides a third
+  `onSelectionChange` argument through the one reporting path every transaction takes —
+  which is what makes a just-toggled button light up and the bar re-place for free.
+- **#299 Link add/edit/remove**: URL input in the bar (the input is the one exception to
+  the selection-preserving mousedown-preventDefault — PM's state selection survives the
+  iframe blur, and apply dispatches against it), `validateLinkHref` decidable BEFORE
+  dispatch reusing `isDangerousUrl` from arp-report-html (no second URL policy),
+  `markExtent` widening so a partial selection rewrites/removes the WHOLE link. First
+  dynamic toolbar content → re-measure keyed on the link editor's open state.
+- **#300 Headings/lists**: H1–H3 + bullet/ordered with deliberate, node-pinned semantics —
+  uniform-active toggles back to paragraph, mixed selections unify, active list kind lifts
+  exactly once, and `class`/`style`/`id` survive heading↔paragraph conversion (anchors
+  must not die, ADR-0062 Amendment 3).
+
+Browser tier: 18 toolbar contracts × 3 documents. A review round then added a CRITICAL
+fix — an entity-encoded `javascript:` href bypass in `isDangerousUrl` (decode character
+references before the scheme check) — plus HIGH mutation-surviving test-gap closures
+(107 browser contracts after). The epic's e2e round-trip was DROPPED as unrunnable on
+preview: the unified editor's cross-origin browser Save fails closed under preview CORS
+with `VIEW_ORIGIN` unset; the toolbar→bold→doc-mutation behaviour stays covered
+hermetically by the browser tier. Remaining epic work: **#298** (Floating composer from the "…" bubble +
+retiring the auto-open composer flow), stacked next.
+
 ### 2026-08-27 — Adopted agentic-sdlc v0.10.0 (framework migration)
 
 Migrated centaur-spec onto the **agentic-sdlc v0.10.0 canonical layout**. This is a
@@ -5845,3 +5879,4 @@ Both gates are green at the tip: `pnpm docs:check` (harness, 9 validators) and
 `sh scripts/check.sh`. Test suites green: the docs-conformance fixtures (89), the config-driven
 guard drivers (tdd-pairing 12 + ci 10) and behavior-delta (13). Not pushed — left for operator
 review. The engine fork can retire once the kit upstreams the docs-skeleton validators.
+

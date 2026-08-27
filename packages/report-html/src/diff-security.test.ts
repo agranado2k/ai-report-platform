@@ -78,6 +78,47 @@ describe("SECURITY (Fix 1): hostile doc JSON never survives diffRendered/diffDoc
     );
   });
 
+  // SECURITY (PR #303 review, C-1): a scheme need not be spelled with literal
+  // characters. `href` is HTML-attribute text, so a browser decodes character
+  // references BEFORE interpreting the URL — `javascript&colon;…`,
+  // `&#106;avascript:`, `&#x6a;avascript:`, `java&Tab;script:` all decode to a
+  // live `javascript:`. This is the toDOM/serialize direction (a client-built
+  // `_source.json` never hits parseDOM), which the editor's link toolbar
+  // (#299) reaches: it validates a RAW typed string and `serializeBody` writes
+  // it into the served document with no re-parse. The neutralizer must decode
+  // references before the scheme check — and the assertion here is stronger
+  // than `assertHostileDocIsInert`'s literal `javascript:` scan, which the
+  // entity-encoded form (`javascript&colon;`) sails straight past.
+  for (const [label, href] of [
+    ["a named &colon; entity", "javascript&colon;alert(1)"],
+    ["a decimal &#106; entity for the scheme letter", "&#106;avascript:alert(1)"],
+    ["a hex &#x6a; entity for the scheme letter", "&#x6a;avascript:alert(1)"],
+    ["a &Tab; entity inside the word", "java&Tab;script:alert(1)"],
+  ] as const) {
+    it(`neutralizes a link mark smuggling ${label}`, () => {
+      const doc = docWith({
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: "click me",
+            marks: [{ type: "link", attrs: { href, title: null } }],
+          },
+        ],
+      });
+      expect(() => diffDocs(OLD_DOC, doc)).not.toThrow();
+      // Assert STRUCTURALLY, not by scanning for the scheme string: an
+      // entity-encoded scheme (`&#106;avascript:`) contains no literal
+      // "javascript" substring yet still decodes to a live one in a browser,
+      // so a substring scan gives a false pass. Neutralization DROPS the
+      // dangerous href, and this link is the only href-bearing content over
+      // the href-free baseline — so a surviving `href` in the output, in ANY
+      // encoding, is the smuggled scheme still shipping.
+      const html = diffRendered(OLD_DOC, doc).toLowerCase();
+      expect(html).not.toContain("href");
+    });
+  }
+
   it("strips a background:url(...) declaration smuggled into a htmlBlock's style attr", () => {
     assertHostileDocIsInert(
       docWith({

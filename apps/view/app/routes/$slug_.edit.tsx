@@ -51,6 +51,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { versionIdToWire } from "arp-domain";
 import {
+  type ActiveFormats,
   type CommentRange,
   type EditorSelection,
   ReportEditor,
@@ -382,6 +383,11 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
   // nulled on Escape / document scroll, so `null` here just means "no
   // toolbar", independent of `selection` (which the comments composer reads).
   const [selectionGeometry, setSelectionGeometry] = useState<SelectionGeometry | null>(null);
+  // WHAT the selection carries (ticket #297) — the toolbar's live active
+  // state, reported by the editor alongside the geometry on every
+  // transaction (including the toggle dispatch itself, which is how a
+  // just-toggled button lights up without any extra round-trip).
+  const [selectionFormats, setSelectionFormats] = useState<ActiveFormats | null>(null);
   // The editor's RESOLVED highlight ranges (onCommentRangesChange) — the
   // panel's document-order sort + degraded-anchor badge read these (items
   // C/D) so position resolution stays inside arp-editor.
@@ -598,9 +604,10 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               onChange={(next) => {
                 docRef.current = next;
               }}
-              onSelectionChange={(next, geometry) => {
+              onSelectionChange={(next, geometry, formats) => {
                 setSelection(next);
                 setSelectionGeometry(geometry);
+                setSelectionFormats(formats);
               }}
               onEscape={() => setSelectionGeometry(null)}
               onDocScroll={() => setSelectionGeometry(null)}
@@ -618,12 +625,23 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
               the public viewer (which this route does not touch). Fixed
               positioning, so where it sits in the tree is immaterial; it
               lives next to the editor it annotates. */}
-          {/* Geometry alone gates the render: non-null geometry implies a
-              non-null selection (the editor only builds geometry for one) —
-              a second `selection &&` conjunct would imply an independence
-              that doesn't exist. `mode` IS load-bearing: never in Compare. */}
-          {mode === "edit" && selectionGeometry ? (
-            <SelectionToolbar geometry={selectionGeometry} />
+          {/* Geometry gates the render: non-null geometry implies a non-null
+              selection (the editor only builds geometry for one), which in
+              turn implies non-null formats — the `selectionFormats` conjunct
+              exists only to give TypeScript that narrowing, not to express an
+              independent condition. `mode` IS load-bearing: never in Compare.
+              The toggle dispatch goes back through the editor's own handle —
+              the same ref the panel's Jump uses. */}
+          {mode === "edit" && selectionGeometry && selectionFormats ? (
+            <SelectionToolbar
+              geometry={selectionGeometry}
+              formats={selectionFormats}
+              onToggleFormat={(format) => editorRef.current?.toggleFormat(format)}
+              onToggleHeading={(level) => editorRef.current?.toggleHeading(level)}
+              onToggleList={(kind) => editorRef.current?.toggleList(kind)}
+              onApplyLink={(href) => editorRef.current?.applyLink(href) ?? false}
+              onRemoveLink={() => editorRef.current?.removeLink() ?? false}
+            />
           ) : null}
 
           {mode === "diff" && diffData && diffHtml ? (

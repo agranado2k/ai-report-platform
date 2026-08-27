@@ -39,9 +39,45 @@ export function sanitizeStyle(raw: string | null | undefined): string | null {
 const DANGEROUS_URL_SCHEME_RE = /^(javascript|vbscript):/i;
 const DANGEROUS_DATA_HTML_RE = /^data:\s*text\/html/i;
 
+// A small named-character-reference map, restricted to the ones that matter in
+// a URL-scheme position: the colon that ends a scheme, and the whitespace/
+// control names browsers ignore there. This is NOT a general HTML-entity table
+// — the scheme grammar is `[a-z][a-z0-9+.-]*:`, so only these named refs (plus
+// any numeric ref, handled generically below) can alter whether a value parses
+// as a dangerous scheme. `&colon;` is the load-bearing one (PR #303 C-1).
+const NAMED_REFS: Record<string, string> = {
+  colon: ":",
+  Tab: "\t",
+  NewLine: "\n",
+  semi: ";",
+};
+
+/**
+ * Decode the HTML character references a browser resolves inside an attribute
+ * value BEFORE it interprets the URL — numeric (`&#106;`, `&#x6a;`) and the
+ * scheme-relevant named refs above. Without this, an entity-obfuscated scheme
+ * (`javascript&colon;…`, `&#106;avascript:`) reads as inert text here yet
+ * decodes to a live `javascript:` in the viewer (PR #303 review, C-1). A
+ * trailing-`;`-optional numeric ref matches how browsers parse them.
+ */
+function decodeSchemeReferences(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);?/gi, (_m, hex) => codePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_m, dec) => codePoint(Number.parseInt(dec, 10)))
+    .replace(/&([a-z]+);/gi, (m, name) => NAMED_REFS[name] ?? NAMED_REFS[name.toLowerCase()] ?? m);
+}
+
+function codePoint(n: number): string {
+  return Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "";
+}
+
 export function isDangerousUrl(value: string): boolean {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — stripping control chars that browsers also ignore when parsing a URL scheme, to close the classic embedded-control-char filter bypass.
-  const normalized = value.replace(/[\x00-\x20\x7f]/g, "");
+  // Decode scheme-relevant references FIRST, then strip control chars that
+  // browsers also ignore in a scheme position (a classic bypass is a tab/
+  // newline mid-word, e.g. `jav\tascript:`) — the decode can itself introduce
+  // those control chars (`&Tab;`), so it must run before the strip.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — see above.
+  const normalized = decodeSchemeReferences(value).replace(/[\x00-\x20\x7f]/g, "");
   return DANGEROUS_URL_SCHEME_RE.test(normalized) || DANGEROUS_DATA_HTML_RE.test(normalized);
 }
 

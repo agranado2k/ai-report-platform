@@ -5,6 +5,7 @@
 // anchor scroll or the Selection toolbar is stubbed — that is the entire
 // point of this tier.
 import {
+  type ActiveFormats,
   type CommentForHighlight,
   type CommentRange,
   type EditorSelection,
@@ -30,6 +31,9 @@ function App() {
   // The Selection toolbar's driver (ticket #296) — same contract as the
   // route: null mid-drag / on Escape / on document scroll means no toolbar.
   const [selectionGeometry, setSelectionGeometry] = React.useState<SelectionGeometry | null>(null);
+  // The toolbar's live active state (ticket #297) — same contract as the
+  // route: reported alongside the geometry on every transaction.
+  const [selectionFormats, setSelectionFormats] = React.useState<ActiveFormats | null>(null);
   const [, setRanges] = React.useState<readonly CommentRange[]>([]);
   const [focused, setFocused] = React.useState<string | null>(null);
   // Comments are STATE, not a frozen empty array: click-to-highlight shares
@@ -105,7 +109,7 @@ function App() {
               //
               // Armed from the test rather than always-on: every other
               // contract in this suite needs the normal, non-throwing wiring.
-              onSelectionChange={(next, geometry) => {
+              onSelectionChange={(next, geometry, formats) => {
                 if (
                   (window as unknown as { __throwOnSelectionChange?: boolean })
                     .__throwOnSelectionChange
@@ -114,6 +118,7 @@ function App() {
                 }
                 setSelection(next);
                 setSelectionGeometry(geometry);
+                setSelectionFormats(formats);
               }}
               onEscape={() => setSelectionGeometry(null)}
               onDocScroll={() => setSelectionGeometry(null)}
@@ -121,7 +126,17 @@ function App() {
               onCommentClick={setFocused}
               className="editor-iframe"
             />
-            {selectionGeometry ? <SelectionToolbar geometry={selectionGeometry} /> : null}
+            {selectionGeometry && selectionFormats ? (
+              <SelectionToolbar
+                geometry={selectionGeometry}
+                formats={selectionFormats}
+                onToggleFormat={(format) => editorRef.current?.toggleFormat(format)}
+                onToggleHeading={(level) => editorRef.current?.toggleHeading(level)}
+                onToggleList={(kind) => editorRef.current?.toggleList(kind)}
+                onApplyLink={(href) => editorRef.current?.applyLink(href) ?? false}
+                onRemoveLink={() => editorRef.current?.removeLink() ?? false}
+              />
+            ) : null}
           </div>
         </main>
         <aside className="side-panel">panel</aside>

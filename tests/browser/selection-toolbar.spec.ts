@@ -99,6 +99,82 @@ async function selectWord(page: Page, selector: string) {
   return { x, y };
 }
 
+/** The harness's reported (trimmed) selection text — the word the formatting
+ *  contracts below expect to see wrapped in a mark element. Polled: in this
+ *  environment the word selection lands only after the release (file doc
+ *  comment), and the harness's React state update trails the gesture by a
+ *  frame or two — reading synchronously flakes under load. */
+async function selectedWord(page: Page): Promise<string> {
+  const read = async () =>
+    ((await page.getByTestId("pending-selection").textContent()) ?? "").trim();
+  await expect.poll(async () => (await read()).length, { timeout: 5_000 }).toBeGreaterThan(0);
+  return await read();
+}
+
+/** Select a word INSIDE AN EXISTING LINK: the same double-click gesture as
+ *  `selectWord`, with Alt held — the editor's own "suppress activation so the
+ *  link can be edited" escape hatch (link-activation.ts). Without Alt, each of
+ *  the double-click's TWO click events would activate the link and open a tab
+ *  (Amendment 3's plain-click-follows behavior), which is exactly not the
+ *  edit gesture. */
+async function altSelectWord(page: Page, selector: string) {
+  const rect = await hostRect(page, selector);
+  const x = rect.x + 10;
+  const y = rect.y + Math.min(10, rect.height / 2);
+  // Bounded retry: under synthetic input this iframe occasionally registers
+  // the double-click as two caret placements (the same environment quirk the
+  // file doc comment documents for drags), leaving no word selection at all.
+  // Retrying the GESTURE is safe — every caller still asserts the outcome
+  // (toolbar contents, document state) after this returns.
+  for (let attempt = 0; ; attempt += 1) {
+    await page.keyboard.down("Alt");
+    await page.mouse.dblclick(x, y);
+    await page.keyboard.up("Alt");
+    try {
+      await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 2_000 });
+      return { x, y };
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
+}
+
+/** Every `<a>` in the editing iframe carrying EXACTLY `href`, with the attrs
+ *  the link contracts assert on. Matching on the test's own unique href (not
+ *  text) keeps the real-report fixture's legitimate links out of the count. */
+async function anchorsWithHref(
+  page: Page,
+  href: string,
+): Promise<ReadonlyArray<{ text: string; target: string | null; rel: string | null }>> {
+  return await page.evaluate((h) => {
+    const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+    if (!doc) throw new Error("the editing surface has not mounted");
+    return Array.from(doc.querySelectorAll("a"))
+      .filter((a) => a.getAttribute("href") === h)
+      .map((a) => ({
+        text: a.textContent ?? "",
+        target: a.getAttribute("target"),
+        rel: a.getAttribute("rel"),
+      }));
+  }, href);
+}
+
+/** How many `<tag>` elements in the editing iframe contain `word`. Counted
+ *  (not just "exists") because a real report legitimately carries its own
+ *  `<strong>`/`<em>` content — the contracts assert the count GREW. */
+async function markCount(page: Page, tag: string, word: string): Promise<number> {
+  return await page.evaluate(
+    ({ tag, word }) => {
+      const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+      if (!doc) throw new Error("the editing surface has not mounted");
+      return Array.from(doc.querySelectorAll(tag)).filter((el) =>
+        (el.textContent ?? "").includes(word),
+      ).length;
+    },
+    { tag, word },
+  );
+}
+
 for (const fixture of FIXTURES) {
   test.describe(`the Selection toolbar — ${fixture.label}`, { tag: fixture.tag }, () => {
     let harnessPage: string;
@@ -250,6 +326,474 @@ for (const fixture of FIXTURES) {
       });
       expect(iframeSelection.exists).toBe(true);
       expect(iframeSelection.collapsed).toBe(false);
+    });
+
+    // ── Formatting toggles (ticket #297) ────────────────────────────────────
+
+    test("the Bold button bolds the selection in the document and shows pressed", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bold = toolbar.getByRole("button", { name: "Bold" });
+      await expect(bold).toHaveAttribute("aria-pressed", "false");
+      const before = await markCount(page, "strong", word);
+
+      await bold.click();
+
+      // Active state updates live, the document really carries the mark
+      // (observed in the iframe's own DOM), and the toolbar stays up.
+      await expect(bold).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(before);
+      await expect(toolbar).toBeVisible();
+    });
+
+    test("bold then italic chain on the same selection without re-selecting", async ({ page }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bold = toolbar.getByRole("button", { name: "Bold" });
+      const italic = toolbar.getByRole("button", { name: "Italic" });
+      const strongBefore = await markCount(page, "strong", word);
+      const emBefore = await markCount(page, "em", word);
+
+      await bold.click();
+      await italic.click();
+
+      await expect(bold).toHaveAttribute("aria-pressed", "true");
+      await expect(italic).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(strongBefore);
+      await expect.poll(() => markCount(page, "em", word)).toBeGreaterThan(emBefore);
+
+      // The chain worked because the selection survived BOTH toggles — the
+      // iframe's own DOM selection is the authority (same reasoning as the
+      // "clicking inside the toolbar" contract above).
+      const iframeSelection = await page.evaluate(() => {
+        const doc = (document.querySelector("iframe") as HTMLIFrameElement)?.contentDocument;
+        const sel = doc?.getSelection();
+        return { exists: sel !== null && sel !== undefined, collapsed: sel?.isCollapsed ?? true };
+      });
+      expect(iframeSelection.exists).toBe(true);
+      expect(iframeSelection.collapsed).toBe(false);
+    });
+
+    test("re-selecting already-bold text arrives with Bold already pressed", async ({ page }) => {
+      // Make the word bold via the toolbar, then collapse the selection away.
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Bold" }).click();
+      await expect.poll(() => markCount(page, "strong", word)).toBeGreaterThan(0);
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+
+      // Arriving on already-bold text shows Bold active immediately.
+      await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Bold" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(toolbar.getByRole("button", { name: "Italic" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    // ── Link editing (ticket #299) ──────────────────────────────────────────
+
+    // Unique per-suite href so the real-report fixture's own links never
+    // collide with what these contracts create.
+    const ADDED_HREF = "https://example.com/added-by-toolbar-test";
+
+    /** Select the fixture word and turn it into ADDED_HREF via the toolbar's
+     *  link editor — the shared setup for the edit/remove contracts. */
+    async function createLink(page: Page): Promise<string> {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await input.click();
+      await page.keyboard.type(ADDED_HREF);
+      await page.keyboard.press("Enter");
+      await expect.poll(async () => (await anchorsWithHref(page, ADDED_HREF)).length).toBe(1);
+      return word;
+    }
+
+    test("Link → type URL → Enter links the selected word with the safe attrs and shows pressed", async ({
+      page,
+    }) => {
+      // The typing happens with host focus in the URL input — the iframe is
+      // blurred, its visual selection hidden — and the apply must still land
+      // on the range that WAS selected (PM's state selection persists).
+      const word = await createLink(page);
+
+      const [anchor] = await anchorsWithHref(page, ADDED_HREF);
+      if (!anchor) throw new Error("the applied link is missing");
+      expect(anchor.text).toContain(word);
+      // Nothing beyond the typed href: no target/rel smuggled onto a link
+      // the user created (the schema adds those only when a source document
+      // carried them).
+      expect(anchor.target).toBeNull();
+      expect(anchor.rel).toBeNull();
+
+      // The bar swapped back to its buttons, still up, with Link pressed.
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    test("an unsafe javascript: URL is rejected with visible feedback and the document unchanged", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await input.click();
+      await page.keyboard.type("javascript:alert(1)");
+      await page.keyboard.press("Enter");
+
+      // Visible inline feedback, and the editor stays open for correction.
+      await expect(page.getByTestId("link-url-error")).toBeVisible();
+      await expect(input).toHaveAttribute("aria-invalid", "true");
+      await expect(input).toBeVisible();
+
+      // The document is untouched: no anchor carries the rejected href.
+      expect((await anchorsWithHref(page, "javascript:alert(1)")).length).toBe(0);
+    });
+
+    test("re-selecting inside the link shows pressed and pre-fills the editor with its href", async ({
+      page,
+    }) => {
+      await createLink(page);
+
+      // Collapse the selection away, then arrive back INSIDE the link
+      // (Alt-select — a plain double-click would follow the link).
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+      await altSelectWord(page, fixture.paragraph);
+
+      const toolbar = page.getByTestId("selection-toolbar");
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await expect(page.getByTestId("link-url-input")).toHaveValue(ADDED_HREF);
+    });
+
+    test("Remove strips the whole link; the text survives unlinked", async ({ page }) => {
+      const word = await createLink(page);
+
+      // Selection is still on the linked word (applyLink refocused the
+      // editor); open the editor again and remove.
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await toolbar.getByRole("button", { name: "Remove link" }).click();
+
+      await expect.poll(async () => (await anchorsWithHref(page, ADDED_HREF)).length).toBe(0);
+      // The text itself survives, unlinked, and the button reads unpressed.
+      expect(await markCount(page, "p", word)).toBeGreaterThan(0);
+      await expect(toolbar.getByRole("button", { name: "Link" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    test("editing an existing link's URL applies the CHANGED href to the document", async ({
+      page,
+    }) => {
+      // #299 AC4's edit half: not just pre-filling the old value (covered
+      // above) but typing a DIFFERENT URL and applying it — the iframe's <a>
+      // must carry the new href, and only the new one.
+      const EDITED_HREF = "https://example.com/edited-by-toolbar-test";
+      const word = await createLink(page);
+
+      // Arrive back inside the link and open the editor: pre-filled and
+      // fully selected, so typing replaces the old value.
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+      await altSelectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await expect(page.getByTestId("link-url-input")).toHaveValue(ADDED_HREF);
+
+      await page.keyboard.type(EDITED_HREF);
+      await page.keyboard.press("Enter");
+
+      // The document's anchor updated in place: new href present around the
+      // same word, old href gone.
+      await expect.poll(async () => (await anchorsWithHref(page, EDITED_HREF)).length).toBe(1);
+      expect((await anchorsWithHref(page, ADDED_HREF)).length).toBe(0);
+      const [anchor] = await anchorsWithHref(page, EDITED_HREF);
+      expect(anchor?.text).toContain(word);
+    });
+
+    test("Apply and Remove both hand focus back to the editor iframe", async ({ page }) => {
+      // The URL input took real keyboard focus (the one deliberate exception
+      // to "the bar never takes focus"), so applyLink/removeLink must RETURN
+      // it: `view.focus()` on the handle is what re-focuses the iframe and
+      // re-reveals the selection. Without it, focus falls to document.body
+      // when the link editor unmounts.
+      const hostFocus = () =>
+        page.evaluate(() => ({
+          tag: document.activeElement?.tagName ?? null,
+          innerHasFocus:
+            (
+              document.querySelector("iframe") as HTMLIFrameElement | null
+            )?.contentDocument?.hasFocus() ?? false,
+        }));
+
+      await createLink(page); // ends with Enter → applyLink
+      await expect.poll(async () => (await hostFocus()).tag).toBe("IFRAME");
+      expect((await hostFocus()).innerHasFocus).toBe(true);
+
+      // Now the remove path: reopen the editor (focus moves into the URL
+      // input again) and click Remove.
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await expect(page.getByTestId("link-url-input")).toBeFocused();
+      await toolbar.getByRole("button", { name: "Remove link" }).click();
+
+      await expect.poll(async () => (await hostFocus()).tag).toBe("IFRAME");
+      expect((await hostFocus()).innerHasFocus).toBe(true);
+    });
+
+    test("a mid-value click in the URL input places the caret — the input is genuinely interactive", async ({
+      page,
+    }) => {
+      // The container's mousedown-preventDefault protects the iframe's
+      // selection; the input's own mousedown stops propagation so the input
+      // still behaves like an input. Autofocus masks that handler for the
+      // FIRST interaction, so this contract clicks mid-value: the caret must
+      // land (collapsing the pre-fill's select-all) and typing must INSERT,
+      // not replace the whole value.
+      await createLink(page);
+      const rect = await hostRect(page, fixture.paragraph);
+      await page.mouse.click(rect.x + rect.width - 10, rect.y + Math.min(10, rect.height / 2));
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+      await altSelectWord(page, fixture.paragraph);
+      await page.getByTestId("selection-toolbar").getByRole("button", { name: "Link" }).click();
+
+      const input = page.getByTestId("link-url-input");
+      await expect(input).toHaveValue(ADDED_HREF);
+      // The pre-fill starts fully selected (the type-to-replace affordance).
+      await expect
+        .poll(() =>
+          input.evaluate(
+            (el: HTMLInputElement) => (el.selectionEnd ?? 0) - (el.selectionStart ?? 0),
+          ),
+        )
+        .toBe(ADDED_HREF.length);
+
+      await input.click(); // center of the input — mid-value
+
+      // The click collapsed the selection to a caret INSIDE the value…
+      const caret = await input.evaluate((el: HTMLInputElement) => ({
+        start: el.selectionStart,
+        end: el.selectionEnd,
+      }));
+      expect(caret.start).toBe(caret.end);
+      expect(caret.start ?? 0).toBeGreaterThan(0);
+
+      // …so typing inserts at the caret instead of replacing everything.
+      await page.keyboard.type("x");
+      const value = await input.inputValue();
+      expect(value).toHaveLength(ADDED_HREF.length + 1);
+      expect(value).not.toBe("x");
+    });
+
+    test("Cancel closes the link editor, keeping the bar and the selection", async ({ page }) => {
+      // The CLICK path out of the editor (distinct from the Escape path
+      // below): same outcome — back to the button row, selection intact.
+      await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await expect(input).toBeVisible();
+
+      await toolbar.getByRole("button", { name: "Cancel link" }).click();
+
+      await expect(input).toHaveCount(0);
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Bold" })).toBeVisible();
+      expect((await page.getByTestId("pending-selection").textContent())?.length).toBeGreaterThan(
+        0,
+      );
+    });
+
+    test("the bar stays correctly placed while the link editor (and its error line) is open", async ({
+      page,
+    }) => {
+      // The re-measure effect's contract (keyed on linkOpen/linkError): the
+      // open editor — and the taller open-with-error state — is re-measured
+      // and re-placed, so the bar still clears the selected line and stays
+      // inside the viewport. A stale closed-state measurement would park the
+      // taller bar overlapping the very line it annotates.
+      const gesture = await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      await expect(page.getByTestId("link-url-input")).toBeVisible();
+
+      await expect(toolbar).toHaveAttribute("data-placement", "above");
+      // Polled: the re-measure allows one pre-measure settle frame after the
+      // content swap (the effect's documented contract), so the box is read
+      // until it reflects the RE-placed position, not the transient one.
+      const bottomAndTop = async () => {
+        const box = await toolbar.boundingBox();
+        if (!box) throw new Error("the toolbar has no box");
+        return { top: box.y, bottom: box.y + box.height };
+      };
+      await expect.poll(async () => (await bottomAndTop()).bottom).toBeLessThanOrEqual(gesture.y);
+      expect((await bottomAndTop()).top).toBeGreaterThanOrEqual(0);
+
+      // Grow the bar again with the error line (empty submit) — still placed.
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("link-url-error")).toBeVisible();
+      await expect.poll(async () => (await bottomAndTop()).bottom).toBeLessThanOrEqual(gesture.y);
+      expect((await bottomAndTop()).top).toBeGreaterThanOrEqual(0);
+    });
+
+    test("Escape in the URL input backs out to the buttons without dismissing the bar", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const toolbar = page.getByTestId("selection-toolbar");
+      await toolbar.getByRole("button", { name: "Link" }).click();
+      const input = page.getByTestId("link-url-input");
+      await expect(input).toBeVisible();
+
+      await input.press("Escape");
+
+      await expect(input).toHaveCount(0);
+      await expect(toolbar).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Bold" })).toBeVisible();
+      // The selection the bar operates on is still pending — Escape here
+      // closed the sub-editor, not the toolbar (the iframe-side Escape does
+      // that, and it never fired: focus was in the host input).
+      expect((await page.getByTestId("pending-selection").textContent())?.length).toBeGreaterThan(
+        0,
+      );
+    });
+
+    // ── Block actions (ticket #300) ─────────────────────────────────────────
+
+    test("the H2 button converts the paragraph, distinguishes levels, and toggles back to a paragraph", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const h2 = toolbar.getByRole("button", { name: "Heading 2" });
+      const h3 = toolbar.getByRole("button", { name: "Heading 3" });
+      await expect(h2).toHaveAttribute("aria-pressed", "false");
+      const h2Before = await markCount(page, "h2", word);
+      const pBefore = await markCount(page, "p", word);
+
+      await h2.click();
+
+      // The block really converted in the iframe's DOM, the ACTIVE LEVEL is
+      // distinguished (H2 pressed, H3 not), and the toolbar survived the
+      // conversion — the dispatch path re-reported geometry + formats.
+      await expect(h2).toHaveAttribute("aria-pressed", "true");
+      await expect(h3).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "h2", word)).toBeGreaterThan(h2Before);
+      await expect(toolbar).toBeVisible();
+
+      // Clicking the ACTIVE level returns the block to a paragraph.
+      await h2.click();
+      await expect(h2).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "h2", word)).toBe(h2Before);
+      await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
+    });
+
+    test("the H1 and H3 buttons convert the block too — every exposed level really dispatches", async ({
+      page,
+    }) => {
+      // #300 AC4: H2 is proven above; this pins the OTHER two levels as live
+      // buttons (not just unpressed decorations) — H1 converts the paragraph,
+      // and H3 then converts the H1 (level-to-level, no paragraph detour).
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const h1 = toolbar.getByRole("button", { name: "Heading 1" });
+      const h3 = toolbar.getByRole("button", { name: "Heading 3" });
+      const h1Before = await markCount(page, "h1", word);
+      const h3Before = await markCount(page, "h3", word);
+
+      await h1.click();
+      await expect(h1).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "h1", word)).toBeGreaterThan(h1Before);
+
+      await h3.click();
+      await expect(h3).toHaveAttribute("aria-pressed", "true");
+      await expect(h1).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "h3", word)).toBeGreaterThan(h3Before);
+      await expect.poll(() => markCount(page, "h1", word)).toBe(h1Before);
+    });
+
+    test("the ordered list button wraps the selection in an <ol> and lifts back out", async ({
+      page,
+    }) => {
+      // #300 AC4: the ordered kind really dispatches (the bullet contract
+      // below cannot prove it — the two buttons run different node types).
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const ordered = toolbar.getByRole("button", { name: "Ordered list" });
+      await expect(ordered).toHaveAttribute("aria-pressed", "false");
+      const olBefore = await markCount(page, "ol", word);
+      const pBefore = await markCount(page, "p", word);
+
+      await ordered.click();
+
+      await expect(ordered).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => markCount(page, "ol", word)).toBeGreaterThan(olBefore);
+      await expect(toolbar).toBeVisible();
+
+      // Clicking the ACTIVE kind lifts back out to a plain paragraph.
+      await ordered.click();
+      await expect(ordered).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "ol", word)).toBe(olBefore);
+      await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
+    });
+
+    test("the bullet list button wraps the selection, distinguishes kinds, and lifts back out", async ({
+      page,
+    }) => {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      const toolbar = page.getByTestId("selection-toolbar");
+      const bullet = toolbar.getByRole("button", { name: "Bullet list" });
+      const ordered = toolbar.getByRole("button", { name: "Ordered list" });
+      await expect(bullet).toHaveAttribute("aria-pressed", "false");
+      const ulBefore = await markCount(page, "ul", word);
+      const pBefore = await markCount(page, "p", word);
+
+      await bullet.click();
+
+      // Wrapped in the iframe's DOM, with the KIND distinguished (bullet
+      // pressed, ordered not) and the toolbar still up.
+      await expect(bullet).toHaveAttribute("aria-pressed", "true");
+      await expect(ordered).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "ul", word)).toBeGreaterThan(ulBefore);
+      await expect(toolbar).toBeVisible();
+
+      // Clicking the ACTIVE kind lifts the item back out; the text survives
+      // as a plain paragraph.
+      await bullet.click();
+      await expect(bullet).toHaveAttribute("aria-pressed", "false");
+      await expect.poll(() => markCount(page, "ul", word)).toBe(ulBefore);
+      await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
     });
 
     test("a keyboard-extended selection shows the toolbar too", async ({ page }) => {

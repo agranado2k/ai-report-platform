@@ -82,6 +82,18 @@ import {
   jumpToCommentTransaction,
   reportableSelection,
 } from "./editor-state";
+import {
+  type ActiveFormats,
+  activeFormats,
+  type HeadingLevel,
+  type ListKind,
+  removeLinkCommand,
+  setLinkCommand,
+  type ToggleableFormat,
+  toggleFormatCommand,
+  toggleHeadingCommand,
+  toggleListCommand,
+} from "./formatting";
 import { buildIframeDocument } from "./iframe-document";
 import {
   editorClickOutcome,
@@ -95,13 +107,51 @@ import { type SelectionGeometry, selectionGeometry, shouldComputeGeometry } from
 // editor-state.ts so the pure selection-reporting gate is testable DOM-free).
 export type { EditorSelection } from "./editor-state";
 
-/** Imperative surface exposed via the forwarded ref (item B's "Jump"). */
+/** Imperative surface exposed via the forwarded ref (item B's "Jump", plus
+ *  the Selection toolbar's command dispatch, ticket #297). */
 export interface ReportEditorHandle {
   /** Scroll the editor to the comment's anchor position, selecting the
    *  anchored range. Returns `false` (and does nothing) when the comment's
    *  relative position no longer resolves against the current doc — the
    *  degraded, version-pinned state has nowhere live to jump to. */
   readonly jumpToComment: (comment: CommentForHighlight) => boolean;
+  /** Toggle a formatting mark over the CURRENT selection — the Selection
+   *  toolbar's dispatch seam (ticket #297). Runs `toggleFormatCommand`
+   *  (formatting.ts): the same prosemirror-commands `toggleMark` the
+   *  Mod-b/Mod-i keymap binds, so toolbar and keyboard stay one behavior.
+   *  `toggleMark` preserves the selection, and the dispatch re-reports
+   *  selection + geometry + active formats through `onSelectionChange` —
+   *  which is what keeps the toolbar up (and its buttons live) so toggles
+   *  chain without re-selecting. Returns whether the command applied
+   *  (`false` also when the editor is not mounted). */
+  readonly toggleFormat: (format: ToggleableFormat) => boolean;
+  /** Convert the current selection's blocks to `<h{level}>` — or back to
+   *  paragraphs when the selection already reads as that level — the heading
+   *  buttons' dispatch seam (ticket #300). Runs `toggleHeadingCommand`
+   *  (formatting.ts); same no-refocus contract as `toggleFormat` (the
+   *  toolbar's mousedown-preventDefault means focus never left the iframe),
+   *  and the dispatch re-reports selection + geometry + formats, so the bar
+   *  stays up over the converted block with the right button lit. */
+  readonly toggleHeading: (level: HeadingLevel) => boolean;
+  /** Wrap the current selection in a bullet/ordered list — or lift it back
+   *  out when it already sits in a list of that kind (ticket #300; semantics
+   *  pinned on `toggleListCommand`). Same dispatch/no-refocus contract as
+   *  `toggleHeading`. */
+  readonly toggleList: (kind: ListKind) => boolean;
+  /** Apply a link with `href` over the current selection — the toolbar link
+   *  editor's Apply seam (ticket #299). Runs `setLinkCommand`: refused hrefs
+   *  (the schema-shared `validateLinkHref` rule) and empty selections outside
+   *  a link return `false` with NO dispatch, so the document is untouched.
+   *  Unlike `toggleFormat`, the dispatch happens while host focus sits in the
+   *  toolbar's URL input — the iframe is blurred and its VISUAL selection
+   *  hidden — but ProseMirror's STATE selection persists across that blur,
+   *  and the command reads `view.state.selection` at dispatch time, so the
+   *  originally selected range is exactly what gets linked. */
+  readonly applyLink: (href: string) => boolean;
+  /** Remove the link the current selection sits in (widened to the link's
+   *  full extent — see `removeLinkCommand`). `false` when the selection
+   *  touches no link, or the editor is not mounted. */
+  readonly removeLink: () => boolean;
 }
 
 export interface ReportEditorProps {
@@ -125,11 +175,17 @@ export interface ReportEditorProps {
    *  (selection-rect.ts) — for selection-anchored floating UI (the Selection
    *  toolbar, ticket #296). It is `null` whenever the selection is, and ALSO
    *  null mid-drag: a floating bar must not appear under a moving pointer, so
-   *  geometry is withheld until the mouseup re-report. Callers that only care
-   *  about the selection itself can ignore the argument entirely. */
+   *  geometry is withheld until the mouseup re-report. The third argument is
+   *  WHAT formats that selection carries (formatting.ts, ticket #297) — the
+   *  toolbar's live active state; `null` exactly when the selection is (it is
+   *  still computed mid-drag: unlike geometry it can't flicker any UI, and
+   *  one rule — "formats accompany every non-null selection" — is simpler
+   *  than two). Callers that only care about the selection itself can ignore
+   *  the extra arguments entirely. */
   readonly onSelectionChange?: (
     selection: EditorSelection | null,
     geometry: SelectionGeometry | null,
+    formats: ActiveFormats | null,
   ) => void;
   /** Fired when Escape is pressed inside the editing surface (observed, never
    *  consumed — PM's own handling still runs). The iframe's key events never
@@ -228,6 +284,51 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
         view.focus();
         return true;
       },
+      // The Selection toolbar's command dispatch (ticket #297). No `focus()`
+      // here, deliberately: the toolbar's mousedown-preventDefault means focus
+      // never left the editing iframe, and the dispatch itself flows through
+      // `dispatchTransaction` below — which re-reports selection, geometry and
+      // active formats, keeping the toolbar in place and its buttons live.
+      toggleFormat(format) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleFormatCommand(format)(view.state, view.dispatch);
+      },
+      // The block-type toggles (ticket #300): same shape as toggleFormat —
+      // no focus() (focus never left the iframe), dispatch through the pure
+      // command, active state re-reported by dispatchTransaction.
+      toggleHeading(level) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleHeadingCommand(level)(view.state, view.dispatch);
+      },
+      toggleList(kind) {
+        const view = viewRef.current;
+        if (!view) return false;
+        return toggleListCommand(kind)(view.state, view.dispatch);
+      },
+      // The link editor's Apply/Remove (ticket #299). These DO refocus the
+      // view on success — the opposite call from toggleFormat's deliberate
+      // no-focus — because here focus genuinely left the iframe (the URL
+      // input needed it to accept typing). `view.focus()` re-syncs the
+      // iframe's DOM selection from PM's state selection, making the
+      // just-linked range visibly selected again; the dispatch itself flows
+      // through `dispatchTransaction`, re-reporting selection + geometry +
+      // formats, which is what lights the Link button and closes the loop.
+      applyLink(href) {
+        const view = viewRef.current;
+        if (!view) return false;
+        const applied = setLinkCommand(href)(view.state, view.dispatch);
+        if (applied) view.focus();
+        return applied;
+      },
+      removeLink() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const applied = removeLinkCommand()(view.state, view.dispatch);
+        if (applied) view.focus();
+        return applied;
+      },
     }),
     [],
   );
@@ -319,7 +420,12 @@ export const ReportEditor = forwardRef<ReportEditorHandle, ReportEditorProps>(fu
             iframe.getBoundingClientRect(),
           );
         }
-        onSelectionChangeRef.current?.(selection, geometry);
+        // WHAT the selection carries rides along with WHERE it sits (ticket
+        // #297): pure, cheap, and recomputed on every report — including the
+        // toggle dispatch itself, which is how the toolbar's buttons light up
+        // immediately after a toggle.
+        const formats = selection ? activeFormats(forView.state) : null;
+        onSelectionChangeRef.current?.(selection, geometry, formats);
       }
 
       // The two link-activation EFFECTS (ADR-0062 Amendment 3). Both defer
