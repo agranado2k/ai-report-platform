@@ -1,6 +1,6 @@
 # Pre-push guard (plan Phase 1.3 — the enforcement CLAUDE.md promises).
 # Two checks, each with a logged escape hatch:
-#   1. docs guard   — `pnpm docs:check` (ADR-026/0041 trigger matrix + CLAUDE.md refs)
+#   1. docs guard   — `pnpm docs:check` (ADR-026/0041 trigger matrix + AGENTS.md refs)
 #                     bypass: PUSH_WITHOUT_DOCS=1
 #   2. TDD pairing  — pushed source changes must come with test changes
 #                     bypass: PUSH_WITHOUT_TESTS=1
