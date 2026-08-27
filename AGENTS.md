@@ -128,7 +128,7 @@ orientation document, and everything else assumes it.
   binding and what superseded what; a decision is made in an ADR, never in the diary.
 - `docs/domain-glossary.md` — the ubiquitous language (ADR-0036). One name per concept, in
   code and in conversation.
-- `.github/PULL_REQUEST_TEMPLATE.md` — the PR checklist, including the human confirm-list
+- `.github/pull_request_template.md` — the PR checklist, including the human confirm-list
   that keeps behavior findings out of the autonomous fix loop.
 
 Keeping these current is not bookkeeping: `pnpm docs:check` fails when this manual points at
