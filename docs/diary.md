@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-08-07
+## Current state — 2026-08-27
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; auth epic complete; MCP server epic complete + live.** The "stop-the-bleeding" tracks are done: #52 pglite adapter test tier (ADR-0046), #53 per-PR preview isolation (ADR-0047), and **#54 real auth (ADR-0048)** — Clerk sign-in, JIT personal-org provisioning, upload attribution, the session-required flip (DEMO_ACTOR removed), and an app-wide default-protect auth gate (#70). **MCP server (ADR-0051, PRs #87–#92 + completers): remote Streamable-HTTP MCP at `mcp.centaurspec.com`, thin client over `/api/v1`; dual auth — `arp_` API keys (own table, ADR-0008) + Clerk OAuth 2.1 (browser login, OAuth-token forward). Verified live on both paths (incl. bulk report management from Claude Desktop).** Earlier Phase-1 milestones live: async scan pipeline (Phase 1.5a, ADR-0045) and the viewer-origin split `view.<domain>/<slug>` (#41, ADR-0038). Sharing/ACL largely shipped (P1 password #100, allowlist #109, private-by-default #127; `get_acl`/`set_acl` API + MCP live) — `org` mode is still a stub and write grants don't exist; the **ownership & shareability epic (ADR-0059/0060/0061)** now covers both plus per-user ownership. Remaining roadmap: **#55** edge hardening, **#65** app-origin CSP vs Clerk, optional #54 surface (org switcher / folder tree / invites — now scoped under ADR-0061). **UI now wears the "Forge & Ember" warm-dark identity (ADR-0058) — design tokens + brand chrome (Centaur logomark, top bar, avatar menu) + inline report rename + the API-keys/MCP settings reskin (PRs #119/#120/#121/#123).** **Editing & comments epic SHIPPED + CLOSED (ADR-0062–0067):** the unified in-viewer editor lives at `view.<domain>/<slug>/edit` — one authenticated surface consolidating the ProseMirror editor, comments (ADR-0064, closed-enum `intent` note/enhancement/add/remove + author-or-owner edit), version history + visual diff (ADR-0065), and author display-names from the Clerk identity mirror (ADR-0048, migration 0016 + one-time backfill #205). Reached one-click from the dashboard by any canWrite user; the standalone dashboard editor/versions/diff pages were retired in the Phase-5 cutover. Feedback rounds 1 (#189–#195) + 2 (#196–#201) + polish batch (#204) + backfill (#205) all merged. **Remaining editor payoff: the comment-`intent` agent-action pipeline (PRD #198) — design-first, needs an ADR (ADR-0069 lethal-trifecta surface).** |
 | **Repo path**          | `~/PetProjects/centaur-spec/` (main; local folder renamed from `ai-report-platform` — the GitHub remote keeps the old name). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `2ecff0e` — Merge PR #276 (`refactor/decision-by-purpose`). Landed by `/merge-train` (ADR-0077) with #275; both web-flow-signed, `migrate-db` + `release` green after each. |
+| **Last commit on main**| `3c477fb` — Merge PR #305 (`feat/floating-composer`, ticket #298). Tail of the Selection-toolbar epic (PRD #295: #296 shell → #303 formatting → #298 composer) plus the **agentic-sdlc v0.10.0 migration** (PR #304); all four web-flow-signed, `migrate-db` + `release` green after each. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually.** Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` **verified + deployed**), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both; prod Home URL → `https://app.centaurspec.com`. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); **the dev/preview instance still needs the same OAuth app + DCR** (preview OAuth — not blocking prod). |
-| **Active worktrees**   | One: `toolbar-formatting` (tickets #297/#299/#300 under PRD #295, one batched PR — see the 2026-08-26 entry). All seven previously listed (the PRD #277 SDLC batch + `selection-toolbar`) merged and were pruned by `/worktree-cleanup` on 2026-08-26; the row had gone stale in between — noted here per the update protocol rather than rewritten in place. |
+| **Active worktrees**   | One: `capability-tiers` (`feat/capability-tiers`, not yet merged). `toolbar-formatting` (#303), `floating-composer` (#298/#305) and `agentic-sdlc-v0-10` (#304) all merged and were pruned by `/worktree-cleanup` on 2026-08-27. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile — ADR-031 single Neon branch / no persistent staging, ADR-0044 signed merge commits + 0 approvals, ADR-0048 session-gated app, canonical `view.<domain>/<slug>`). ADR-0035–0048 in `docs/adr/`; **ADR-001–030 still inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/events.md` is the canonical event registry; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -5880,3 +5880,30 @@ Both gates are green at the tip: `pnpm docs:check` (harness, 9 validators) and
 guard drivers (tdd-pairing 12 + ci 10) and behavior-delta (13). Not pushed — left for operator
 review. The engine fork can retire once the kit upstreams the docs-skeleton validators.
 
+
+### 2026-08-27 — Selection-toolbar epic closed; #298 composer shipped, all merged + deployed
+
+The Floating composer (#298, PR #305) landed, closing PRD #295: the "…" bubble opens a
+composer anchored at the selection (quote + body + Comment intent + shared composer keys),
+posting through the existing comments client + Annotation anchor; selecting text no longer
+auto-opens the side-panel composer (the pending-selection contract was retired). Glossary
+gained **Floating composer**. Node 2718 / browser 101 green; the bot review passed and CI
+was clean.
+
+Landing sequence (all four web-flow-signed, `migrate-db` + `release` green each):
+- #303 formatting (#297/#299/#300) — merged after a review round that caught a CRITICAL the
+  bot missed: an entity-encoded `javascript:` bypass in `isDangerousUrl` (now decodes
+  character references before the scheme check), plus HIGH mutation-surviving test-gap
+  closures.
+- #304 agentic-sdlc v0.10.0 migration — merged (see the earlier 2026-08-27 entry).
+- #305 composer (#298) — merged; both feature branches were rebased onto the migrated main
+  (CLAUDE.md→AGENTS.md, constitution at repo root) before landing.
+
+Dropped, deliberately: the formatting epic's cross-origin **browser-Save e2e** — it fails
+by design on isolated previews (CORS fails closed with `VIEW_ORIGIN` unset). The
+toolbar→bold→doc-mutation behaviour stays covered hermetically by the browser tier; the
+"set `VIEW_ORIGIN` on previews so the Save round-trip is exercisable" question is left open
+for a future infra decision (an ADR-0063/0069 CORS-surface change).
+
+`/worktree-cleanup` pruned the three merged worktrees and fast-forwarded main to `3c477fb`.
+`capability-tiers` remains, unmerged.
