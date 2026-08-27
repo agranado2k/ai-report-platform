@@ -21,7 +21,10 @@
 // the toolbar convention is a small set). Adding these buttons changes the
 // bar's RESTING width, which the mount-time measurement covers; they add no
 // open/closed sub-state, so the re-measure stays keyed on the link editor
-// alone. The More button remains a placeholder (composer, #298).
+// alone. The "…" bubble is live too (ticket #298): it asks the HOST to swap
+// this bar for the Floating composer at the same geometry (`onCompose`) —
+// the composing state lives with the host, which owns the selection and the
+// composer's post action; the bar only reports the click.
 //
 // Placement is measure-then-place: the bar first renders OFFSCREEN (also the
 // SSR output — effects don't run on the server), a layout effect measures the
@@ -31,9 +34,11 @@
 // translated out of its iframe (selection-rect.ts) — so this component never
 // touches the iframe at all. The link editor is the bar's FIRST dynamic
 // content — opening/closing it (and its error line) changes the bar's size —
-// so the measurement re-runs keyed on that state; #300/#298's composer will
-// need the same treatment (a general re-measure) when the bar grows more
-// swap-in content.
+// so the measurement re-runs keyed on that state. #298's composer ended up a
+// SEPARATE component the host swaps in (FloatingComposer.tsx) rather than
+// more swap-in content here, and it carries the general (ResizeObserver)
+// re-measure its fluid size needs; this bar's enumerable sub-states keep the
+// cheaper keyed effect.
 //
 // `onMouseDown={preventDefault}` on the container is load-bearing: the
 // editor's selection lives in the sandboxed iframe, and a default-handled
@@ -96,6 +101,10 @@ export interface SelectionToolbarProps {
   readonly onApplyLink: (href: string) => boolean;
   /** Remove the link the selection sits in (ReportEditorHandle.removeLink). */
   readonly onRemoveLink: () => boolean;
+  /** The "…" bubble (ticket #298): ask the host to swap this bar for the
+   *  Floating composer at the same selection geometry. The host owns the
+   *  composing state (it also owns the selection the composer anchors to). */
+  readonly onCompose: () => void;
 }
 
 /** The link editor's inline feedback, keyed by `validateLinkHref`'s reason
@@ -150,6 +159,7 @@ export function SelectionToolbar({
   onToggleList,
   onApplyLink,
   onRemoveLink,
+  onCompose,
 }: SelectionToolbarProps) {
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -168,9 +178,9 @@ export function SelectionToolbar({
   // this component is SSR-rendered by its smoke test and a layout effect
   // warns there; the one pre-measure frame it allows is the same settle the
   // mount-time OFFSCREEN placeholder has always accepted. Binary open/closed
-  // (+ error) state keyed by deps is all this needs today; when #298's
-  // composer makes the content genuinely fluid, this becomes a general
-  // re-measure (ResizeObserver or equivalent).
+  // (+ error) state keyed by deps is all this bar needs — its sub-states are
+  // enumerable. The genuinely fluid surface (#298's Floating composer) is a
+  // separate component with the general ResizeObserver re-measure.
   // biome-ignore lint/correctness/useExhaustiveDependencies: linkOpen/linkError are re-measure TRIGGERS (they change the rendered content whose size is being read), not values the effect body reads.
   useEffect(() => {
     const el = ref.current;
@@ -390,7 +400,12 @@ export function SelectionToolbar({
             </span>
           </button>
           <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
-          <button type="button" aria-label="More actions" className={buttonClass}>
+          <button
+            type="button"
+            aria-label="More actions"
+            className={buttonClass}
+            onClick={onCompose}
+          >
             <MoreIcon className="h-4 w-4" />
           </button>
         </>

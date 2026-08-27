@@ -1,8 +1,13 @@
 // authorLabel (ADR-0063 author display): prefer the display name, else the
 // resolved email, else a stable label — never the raw user_… id.
+// Plus the panel's post-#298 composer contract: the Floating composer is the
+// SOLE creation path for selection-anchored root comments, so the panel never
+// renders a new-comment composer (the retired pendingSelection auto-open).
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { CommentWire } from "../wire-types";
-import { authorLabel } from "./CommentsPanel";
+import { authorLabel, CommentsPanel } from "./CommentsPanel";
 
 const base: CommentWire = {
   object: "comment",
@@ -46,5 +51,28 @@ describe("authorLabel", () => {
     const label = authorLabel(base);
     expect(label).toBe("Unknown user");
     expect(label).not.toContain("user_");
+  });
+});
+
+describe("CommentsPanel composer contract (ticket #298)", () => {
+  it("never renders a new-comment composer — it points at the Selection toolbar instead", () => {
+    // The pendingSelection-driven auto-open is RETIRED: the panel takes no
+    // selection at all any more, and the Floating composer (opened from the
+    // toolbar's "…" bubble) is the one creation path for selection-anchored
+    // root comments. The panel's read-side hint names that path.
+    const html = renderToStaticMarkup(
+      createElement(CommentsPanel, {
+        appOrigin: "https://app.example",
+        slug: "report-1",
+        editToken: "et",
+        comments: [],
+        onCommentsChange: () => {},
+        commentRanges: [],
+        versions: [],
+      }),
+    );
+    expect(html).not.toContain("Add a comment…");
+    expect(html).toContain("Select text in the document");
+    expect(html).toContain("“…”");
   });
 });

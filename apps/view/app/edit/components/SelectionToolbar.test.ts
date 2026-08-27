@@ -1,10 +1,11 @@
-// Smoke test for the Selection toolbar (tickets #296/#297/#299) — the
+// Smoke test for the Selection toolbar (tickets #296/#297/#299/#298) — the
 // floating, selection-anchored bar in the unified editor's Edit mode. Bold
-// and Italic are live toggles (#297) and Link is a live editor (#299):
-// active state arrives as the `formats` prop and is mirrored to
-// `aria-pressed`; the "…" bubble stays a placeholder for #300. Placement/
+// and Italic are live toggles (#297), Link is a live editor (#299), and the
+// "…" bubble opens the Floating composer (#298, via `onCompose` — the host
+// owns that swap): active state arrives as the `formats` prop and is
+// mirrored to `aria-pressed`. Placement/
 // visibility/interaction behavior (including the whole link add/edit/remove
-// flow) is proven in the browser tier
+// flow and the composer swap) is proven in the browser tier
 // (tests/browser/selection-toolbar.spec.ts); this node-tier test pins the
 // accessible surface: a toolbar role, labelled buttons, aria-pressed
 // mirroring, and the measure-then-place lifecycle's SSR-safe start
@@ -39,6 +40,7 @@ function render(formats: ActiveFormats): string {
       onToggleList: () => {},
       onApplyLink: () => true,
       onRemoveLink: () => true,
+      onCompose: () => {},
     }),
   );
 }

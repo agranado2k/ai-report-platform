@@ -796,6 +796,116 @@ for (const fixture of FIXTURES) {
       await expect.poll(() => markCount(page, "p", word)).toBe(pBefore);
     });
 
+    // ── The Floating composer (ticket #298) ─────────────────────────────────
+
+    /** Select the fixture word and swap the toolbar for the composer via the
+     *  "…" bubble — the shared setup for the composer contracts. */
+    async function openComposer(page: Page): Promise<string> {
+      await selectWord(page, fixture.paragraph);
+      const word = await selectedWord(page);
+      await page
+        .getByTestId("selection-toolbar")
+        .getByRole("button", { name: "More actions" })
+        .click();
+      await expect(page.getByTestId("floating-composer")).toBeVisible();
+      return word;
+    }
+
+    test('the "…" bubble swaps the toolbar for the composer, quote visible, inside the viewport', async ({
+      page,
+    }) => {
+      const word = await openComposer(page);
+
+      // A SWAP, not a stack: the toolbar is gone, the composer holds the
+      // same anchor, and the quote shows the selected text.
+      await expect(page.getByTestId("selection-toolbar")).toHaveCount(0);
+      const composer = page.getByTestId("floating-composer");
+      await expect(composer.getByTestId("floating-composer-quote")).toContainText(word);
+      const box = await composer.boundingBox();
+      if (!box) throw new Error("the composer has no box");
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      // The body took focus — typing goes straight into the composer.
+      await expect(page.getByTestId("floating-composer-body")).toBeFocused();
+    });
+
+    test("typing + Ctrl+Enter posts: highlight in the document, comment in the panel", async ({
+      page,
+    }) => {
+      await openComposer(page);
+      const highlightsBefore = await page
+        .locator("iframe")
+        .contentFrame()
+        .locator(".comment-highlight")
+        .count();
+
+      await page.keyboard.type("Needs a stronger example");
+      await page.keyboard.press("Control+Enter");
+
+      // Composer dismissed, the REAL highlight pipeline decorated the
+      // anchored range inside the iframe, and the panel shows the Thread —
+      // the same three effects a panel-composed comment had.
+      await expect(page.getByTestId("floating-composer")).toHaveCount(0);
+      await expect
+        .poll(() => page.locator("iframe").contentFrame().locator(".comment-highlight").count())
+        .toBeGreaterThan(highlightsBefore);
+      await expect(page.getByTestId("panel-comment")).toHaveText("note: Needs a stronger example");
+    });
+
+    test("a failed post keeps the composer open with an inline error and the body preserved", async ({
+      page,
+    }) => {
+      await openComposer(page);
+      await page.evaluate(() => {
+        (window as unknown as { __failComposerPost?: boolean }).__failComposerPost = true;
+      });
+
+      await page.keyboard.type("do not lose me");
+      await page.keyboard.press("Control+Enter");
+
+      // Inline role=alert error, composer still up, body intact — the
+      // comment is never lost to a failed POST.
+      await expect(page.getByTestId("floating-composer-error")).toBeVisible();
+      await expect(page.getByTestId("floating-composer-body")).toHaveValue("do not lose me");
+
+      // Disarm and retry: the same draft posts.
+      await page.evaluate(() => {
+        (window as unknown as { __failComposerPost?: boolean }).__failComposerPost = false;
+      });
+      await page.getByTestId("floating-composer-body").press("Control+Enter");
+      await expect(page.getByTestId("floating-composer")).toHaveCount(0);
+      await expect(page.getByTestId("panel-comment")).toHaveText("note: do not lose me");
+    });
+
+    test("Escape in the composer cancels it with the document selection intact", async ({
+      page,
+    }) => {
+      await openComposer(page);
+
+      await page.keyboard.press("Escape");
+
+      // The composer is gone; the selection (and so its toolbar) survives —
+      // composer Escape is layered ABOVE the editor's own Escape dismissal
+      // (handleComposerKeyDown stops propagation), so the anchored chrome
+      // falls back to the toolbar instead of vanishing entirely.
+      await expect(page.getByTestId("floating-composer")).toHaveCount(0);
+      await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+      expect((await page.getByTestId("pending-selection").textContent())?.length).toBeGreaterThan(
+        0,
+      );
+    });
+
+    test("a plain selection opens NO composer — the toolbar is all that appears", async ({
+      page,
+    }) => {
+      // The retired contract, pinned from the browser: selecting text used
+      // to auto-open the side panel's composer; now the toolbar alone shows
+      // until the user asks for the composer.
+      await selectWord(page, fixture.paragraph);
+      await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+      await expect(page.getByTestId("floating-composer")).toHaveCount(0);
+    });
+
     test("a keyboard-extended selection shows the toolbar too", async ({ page }) => {
       // Caret in the paragraph, then Shift+ArrowRight — selection built by
       // TRANSACTIONS with no pointer involved. This is the dispatch-path
