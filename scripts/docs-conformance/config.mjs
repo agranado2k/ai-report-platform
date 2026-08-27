@@ -213,13 +213,34 @@ export const features = {
  * Agent-manual rules (plan Phase 1.2, ADR-0082's layered constitution).
  *
  * The manual is a layered set of files, all of them standing instructions the
- * agent obeys: the root `CLAUDE.md`, the on-demand articles under
- * `.claude/constitution/`, and the nested package manuals below. Every layer
- * gets the same two existence checks — slash commands must resolve to
- * `.claude/skills/<name>/SKILL.md`, referenced repo paths must exist — plus,
- * for the shared article only, the portability guard further down.
+ * agent obeys: the root `AGENTS.md` (with `CLAUDE.md` / `GEMINI.md` shims beside
+ * it), the on-demand articles under `constitution/`, and the nested package
+ * manuals below. Every layer gets the same two existence checks — slash commands
+ * must resolve to `.claude/skills/<name>/SKILL.md`, referenced repo paths must
+ * exist — plus the shim-integrity rule on the shims, and, for the shared
+ * articles only, the portability guard further down.
  */
 export const claudeMdRefs = {
+  // rootManual left unset → defaults to AGENTS.md (v0.10.0). The root manual is
+  // AGENTS.md and CLAUDE.md / GEMINI.md are shims that import it.
+  //
+  // The on-demand articles live at the repo root under constitution/ (moved out
+  // of .claude/constitution/ when this repo adopted the v0.10.0 layout).
+  constitutionDir: "constitution",
+
+  // The tool entry points beside the root manual. Each must be a bare
+  // `@AGENTS.md` shim (plus at most one comment line) — the `shim-invalid` rule
+  // stops a second manual quietly growing in one tool's file. The nested pairs
+  // shim the package manuals under apps/mcp and packages/domain.
+  shims: [
+    "CLAUDE.md",
+    "GEMINI.md",
+    "apps/mcp/CLAUDE.md",
+    "apps/mcp/GEMINI.md",
+    "packages/domain/CLAUDE.md",
+    "packages/domain/GEMINI.md",
+  ],
+
   // Commands that are real but are not repo skills. Each carries its reason
   // here so the exemption is itself reviewable.
   ignoreCommands: [
@@ -251,7 +272,7 @@ export const claudeMdRefs = {
     "tests",
     ".claude/hooks",
     ".claude/skills",
-    ".claude/constitution",
+    "constitution",
   ],
 
   /**
@@ -261,7 +282,7 @@ export const claudeMdRefs = {
    *
    * THE RESOLUTION RULE, decided here because it is policy: inside a nested
    * manual, a path token whose first segment is in `pathRoots` above means the
-   * repo-root path (`tests/evals/` in `apps/mcp/CLAUDE.md` is the repo's eval
+   * repo-root path (`tests/evals/` in `apps/mcp/AGENTS.md` is the repo's eval
    * suite, not a package-local one); every other path token is resolved against
    * `dir`. To keep prose out of the check, a package-relative token must contain
    * a `/` AND either end in `/` (a directory) or have a dotted final segment (a
@@ -302,7 +323,7 @@ export const claudeMdRefs = {
    *                misread ordinary "either/or" phrasing as a path.
    */
   portability: {
-    files: [".claude/constitution/shared-invariants.md"],
+    files: ["constitution/shared-invariants.md", "constitution/shared-code-craft.md"],
     deny: [
       {
         id: "product-name",

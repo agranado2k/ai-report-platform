@@ -33,6 +33,7 @@
 - **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
 - **TDD enforcement is live** (2026-08-07): the `.husky/pre-push` TDD pairing guard blocks source-without-tests pushes; `pnpm docs:check` runs in the same hook. Escape hatches `PUSH_WITHOUT_TESTS=1` / `PUSH_WITHOUT_DOCS=1`, both logged.
+- **The manual is `AGENTS.md`** (agentic-sdlc v0.10.0, migrated 2026-08-27 on `chore/agentic-sdlc-v0.10`, not yet merged). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/` (not `.claude/constitution/`); the guards read `scripts/guards.config.sh`; the docs-conformance engine is a recorded local fork (see `VERSION`). See the 2026-08-27 entry.
 
 ### Update protocol
 
@@ -5810,3 +5811,37 @@ only; the formatting commands and the Floating composer are the follow-up ticket
   in the review round), each run over both synthetic fixtures and the real report — 24
   runs; the full tier is 56/56 green.
 - Glossary gained **Selection toolbar** (ADR-0036 same-PR rule).
+
+### 2026-08-27 — Adopted agentic-sdlc v0.10.0 (framework migration)
+
+Migrated centaur-spec onto the **agentic-sdlc v0.10.0 canonical layout**. This is a
+tooling/docs migration only — no product behaviour changes — done as an eight-commit
+sequence on `chore/agentic-sdlc-v0.10`. What moved:
+
+- **The manual is now `AGENTS.md`.** `CLAUDE.md` and `GEMINI.md` (root + `apps/mcp/` +
+  `packages/domain/`) are two-line `@AGENTS.md` shims. All of centaur-spec's existing manual
+  content is preserved; the missing template sections were added (Capability tiers, Project
+  documentation, Local rules, The chain, a Precedence heading).
+- **The constitution moved to the repo root `constitution/`** (out of `.claude/constitution/`).
+  `shared-invariants.md` is byte-identical to the kit; `shared-code-craft.md` (ten portable
+  craft rules) joined verbatim; `local-engineering.md` / `local-workflow.md` moved with their
+  content. local-workflow gained the capability-tier rubric.
+- **Config-driven guards.** The forked TDD-pairing and behavior-delta guards were replaced by
+  the v0.10.0 shared scripts, which read `scripts/guards.config.sh` via `scripts/guards.lib.sh`.
+  guards.config.sh reproduces the old forked regexes **byte-for-byte** (source/test globs and
+  the eight behavior-delta surfaces, incl. the pre-migration `.claude/constitution/` / `CLAUDE.md`
+  paths) so the two open PRs' pairing and behavior-delta verdicts do not shift.
+- **Capability tiers.** `scripts/agents.lib.sh` (resolver) + `scripts/agents.config.sh`
+  (tier→model, shipped **empty** — an operator decision left for later).
+- **Docs-conformance engine: a RECORDED LOCAL FORK.** `index.mjs` and
+  `validators/claude-md-refs.mjs` are taken verbatim from v0.10.0; `runner.mjs` and
+  `context.mjs` are kept forked so the eight local validators (ADR index/MADR, glossary,
+  events, features, gherkin, OpenAPI) that depend on `ctx.paths` — which v0.10.0 removed —
+  keep running. `runner.mjs` still registers all nine validators. The fork is recorded in
+  `VERSION`'s deviation note and in `constitution/local-workflow.md`.
+- **`VERSION` pins shared-layer 0.10.0**; `scripts/check.sh` is the language-agnostic gate.
+
+Both gates are green at the tip: `pnpm docs:check` (harness, 9 validators) and
+`sh scripts/check.sh`. Test suites green: the docs-conformance fixtures (89), the config-driven
+guard drivers (tdd-pairing 12 + ci 10) and behavior-delta (13). Not pushed — left for operator
+review. The engine fork can retire once the kit upstreams the docs-skeleton validators.

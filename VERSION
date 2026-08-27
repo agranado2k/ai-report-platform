@@ -1,0 +1,223 @@
+# agentic-sdlc — shared-layer manifest
+#
+# The SHARED LAYER is the part of this kit that is copied VERBATIM into your
+# project and is not yours to edit. It carries a version so that a project
+# bootstrapped from kit 0.1.0 can later be diffed against kit 0.3.0 and told
+# exactly what moved. `UPDATING.md` is that recipe; this manifest is the anchor
+# it diffs against.
+#
+# Everything NOT listed here is yours from the moment bootstrap stamps it:
+# AGENTS.md (and the CLAUDE.md / GEMINI.md shims beside it), README.md,
+# docs/diary.md, docs/adr/, docs/domain-glossary.md, your adapters, the
+# .github/PULL_REQUEST_TEMPLATE.md — and, importantly, the POLICY files, which
+# are meant to grow with your repo:
+#
+#   scripts/docs-conformance/config.mjs            what the docs gate enforces
+#   scripts/docs-conformance/local-vocabulary.mjs  your product's vocabulary
+#   scripts/docs-conformance/test/                 fixture tests; extend freely
+#   scripts/guards.config.sh                       the guards' view of your layout
+#   scripts/agents.config.sh                       tier -> model, your provider's
+#
+# Edit those freely — the whole point of stamping a template is that the copy
+# is then yours.
+#
+# THIS FILE IS COPIED WHOLESALE during an update (see UPDATING.md step 5): it
+# carries no project-specific content, only which release you are on and what
+# that release covers. It is deliberately not listed under `files:` — a manifest
+# cannot be an entry in itself.
+#
+# Versioning, pre-1.0: the MINOR bumps whenever the set of shared files or their
+# content changes, so a consumer can always ask "is my layer byte-identical to
+# the release I claim?" and get a yes/no. There is no patch-level for prose.
+# The split is deliberate: the validator ENGINE is shared because a fix to it
+# should reach every project, while the RULES are local because they are the
+# thing each project must own and review.
+#
+# `scripts/check.sh` verifies every file below still exists.
+
+# 0.3.0 — the manual became AGENTS.md. Two shared-layer files changed content:
+# scripts/check.sh now requires AGENTS.md as the root manual, and the
+# claude-md-refs validator defaults to it and gained the `shim-invalid` rule for
+# the tool entry points beside it. No file joined or left the layer.
+# 0.4.0 — feedback wave 1: scripts/agents.lib.sh (the capability-tier resolver)
+# joined the layer, and /implement gained the Deliver phase (push → PR →
+# independent review; skills are not manifest-listed, but the shared invariants
+# they cite are unchanged). UPDATING.md changed content too, and materially: it
+# now has a SECOND half covering everything this manifest does NOT list. That
+# was not cosmetic — this release is the first one whose value sits mostly
+# outside the shared layer, so a consumer following the old recipe would have
+# taken the resolver above and nothing that reads or calls it.
+# 0.5.0 — constitution/shared-code-craft.md joined the layer: ten portable
+# rules for the code an agent writes, from the smallest sufficient diff to
+# diagrams drawn as SVG in HTML reports, never ASCII art. Two shared files
+# changed content with it: scripts/check.sh's reduced fallback now skips the
+# new article the way it skips shared-invariants.md, and UPDATING.md now
+# documents what an article joining the layer does — Part 1 alone ends with a
+# RED gate (article-unreferenced) until the consumer's own manual points at
+# the new article; deliberate, and the worked examples are re-captured showing
+# it. The wave's non-manifest half, recovered by Part 2: /tdd, /implement and
+# /review-pr point at the article, the manual and local-engineering templates
+# carry the pointers, /improve-codebase-architecture's report rendering became
+# self-contained inline SVG, and the starter config.mjs (yours, step 9d) adds
+# the article to the portability file set — existing consumers merge that hunk
+# by hand.
+# 0.6.0 — the config-discovery trust wave: the loaders stopped treating "the
+# repository the process is standing in" as an identity. scripts/guards.lib.sh
+# sources the cwd repo's guards.config.sh only when that repo is also the one
+# the calling guard lives in (a config is sourced, i.e. CODE), refuses with a
+# stderr note otherwise, discovers nothing without an anchor, and scrubs the
+# GIT_DIR/GIT_WORK_TREE a git hook inherits so a linked-worktree push cannot
+# make a repo's own config look foreign. scripts/agents.lib.sh (the same hole,
+# fixed in the sibling PR of this wave) anchors its discovery on the library's
+# own location. No file joined or left the layer; both changes are content
+# changes to manifest-listed files, which is what this MINOR records.
+# 0.7.0 — task-domain routing. No file joined or left the layer; ONE shared file
+# changed content: scripts/agents.lib.sh's resolver gained an optional second
+# argument, the task DOMAIN, so `sh scripts/agents.lib.sh implementer content`
+# reads AGENT_TIER_IMPLEMENTER_CONTENT and falls back to AGENT_TIER_IMPLEMENTER
+# when it is unset. Called with one argument it is byte-for-byte the 0.6.0
+# behaviour, which is what makes this wave safe to adopt without touching a
+# single caller. The two vocabularies are deliberately opposite: the four tiers
+# stay CLOSED (an unknown one is still exit 2) while domains are OPEN local
+# policy, so an unmapped domain falls back to the tier in silence — and because
+# the token is interpolated into a variable name, its SHAPE ([a-z][a-z0-9-]*) is
+# checked instead, exit 2 on anything else. UPDATING.md changed content too, for
+# the 0.7.0 recipe delta. The wave's non-manifest half, recovered by Part 2:
+# /to-tickets stamps an optional `Domain:` line when the medium of the work
+# would change which model you would pick, /implement passes it as the second
+# argument, the manual template's "Capability tiers" section explains the axis,
+# and the claude-code adapter note works a domain-qualified spawn through. The
+# consumer's own scripts/agents.config.sh (theirs, never overwritten) documents
+# the AGENT_TIER_<TIER>_<DOMAIN> convention — existing consumers merge that
+# comment hunk by hand, or skip it and lose nothing but the documentation.
+# 0.8.0 — the transcripts became platform-independent. No file joined or left
+# the layer; ONE shared file changed content: UPDATING.md, whose two worked
+# examples are re-captured under LC_ALL=C. `sort` and `comm` order by the
+# locale's collation, so the manifest lists inside those transcripts came out in
+# one order on the machine that captured them (macOS, UTF-8: `UPDATING.md` after
+# `scripts/...`) and another in the C locale (`UPDATING.md` before
+# `constitution/...`). The dependence was latent from the day the transcripts
+# existed and surfaced the day tests/docs-demo.sh gained a CI job, whose runner
+# is the second platform the byte-for-byte comparison had ever seen. The
+# capture pins themselves live in that suite — kit-only, not shared — so what
+# a consumer takes here is the re-captured prose and nothing else: a re-read of
+# the two worked examples, and no command of theirs changes.
+# 0.9.0 — the self-hosting follow-ups. No file joined or left the layer; two
+# shared files changed content. The substantive one, and only in its comments:
+# scripts/docs-conformance/validators/claude-md-refs.mjs described "the kit's
+# own unbootstrapped tree" as its example of a tree the shim and reachability
+# rules stay silent on. The kit has self-hosted since ADR-0001, so that example
+# named a state nothing is in any more — and a repo created from the template
+# is not it either, since it carries the kit's own AGENTS.md and both shims
+# until bootstrap strips them. The general statements were always right; only
+# the example moved, to a tree whose manual has not been written yet. Zero
+# behaviour change: the validator's 52 fixture tests pass unchanged, and a
+# consumer taking 0.9.0 re-reads two comments and changes no command of theirs.
+# The wave's non-manifest half is a kit-only test fix that a consumer never
+# sees: tests/docs-demo.sh built its fake 0.3.0 consumer with a sed pinned to
+# one literal version, so the rollback went silently dead the release after it
+# was written and the fixture carried the CURRENT version instead. The marker
+# line is now matched by SHAPE, and an assertion right after the fixture is
+# built proves the rollback happened.
+# The second content change is UPDATING.md, per this manifest's own precedent
+# that a re-pin is a content change: its worked-example prose and transcripts
+# moved 0.8.0 -> 0.9.0 with the release, nothing else. The recipe itself is
+# untouched.
+# 0.10.0 — the recipe stopped destroying consumer files. No file joined or left
+# the layer; ONE shared file changed content, and materially: UPDATING.md. Both
+# defects were found by the SECOND real consumer update (0.4.0 -> 0.9.0), and
+# both are data loss, so a consumer on any release should take this one before
+# running an update.
+#   The first is a SHAPE, not a line. `kit show "$REF:$path" >"$mine"` was the
+# recipe's idiom for taking the release's copy of a file, and the shell
+# truncates `$mine` BEFORE kit is started — so a path that is absent at that ref
+# leaves zero bytes and a `fatal:` on stderr. 9d is where it was caught: it
+# named `scripts/docs-conformance/local-vocabulary.mjs`, which the kit ships
+# only as a `.template`, asked whether the path existed at FROM_REF, and read
+# that one `no` as "then it is new at TO_REF". Measured on a real consumer:
+# 1807 bytes -> 0. Seven other sites carried the same shape. Step 0 now defines
+# `kit_take`, which fetches to a temp file and writes only on success, and every
+# take in the recipe goes through it. 9d additionally asks about BOTH refs and
+# has a third verdict, STAMPED, for the half of its list the kit holds only as
+# a `.template`.
+#   The second is the shell. The recipe never declared one, and zsh — macOS's
+# default — applies HISTORY MODIFIERS to `$var:x` inside double quotes, so
+# `"$TO_REF:constitution/…"` was `$TO_REF` with `:c` applied plus the literal
+# `onstitution/…`. Four lines carried a bare letter after the colon; git got a
+# ref that resolves to nothing, one local article went 45 bytes -> 0, and the
+# `cmp` above it answered YOURS having compared against empty input. Every ref
+# expansion is now braced or followed by a `$`, "Before you start" names POSIX
+# sh, and tests/docs-demo.sh greps the whole document for the shape on every
+# run and drives 9b through a real zsh.
+#   Three smaller recipe fixes ride along: 9d routes `.mjs` configs to a read of
+# the diff rather than a key-set extractor that cannot parse them (and the
+# extractor now refuses to answer rather than reporting a vacuous "nothing
+# missing"); step 8 says that the kit's own self-hosted AGENTS.md, shims,
+# README and docs are never a consumer's base, since those ARE paths a consumer
+# has; and "Before you start" carries the standing "re-read this file after
+# step 5" rule, which the step-5 NOTE cannot deliver to the consumer who most
+# needs it because that consumer is on the old recipe.
+#   What a consumer takes: a re-read of UPDATING.md, and one habit change — the
+# takes in Part 2 are `kit_take` calls now, which needs step 0's helper in
+# scope. Nothing else of theirs changes. That first change has no
+# non-manifest half of its own.
+#   The wave's second content change, landed before the v0.10.0 tag was cut so
+# one release carries the incident AND its standing rules: shared-code-craft
+# gains §11 (never point a redirect at a file you cannot lose) and §12 (declare
+# the shell, then write for it) — the same two data-loss shapes, generalized
+# from recipe fix to portable craft; UPDATING.md's step-0 "Pre-1.0" tag caveat
+# retires (every release is tagged now, and the kit's self-host suite holds it
+# to that). The non-manifest half this second change DOES have: /review-pr's
+# Security Sentinel gains a shell-hazard audit citing the two rules by number.
+shared-layer: 0.10.0
+
+# NOT shared layer, and deliberately so: scripts/guards.config.sh. It is the
+# only file the guards read policy from, and its whole purpose is to be edited
+# locally. Keeping mechanism shared and policy local is what lets the guard
+# scripts stay byte-identical to the kit's copies.
+#
+# Same split, same reasoning, for capability tiers: scripts/agents.lib.sh is
+# shared (one resolver, fixable once for everyone, and the four tier names are
+# the shared word between the manual, the skills and the config) while
+# scripts/agents.config.sh is NOT (it maps those tiers onto one provider's model
+# identifiers — the fastest-rotting, least portable data in the repo). A kit
+# that shared the mapping would be shipping a standing instruction with a timer
+# on it.
+
+files:
+  constitution/shared-invariants.md
+  constitution/shared-code-craft.md
+  UPDATING.md
+  scripts/guards.lib.sh
+  scripts/agents.lib.sh
+  scripts/tdd-pairing-guard.sh
+  scripts/tdd-pairing-guard-ci.sh
+  scripts/behavior-delta.sh
+  scripts/check.sh
+  scripts/docs-conformance/index.mjs
+  scripts/docs-conformance/context.mjs
+  scripts/docs-conformance/runner.mjs
+  scripts/docs-conformance/validators/claude-md-refs.mjs
+
+# ---------------------------------------------------------------------------
+# LOCAL DEVIATION FROM THE SHARED LAYER (centaur-spec) — recorded, not hidden.
+# ---------------------------------------------------------------------------
+# Two files above are listed as shared layer but are, in THIS repo, a RECORDED
+# LOCAL FORK — they exist at the pinned paths (so `scripts/check.sh` is
+# satisfied), but their CONTENT diverges from v0.10.0 on purpose:
+#
+#   scripts/docs-conformance/context.mjs   keeps the `ctx.paths` map v0.10.0
+#                                          removed.
+#   scripts/docs-conformance/runner.mjs    registers NINE validators, not the
+#                                          one v0.10.0 ships.
+#
+# Why: centaur-spec adopted the docs-conformance engine before v0.10.0 and grew
+# eight local validators (adr-index-sync, adr-madr, glossary-terms, event-names,
+# feature-presence, feature-executes, gherkin-structure, openapi-structure) that
+# read `ctx.paths`. v0.10.0 upstreamed only `claude-md-refs` and deleted both the
+# extra validators and `ctx.paths`. Taking runner.mjs/context.mjs verbatim would
+# silently drop eight checks this repo depends on, so they stay forked here while
+# `index.mjs` and `validators/claude-md-refs.mjs` are taken verbatim. When the
+# kit upstreams the docs-skeleton validators (its runner.mjs comment names this
+# as planned work), this fork can retire. See docs/diary.md and
+# constitution/local-workflow.md for the same note in prose.

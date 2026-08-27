@@ -127,7 +127,7 @@ describe("tdd-pairing-guard-ci.sh", () => {
       "packages/domain/src/report.ts": "export const a = 1;\n",
     });
     const res = runGuardCi(dir, { BASE_SHA: base, HEAD_SHA: head });
-    expect(res.stderr).toContain("✗ ci:");
+    expect(res.stderr).toContain("x ci:");
     expect(res.stderr).toContain("tdd-exempt");
   });
 

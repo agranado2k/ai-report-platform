@@ -49,3 +49,15 @@ export function validAdr(num = "0099", title = "Test decision") {
 export function hasRule(violations, rule) {
   return violations.some((v) => v.rule === rule);
 }
+
+/**
+ * The shipped config with the claudeMdRefs section partially overridden. Used by
+ * tests that exercise a policy knob (a different constitution directory, an empty
+ * shims list) without mutating the module-level config every other test shares.
+ */
+export function configWith(overrides) {
+  return {
+    ...defaultConfig,
+    claudeMdRefs: { ...defaultConfig.claudeMdRefs, ...overrides },
+  };
+}

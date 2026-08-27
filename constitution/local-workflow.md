@@ -58,9 +58,16 @@ in the loop.
 | A new use case                | `tests/e2e/features/*.feature` + README entry       |
 | A new domain event            | `docs/events.md`                                    |
 | A new ADR                     | `docs/adr/INDEX.md` link                            |
-| `.claude/skills/**` or `.claude/hooks/**` | `CLAUDE.md` (or the article that owns the rule) |
-| `.claude/constitution/**` or any `CLAUDE.md` | the other layers, so one home per rule survives: a root rule that grew gets its article; an article rule that became binding gets the root; a package rule gets the nested file. Never leave the same rule in two homes (ADR-0082) |
+| `.claude/skills/**` or `.claude/hooks/**` | `AGENTS.md` (or the article that owns the rule) |
+| `constitution/**` or any `AGENTS.md` | the other layers, so one home per rule survives: a root rule that grew gets its article; an article rule that became binding gets the root; a package rule gets the nested file. Never leave the same rule in two homes (ADR-0082) |
 | `infra/terraform/**`          | `docs/infra.md` + the ops runbook                   |
+
+The docs gate runs the agentic-sdlc v0.10.0 docs-conformance harness, but with a **recorded
+local fork**: `scripts/docs-conformance/index.mjs` and `validators/claude-md-refs.mjs` are
+taken verbatim from the kit, while `runner.mjs` and `context.mjs` are kept forked so the
+eight local validators (ADR index/MADR, glossary, events, features, gherkin, OpenAPI) that
+depend on `ctx.paths` — removed upstream — keep running. The fork is recorded in `VERSION`'s
+deviation note; it can retire when the kit upstreams the docs-skeleton validators.
 
 ## Automated review (ADR-030 — fully wired)
 
@@ -81,6 +88,46 @@ protection.
   `infra/terraform/modules/github-repo/main.tf`.
 - Locally, `/review-and-evaluate` runs the two-axis review. **Axis-2 confirm-list items are
   human-only** — never auto-applied (`shared-invariants.md` §5).
+
+## Capability tiers — the cost/benefit call
+
+The root `AGENTS.md` names the four tiers (`planner`, `implementer`, `mechanical`,
+`reviewer`) and where the mapping lives (`scripts/agents.config.sh`, empty until an operator
+fills it in). This is the practice around them.
+
+**The decision is made at ticket-writing time, by the planner, in the open** — not at spawn
+time, and never by an agent about its own session. An agent asked to size itself has no view
+of the wave's total budget and every incentive to say "the strongest one". `/to-tickets`
+stamps a tier on every ticket and surfaces the whole set at its quiz step, which is where a
+human overrides it.
+
+The rubric, in the order to ask it:
+
+1. **Is the definition of done checkable without judgement?** A rename, a codemod, a
+   dependency bump, a mechanical migration of call sites — the suite is the oracle.
+   ⇒ `mechanical`. This is the one that saves real money, and the most common ticket in an
+   expand–migrate–contract wave.
+2. **Does the ticket's outcome constrain other tickets?** Decomposition, a design decision, a
+   schema, an interface everything else builds against. A wrong answer is paid for by every
+   downstream session. ⇒ `planner`.
+3. **Is the deliverable a verdict on a diff rather than the diff?** Fresh-context adversarial
+   reading, the standards axis of a review. ⇒ `reviewer`.
+4. **Otherwise** ⇒ `implementer`. The default, and defaulting is correct: an unsure planner
+   picking the cheap tier turns a saving into a re-run, and a re-run costs more than the tier
+   ever saved.
+
+Two rules that keep the rubric honest:
+
+- **Ambiguity resolves upward**, the opposite direction from the autonomy label (which
+  resolves to human-in-the-loop). Under-tiering is silent — you get a plausible wrong diff —
+  while over-tiering only costs money, and cost is visible.
+- **A tier is not a permission.** It says which model runs the work, never how much autonomy
+  the work carries. The `ready-for-agent` label is the only thing that says that, and a
+  `mechanical` ticket with no label still stops for a human.
+
+Unmapped is a working state: with `scripts/agents.config.sh` empty, every tier resolves to
+nothing, the spawn inherits the session's own model, and the resolver warns once so the gap
+is visible rather than assumed away.
 
 ## ADRs
 
