@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // docs-conformance entry point. Runs every validator against the repo and
-// exits non-zero on any violation. Invoked by `pnpm docs:check` and by the
-// docs-conformance CI workflow. Optional arg: a repo root (defaults to the
-// repo this script lives in).
+// exits non-zero on any violation.
+//
+// It is invoked by `scripts/check.sh` whenever node is available, and directly
+// by the kit's own CI. Optional arg: a repo root (defaults to the repo this
+// script lives in), which is how CI points it at a checkout and how the demo
+// points it at a throwaway project.
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +20,7 @@ const ctx = makeContext({ repoRoot, config });
 const violations = runAll(ctx);
 
 if (violations.length === 0) {
-  console.log("✓ docs conformance: all checks passed");
+  console.log("OK  docs conformance: all checks passed");
   process.exit(0);
 }
 
@@ -28,12 +31,12 @@ for (const v of violations) {
   byValidator.get(v.validator).push(v);
 }
 
-console.error("✗ docs conformance: violations found\n");
+console.error("FAIL  docs conformance: violations found\n");
 for (const [validator, items] of byValidator) {
   console.error(`  [${validator}] (${items.length})`);
   for (const v of items) {
-    console.error(`    ✗ ${v.file} — ${v.message}`);
-    console.error(`      ↳ ${v.hint}`);
+    console.error(`    x ${v.file} [${v.rule}] — ${v.message}`);
+    console.error(`      -> ${v.hint}`);
   }
   console.error("");
 }
