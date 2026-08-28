@@ -59,13 +59,15 @@ jobs:
     name: Isolate preview data plane
     runs-on: ubuntu-latest
     outputs:
-      # https:// URL of the isolated app-preview deployment, once it's READY —
-      # consumed by the `smoke` job below to invoke e2e.yml with a live target.
+      # Stable branch-alias URL of the isolated app-preview deployment (not the
+      # immutable per-deploy URL) — consumed by the `smoke` job to invoke
+      # e2e.yml with a live target. It is the app's VIEW_ORIGIN-carrying
+      # deployment after the second redeploy (issue #307).
       app_url: ${{ steps.redeploy.outputs.app_url }}
-      # https:// URL of the isolated view-preview deployment, once it's READY
-      # (redeployed AFTER the view project's APP_ORIGIN was set to app_url,
-      # above) — consumed by the `smoke` job to drive the cross-origin
-      # editor-render e2e (tests/e2e/smoke/editor-auth.feature).
+      # Stable branch-alias URL of the isolated view-preview deployment — the
+      # origin the e2e browser sits on, which the app's VIEW_ORIGIN names
+      # exactly so the cross-origin Save passes CORS. Consumed by the `smoke`
+      # job (tests/e2e/smoke/editor-auth.feature + toolbar-formatting.feature).
       view_url: ${{ steps.redeploy.outputs.view_url }}
     steps:
       - name: Checkout
@@ -216,27 +218,37 @@ jobs:
         id: redeploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        # Cross-origin editor e2e (issue #187 follow-up — the P0 owner-lockout
-        # coverage gap): the app's /open redirect always points at
-        # `${viewOrigin}/${slug}/edit?et=…`, but on previews VIEW_ORIGIN is
-        # unset (Terraform wires it prod-only) so `viewOrigin` falls back to
-        # the APP's OWN request origin (container.server.ts) — a circular,
-        # same-origin URL Remix has no route for. Rather than wire VIEW_ORIGIN
-        # here (which would need the VIEW's URL before the APP deploys — still
-        # circular the other way), the e2e test extracts the `et=` token from
-        # that (broken) Location and navigates directly to the VIEW preview's
-        # own URL instead. That URL only needs to exist and be captured, in
-        # this order: (a) redeploy+wait the APP (unchanged), (b) now that
-        # app_url is known, set it as the VIEW project's APP_ORIGIN — the ONE
-        # preview env the view side actually needs, since $slug.edit.tsx bails
-        # to the public viewer without it (arp-env schema.ts) and its editor
-        # bundle needs it as the cross-origin API base — (c) redeploy+wait the
-        # VIEW so it picks up that env, symmetric to the app. VIEW_ACCESS_TOKEN_SECRET
-        # is already shared across both projects on previews (one
-        # random_password resource, target=[production,preview]), so the
-        # edit-token HMAC verifies once (b)+(c) land — and if the deployed
-        # secrets ever drift apart, the view render fails and THIS e2e catches
-        # it (see tests/e2e/smoke/editor-auth.feature).
+        # Cross-origin editor previews (issue #187 owner-lockout coverage +
+        # issue #307 Save round-trip). The two preview deployments talk to each
+        # other across origins: the VIEW's editor bundle calls the APP's API
+        # (APP_ORIGIN), and the APP's CORS allow-list must name the VIEW's
+        # origin exactly (VIEW_ORIGIN, ADR-0063 — echoed byte-for-byte, never
+        # `*`, fail-closed when unset). Terraform wires both prod-only; on
+        # previews we wire them here to each other's STABLE branch alias
+        # (<project>-git-<branch>-<team>.vercel.app), which survives redeploys,
+        # rather than the immutable per-deploy `.url`, which does not.
+        #
+        # Order (three deploys, because each side bakes the other's origin at
+        # build and the view's origin is only known after it deploys):
+        #   (a) redeploy+wait the APP, capture its stable alias
+        #   (b) set the VIEW's APP_ORIGIN to the app alias
+        #   (c) redeploy+wait the VIEW, capture its stable alias
+        #   (d) set the APP's VIEW_ORIGIN to the view alias
+        #   (e) redeploy+wait the APP again so it serves with VIEW_ORIGIN set —
+        #       its alias (already the view's APP_ORIGIN) now points here, so
+        #       the pair is consistent and the cross-origin browser Save passes.
+        # A 2-deploy variant (compute the view alias up front and set
+        # VIEW_ORIGIN before the app's first deploy) is possible but relies on
+        # reproducing Vercel's alias slug/truncation + team-slug rules; the
+        # extra app deploy buys robustness for any branch name. See ADR-0085.
+        #
+        # VIEW_ACCESS_TOKEN_SECRET is already shared across both projects on
+        # previews (one random_password, target=[production,preview]), so the
+        # edit-token HMAC verifies once the pair lands — and if the deployed
+        # secrets ever drift apart, the view render fails and the e2e catches it
+        # (tests/e2e/smoke/editor-auth.feature). With VIEW_ORIGIN now set, the
+        # app's /open redirect resolves to the real view alias too, but the
+        # e2e still lifts `et=` and navigates directly for determinism.
         run: |
           set -euo pipefail
           # On success, prints the response BODY to stdout. On failure, logs
@@ -283,8 +295,9 @@ jobs:
 
           # Same git-branch-scoped upsert as the "Inject branch-scoped Vercel
           # env" step above — bash functions don't cross step boundaries, so
-          # it's redefined verbatim here rather than shared, to set exactly
-          # one var (APP_ORIGIN, below) on one project (the view).
+          # it's redefined verbatim here rather than shared. Used below to set
+          # APP_ORIGIN on the view AND VIEW_ORIGIN on the app, each to the
+          # OTHER's stable branch alias (issue #307).
           set_env() {
             local proj="$1" key="$2" val="$3"
             local resp code
@@ -297,38 +310,100 @@ jobs:
             case "$code" in 200|201) echo "  set $key on $proj";; *) echo "::error::set $key on $proj → HTTP $code"; printf '%s' "$resp" | sed '$d'; return 1;; esac
           }
 
-          # (a) App project: capture id + url, redeploy, wait for READY —
-          # unchanged from before, just factored through wait_ready().
+          # The deployment's STABLE git-branch alias
+          # (<project>-git-<branch>-<team>.vercel.app) — stable across
+          # redeploys of the same branch, unlike the immutable per-deploy
+          # `.url`. We cross-wire the pair to each other's alias (not their
+          # immutable URLs) precisely so the app can be redeployed once more
+          # below without invalidating the view's APP_ORIGIN (issue #307).
+          # Read from the API rather than hand-slugified: Vercel truncates and
+          # hashes long branch names, and the alias also carries the team slug,
+          # neither of which the workflow should try to reproduce.
+          branch_alias() {
+            local id="$1" name="$2" alias
+            alias=$(curl -sf -m 10 "$VERCEL_API/v13/deployments/$id?teamId=$VERCEL_TEAM" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              | jq -r '.meta.branchAlias // .alias[0] // empty' 2>/dev/null || true)
+            [ -n "$alias" ] || { echo "::error::$name deployment $id exposed no branch alias — cannot wire cross-origin CORS"; return 1; }
+            printf '%s' "$alias"
+          }
+
+          # A branch alias points at the LATEST ready deployment of its branch,
+          # but the reassignment LAGS readyState:READY. After the app's second
+          # deploy (e), poll until the alias actually resolves to THAT deployment
+          # before handing it to the e2e — otherwise the cross-origin Save races a
+          # stale target still serving the app's FIRST deploy, which has no
+          # VIEW_ORIGIN, and CORS fails closed exactly as if the fix were absent.
+          wait_alias() {
+            local host="$1" want="$2" name="$3" tries=36 interval=5 got
+            for i in $(seq 1 "$tries"); do
+              got=$(curl -sf -m 10 "$VERCEL_API/v13/deployments/$host?teamId=$VERCEL_TEAM" \
+                -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.id // empty' 2>/dev/null || true)
+              [ "$got" = "$want" ] && return 0
+              sleep "$interval"
+            done
+            echo "::error::$name alias $host still resolves to '$got', not $want, after $((tries * interval))s — the cross-origin Save would race a deployment without VIEW_ORIGIN"
+            return 1
+          }
+
+          # (a) App project: redeploy, wait for READY, then capture its stable
+          # branch alias — the origin the VIEW's editor bundle will call.
           app_body=$(redeploy "$APP_PROJECT" arp-app-prod)
           app_id=$(printf '%s' "$app_body" | jq -r '.id // empty')
           app_url=$(printf '%s' "$app_body" | jq -r '.url // empty')
           [ -n "$app_id" ] && [ -n "$app_url" ] || { echo "::error::redeploy arp-app-prod succeeded but the response had no id/url"; exit 1; }
           echo "  redeployed arp-app-prod ($app_id → $app_url)"
           wait_ready "$app_id" arp-app-prod
-          echo "  arp-app-prod deployment $app_id is READY"
+          app_alias=$(branch_alias "$app_id" arp-app-prod)
+          echo "  arp-app-prod deployment $app_id is READY (alias $app_alias)"
 
-          # (b) Now that app_url is known, point the VIEW project's
-          # cross-origin editor bundle at it. Must happen AFTER the app is
-          # READY (so app_url is real) and BEFORE the view's own redeploy
-          # below (so that redeploy's build picks it up).
-          set_env "$VIEW_PROJECT" APP_ORIGIN "https://$app_url"
+          # (b) Point the VIEW project's cross-origin editor bundle at the
+          # app's STABLE alias (not the immutable app_url) — so it survives the
+          # app's second redeploy in (e). Must happen BEFORE the view's own
+          # redeploy below so that build picks it up.
+          set_env "$VIEW_PROJECT" APP_ORIGIN "https://$app_alias"
 
-          # (c) View project: now captured + polled too (previously
-          # fire-and-forget), symmetric to the app — the `smoke` job needs a
-          # live view URL to hand Playwright for the cross-origin editor
-          # render (tests/e2e/smoke/editor-auth.feature).
+          # (c) View project: redeploy, wait for READY, capture its stable
+          # alias — the origin the browser will sit on, which the app's CORS
+          # allow-list must name exactly (tests/e2e/smoke/editor-auth.feature +
+          # toolbar-formatting.feature).
           view_body=$(redeploy "$VIEW_PROJECT" arp-view-prod)
           view_id=$(printf '%s' "$view_body" | jq -r '.id // empty')
           view_url=$(printf '%s' "$view_body" | jq -r '.url // empty')
           [ -n "$view_id" ] && [ -n "$view_url" ] || { echo "::error::redeploy arp-view-prod succeeded but the response had no id/url"; exit 1; }
           echo "  redeployed arp-view-prod ($view_id → $view_url)"
           wait_ready "$view_id" arp-view-prod
-          echo "  arp-view-prod deployment $view_id is READY"
+          view_alias=$(branch_alias "$view_id" arp-view-prod)
+          echo "  arp-view-prod deployment $view_id is READY (alias $view_alias)"
+
+          # (d) Now the view's stable origin is known, set it as the app's
+          # VIEW_ORIGIN — the single exact origin the app's CORS allow-list
+          # echoes (ADR-0063; cors.server.ts reads VIEW_ORIGIN per-request,
+          # but the value is baked into the deployment at build, so the app
+          # must redeploy to see it).
+          set_env "$APP_PROJECT" VIEW_ORIGIN "https://$view_alias"
+
+          # (e) Redeploy the app so it serves with VIEW_ORIGIN set. Its stable
+          # alias (already the view's APP_ORIGIN from (b)) now resolves to this
+          # deployment, so the pair is consistent: browser on view_alias →
+          # Save → app_alias, whose VIEW_ORIGIN === view_alias → CORS allows.
+          app_body=$(redeploy "$APP_PROJECT" arp-app-prod)
+          app_id=$(printf '%s' "$app_body" | jq -r '.id // empty')
+          [ -n "$app_id" ] || { echo "::error::second redeploy of arp-app-prod had no id"; exit 1; }
+          echo "  redeployed arp-app-prod for VIEW_ORIGIN ($app_id)"
+          wait_ready "$app_id" arp-app-prod
+          # Do not proceed until the alias the view actually calls resolves to
+          # THIS deployment — the one that carries VIEW_ORIGIN (see wait_alias).
+          wait_alias "$app_alias" "$app_id" arp-app-prod
+          echo "  arp-app-prod deployment $app_id is READY with VIEW_ORIGIN=https://$view_alias and owns the alias"
 
           echo "Preview PR #$PR isolated on Neon branch $NEON_BRANCH + R2 prefix pr-$PR/"
 
-          echo "app_url=https://$app_url" >> "$GITHUB_OUTPUT"
-          echo "view_url=https://$view_url" >> "$GITHUB_OUTPUT"
+          # Emit the STABLE aliases (not immutable per-deploy URLs): the browser
+          # Origin the e2e sits on must equal the app's VIEW_ORIGIN byte for
+          # byte, and both sides of the pair reference each other by alias.
+          echo "app_url=https://$app_alias" >> "$GITHUB_OUTPUT"
+          echo "view_url=https://$view_alias" >> "$GITHUB_OUTPUT"
 
   # ── Smoke: run the e2e reusable workflow against the now-READY isolated URL ───
   #

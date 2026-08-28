@@ -5949,3 +5949,41 @@ the gap where the migrated `AGENTS.md` *promised* stamping/reading the skills di
 Backlog (recorded, its own refactor ticket per §10): `/review-pr` and `/report-comments`
 still name models in prose. ADR-0084's pre-migration draft was rewritten to be truthful (it
 had referenced the dropped `agents.sh` and an enforcing test the migration removed).
+
+### 2026-08-28 — VIEW_ORIGIN wired on isolated previews; Save round-trip e2e restored (#307, ADR-0085)
+
+Mapping the #307 fix turned up that option 1 as literally stated — "set `VIEW_ORIGIN` to the
+view preview URL" — **cannot converge**: preview deploys get immutable per-deploy URLs, and
+because each side bakes the other's origin at build, redeploying the app to pick up
+`VIEW_ORIGIN` mints a new app URL the view no longer points at, and so on forever. The real
+fix wires the preview pair to each other's **stable Vercel git-branch alias**
+(`<project>-git-<branch>-<team>.vercel.app`), which survives redeploys — read from the Vercel
+API (`.meta.branchAlias`), never hand-slugified (Vercel truncates/hashes long names and the
+alias carries the team slug). Verified the alias shape against the live API before touching
+the workflow.
+
+The change is entirely in `preview-isolation.yml`'s redeploy step: (a) deploy app → its
+alias; (b) view `APP_ORIGIN` = app alias; (c) deploy view → its alias; (d) app `VIEW_ORIGIN`
+= view alias; (e) redeploy app to bake it. The job now emits the stable aliases as
+`app_url`/`view_url`, so the e2e's browser Origin equals the app's `VIEW_ORIGIN` byte for
+byte. **The ADR-0063 CORS contract is unchanged** — one exact origin, fail-closed, no `*`, no
+reflection, credentials never set; prod is Terraform's, untouched. Cost: a **third deploy per
+PR** (the second app redeploy) — accepted for robustness; the 2-deploy compute-and-verify
+variant is recorded in ADR-0085 as the optimization if CI time bites. This closes the
+Phase 5-C follow-up TODO in ADR-0063.
+
+The `toolbar-formatting.feature` + `.steps.ts` dropped in #303 are restored (ADR-0019 tier,
+gated like `editor-auth`) and now drive the real cross-origin browser Save. Verification of
+the flow is the PR's own preview: the modified workflow runs from the PR branch, so this PR's
+isolate job exercises the new three-deploy wiring and the restored e2e against it.
+
+**Second blocker, found on that preview and fixed test-side.** With `VIEW_ORIGIN` wired, the
+Save still failed — a diagnostic build proved (via a thrown, captured browser error) it was
+`x-vercel-set-bypass-cookie` **not allowed by Access-Control-Allow-Headers in preflight**.
+Playwright's global `extraHTTPHeaders` inject Vercel's protection-bypass headers on every
+request; they rode on the real cross-origin Save, whose preflight the app's strict CORS
+(`Authorization, Content-Type`, ADR-0063) then rejected. Production never sends those headers.
+Fixed by dropping the bypass headers on the `@browser` project (`chromium-auth`) — the app's
+security-reviewed CORS was **not** widened for an infra header. Safe because both preview
+projects have Deployment Protection disabled (confirmed via the Vercel API); if that changes,
+deliver the bypass as a cookie, not a header. Recorded in ADR-0085.
