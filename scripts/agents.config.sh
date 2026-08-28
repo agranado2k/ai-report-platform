@@ -96,23 +96,47 @@
 #
 # The kit ships none of these set, for the same reason it ships the four tiers
 # empty: a mapping is a model identifier, and the kit never names one.
+#
+# ---------------------------------------------------------------------------
+# THIS REPO FILLS IT IN (ADR-0084)
+# ---------------------------------------------------------------------------
+# The paragraphs above are the KIT's stance: it ships these empty because a
+# framework has no provider. This file is local (see VERSION), so this repo does
+# name its models — one harness (Claude Code), one provider. The values are
+# harness ALIASES, not dated identifiers, because the alias is what a spawn call
+# takes and it tracks its family across a version bump. The mapping is derived
+# from choices this repo already made in skill prose, so adopting the seam
+# changed no behaviour on day one:
+#
+#   planner      opus    (no named precedent — planner work runs in the
+#                         operator's own session or spawns with no model named,
+#                         i.e. the session's own, the top of the range)
+#   implementer  opus    (/report-comments Phase 3, "one Opus 5 subagent")
+#   mechanical   haiku   (/review-pr step 1, "Context Discovery (Haiku agent)")
+#   reviewer     opus    (all seven /review-pr sub-agents; claude-code-review.yml)
+#
+# Three of four are `opus` today, and that is the honest reading of current
+# practice, not a failure of the rubric — the VALUE is the seam: re-pointing is
+# now a one-file diff a reviewer reads, `mechanical` is genuinely cheaper, and
+# scripts/test/agents-mapping.test.mjs fails if any tier is emptied or if
+# `mechanical` ever collapses onto the `reviewer` model.
 
 # ---------------------------------------------------------------------------
 # 1. PLANNER — decomposition, design, triage
 # ---------------------------------------------------------------------------
-AGENT_TIER_PLANNER=''
+AGENT_TIER_PLANNER='opus'
 
 # ---------------------------------------------------------------------------
 # 2. IMPLEMENTER — one ticket, test-first, through the seams
 # ---------------------------------------------------------------------------
-AGENT_TIER_IMPLEMENTER=''
+AGENT_TIER_IMPLEMENTER='opus'
 
 # ---------------------------------------------------------------------------
 # 3. MECHANICAL — checkable definition of done, no judgement required
 # ---------------------------------------------------------------------------
-AGENT_TIER_MECHANICAL=''
+AGENT_TIER_MECHANICAL='haiku'
 
 # ---------------------------------------------------------------------------
 # 4. REVIEWER — adversarial reading of a finished diff, in fresh context
 # ---------------------------------------------------------------------------
-AGENT_TIER_REVIEWER=''
+AGENT_TIER_REVIEWER='opus'
