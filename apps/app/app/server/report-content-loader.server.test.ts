@@ -123,7 +123,12 @@ describe("loadReportContent", () => {
   it("returns the LIVE version's stored HTML by default", async () => {
     const { h, slug: reportSlug, v2 } = await twoVersionLiveReport({ withSidecars: false });
 
-    const result = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {});
+    const result = await loadReportContent(
+      depsOf(h),
+      { orgId: ORG, userId: OWNER },
+      reportSlug,
+      {},
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -205,7 +210,12 @@ describe("loadReportContent", () => {
     const created = await seedVersion(h, V1_HTML, "hash-v1", undefined, undefined);
     const reportSlug = slug(created); // NOT promoted → liveVersionId stays null
 
-    const result = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {});
+    const result = await loadReportContent(
+      depsOf(h),
+      { orgId: ORG, userId: OWNER },
+      reportSlug,
+      {},
+    );
 
     expect(result.ok).toBe(false);
     if (result.ok) return;

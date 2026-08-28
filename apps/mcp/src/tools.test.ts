@@ -111,7 +111,11 @@ describe("reports_get_content", () => {
     expect(tool).toBeDefined();
     expect(tool?.config.annotations?.readOnlyHint).toBe(true);
 
-    const res = await tool?.handler({ slug: "abc12345", version: "version_1", include_source: true });
+    const res = await tool?.handler({
+      slug: "abc12345",
+      version: "version_1",
+      include_source: true,
+    });
     expect(res?.isError).toBeUndefined();
     expect(calls).toEqual([
       {

@@ -42,7 +42,14 @@ describe("reportContentToHttp", () => {
   it("includes `source` verbatim when the outcome carries the sidecar doc", () => {
     const doc = { type: "doc", content: [] };
     const http = reportContentToHttp(
-      ok({ slug: "s", versionId: V, versionNo: 1, contentType: "text/html", html: "<x>", source: doc }),
+      ok({
+        slug: "s",
+        versionId: V,
+        versionNo: 1,
+        contentType: "text/html",
+        html: "<x>",
+        source: doc,
+      }),
       CTX,
     );
     expect((http.body as { source: unknown }).source).toEqual(doc);
