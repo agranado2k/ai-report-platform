@@ -162,20 +162,56 @@ Given("I have opened that report in the unified editor", async ({ page }) => {
 });
 
 When("I select a word of the report body", async ({ page }) => {
-  // Double-click word selection at the paragraph's start, in HOST viewport
-  // coordinates (element rect + the iframe's own offset) — the browser
-  // tier's `selectWord`, inlined against the deployed page.
-  const rect = await page.evaluate((sel) => {
+  // Double-click word selection in HOST viewport coordinates (element rect +
+  // the iframe's own offset) — the browser tier's `selectWord`, inlined against
+  // the deployed page.
+  //
+  // We double-click the CENTRE of a deterministically PLAIN word, located via a
+  // DOM Range, rather than a blind `paragraph.left + 10px` offset. The fixture's
+  // `p.sub` opens `Built for <strong>Arthur Granado</strong> …`, so a fixed
+  // offset near the start could resolve onto the <strong> depending on font
+  // metrics / wrapping — which lands the double-click on already-bold text and
+  // makes the very next step (asserting Bold is NOT yet pressed) flake. Picking
+  // the first plain 4+-letter word by Range makes the selection font-metric
+  // independent and always un-bold. (Root-caused on PR #313's preview.)
+  const target = await page.evaluate((sel) => {
     const iframe = document.querySelector("iframe") as HTMLIFrameElement | null;
     const doc = iframe?.contentDocument;
     if (!iframe || !doc) throw new Error("the editing surface has not mounted");
-    const el = doc.querySelector(sel);
-    if (!el) throw new Error(`the editing surface has no ${sel}`);
-    const frame = iframe.getBoundingClientRect();
-    const r = el.getBoundingClientRect();
-    return { x: frame.left + r.left, y: frame.top + r.top, height: r.height };
+    const para = doc.querySelector(sel);
+    if (!para) throw new Error(`the editing surface has no ${sel}`);
+
+    // A text node is "plain" only if no inline mark (strong/b/em/i/a/code) wraps
+    // it between the node and the paragraph — the same marks that would make the
+    // Bold button read pressed.
+    const isPlain = (node: Node): boolean => {
+      let p = node.parentElement;
+      while (p && p !== para) {
+        if (/^(STRONG|B|EM|I|A|CODE)$/.test(p.tagName)) return false;
+        p = p.parentElement;
+      }
+      return true;
+    };
+
+    const walker = doc.createTreeWalker(para, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!isPlain(n)) continue;
+      const m = /[A-Za-z]{4,}/.exec(n.textContent ?? "");
+      if (!m) continue;
+      const range = doc.createRange();
+      range.setStart(n, m.index);
+      range.setEnd(n, m.index + m[0].length);
+      const rr = range.getBoundingClientRect();
+      const frame = iframe.getBoundingClientRect();
+      return {
+        x: frame.left + rr.left + rr.width / 2,
+        y: frame.top + rr.top + rr.height / 2,
+        word: m[0],
+      };
+    }
+    throw new Error(`no plain word found in ${sel}`);
   }, PARAGRAPH);
-  await page.mouse.dblclick(rect.x + 10, rect.y + Math.min(10, rect.height / 2));
+  await page.mouse.dblclick(target.x, target.y);
 
   await expect(page.getByTestId("selection-toolbar")).toBeVisible();
   selectedWord = (
