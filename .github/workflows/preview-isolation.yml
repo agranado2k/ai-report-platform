@@ -328,6 +328,24 @@ jobs:
             printf '%s' "$alias"
           }
 
+          # A branch alias points at the LATEST ready deployment of its branch,
+          # but the reassignment LAGS readyState:READY. After the app's second
+          # deploy (e), poll until the alias actually resolves to THAT deployment
+          # before handing it to the e2e — otherwise the cross-origin Save races a
+          # stale target still serving the app's FIRST deploy, which has no
+          # VIEW_ORIGIN, and CORS fails closed exactly as if the fix were absent.
+          wait_alias() {
+            local host="$1" want="$2" name="$3" tries=36 interval=5 got
+            for i in $(seq 1 "$tries"); do
+              got=$(curl -sf -m 10 "$VERCEL_API/v13/deployments/$host?teamId=$VERCEL_TEAM" \
+                -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.id // empty' 2>/dev/null || true)
+              [ "$got" = "$want" ] && return 0
+              sleep "$interval"
+            done
+            echo "::error::$name alias $host still resolves to '$got', not $want, after $((tries * interval))s — the cross-origin Save would race a deployment without VIEW_ORIGIN"
+            return 1
+          }
+
           # (a) App project: redeploy, wait for READY, then capture its stable
           # branch alias — the origin the VIEW's editor bundle will call.
           app_body=$(redeploy "$APP_PROJECT" arp-app-prod)
@@ -374,7 +392,10 @@ jobs:
           [ -n "$app_id" ] || { echo "::error::second redeploy of arp-app-prod had no id"; exit 1; }
           echo "  redeployed arp-app-prod for VIEW_ORIGIN ($app_id)"
           wait_ready "$app_id" arp-app-prod
-          echo "  arp-app-prod deployment $app_id is READY with VIEW_ORIGIN=https://$view_alias"
+          # Do not proceed until the alias the view actually calls resolves to
+          # THIS deployment — the one that carries VIEW_ORIGIN (see wait_alias).
+          wait_alias "$app_alias" "$app_id" arp-app-prod
+          echo "  arp-app-prod deployment $app_id is READY with VIEW_ORIGIN=https://$view_alias and owns the alias"
 
           echo "Preview PR #$PR isolated on Neon branch $NEON_BRANCH + R2 prefix pr-$PR/"
 
