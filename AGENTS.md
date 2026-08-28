@@ -70,13 +70,15 @@ Unlike the four tiers, **the domain vocabulary is open and local**: it is data i
 your config, invented by the repo that finds the distinction useful, and a domain
 you have not mapped is not an error — it resolves to the tier, silently.
 
-**This manual names no model, and neither does any other file the kit ships.**
-Model identifiers rot on a vendor's schedule, so the tier → model mapping is data
-in `scripts/agents.config.sh` and the resolver is `scripts/agents.lib.sh`
-(`sh scripts/agents.lib.sh implementer` prints the mapped id). The mapping ships
-empty here — an unmapped tier is a working state: the resolver warns once, prints
-nothing, and the spawn inherits the session's own model. The cost/benefit rubric
-for choosing a tier lives in `constitution/local-workflow.md`.
+**This manual names no model; the mapping does.** Model identifiers rot on a
+vendor's schedule, so the tier → model mapping is data in `scripts/agents.config.sh`
+and the resolver is `scripts/agents.lib.sh` (`sh scripts/agents.lib.sh implementer`
+prints the mapped id). The kit ships that file empty; **this repo fills it in
+(ADR-0084)** — one harness, one provider — and `scripts/test/agents-mapping.test.mjs`
+fails if a tier is emptied or the cost seam collapses. (An unmapped tier would
+still be a working state: the resolver warns once, prints nothing, and the spawn
+inherits the session's own model.) The cost/benefit rubric for choosing a tier
+lives in `constitution/local-workflow.md`.
 
 ## Agent trust boundary (ADR-0069 is the contract)
 

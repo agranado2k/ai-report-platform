@@ -5925,3 +5925,27 @@ included. Bot review LGTM; noted (non-blocking) that `turbo`'s `typecheck` task 
 correctness. In flight alongside this: #302 (capability-tiers, rebased onto the migrated
 main) and #307 (the preview-CORS decision — implementing option 1 so the Save round-trip
 e2e becomes runnable).
+
+### 2026-08-28 — Capability-tier mapping filled + skills wired; /implement delivers (#302, ADR-0084)
+
+#302 predated the v0.10.0 migration and had to be rebased in place onto it. The migration
+had already superseded most of the branch: it brought the tier **mechanism** — the resolver
+`scripts/agents.lib.sh` (richer than the branch's: sourcing/zsh-safe, a domain second axis),
+the config `scripts/agents.config.sh`, the four-tier vocabulary in `AGENTS.md`, and the
+rubric in `constitution/local-workflow.md`. So the rebase kept main's canonical mechanism and
+re-applied only what was genuinely still missing: **the mapping, the skill wiring, and the
+decision record**, adapted to the post-migration layout (the branch's redundant `agents.sh`
+wrapper dropped for the directly-runnable `agents.lib.sh`; `.claude/constitution/` → root
+`constitution/`).
+
+Landed (ADR-0084): the mapping is filled — `planner`/`implementer`/`reviewer` → `opus`,
+`mechanical` → `haiku` (aliases, derived from choices already in skill prose, so day one
+changed no behaviour), pinned by `scripts/test/agents-mapping.test.mjs` (`test:scripts`),
+which fails if a tier is emptied or if `mechanical` collapses onto `reviewer`. `/to-tickets`
+now stamps `Tier:` and shows the mix at its quiz; `/implement` reads it and gained a Deliver
+phase (push through the hooks → `gh pr create` on the template with the restatement + demo
+evidence → confirm the ADR-030 reviewers fired → stop one click short of merge). This closes
+the gap where the migrated `AGENTS.md` *promised* stamping/reading the skills didn't do.
+Backlog (recorded, its own refactor ticket per §10): `/review-pr` and `/report-comments`
+still name models in prose. ADR-0084's pre-migration draft was rewritten to be truthful (it
+had referenced the dropped `agents.sh` and an enforcing test the migration removed).
