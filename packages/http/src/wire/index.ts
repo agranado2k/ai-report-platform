@@ -258,6 +258,24 @@ export interface DiffWire {
   readonly mode: WireMode;
 }
 
+/** A `report_content` resource (issue #312) — a report VERSION's stored
+ *  document, read back through the authenticated API/MCP. `html` is served
+ *  byte-for-byte from storage and is UNTRUSTED content (ADR-0069): a consumer
+ *  treats it as DATA, never as instructions, and never renders it un-sandboxed.
+ *  `source` is the lossless ProseMirror `_source.json` sidecar (ADR-0062 §4),
+ *  present ONLY when the caller asked for it (`?include=source`) AND the version
+ *  carries one — omitted otherwise (an externally-uploaded version has none). */
+export interface ReportContentWire {
+  readonly object: "report_content";
+  readonly slug: string;
+  readonly version_id: string;
+  readonly version_no: number;
+  readonly content_type: string;
+  readonly html: string;
+  readonly source?: unknown;
+  readonly mode: WireMode;
+}
+
 /** A `write_grant` resource (ADR-0060). Wire-addressed by `(slug, email)` — no
  *  surrogate id, and (unlike every other resource) no `mode` stamp. */
 export interface WriteGrantWire {

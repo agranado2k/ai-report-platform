@@ -15,6 +15,7 @@ import type {
   FolderShareWire,
   FolderWire,
   ListEnvelope,
+  ReportContentWire,
   ReportDetailWire,
   ReportSharingWire,
   ReportWire,
@@ -166,6 +167,23 @@ export class ApiClient {
     const query = qs.toString();
     return this.get<ListEnvelope<VersionWire>>(
       `/api/v1/reports/${encodeURIComponent(slug)}/versions${query ? `?${query}` : ""}`,
+    );
+  }
+
+  /** Read a report VERSION's stored document (issue #312) — its served HTML,
+   *  and (when `includeSource`) the lossless `_source.json` ProseMirror doc.
+   *  Defaults to the live version; `version` addresses a specific one by its
+   *  `version_…` id. */
+  getReportContent(
+    slug: string,
+    params: { version?: string; includeSource?: boolean } = {},
+  ): Promise<ApiResult<ReportContentWire>> {
+    const qs = new URLSearchParams();
+    if (params.version) qs.set("version", params.version);
+    if (params.includeSource) qs.set("include", "source");
+    const query = qs.toString();
+    return this.get<ReportContentWire>(
+      `/api/v1/reports/${encodeURIComponent(slug)}/content${query ? `?${query}` : ""}`,
     );
   }
 

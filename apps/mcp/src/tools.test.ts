@@ -101,6 +101,39 @@ describe("tool result mapping", () => {
   });
 });
 
+describe("reports_get_content", () => {
+  it("is READ-ONLY and maps slug + version + include_source to getReportContent", async () => {
+    const { client, calls } = recordingClient({
+      ok: true,
+      data: { object: "report_content", slug: "abc12345", html: "<x>" },
+    });
+    const tool = collectTools(registerReadTools, client).get("reports_get_content");
+    expect(tool).toBeDefined();
+    expect(tool?.config.annotations?.readOnlyHint).toBe(true);
+
+    const res = await tool?.handler({ slug: "abc12345", version: "version_1", include_source: true });
+    expect(res?.isError).toBeUndefined();
+    expect(calls).toEqual([
+      {
+        method: "getReportContent",
+        args: ["abc12345", { version: "version_1", includeSource: true }],
+      },
+    ]);
+  });
+
+  it("passes undefined version/include_source through when omitted (live, no source)", async () => {
+    const { client, calls } = recordingClient({
+      ok: true,
+      data: { object: "report_content", slug: "s", html: "<x>" },
+    });
+    const tool = collectTools(registerReadTools, client).get("reports_get_content");
+    await tool?.handler({ slug: "s" });
+    expect(calls).toEqual([
+      { method: "getReportContent", args: ["s", { version: undefined, includeSource: undefined }] },
+    ]);
+  });
+});
+
 describe("comment tools", () => {
   it("reports_list_comments is READ-ONLY and maps slug + cursor to listComments", async () => {
     const { client, calls } = recordingClient({

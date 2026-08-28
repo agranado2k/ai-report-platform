@@ -3,6 +3,7 @@
 // shared problem.ts mapper; request-parse helpers may join later.
 
 export * from "./cors";
+export * from "./content-response";
 export * from "./cursor";
 export * from "./diff-response";
 export * from "./edit-token-response";
