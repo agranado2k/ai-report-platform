@@ -35,6 +35,9 @@ let ownerAccess: string;
  *  iframe's own selection — what the `<strong>` assertions look for. */
 let selectedWord: string;
 let versionCountBefore: number;
+/** DIAGNOSTIC (#307): captured requestfailed/console events, thrown on Save
+ *  failure. Temporary — remove once the round-trip is green. */
+const diag: string[] = [];
 
 // The REAL generated report (same fixture as editor-auth + the browser
 // tier's @real-report project). Its `p.sub` paragraph is on screen at rest
@@ -117,19 +120,19 @@ Given("I have opened that report in the unified editor", async ({ page }) => {
     "PLAYWRIGHT_VIEW_BASE_URL not set — no deployed view origin to edit on",
   );
 
-  // DIAGNOSTIC (issue #307): surface exactly why a cross-origin Save fetch is
+  // DIAGNOSTIC (issue #307): capture exactly why a cross-origin Save fetch is
   // rejected on preview — CSP (net::ERR_BLOCKED_BY_CSP / a securitypolicy
-  // console violation) vs CORS vs network. Logged to the test's stdout so the
-  // CI job states the cause instead of collapsing to the client's generic
-  // "Network error". Remove once the round-trip is green.
+  // console violation) vs CORS vs network. Accumulated here and THROWN in the
+  // Save step on failure (console.log is swallowed by the reporter), so the
+  // cause lands in the error context instead of the client's generic "Network
+  // error". Remove once the round-trip is green.
+  diag.length = 0;
   page.on("requestfailed", (r) => {
-    // eslint-disable-next-line no-console
-    console.log(`[reqfailed] ${r.method()} ${r.url()} → ${r.failure()?.errorText ?? "?"}`);
+    diag.push(`[reqfailed] ${r.method()} ${r.url()} → ${r.failure()?.errorText ?? "?"}`);
   });
   page.on("console", (m) => {
-    if (/content security|csp|blocked|access-control|cors|violat/i.test(m.text())) {
-      // eslint-disable-next-line no-console
-      console.log(`[browser-console:${m.type()}] ${m.text()}`);
+    if (/content security|csp|blocked|access-control|cors|violat|refused/i.test(m.text())) {
+      diag.push(`[console:${m.type()}] ${m.text()}`);
     }
   });
 
@@ -220,6 +223,16 @@ When("I save the formatted document", async ({ page }) => {
   // The TopBar's live-region status reports the save (e.g. "Saved as v2 —
   // scan: pending"). The save is a cross-origin Bearer fetch (view → app,
   // ADR-0063 Phase 4) — give the round-trip room.
+  // DIAGNOSTIC (#307): if the save reports a network failure, throw the captured
+  // browser events so the error context names the real cause (CSP vs CORS vs
+  // URL) instead of the client's generic message. Remove once green.
+  await page.waitForTimeout(3_000);
+  const statusText = (await page.getByRole("status").textContent()) ?? "";
+  if (/network error/i.test(statusText)) {
+    throw new Error(
+      `Save reported "${statusText}". Captured browser events:\n${diag.join("\n") || "(none captured — the fetch threw before making a request; likely a bad appOrigin URL)"}`,
+    );
+  }
   await expect(page.getByRole("status")).toContainText(/Saved as v/, { timeout: 20_000 });
 });
 
