@@ -32,8 +32,14 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck packages
-        run: pnpm --filter "./packages/*" typecheck
+      # Typecheck the WHOLE workspace — apps as well as packages. The
+      # `./packages/*` filter here once let an app-tier type error stay green
+      # (vitest strips types, so an app test with a type error still runs), which
+      # is exactly how a broken `mount()` helper in apps/view reached main under a
+      # green suite (issue #308). `turbo typecheck` runs the task in every
+      # workspace that defines one, apps included.
+      - name: Typecheck (apps + packages)
+        run: pnpm turbo typecheck
 
       - name: Test
         run: pnpm test
