@@ -5907,3 +5907,21 @@ for a future infra decision (an ADR-0063/0069 CORS-surface change).
 
 `/worktree-cleanup` pruned the three merged worktrees and fast-forwarded main to `3c477fb`.
 `capability-tiers` remains, unmerged.
+
+### 2026-08-28 — CI typecheck widened to the apps (#308)
+
+Post-epic housekeeping surfaced a real gate hole (#308): the `unit` workflow typechecked
+only `./packages/*`, so an app-tier type error never turned CI red — vitest strips types, so
+an app test with a type error still runs green. Pre-flighting `pnpm turbo typecheck` on a
+clean `main` caught a **latent break already on main**: `apps/view`'s
+`SelectionToolbar.link-editor.test.ts` `mount()` helper omitted `onCompose`, which #305 had
+made a required prop (TS2769) — the sibling `SelectionToolbar.test.ts` was fixed at the time
+but this call site was missed and nothing caught it.
+
+Fix (PR #309, two commits): supply the missing prop, then swap the CI step to
+`pnpm turbo typecheck`, which runs the task in every workspace that defines one — apps
+included. Bot review LGTM; noted (non-blocking) that `turbo`'s `typecheck` task carries
+`dependsOn: ["^build"]`, so the step now builds upstream packages first — the right trade for
+correctness. In flight alongside this: #302 (capability-tiers, rebased onto the migrated
+main) and #307 (the preview-CORS decision — implementing option 1 so the Save round-trip
+e2e becomes runnable).
