@@ -117,6 +117,22 @@ Given("I have opened that report in the unified editor", async ({ page }) => {
     "PLAYWRIGHT_VIEW_BASE_URL not set — no deployed view origin to edit on",
   );
 
+  // DIAGNOSTIC (issue #307): surface exactly why a cross-origin Save fetch is
+  // rejected on preview — CSP (net::ERR_BLOCKED_BY_CSP / a securitypolicy
+  // console violation) vs CORS vs network. Logged to the test's stdout so the
+  // CI job states the cause instead of collapsing to the client's generic
+  // "Network error". Remove once the round-trip is green.
+  page.on("requestfailed", (r) => {
+    // eslint-disable-next-line no-console
+    console.log(`[reqfailed] ${r.method()} ${r.url()} → ${r.failure()?.errorText ?? "?"}`);
+  });
+  page.on("console", (m) => {
+    if (/content security|csp|blocked|access-control|cors|violat/i.test(m.text())) {
+      // eslint-disable-next-line no-console
+      console.log(`[browser-console:${m.type()}] ${m.text()}`);
+    }
+  });
+
   // The app-side half of the hand-off (same seam editor-auth proves): /open
   // mints the edit token in the Location's query. With VIEW_ORIGIN now wired on
   // previews (issue #307) the Location's ORIGIN resolves to the real view alias
