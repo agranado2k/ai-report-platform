@@ -5976,3 +5976,14 @@ The `toolbar-formatting.feature` + `.steps.ts` dropped in #303 are restored (ADR
 gated like `editor-auth`) and now drive the real cross-origin browser Save. Verification of
 the flow is the PR's own preview: the modified workflow runs from the PR branch, so this PR's
 isolate job exercises the new three-deploy wiring and the restored e2e against it.
+
+**Second blocker, found on that preview and fixed test-side.** With `VIEW_ORIGIN` wired, the
+Save still failed — a diagnostic build proved (via a thrown, captured browser error) it was
+`x-vercel-set-bypass-cookie` **not allowed by Access-Control-Allow-Headers in preflight**.
+Playwright's global `extraHTTPHeaders` inject Vercel's protection-bypass headers on every
+request; they rode on the real cross-origin Save, whose preflight the app's strict CORS
+(`Authorization, Content-Type`, ADR-0063) then rejected. Production never sends those headers.
+Fixed by dropping the bypass headers on the `@browser` project (`chromium-auth`) — the app's
+security-reviewed CORS was **not** widened for an infra header. Safe because both preview
+projects have Deployment Protection disabled (confirmed via the Vercel API); if that changes,
+deliver the bypass as a cookie, not a header. Recorded in ADR-0085.

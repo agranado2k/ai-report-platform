@@ -53,6 +53,26 @@ The dropped e2e (`toolbar-formatting.feature` + `.steps.ts`) is **restored**, ga
 - **Recorded alternative (a 2-deploy variant)**: compute the view alias up front and set `VIEW_ORIGIN` before the app's first deploy, cross-checking the computed value against the API-returned alias and failing loud on mismatch. It trades the extra deploy for reproducing Vercel's alias slug/truncation + team-slug rules. Not taken now — robustness for any branch name is worth one deploy — but it is the obvious optimization if the added CI time bites.
 - **Neutral**: `APP_ORIGIN` on the view moves from the immutable URL to the stable alias. This is strictly more correct (it already had to survive the view's own redeploy) and does not change what `editor-auth` observes.
 
+### The test harness must not pollute the Save's preflight
+
+Wiring `VIEW_ORIGIN` fixed the allow-list, but the restored e2e still failed —
+for a second, unrelated reason worth recording. Playwright's global
+`extraHTTPHeaders` inject Vercel's automation-bypass headers
+(`x-vercel-protection-bypass`, `x-vercel-set-bypass-cookie`) on **every** request
+to get through Deployment Protection. Those rode on the editor's real
+cross-origin Save, whose preflight then advertised `x-vercel-set-bypass-cookie`
+— which the app's CORS `Access-Control-Allow-Headers` (exactly
+`Authorization, Content-Type`, ADR-0063) rejects, so the browser blocked the
+Save before it left. Production never sends those headers.
+
+Fix (test side, not product): the `chromium-auth` project (which runs the
+`@browser` scenarios) drops the bypass headers, so the Save carries exactly what
+prod sends. The app's strict CORS surface was **deliberately not widened** for an
+infra header. This is safe because both preview projects have Deployment
+Protection disabled, so navigation needs no bypass; the alternative that survives
+protection being re-enabled is to deliver the bypass as a **cookie** (same-origin,
+never sent on the `credentials: "omit"` cross-origin Save) rather than a header.
+
 ## More information
 
 - Mechanism: `.github/workflows/preview-isolation.yml` (the `redeploy` step and the `isolate` job outputs). No app, package, or Terraform change.

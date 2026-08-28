@@ -132,7 +132,27 @@ export default defineConfig({
       name: "chromium-auth",
       dependencies: ["setup"],
       grep: /@browser/,
-      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE_PATH },
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: STORAGE_STATE_PATH,
+        // Drop the top-level Vercel automation-bypass headers for @browser
+        // scenarios (issue #307). They must not ride on the editor's REAL
+        // cross-origin Save fetch (view origin → app API): that request is a
+        // browser fetch subject to the app's strict CORS, whose
+        // Access-Control-Allow-Headers is exactly `Authorization, Content-Type`
+        // (ADR-0063, security-reviewed — deliberately NOT widened for an infra
+        // header). With the bypass headers present, the Save's preflight
+        // advertises `x-vercel-set-bypass-cookie` and CORS rejects it, so the
+        // save never leaves the browser. Production never sends these headers,
+        // so dropping them here makes the e2e faithful to prod, not weaker.
+        // SAFE because both preview projects have Deployment Protection
+        // DISABLED, so navigating the previews needs no bypass. If protection
+        // is ever re-enabled for previews, deliver the bypass as a COOKIE
+        // (same-origin, and not sent on the `credentials: "omit"` cross-origin
+        // Save) rather than as a global header — a header pollutes the
+        // cross-origin preflight, a cookie does not.
+        extraHTTPHeaders: {},
+      },
     },
   ],
 });
