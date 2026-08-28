@@ -55,6 +55,7 @@ function mount(overrides: Partial<SelectionToolbarProps> = {}) {
         onToggleList: () => {},
         onApplyLink: () => true,
         onRemoveLink: () => true,
+        onCompose: () => {},
         ...overrides,
       }),
     );
