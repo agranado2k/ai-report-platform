@@ -10,6 +10,8 @@ import * as featurePresence from "./validators/feature-presence.mjs";
 import * as gherkinStructure from "./validators/gherkin-structure.mjs";
 import * as glossaryTerms from "./validators/glossary-terms.mjs";
 import * as openapiStructure from "./validators/openapi-structure.mjs";
+import * as skillPaths from "./validators/skill-paths.mjs";
+import * as skillWeb from "./validators/skill-web.mjs";
 
 export const VALIDATORS = [
   adrMadr,
@@ -21,9 +23,15 @@ export const VALIDATORS = [
   gherkinStructure,
   openapiStructure,
   claudeMdRefs,
+  // Shared-layer advisories (kit 0.11/0.12) — warnings, never violations;
+  // index.mjs splits them out by severity and only it decides the exit code.
+  skillPaths,
+  skillWeb,
 ];
 
-/** Run all validators against the context; returns a flat list of violations. */
+/** Run all validators against the context; returns a flat list of findings —
+ * violations and warnings alike. `index.mjs` splits them by severity; only it
+ * decides the exit code. */
 export function runAll(ctx) {
   const violations = [];
   for (const validator of VALIDATORS) {

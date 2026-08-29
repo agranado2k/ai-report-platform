@@ -490,7 +490,7 @@ addition.
 
 A real run, captured from `tests/docs-demo.sh` in the kit. The setup: a consumer
 that bootstrapped at shared-layer **0.1.0** (whose layer was
-`constitution/shared-invariants.md` alone), updating to **0.10.0** (by which point
+`constitution/shared-invariants.md` alone), updating to **0.12.0** (by which point
 the guards, the gate, the harness engine, the tier resolver, the code-craft
 article and this file have all joined the layer). The consumer has one local edit to a shared file — the
 drift case, because the clean case teaches nothing.
@@ -503,9 +503,9 @@ order by the locale's collation, and only the paths move, never the verdicts.
 ```console
 $ kit tag --list
 v0.1.0
-v0.10.0
+v0.12.0
 $ echo "$FROM_REF -> $TO_REF"
-v0.1.0 -> v0.10.0
+v0.1.0 -> v0.12.0
 
 $ comm -13 "$WORK/from.list" "$WORK/to.list"   # JOINING
 UPDATING.md
@@ -517,6 +517,8 @@ scripts/docs-conformance/context.mjs
 scripts/docs-conformance/index.mjs
 scripts/docs-conformance/runner.mjs
 scripts/docs-conformance/validators/claude-md-refs.mjs
+scripts/docs-conformance/validators/skill-paths.mjs
+scripts/docs-conformance/validators/skill-web.mjs
 scripts/guards.lib.sh
 scripts/tdd-pairing-guard-ci.sh
 scripts/tdd-pairing-guard.sh
@@ -524,10 +526,10 @@ $ comm -23 "$WORK/from.list" "$WORK/to.list"   # LEAVING
 (none)
 
 $ kit diff --stat "$FROM_REF" "$TO_REF" -- $(sort -u "$WORK/from.list" "$WORK/to.list")
- UPDATING.md                       | 1306 +++++++++++++++++++++++++++++++++++++
+ UPDATING.md                       | 1387 +++++++++++++++++++++++++++++++++++++
  constitution/shared-code-craft.md |  129 ++++
  constitution/shared-invariants.md |    8 +-
- 3 files changed, 1442 insertions(+), 1 deletion(-)
+ 3 files changed, 1523 insertions(+), 1 deletion(-)
 
 $ kit diff "$FROM_REF" "$TO_REF" -- constitution/shared-invariants.md
 diff --git a/constitution/shared-invariants.md b/constitution/shared-invariants.md
@@ -572,10 +574,12 @@ $ # step 5 — apply
   updated scripts/docs-conformance/index.mjs
   updated scripts/docs-conformance/runner.mjs
   updated scripts/docs-conformance/validators/claude-md-refs.mjs
+  updated scripts/docs-conformance/validators/skill-paths.mjs
+  updated scripts/docs-conformance/validators/skill-web.mjs
   updated scripts/guards.lib.sh
   updated scripts/tdd-pairing-guard-ci.sh
   updated scripts/tdd-pairing-guard.sh
-  NOTE  UPDATING.md changed in v0.10.0 — RE-READ IT before continuing
+  NOTE  UPDATING.md changed in v0.12.0 — RE-READ IT before continuing
 
 $ # step 6 — verbatim check (bytes AND mode), then the gate
 verbatim  UPDATING.md
@@ -588,6 +592,8 @@ verbatim  scripts/docs-conformance/context.mjs
 verbatim  scripts/docs-conformance/index.mjs
 verbatim  scripts/docs-conformance/runner.mjs
 verbatim  scripts/docs-conformance/validators/claude-md-refs.mjs
+verbatim  scripts/docs-conformance/validators/skill-paths.mjs
+verbatim  scripts/docs-conformance/validators/skill-web.mjs
 verbatim  scripts/guards.lib.sh
 verbatim  scripts/tdd-pairing-guard-ci.sh
 verbatim  scripts/tdd-pairing-guard.sh
@@ -607,10 +613,10 @@ Fix them, or see .githooks/pre-push for the logged bypass.
 $ # RED, deliberately: the ARTICLE is shared layer, the POINTER to it is
 $ # yours (the root manual — Part 2 territory). Add it and re-run.
 $ sh scripts/check.sh
-OK  docs gate: all checks passed (shared-layer 0.10.0, engine: harness)
+OK  docs gate: all checks passed (shared-layer 0.12.0, engine: harness)
 $ sed -n 's/^shared-layer:[[:space:]]*//p' VERSION
-0.10.0
-Part 1 complete — shared layer at v0.10.0. The update is not done: go to step 8.
+0.12.0
+Part 1 complete — shared layer at v0.12.0. The update is not done: go to step 8.
 ```
 
 **Read the last two lines before the drift block.** `NOTE  UPDATING.md changed`
@@ -715,10 +721,61 @@ One rule per category, because the categories differ in what a local edit
 
 ### 9a. Skills — a three-way, not a copy
 
-A skill is prose an agent loads, and adapting it to your repo is the intended
-way to make the chain fit. So "is it byte-identical to the release?" is the
-wrong question here; the right one is **"what did the kit change, and did I
-change the same lines?"**
+**Start with the inventory, not the diff.** Since 0.11.0 the kit's `VERSION`
+carries a `skills:` section — every skill the release ships, by name. It is
+**state, not delta**: however many releases this update spans, and however
+many earlier windows were skimmed or skipped, the comparison below prints
+exactly what your project lacks. Step 8's `changed.yours` cannot promise that
+— a skill added before your `FROM_REF` is in no diff you will ever run, which
+is precisely how a real consumer lost a whole skill with a green gate. Only
+the newer ref's list is read, so a `FROM_REF` that predates the section does
+not matter — and a `TO_REF` that predates it makes the fence say so rather
+than print an empty gap list, because a silence that means "I could not look"
+must never read as "nothing is missing".
+
+```sh
+kit show "${TO_REF}:VERSION" | awk '
+	/^skills:/      { inlist = 1; next }
+	!inlist         { next }
+	/^[ \t]*#/      { next }
+	/^[ \t]*$/      { next }
+	/^[ \t]+[^ \t]/ { sub(/^[ \t]+/, ""); print $1; next }
+	                { inlist = 0 }
+' | sort >"$WORK/skills.manifest"
+[ -s "$WORK/skills.manifest" ] ||
+	echo "no skills: manifest at ${TO_REF} (pre-0.11.0 kit?) — the inventory cannot answer" >&2
+
+for d in .claude/skills/*/; do
+	[ -d "$d" ] || continue
+	basename "$d"
+done | sort >"$WORK/skills.installed"
+
+comm -23 "$WORK/skills.manifest" "$WORK/skills.installed"   # skills you LACK
+```
+
+Read each printed name against what you know: it is either a **decline you
+recorded** (the optional skill you said no to, a fork you wrote down — nothing
+to do) or a **feature nobody ever told you about** — adopt it as a new skill
+(the directory copy further down), and read its release's history note in the
+newer `VERSION` for the wiring that shipped with it, because a skill's whole
+value can hang on one bullet in another skill and one marker in a template.
+Only the first word of a manifest entry is the name; anything after it is
+annotation.
+
+**Arriving from 0.10.0 or older, check `/explain-diff` by name.** It shipped
+in the v0.8.0 window and predates this inventory, so it is the skill the list
+above most likely prints. Adopting it is the directory copy plus **two wiring
+points**: your `/implement` skill's Deliver phase gains the appendix bullet
+(that arrives as an ordinary 9a take or merge of `/implement` below), and your
+pull-request template gains the `<!-- explain-diff-appendix -->` marker
+paragraph (that is a 9c template take). The copy without the wiring installs a
+skill nothing invokes.
+
+After the inventory, the per-skill question for what you DO have. A skill is
+prose an agent loads, and adapting it to your repo is the intended way to make
+the chain fit. So "is it byte-identical to the release?" is the wrong question
+here; the right one is **"what did the kit change, and did I change the same
+lines?"**
 
 ```sh
 S=.claude/skills/implement/SKILL.md
@@ -940,7 +997,7 @@ else
 fi
 ```
 
-`MERGE` is the 0.4.0 → 0.10.0 case for this file, and `ADD` is the 0.3.0 → 0.10.0
+`MERGE` is the 0.4.0 → 0.12.0 case for this file, and `ADD` is the 0.3.0 → 0.12.0
 one: `scripts/agents.config.sh` did **not** exist at 0.3.0 — it arrived with the
 0.4.0 wave's tier resolver — so a 0.3.0 consumer copies the whole file and then
 edits it. Nothing is at risk there, which is precisely why it is worth checking
@@ -1113,6 +1170,14 @@ the pointer names a path you have just renamed away (`path-missing`) and the
 article nobody points at is `article-unreferenced`. That is the framework
 working, and it is still two steps you can simply take in the right order.
 
+3. **Restore the skill's gate exemption.** Bootstrap stripped it when you
+   declined: re-add `"docs/dogfood-reports/"` to `skillPaths.exemptTokens` in
+   `scripts/docs-conformance/config.mjs` (yours, so this is an ordinary edit),
+   or accept a standing `skill-path-missing` advisory until the skill's first
+   run creates that directory. The gate stays green either way — the advisory
+   channel is why — but a warning you have decided to ignore is training, and
+   the wrong kind.
+
 ```sh
 sh scripts/check.sh
 ```
@@ -1146,14 +1211,14 @@ The same test, a different consumer. This one bootstrapped at shared-layer
 **0.3.0** with `/dogfood` declined, adapted `/to-tickets` with a local note (a
 legitimate edit — skills are yours), **deleted `.github/workflows/tdd-pairing.yml`
 on purpose** after folding that gate into its own CI, and has just finished Part
-1: its `VERSION` says 0.10.0 and `scripts/agents.lib.sh` is on disk — and the gate
+1: its `VERSION` says 0.12.0 and `scripts/agents.lib.sh` is on disk — and the gate
 is **red** with `article-unreferenced`, because Part 1 landed the code-craft
 article and nothing in this consumer's manual points at it yet. That pointer is
 step 9b's hand edit, which is the point.
 
 > **The file list below is this pair of releases, and this consumer.** What
 > `changed.yours` prints is every non-shared path the kit touched between *your*
-> two refs — a real `v0.3.0 → v0.10.0` clone prints more lines than the fixture
+> two refs — a real `v0.3.0 → v0.12.0` clone prints more lines than the fixture
 > here, because the fixture models only the parts of the wave the example is
 > about. Read the transcript for the **shape** of each decision, never as a list
 > to check yours against: a line you have and this one does not is normal.
@@ -1186,6 +1251,11 @@ scripts/agents.config.sh
 templates/workflows/ai-review-prompt.md
 templates/workflows/ai-review.example.yml
 
+$ # 9a — the INVENTORY first: state, not delta (one is a decline, one is a gap)
+$ comm -23 "$WORK/skills.manifest" "$WORK/skills.installed"   # skills you LACK
+dogfood
+improve-codebase-architecture
+
 $ # 9a — /implement: the kit changed it, we did not
 $ kit diff --stat "$FROM_REF" "$TO_REF" -- "$S"
  .claude/skills/implement/SKILL.md | 20 ++++++++++++++++++++
@@ -1208,6 +1278,17 @@ $ kit diff --name-only --diff-filter=A "$FROM_REF" "$TO_REF" -- .claude/skills
 $ kit archive "$TO_REF" .claude/skills/improve-codebase-architecture | tar -x
 $ sh scripts/check.sh   # still red from Part 1: the ARTICLE is here; the manual does not know
 FAIL  docs gate: violations found
+
+WARN  docs conformance: advisories (gate stays green)
+
+  [skill-paths] ! .claude/skills/implement/SKILL.md [skill-path-missing] — references `adapters/claude-code/README.md` but neither it nor `adapters/claude-code/README.md.template` exists
+      -> Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.
+  [skill-paths] ! .claude/skills/implement/SKILL.md [skill-path-missing] — references `scripts/agents.config.sh` but neither it nor `scripts/agents.config.sh.template` exists
+      -> Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.
+  [skill-paths] ! .claude/skills/improve-codebase-architecture/SKILL.md [skill-path-missing] — references `scripts/agents.config.sh` but neither it nor `scripts/agents.config.sh.template` exists
+      -> Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.
+  [skill-paths] ! .claude/skills/to-tickets/SKILL.md [skill-path-missing] — references `scripts/agents.config.sh` but neither it nor `scripts/agents.config.sh.template` exists
+      -> Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.
 
 FAIL  docs conformance: violations found
 
@@ -1239,7 +1320,7 @@ DECLINED  .github/workflows/tdd-pairing.yml
 
 $ # 9d — config: MERGE, ADD or STAMPED? Ask about BOTH refs first.
 $ # kit cat-file -e "${FROM_REF}:$C" — did it exist at the release we are on?
-ADD     scripts/agents.config.sh is new at v0.10.0 — nothing of ours to preserve
+ADD     scripts/agents.config.sh is new at v0.12.0 — nothing of ours to preserve
 $ sed -n 's/^\(AGENT_TIER_[A-Z]*\)=.*/\1/p' "$C"
 AGENT_TIER_PLANNER
 AGENT_TIER_IMPLEMENTER
@@ -1257,12 +1338,12 @@ claude-code
 node-ts
 
 $ sh scripts/check.sh
-OK  docs gate: all checks passed (shared-layer 0.10.0, engine: harness)
+OK  docs gate: all checks passed (shared-layer 0.12.0, engine: harness)
 ```
 
 Six things in that transcript are worth reading twice.
 
-**`ADD     scripts/agents.config.sh is new at v0.10.0`.** The tier→model map did
+**`ADD     scripts/agents.config.sh is new at v0.12.0`.** The tier→model map did
 not exist at 0.3.0; it arrived with the resolver. So this consumer copies the
 whole file — nothing of theirs is at risk — and then edits it. That is *this*
 pair of releases, not a rule: the same path is a destructive overwrite for a
