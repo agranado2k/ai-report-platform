@@ -33,7 +33,7 @@
 - **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
 - **TDD enforcement is live** (2026-08-07): the `.husky/pre-push` TDD pairing guard blocks source-without-tests pushes; `pnpm docs:check` runs in the same hook. Escape hatches `PUSH_WITHOUT_TESTS=1` / `PUSH_WITHOUT_DOCS=1`, both logged.
-- **The manual is `AGENTS.md`** (agentic-sdlc v0.10.0, merged 2026-08-27 via PR #304). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/` (not `.claude/constitution/`); the guards read `scripts/guards.config.sh`; the docs-conformance engine is a recorded local fork (see `VERSION`). Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku), resolved by `sh scripts/agents.lib.sh <tier>`. See the 2026-08-27/28 entries.
+- **The manual is `AGENTS.md`** (agentic-sdlc **v0.12.0**, adopted 2026-08-29; v0.10.0 was the 2026-08-27 migration, PR #304). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/` (not `.claude/constitution/`); the guards read `scripts/guards.config.sh`; the docs-conformance engine is a recorded local fork — `context.mjs`/`runner.mjs` keep `ctx.paths` + register 11 validators (the 8 local docs-skeleton ones plus the kit's `claude-md-refs`/`skill-web`/`skill-paths`); see `VERSION`. `/explain-diff` is now installed and wired into `/implement`. Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku), resolved by `sh scripts/agents.lib.sh <tier>`. See the 2026-08-27/28/29 entries.
 
 ### Update protocol
 
@@ -5987,3 +5987,52 @@ Fixed by dropping the bypass headers on the `@browser` project (`chromium-auth`)
 security-reviewed CORS was **not** widened for an infra header. Safe because both preview
 projects have Deployment Protection disabled (confirmed via the Vercel API); if that changes,
 deliver the bypass as a cookie, not a header. Recorded in ADR-0085.
+
+### 2026-08-29 — Adopted agentic-sdlc v0.12.0 (skills-adoption + skill-interior gates)
+
+Bumped the kit shared layer **0.10.0 → 0.12.0** via `UPDATING.md` (worktree
+`kit-update-0.12.0`, `chore/kit-update-0.12.0`). Motivated by finding that
+`/explain-diff` — shipped upstream in the v0.8.0 window — had never reached this
+consumer: the whole feature lives in the NON-shared layer (skills + PR template),
+so a shared-layer bump left it silently absent (agentic-sdlc #69; the kit had
+already fixed the class of problem independently in 0.11.0/0.12.0).
+
+**Part 1 — shared layer.** Took verbatim from v0.12.0: `UPDATING.md`,
+`scripts/agents.lib.sh`, `scripts/check.sh`, `scripts/docs-conformance/index.mjs`,
+`validators/claude-md-refs.mjs`, plus the two NEW validators
+`validators/skill-web.mjs` (0.11.0 — warns when an installed skill references an
+uninstalled one; this is the #69 detector) and `validators/skill-paths.mjs`
+(0.12.0 — resolves path references inside skill bodies). `index.mjs` now splits
+findings by `severity`: a `warning` is an advisory that never moves the exit code.
+`VERSION` taken wholesale (new `skills:` manifest + the 0.11/0.12 changelog), then
+the local-deviation note re-appended.
+
+**The fork survived the bump.** `context.mjs` and `runner.mjs` remain the recorded
+local fork: `context.mjs` is v0.12.0 verbatim plus our `paths` map (the eight
+local docs-skeleton validators read it; the shared validators use
+`list/read/exists`, all present), and `runner.mjs` now registers **eleven**
+validators — the kit's `claude-md-refs` + `skill-web` + `skill-paths` alongside our
+eight local ones. Because the runner is forked to 11, the kit's two
+"end-to-end … gate still exits 0 on a bare fixture" tests cannot hold here (a bare
+fixture correctly trips the local validators → exit 1), so they are omitted with a
+NOTE; the validators' unit tests are kept (106/106) and the advisory/exit split is
+proven by our own green `pnpm docs:check`.
+
+**Part 2 — non-shared, full conformance.** Adopted `/explain-diff` (skill +
+`MICROWORLDS.md`), wired its appendix into `/implement`'s Deliver phase (the third
+PR-body artifact, appended below `<!-- explain-diff-appendix -->`, the Axis-2 stop
+boundary), and added it to `AGENTS.md` (chain narrative + quick-ref). Ported the
+kit's in-range delta into `/review-pr` (the §5 output contract — verdict-first
+summary, 🔴🟠🟡🔵 badges, finding anatomy with `cites`/`fix`/evidence-fold, the
+Axis-2 horizontal-rule separation), preserving our local "GitHub comments" wording.
+`config.mjs` gained `skillPaths` (exempt the ADR-FORMAT `NNNN` placeholder and the
+optional `docs/personas.yaml`) and two `ignoreCommands` (`/tmp`,
+`/setup-matt-pocock-skills`); fixed `/diagnose`'s stale `hitl-loop.template.sh`
+reference to its real skill-local path. **Deliberately NOT ported** (kit-self-host
+specific or our docs diverge): the kit's `merge-train`/`AGENTS.md` release-tag
+notes, `README.md`, and `templates/workflows/ai-review-prompt.md`; `/pr-iterate`'s
+severity line is N/A (ours reports `/review-and-evaluate` verdicts, not `/review-pr`
+counts).
+
+Verified: `pnpm docs:check` green, `pnpm docs:check:test` 106/106, `pnpm lint`
+(biome ci) clean, `pnpm test:scripts` (agents-mapping) 46/46.

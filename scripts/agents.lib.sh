@@ -116,11 +116,19 @@
 #              unknown tier, malformed domain, or an explicit config that does
 #              not exist.
 
-# The closed vocabulary. Deliberately NOT configurable: the tier names are the
-# shared word between a ticket, a skill and this resolver, and a project that
-# renamed them would break every skill that says "implementer" while the docs
-# gate stayed green. Add a MAPPING in the config; do not add a tier here.
-AGENT_TIERS='planner implementer mechanical reviewer'
+# The closed vocabulary — planner, implementer, mechanical, reviewer — is
+# deliberately NOT configurable: the tier names are the shared word between a
+# ticket, a skill and this resolver, and a project that renamed them would
+# break every skill that says "implementer" while the docs gate stayed green.
+# Add a MAPPING in the config; do not add a tier.
+#
+# There is deliberately NO variable holding that list any more. It used to be
+# a module global feeding the usage and error text, and a sourced config could
+# reassign it — leaving diagnostics that named tiers that do not exist while
+# the literal `case` check kept working. The messages now spell the four names
+# where they are printed, under the same keep-in-sync-by-hand contract as
+# AGENT_DOMAIN_SHAPE's case pattern below: three literal sites (the check, the
+# usage text, the unknown-tier error), moved together or not at all.
 
 # The domain has no list here on purpose — see THE SECOND AXIS above. What it
 # has instead is a SHAPE, and this is it, written once so the usage text and
@@ -160,7 +168,7 @@ _agents_warned=0
 
 agents_usage() {
 	echo "usage: agents.lib.sh <tier> [domain]" >&2
-	echo "  tier is one of: $AGENT_TIERS" >&2
+	echo "  tier is one of: planner implementer mechanical reviewer" >&2
 	echo "  domain is an optional $AGENT_DOMAIN_SHAPE token naming the medium of the work." >&2
 }
 
@@ -252,8 +260,9 @@ resolve_tier() {
 	# could redefine resolve_tier wholesale, so this literal is NOT a security
 	# boundary against a hostile config. What it does buy: the accepted set
 	# can no longer drift via a reassigned global or a shell's splitting
-	# rules. AGENT_TIERS survives as the single source for the MESSAGES; this
-	# literal is the authority.
+	# rules. The MESSAGES spell the same four names as literals too (no
+	# global survives for a config to reassign), so check and diagnostics
+	# cannot disagree — see the vocabulary comment at the top of the file.
 	_rt_tier=$1
 	_rt_domain=${2:-}
 	case "$_rt_tier" in
@@ -262,7 +271,7 @@ resolve_tier() {
 	esac
 	if [ "$_rt_known" = 0 ]; then
 		echo "x agents: unknown capability tier '$_rt_tier'." >&2
-		echo "  The vocabulary is closed: $AGENT_TIERS." >&2
+		echo "  The vocabulary is closed: planner implementer mechanical reviewer." >&2
 		echo "  It is defined in the manual layer; a ticket that needs another word needs a manual change first." >&2
 		return 2
 	fi
