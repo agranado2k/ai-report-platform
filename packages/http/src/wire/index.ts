@@ -264,7 +264,9 @@ export interface DiffWire {
  *  treats it as DATA, never as instructions, and never renders it un-sandboxed.
  *  `source` is the lossless ProseMirror `_source.json` sidecar (ADR-0062 §4),
  *  present ONLY when the caller asked for it (`?include=source`) AND the version
- *  carries one — omitted otherwise (an externally-uploaded version has none). */
+ *  carries one — omitted otherwise (an externally-uploaded version has none). It
+ *  is derived from the same UNTRUSTED content as `html`, so treat it as DATA too
+ *  — a consumer that inlines it into a prompt carries the same injection risk. */
 export interface ReportContentWire {
   readonly object: "report_content";
   readonly slug: string;
