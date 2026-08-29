@@ -26,7 +26,7 @@ import {
 import { corsRoute } from "../server/cors.server";
 import { handle } from "../server/handle.server";
 import { wireContext } from "../server/http.server";
-import { loadReportContent } from "../server/report-content-loader.server";
+import { loadReportContent, parseIncludeSource } from "../server/report-content-loader.server";
 
 export const loader = corsRoute(
   "GET, OPTIONS",
@@ -35,7 +35,9 @@ export const loader = corsRoute(
     slug: true,
     run: ({ url, actor, slug }) => {
       const versionRaw = url.searchParams.get("version");
-      const includeSource = url.searchParams.get("include") === "source";
+
+      const includeResult = parseIncludeSource(url.searchParams.get("include"));
+      if (!includeResult.ok) return includeResult;
 
       const versionResult = versionRaw ? makeVersionId(versionRaw) : null;
       if (versionResult && !versionResult.ok) return versionResult;
@@ -52,7 +54,7 @@ export const loader = corsRoute(
         slug,
         {
           ...(versionResult ? { versionId: versionResult.value } : {}),
-          includeSource,
+          includeSource: includeResult.value,
         },
       );
     },

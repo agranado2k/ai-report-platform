@@ -21,7 +21,7 @@ import {
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { resolveEditTokenActor } from "./edit-token-actor.server";
-import { loadReportContent } from "./report-content-loader.server";
+import { loadReportContent, parseIncludeSource } from "./report-content-loader.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
 const OWNER = userId("00000000-0000-7000-8000-0000000000d1");
@@ -118,6 +118,27 @@ async function twoVersionLiveReport(opts: { withSidecars: boolean }) {
 
   return { h, slug: reportSlug, v1, v2 };
 }
+
+describe("parseIncludeSource", () => {
+  it("treats an absent `include` as false (the live/no-source default)", () => {
+    const r = parseIncludeSource(null);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toBe(false);
+  });
+
+  it("treats `include=source` as true", () => {
+    const r = parseIncludeSource("source");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toBe(true);
+  });
+
+  it("rejects any other value with a ValidationError — mirroring `version`'s strictness, not a silent ignore", () => {
+    const r = parseIncludeSource("sources");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.kind).toBe("ValidationError");
+  });
+});
 
 describe("loadReportContent", () => {
   it("returns the LIVE version's stored HTML by default", async () => {

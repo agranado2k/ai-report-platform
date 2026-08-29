@@ -29,6 +29,7 @@ import {
   type Result,
   type Slug,
   type VersionId,
+  validationError,
 } from "arp-domain";
 
 export interface LoadReportContentDeps extends CanWriteDeps {
@@ -50,6 +51,18 @@ export interface LoadedReportContent {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
+}
+
+/**
+ * Parse the `?include=` query param. Present-but-not-`source` is a
+ * ValidationError (422), not a silent no-op — mirroring the strictness of the
+ * `version` param, so a typo like `?include=sources` fails loudly instead of
+ * quietly returning content with no `source`.
+ */
+export function parseIncludeSource(raw: string | null): Result<boolean, AppError> {
+  if (raw === null) return ok(false);
+  if (raw === "source") return ok(true);
+  return err(validationError("'include' must be 'source' when present", "include"));
 }
 
 export async function loadReportContent(
