@@ -17,7 +17,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = process.argv[2] ?? join(here, "..", "..");
 
 const ctx = makeContext({ repoRoot, config });
-const violations = runAll(ctx);
+const findings = runAll(ctx);
+
+// Two severities, one boundary: a WARNING is printed and never moves the exit
+// code, because the states it names (a declined skill, a recorded fork) are
+// legal ones the project may hold deliberately. Everything else is a
+// violation and fails the gate exactly as before.
+const warnings = findings.filter((f) => f.severity === "warning");
+const violations = findings.filter((f) => f.severity !== "warning");
+
+if (warnings.length > 0) {
+  console.error("WARN  docs conformance: advisories (gate stays green)\n");
+  for (const w of warnings) {
+    console.error(`  [${w.validator}] ! ${w.file} [${w.rule}] — ${w.message}`);
+    console.error(`      -> ${w.hint}`);
+  }
+  console.error("");
+}
 
 if (violations.length === 0) {
   console.log("OK  docs conformance: all checks passed");

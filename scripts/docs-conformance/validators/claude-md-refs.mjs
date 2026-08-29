@@ -136,10 +136,26 @@ export function run(ctx) {
 }
 
 /** Build the repo-anchored path matcher from the configured roots. */
-function pathTokenRe(roots) {
+// Exported alongside commandRefs below, and for the same reason: the
+// skill-paths validator must ask "what counts as a repo-path reference?" and
+// get THIS answer, not a re-derivation of it.
+export function pathTokenRe(roots) {
   if (roots.length === 0) return /(?!)/;
   const alt = roots.map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   return new RegExp(`^(?:${alt})/[\\w./-]+$`);
+}
+
+/**
+ * The repo-path extraction alone — code spans only, fences stripped, no
+ * package-relative resolution (skills are repo-level documents, like the root
+ * manual and the articles: they have no package to be relative to).
+ */
+export function pathRefs(raw, pathRe) {
+  const paths = new Set();
+  for (const text of codeSpans(stripFences(raw))) {
+    if (pathRe.test(text)) paths.add(text);
+  }
+  return paths;
 }
 
 /**
@@ -224,7 +240,7 @@ function stripFences(raw) {
  * violation can show both the reference and where it resolved to.
  */
 function extractRefs(raw, pathRe, base) {
-  const commands = new Set();
+  const commands = commandRefs(raw);
   const paths = new Map();
   for (const text of codeSpans(stripFences(raw))) {
     if (pathRe.test(text)) {
@@ -232,10 +248,22 @@ function extractRefs(raw, pathRe, base) {
     } else if (base && isPackageRelative(text)) {
       paths.set(text, `${base}/${text}`);
     }
+  }
+  return { commands, paths };
+}
+
+/**
+ * The slash-command extraction alone, exported so the skill-web validator
+ * reads references with the SAME grammar this manual validator uses — one
+ * definition of "what is a command reference", two consumers.
+ */
+export function commandRefs(raw) {
+  const commands = new Set();
+  for (const text of codeSpans(stripFences(raw))) {
     if (!COMMAND_SPAN.test(text)) continue;
     for (const m of text.matchAll(COMMAND_TOKEN)) commands.add(m[1]);
   }
-  return { commands, paths };
+  return commands;
 }
 
 function isPackageRelative(token) {

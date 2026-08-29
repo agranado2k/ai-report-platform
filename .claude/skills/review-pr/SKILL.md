@@ -193,39 +193,54 @@ Missing requirements (spec asked, diff doesn't deliver) are also Axis-2 findings
 
 ### 5. Severity-Based Summary Report (MANDATORY — Axis 1)
 
-After all agents complete, you MUST present the **Axis 1 (standards)** findings organized into exactly 4 severity categories with a count summary table:
+After all agents complete, you MUST present the **Axis 1 (standards)** findings as one report following the output contract below. The report is GitHub-flavored markdown and nothing else — the same bytes render in the terminal and as PR-comment text wherever a host posts them (§6 says what this skill itself posts, and Axis-1 findings go inline there), so: no ANSI escapes ever, no raw HTML beyond the `<details>`/`<summary>` fold, tables kept to two or three columns so a phone does not scroll them.
+
+**Summary first.** The reader decides "is this blocked, and what do I fix first?" in the first screenful, before any finding detail:
 
 ```
 ### Review Summary
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| CRITICAL | X | Security vulnerabilities, data leaks, broken functionality, divergent duplicate logic that has already drifted into a latent bug |
-| HIGH     | X | Missing tests, broken contracts, major pattern violations, a reimplemented helper that duplicates an existing shared export |
-| MEDIUM   | X | Redundant tests, unnecessary complexity, code duplication / copy-paste blocks that should be extracted once |
-| LOW      | X | Minor simplifications, style improvements |
+**Verdict:** <one line — blocking or not, and what to fix first; "no findings" is a valid verdict>
+Clean audits: <the lenses that found nothing, comma-separated — one line, never sections of nothing>
+
+| | Severity | Count |
+|---|----------|-------|
+| 🔴 | CRITICAL | X |
+| 🟠 | HIGH | X |
+| 🟡 | MEDIUM | X |
+| 🔵 | LOW | X |
 ```
 
-Then list each finding under its severity header, with each item numbered as INITIAL-N (C = Critical, H = High, M = Medium, L = Low). Numbering resets per category.
+The badge is **redundant** encoding: the text label always accompanies it, because color is never the only channel a reader has. The count table is the exhaustive record — all four buckets always appear, zeros included. The severity buckets keep their meanings: CRITICAL is vulnerabilities, data leaks, broken functionality, divergent duplicate logic already drifted into a latent bug; HIGH is missing tests, broken contracts, major pattern violations, a reimplemented helper duplicating an existing export; MEDIUM is redundant tests, unnecessary complexity, copy-paste blocks worth extracting once; LOW is minor simplifications and style.
+
+**Then the findings** — all four severity sections, always, in this order, headed by badge + label: `#### 🔴 CRITICAL`, `#### 🟠 HIGH`, `#### 🟡 MEDIUM`, `#### 🔵 LOW`. An empty section carries exactly one line — `— none found.` — so absence is stated, never inferred, and the reader's eye learns where each bucket lives. Each finding uses this anatomy:
 
 ```
-#### CRITICAL
-- **C-1** [file:line] Brief description of the issue
-- **C-2** [file:line] Brief description of the issue
+#### 🟠 HIGH
 
-#### HIGH
-- **H-1** [file:line] Brief description of the issue
+**H-1** `path/to/file:42` — one line: what is wrong, readable in isolation
+↳ cites: <the decision record, audit item, or craft rule that makes this a finding>
+↳ fix: <the change the review wants, one line>
+<details><summary>evidence</summary>
 
-#### MEDIUM
-- **M-1** [file:line] Brief description of the issue
+the longer proof — a mutation transcript, a failing command, an excerpt
 
-#### LOW
-- **L-1** [file:line] Brief description of the issue
+</details>
+
+**H-2** `path/to/other:7` — next finding, same anatomy
 ```
+
+Anatomy rules:
+
+- The what/where line is **mandatory**: bold ID, a code-span `file:line` anchor (clickable in both mediums), one line that makes sense in isolation.
+- `↳ cites:` and `↳ fix:` appear only when the review actually has them — never padded with filler.
+- Evidence longer than a couple of lines goes behind the fold: thoroughness must not cost the reader scroll distance.
+- Items are numbered INITIAL-N (C = Critical, H = High, M = Medium, L = Low). Numbering resets per category, and the IDs are how findings stay citable across iterations and commit messages.
+- Axis 1 owns the four circle badges. It never borrows the confirm-list's glyph set, and never lends its badges to §5b — the two axes must be tell-apart-at-a-glance.
 
 ### 5b. Behavior Confirm-List (MANDATORY — Axis 2, never merged with §5)
 
-Immediately after (and visually separate from) the severity report, present Agent 7's output verbatim in this shape — 🔀 items first, then ⚠️:
+Immediately after the severity report — **separated by a horizontal rule and under its own header**, so the axes are unmistakable on the page — present Agent 7's output verbatim in this shape, 🔀 items first, then ⚠️. The list's inner shape is a machine contract, not a style: glyph + TAG at the start of the line, one item per line, so the human-only items can be lifted verbatim by whatever reads this report next. Presentation may improve *around* these lines, never *inside* them — and in particular they never become table cells, which would break the lifting.
 
 ```
 ### Behavior changes in this PR — confirm before merge
@@ -288,4 +303,4 @@ After presenting the summary, you MUST ask:
 
 ### 7. Finalization
 
-**Closing**: You MUST end the response with: "Review complete. Which severity categories or specific items should I post as GitHub comments?"
+**Closing**: Restate the verdict in one line — the reader answers the question below without scrolling back up — and then you MUST end the response with: "Review complete. Which severity categories or specific items should I post as GitHub comments?"
