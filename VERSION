@@ -169,7 +169,70 @@
 # retires (every release is tagged now, and the kit's self-host suite holds it
 # to that). The non-manifest half this second change DOES have: /review-pr's
 # Security Sentinel gains a shell-hazard audit citing the two rules by number.
-shared-layer: 0.10.0
+# 0.11.0 — the skills adoption wave: VERSION gains the `skills:` section below,
+# a NAME-LEVEL manifest of every skill this release ships. It exists because
+# delta-based adoption failed in the field: /explain-diff shipped inside the
+# v0.8.0 window, and a consumer whose update ranges never included that window
+# lost the feature with no signal — shared layer byte-identical, gate green,
+# and an entire PR-flow capability silently absent. Names, never bytes: a
+# consumer is invited to adapt a skill's prose, so the manifest answers "do I
+# HAVE it?", and only that. The update recipe diffs this list against the
+# consumer's installed set — state, not delta, so skipped windows heal.
+# UPDATING.md changed content with the bump (the worked-example transcripts
+# and their surrounding prose re-pinned — a content change by this manifest's
+# own precedent).
+#   NON-MANIFEST HALF of this wave, enumerated (the discipline this release
+# introduces — every release from here names what shipped outside the files:
+# list): the skills manifest referee joined tests/ (kit-only); consumers on
+# ≤0.10.0 adopting /explain-diff need the skill directory PLUS its two wiring
+# points — the Deliver-phase appendix bullet in /implement and the
+# explain-diff-appendix marker in the PR template. UPDATING.md moved with the
+# manifest: step 9a now OPENS with the inventory fence (manifest vs installed,
+# printed before any per-skill diff) and carries that retroactive note under
+# "Arriving from 0.10.0 or older". The half-adopted STATE got its own detector:
+# scripts/docs-conformance/validators/skill-web.mjs joined the layer — it scans
+# installed skill bodies for references to skills that are not installed and
+# WARNS, never fails (declining a skill is a legal recorded state; the gate's
+# engine now separates advisories from violations, and the reduced POSIX form
+# says it cannot run this scan). It reads claudeMdRefs.ignoreCommands, so one
+# exemption list serves both validators — and that list gained two entries
+# ("/tmp" and "/codebase-design", both command-shaped quoted non-references in
+# the shipped skill prose). config.mjs is YOURS and is never overwritten, so
+# an updating consumer must take those two entries by hand at step 9d, or the
+# first gate run after the update warns on the kit's own skills.
+# scripts/agents.lib.sh also changed content: the resolver's usage and
+# unknown-tier messages no longer read a module global a sourced config could
+# reassign — the four tier names are literals at every site, so the
+# diagnostics can no longer disagree with the check. No behavior change to
+# resolution, exit codes, or stdout. (This note grew with the wave's stacked
+# tickets and was finished at the v0.11.0 tag.)
+# 0.12.0 — skill interiors join the gate (#79, from K2's oldest caveat, #18).
+# One file joined the layer: scripts/docs-conformance/validators/skill-paths.mjs.
+# Every installed skill body — SKILL.md and the sidecar markdown beside it —
+# now has its repo-path references resolved, as WARNINGS on the 0.11.0
+# advisory channel. Warnings by discovery, not by softness: the spec ordered
+# violations, and implementation found the legal reading — VERSION SKEW. The
+# recipe is per-category and demands a green gate BEFORE an update starts, so
+# a consumer mid-skew (skills referencing an article a later release
+# delivers) is a sanctioned state the kit's own recipe demo models; a red
+# gate would outlaw the starting point of every update.
+# One rule covers both sides of bootstrap: a token
+# resolves if the file exists OR its .template source does, so a skill naming
+# a stamped article is right in a consumer and right in the kit. The grammar
+# is claude-md-refs' own pathTokenRe/pathRefs over the same pathRoots — one
+# definition of "what is a path reference", now three consumers.
+#   NON-MANIFEST HALF, enumerated: your config.mjs (yours, never overwritten)
+# gains a skillPaths section — exemptFiles for upstream-verbatim documents,
+# and exemptTokens for paths that are legitimately absent until created (the
+# shipped entries: the dogfood report directory, made by the skill's first
+# run, and the example review workflow, installed by bootstrap from the
+# templates tree). Take that section by hand at step 9d, or the gate warns on
+# the kit's own shipped skills. The validator's fixture tests join the
+# consumer-owned test directory alongside the others. One skill changed with
+# the wave: /merge-train's step-5 release note no longer names the kit's own
+# self-host suite by path — the first thing the new scan caught was the kit
+# pointing every consumer at a file bootstrap deletes (take via 9a).
+shared-layer: 0.12.0
 
 # NOT shared layer, and deliberately so: scripts/guards.config.sh. It is the
 # only file the guards read policy from, and its whole purpose is to be edited
@@ -198,26 +261,72 @@ files:
   scripts/docs-conformance/context.mjs
   scripts/docs-conformance/runner.mjs
   scripts/docs-conformance/validators/claude-md-refs.mjs
+  scripts/docs-conformance/validators/skill-web.mjs
+  scripts/docs-conformance/validators/skill-paths.mjs
+
+# The SKILLS the release ships — a NAME-LEVEL manifest, deliberately not part
+# of files: above. A skill's prose is yours to adapt from the moment bootstrap
+# installs it, so the byte question the shared layer answers ("is my copy
+# verbatim?") is the wrong one here; the only question this list answers is
+# "does my project HAVE every skill this release ships?" — and it answers it
+# as STATE, so an update from any older release, however many windows were
+# skipped, still yields the exact missing list. Only the first word of an
+# entry is the name; anything after it is annotation. One skill is optional
+# (bootstrap asks before installing it) — declining it is a clean state, not
+# a gap.
+skills:
+  diagnose
+  dogfood            optional — bootstrap asks; declining is a recorded choice
+  explain-diff
+  grill-me
+  grill-with-docs
+  implement
+  improve-codebase-architecture
+  merge-train
+  pr-iterate
+  prototype
+  review-pr
+  tdd
+  to-prd
+  to-tickets
+  worktree-cleanup
 
 # ---------------------------------------------------------------------------
 # LOCAL DEVIATION FROM THE SHARED LAYER (centaur-spec) — recorded, not hidden.
 # ---------------------------------------------------------------------------
 # Two files above are listed as shared layer but are, in THIS repo, a RECORDED
 # LOCAL FORK — they exist at the pinned paths (so `scripts/check.sh` is
-# satisfied), but their CONTENT diverges from v0.10.0 on purpose:
+# satisfied), but their CONTENT diverges from v0.12.0 on purpose:
 #
-#   scripts/docs-conformance/context.mjs   keeps the `ctx.paths` map v0.10.0
-#                                          removed.
-#   scripts/docs-conformance/runner.mjs    registers NINE validators, not the
-#                                          one v0.10.0 ships.
+#   scripts/docs-conformance/context.mjs   the v0.12.0 context VERBATIM plus a
+#                                          local `paths` map on the returned ctx
+#                                          (the eight local validators read it).
+#                                          list/read/exists/config are unchanged,
+#                                          so the shared validators run against it.
+#   scripts/docs-conformance/runner.mjs    registers ELEVEN validators, not the
+#                                          three v0.12.0 ships: the kit's
+#                                          claude-md-refs + skill-web + skill-paths
+#                                          PLUS eight local docs-skeleton
+#                                          validators (adr-index-sync, adr-madr,
+#                                          glossary-terms, event-names,
+#                                          feature-presence, feature-executes,
+#                                          gherkin-structure, openapi-structure).
 #
 # Why: centaur-spec adopted the docs-conformance engine before v0.10.0 and grew
-# eight local validators (adr-index-sync, adr-madr, glossary-terms, event-names,
-# feature-presence, feature-executes, gherkin-structure, openapi-structure) that
-# read `ctx.paths`. v0.10.0 upstreamed only `claude-md-refs` and deleted both the
-# extra validators and `ctx.paths`. Taking runner.mjs/context.mjs verbatim would
-# silently drop eight checks this repo depends on, so they stay forked here while
-# `index.mjs` and `validators/claude-md-refs.mjs` are taken verbatim. When the
-# kit upstreams the docs-skeleton validators (its runner.mjs comment names this
-# as planned work), this fork can retire. See docs/diary.md and
+# eight local validators that read `ctx.paths`. v0.10.0 upstreamed only
+# `claude-md-refs` and deleted both the extra validators and `ctx.paths`; 0.11.0
+# and 0.12.0 then ADDED `skill-web` and `skill-paths` to the shared layer. Taking
+# runner.mjs/context.mjs verbatim would silently drop the eight checks this repo
+# depends on, so they stay forked while `index.mjs` and every
+# `validators/*.mjs` the kit ships (claude-md-refs, skill-web, skill-paths) are
+# taken verbatim and registered alongside the local eight. When the kit
+# upstreams the docs-skeleton validators (its runner.mjs comment names this as
+# planned work), this fork can retire. See docs/diary.md and
 # constitution/local-workflow.md for the same note in prose.
+#
+# The `skills:` manifest above is the kit's shipped set, taken wholesale. This
+# repo's own installed set deviates by name in two recorded ways: it ships
+# `ce-dogfood` where the kit ships the optional `dogfood`, and (as of this
+# update) it now carries `explain-diff`. The skills' BODIES are adapted to this
+# stack throughout (ADR numbers, this repo's tools) — expected for a non-shared,
+# name-level manifest.

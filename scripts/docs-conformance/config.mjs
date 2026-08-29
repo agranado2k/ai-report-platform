@@ -248,6 +248,8 @@ export const claudeMdRefs = {
     "/security-review", // Claude Code built-in
     "/install-github-app", // Claude Code built-in (one-time setup, quoted in ADR-030 context)
     "/merge", // historical reference — the obsolete bot-merge flow, quoted as history
+    "/tmp", // a filesystem path that is command-shaped in a code span, never a skill
+    "/setup-matt-pocock-skills", // a command from the mattpocock skills bundle, not a repo skill (quoted in /to-prd)
   ],
 
   /**
@@ -414,4 +416,24 @@ export const openapi = {
   },
 };
 
-export default { adr, glossary, events, featureTags, features, claudeMdRefs, openapi };
+/**
+ * skill-paths (kit 0.12.0) — every installed skill body's repo-path references
+ * are resolved as WARNINGS. Two escape hatches, each entry carrying its reason:
+ *   - exemptFiles: whole files whose interiors are skipped (upstream-verbatim).
+ *   - exemptTokens: exact path tokens that are legitimately absent — a literal
+ *     placeholder, or a file created only when something runs.
+ */
+export const skillPaths = {
+  exemptFiles: [],
+  exemptTokens: [
+    // A literal filename PLACEHOLDER in the ADR authoring guide ("NNNN" is the
+    // next number, filled in by hand), never a real path.
+    "docs/adr/NNNN-short-kebab-title.md",
+    // Optional persona catalog: /ce-dogfood reads personas from here OR inline
+    // (SKILL.md: "Define these in docs/personas.yaml or inline"), so a project
+    // that keeps personas inline never creates the file.
+    "docs/personas.yaml",
+  ],
+};
+
+export default { adr, glossary, events, featureTags, features, claudeMdRefs, openapi, skillPaths };

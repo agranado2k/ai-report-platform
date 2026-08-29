@@ -161,7 +161,10 @@ feasibility question the spec is blocked on, `/diagnose` is for a bug rather tha
 comments, `/ce-dogfood` walks the real user surface before a human does, and
 `/improve-codebase-architecture` is for an area that has become hard to change — it finds
 and designs the deepening, then re-enters the line at `/to-tickets`. `/zoom-out` is the way
-in when the area is unfamiliar.
+in when the area is unfamiliar. `/explain-diff` turns a diff, branch or PR into an
+interactive HTML explainer (teaches, never reviews); `/implement` runs it in its Deliver
+phase and appends the markdown rendition to the PR body below the `<!-- explain-diff-appendix -->`
+marker, so a reviewer meets the change before the diff.
 
 ## Quick reference
 
@@ -178,6 +181,7 @@ in when the area is unfamiliar.
 | Run end-to-end QA on a branch            | `/ce-dogfood` (browser test all changed flows, auto-fix safe issues, report with auditability) |
 | Force the agent to ask clarifying questions before coding | `/grill-me` (quick) · `/grill-with-docs` (also updates the glossary / ADR drafts) |
 | Diagnose a bug or perf issue methodically | `/diagnose` (reproduce → minimize → hypothesize → instrument → fix → test) |
+| Understand a change before reviewing or merging it | `/explain-diff` — interactive HTML explainer; teaches, never reviews (`/implement` appends its markdown to the PR body) |
 | Turn a conversation into a PRD as a GitHub issue | `/to-prd`                                       |
 | Decompose a PRD into tracer-bullet tickets | `/to-tickets <PRD issue#>` — demoable slices, blocking DAG, HITL/AFK labels |
 | Implement one ticket in a fresh session  | `/implement <issue#>` — restate → `/tdd` through seams → full suite → commit |
