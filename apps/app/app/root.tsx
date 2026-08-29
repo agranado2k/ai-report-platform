@@ -1,6 +1,5 @@
 import { ClerkApp, SignedIn } from "@clerk/remix";
 import { rootAuthLoader } from "@clerk/remix/ssr.server";
-import { dark } from "@clerk/themes";
 import { type LinksFunction, type LoaderFunctionArgs, redirect } from "@remix-run/node";
 import {
   isRouteErrorResponse,
@@ -18,6 +17,7 @@ import { EmptyState } from "./components/EmptyState";
 import { PageShell } from "./components/PageShell";
 import { TopBar } from "./components/TopBar";
 import stylesheet from "./tailwind.css?url";
+import { clerkAppearance } from "./theme/clerk-appearance";
 
 // The compiled Tailwind stylesheet (static, served from 'self' — CSP-safe) +
 // preloaded self-hosted fonts (font-src 'self'; no remote CDN).
@@ -136,27 +136,10 @@ export function ErrorBoundary() {
 }
 
 // Clerk renders its own DOM (SignIn / SignUp / UserButton); we theme it via the
-// appearance API. The `dark` baseTheme is load-bearing: it makes Clerk's COMPUTED
-// neutral colours (popover menu items, icons, dividers, secondary text) light and
-// readable on the warm-ink surfaces — the variable overrides alone left the
-// account menu dark-on-dark. On top of the dark base we tint with the Forge &
-// Ember accents (copper primary, warm-ink background, parchment text); Clerk needs
-// literal hex here, not CSS vars (var() resolution inside its injected styles is
-// unreliable), so we duplicate the theme.css values intentionally.
-const clerkAppearance = {
-  baseTheme: dark,
-  variables: {
-    colorPrimary: "#c8762d",
-    colorText: "#f2e9dc",
-    colorTextSecondary: "#c6b9a6",
-    colorBackground: "#241c16",
-    colorInputBackground: "#2c231b",
-    colorInputText: "#f2e9dc",
-    fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif',
-    borderRadius: "8px",
-  },
-};
-
+// appearance API. The pure config lives in ./theme/clerk-appearance so its
+// literals can be unit-pinned (ADR-0086, #324) — light default (no dark
+// baseTheme) + the ClickUp light literals.
+//
 // ClerkApp wraps the app in <ClerkProvider>, reading the publishable key from the
 // rootAuthLoader state injected above.
 export default ClerkApp(App, { appearance: clerkAppearance });

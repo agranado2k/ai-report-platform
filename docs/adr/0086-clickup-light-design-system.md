@@ -83,6 +83,12 @@ Chosen: **option 6, ClickUp — a bright, light design system.**
   light background/text). Clerk needs literal hex, not `var()`, so these intentionally
   duplicate the token values.
 
+  **Amendment (2026-08-29, #324):** `@clerk/themes` ships **no `light` export** (its bases
+  are `dark`, `shadesOfPurple`, `neobrutalism`, `shadcn`, `experimental__simple`) — light is
+  Clerk's *default*. So "light" is achieved by **omitting `baseTheme` entirely**, not by
+  `baseTheme: light`; removing the `dark` override restores the light computed neutrals the
+  bullet above relies on.
+
 - **Scope**: `apps/app` + `apps/view` chrome, Clerk auth, and the shared `packages/ui`
   component library. **`packages/report-html` (the generated report documents) is out of
   scope** — those documents carry their own per-document styling.

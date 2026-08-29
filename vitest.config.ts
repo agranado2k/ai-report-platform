@@ -40,6 +40,14 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
       "apps/app/app/server/**/*.test.ts",
+      // Pure, client-safe theming values (ADR-0086) — the Clerk `appearance`
+      // config extracted out of root.tsx so its literals can be pinned by a
+      // unit test (Clerk can't resolve `var()`, so the tokens are duplicated as
+      // hex and the test catches drift). A plain data module with no DOM/React
+      // dependency, so it lives in the fast node tier rather than e2e like the
+      // rest of apps/app's routes. KEEP IN SYNC with GUARD_SOURCE_RE in
+      // scripts/guards.config.sh (see the reminder there).
+      "apps/app/app/theme/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
       // The browser tier's own node-tier guards (ADR-0079): properties of the
