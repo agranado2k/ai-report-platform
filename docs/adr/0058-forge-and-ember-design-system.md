@@ -1,6 +1,6 @@
 # ADR-0058: "Forge & Ember" warm-dark design system
 
-- **Status**: Accepted (2026-06-29) — amends ADR-0050
+- **Status**: Superseded by ADR-0086 (2026-08-29) — amended ADR-0050
 - **Deciders**: operator
 - **Date**: 2026-06-29
 
