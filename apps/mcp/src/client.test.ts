@@ -95,6 +95,40 @@ describe("ApiClient", () => {
     expect(calls[0]?.headers.authorization).toBeUndefined();
   });
 
+  it("getReportContent GETs /content (slug encoded), no query when unparameterised", async () => {
+    const { fn, calls } = stub(
+      json({ object: "report_content", slug: "ab/cd", version_id: "version_x", html: "<x>" }),
+    );
+    const client = new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+    const r = await client.getReportContent("ab/cd");
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.html).toBe("<x>");
+    expect(calls[0]?.url).toBe("https://app.example.com/api/v1/reports/ab%2Fcd/content");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.authorization).toBe("Bearer arp_live_x");
+  });
+
+  it("getReportContent forwards ?version= and ?include=source when asked", async () => {
+    const { fn, calls } = stub(json({ object: "report_content", slug: "s", html: "<x>" }));
+    const client = new ApiClient({
+      baseUrl: "https://app.example.com",
+      authorization: "Bearer arp_live_x",
+      fetch: fn,
+    });
+
+    await client.getReportContent("s", { version: "version_abc", includeSource: true });
+
+    expect(calls[0]?.url).toBe(
+      "https://app.example.com/api/v1/reports/s/content?version=version_abc&include=source",
+    );
+  });
+
   it("maps an RFC-9457 problem+json error into a structured problem", async () => {
     const problem = json(
       {
