@@ -5,3 +5,9 @@
 @import "tailwindcss";
 @import "./styles/fonts.css";
 @import "arp-ui/theme.css";
+/* Tailwind's automatic source scan skips node_modules, which is how `arp-ui`
+ * resolves here — so utilities used only inside the shared components (the
+ * primary Button's `bg-brand text-on-brand`, the Badge fills) were never
+ * compiled and rendered unstyled. Opt the package in explicitly. Pinned by
+ * scripts/test/tailwind-sources.test.ts. */
+@source "../../../packages/ui/src";
