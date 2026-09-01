@@ -13,8 +13,9 @@
 // The `variables` are the ClickUp light literals. Clerk needs literal hex here,
 // not CSS `var()` (var() resolution inside its injected styles is unreliable),
 // so these INTENTIONALLY duplicate the ADR-0086 token values. That duplication
-// is the drift risk the unit test exists to catch — keep these in lockstep with
-// the tokens in the shared theme.css.
+// is a standing drift risk: the unit test pins these against the ADR's recorded
+// values (a change detector), not against the shared theme.css — keep them in
+// lockstep with theme.css by hand until a cross-file guard exists.
 export const clerkAppearance = {
   // No base-theme import: `baseTheme: undefined` is Clerk's light default and is
   // runtime-identical to omitting the key, while keeping the "no dark override"

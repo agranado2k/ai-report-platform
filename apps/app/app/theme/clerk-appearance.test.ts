@@ -8,8 +8,12 @@
 //      omitting it restores Clerk's light COMPUTED neutrals (menu items, icons,
 //      dividers). See ADR-0086's Clerk amendment.
 //   2. The ClickUp light literals. Clerk can't resolve `var()`, so these
-//      duplicate the token values as hex; pinning them here is the only guard
-//      against them silently diverging from the ADR-0086 tokens.
+//      duplicate the ADR-0086 token values as hex. Pinning them here is a
+//      CHANGE DETECTOR against the values ADR-0086 records — an edit to the
+//      module without a matching edit here fails. It does NOT read theme.css,
+//      so it cannot catch the shared tokens moving underneath it; a cross-file
+//      guard (like the unlock page's, see unlock-route.test.ts) is a follow-up
+//      once the #323 token re-theme lands and theme.css carries these values.
 import { dark } from "@clerk/themes";
 import { describe, expect, it } from "vitest";
 import { clerkAppearance } from "./clerk-appearance";
@@ -20,7 +24,7 @@ describe("clerkAppearance (ADR-0086 ClickUp light)", () => {
     expect(clerkAppearance.baseTheme).not.toBe(dark);
   });
 
-  it("pins the ClickUp light literals (drift guard vs the ADR-0086 tokens)", () => {
+  it("pins the ClickUp light literals recorded in ADR-0086", () => {
     expect(clerkAppearance.variables).toEqual({
       colorPrimary: "#7B68EE",
       colorText: "#2A2E34",
