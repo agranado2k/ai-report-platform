@@ -22,17 +22,16 @@ const themeCss = readFileSync(
 
 /** Extract the body of the first `:root { … }` block (primitives live here). */
 function rootBlock(css: string): string {
-  const match = css.match(/:root\s*\{([\s\S]*?)\}/);
-  if (!match) throw new Error("no :root block found in theme.css");
-  return match[1];
+  const body = css.match(/:root\s*\{([\s\S]*?)\}/)?.[1];
+  if (body === undefined) throw new Error("no :root block found in theme.css");
+  return body;
 }
 
 const root = rootBlock(themeCss);
 
 /** Read a custom-property value declared inside a CSS block body. */
 function declValue(block: string, name: string): string | undefined {
-  const match = block.match(new RegExp(`${name}\\s*:\\s*([^;]+);`));
-  return match?.[1].trim();
+  return block.match(new RegExp(`${name}\\s*:\\s*([^;]+);`))?.[1]?.trim();
 }
 
 // The color primitives that map through @theme inline to Tailwind utilities.
