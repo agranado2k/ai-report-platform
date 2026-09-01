@@ -31,45 +31,45 @@ const root = rootBlock(themeCss);
 
 /** Read a custom-property value declared inside a CSS block body. */
 function declValue(block: string, name: string): string | undefined {
-  return block.match(new RegExp(`${name}\\s*:\\s*([^;]+);`))?.[1]?.trim();
+  // Anchored so a token that is a prefix of another (--brand / --brand-hover)
+  // or a suffix of a mapping (--brand / --color-brand) can never match it.
+  return block.match(new RegExp(`(?:^|[\\s;{])${name}\\s*:\\s*([^;]+);`))?.[1]?.trim();
 }
 
-// The color primitives that map through @theme inline to Tailwind utilities.
-// Keeping these NAMES stable is what makes the re-skin class-churn-free.
-const REQUIRED_PRIMITIVES = [
-  "--bg",
-  "--surface",
-  "--surface-raised",
-  "--border",
-  "--border-strong",
-  "--fg",
-  "--muted",
-  "--subtle",
-  "--brand",
-  "--brand-hover",
-  "--on-brand",
-  "--success",
-  "--warning",
-  "--danger",
+// The color primitives that map through @theme inline to Tailwind utilities,
+// with the exact ClickUp light values ADR-0086 §"Decision outcome" records.
+// Keeping the NAMES stable is what makes the re-skin class-churn-free; pinning
+// the VALUES means a wrong hex cannot ship green.
+const REQUIRED_PRIMITIVES: Record<string, string> = {
+  "--bg": "#f5f6f8",
+  "--surface": "#ffffff",
+  "--surface-raised": "#f2f1fd",
+  "--border": "#e6e7eb",
+  "--border-strong": "#d6d8de",
+  "--fg": "#2a2e34",
+  "--muted": "#656f7d",
+  "--subtle": "#a2abb8",
+  "--brand": "#7b68ee",
+  "--brand-hover": "#5f4fd6",
+  "--on-brand": "#ffffff",
+  "--success": "#2ecc71",
+  "--warning": "#ffc800",
+  "--danger": "#e8465e",
   // Additive ClickUp accents (ADR-0086): sky, pink, and the info semantic.
-  "--accent",
-  "--accent-2",
-  "--info",
-];
+  "--accent": "#49ccf9",
+  "--accent-2": "#fd71af",
+  "--info": "#49ccf9",
+};
 
 describe("theme.css token contract (ADR-0086, ClickUp light)", () => {
-  for (const token of REQUIRED_PRIMITIVES) {
-    it(`declares ${token} on :root`, () => {
-      expect(declValue(root, token)).toBeTruthy();
+  for (const [token, hex] of Object.entries(REQUIRED_PRIMITIVES)) {
+    it(`declares ${token}: ${hex} on :root`, () => {
+      expect(declValue(root, token)?.toLowerCase()).toBe(hex);
     });
   }
 
   it("declares color-scheme: light on :root (light is the default — ADR-0086)", () => {
     expect(declValue(root, "color-scheme")).toBe("light");
-  });
-
-  it("uses the ClickUp brand violet #7B68EE for --brand", () => {
-    expect(declValue(root, "--brand")?.toLowerCase()).toBe("#7b68ee");
   });
 
   // Radii + fonts are mapped in the @theme inline block; assert they survive the
