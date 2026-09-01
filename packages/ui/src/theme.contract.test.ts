@@ -51,6 +51,10 @@ const REQUIRED_PRIMITIVES = [
   "--success",
   "--warning",
   "--danger",
+  // Additive ClickUp accents (ADR-0086): sky, pink, and the info semantic.
+  "--accent",
+  "--accent-2",
+  "--info",
 ];
 
 describe("theme.css token contract (ADR-0086, ClickUp light)", () => {
@@ -81,6 +85,17 @@ describe("theme.css token contract (ADR-0086, ClickUp light)", () => {
       expect(declValue(themeCss, token)).toBeTruthy();
     });
   }
+
+  // The additive tokens are only useful if they reach utilities / references.
+  for (const mapping of ["--color-accent-2", "--color-info", "--gradient-brand"]) {
+    it(`maps ${mapping} in the @theme inline block`, () => {
+      expect(declValue(themeCss, mapping)).toBeTruthy();
+    });
+  }
+
+  it("declares the violet → pink --brand-gradient on :root", () => {
+    expect(declValue(root, "--brand-gradient")).toMatch(/linear-gradient/);
+  });
 
   it("keeps the @custom-variant dark hook (dark is a deferred additive follow-up)", () => {
     expect(themeCss).toMatch(/@custom-variant\s+dark/);
