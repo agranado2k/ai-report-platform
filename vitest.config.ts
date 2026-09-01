@@ -31,11 +31,11 @@ import { defineConfig } from "vitest/config";
 // directly rather than deferring it to e2e like the mounted editor route.
 export default defineConfig({
   test: {
-    // KEEP IN SYNC with the TDD pairing guard's source-tree regex in
-    // scripts/tdd-pairing-guard.sh — it hand-mirrors these globs (plus the
-    // node:test tree scripts/docs-conformance/, which vitest does not cover);
-    // adding a covered tree here without updating it silently un-guards that
-    // tree.
+    // KEEP IN SYNC with the TDD pairing guard's source-tree regex
+    // (GUARD_SOURCE_RE in scripts/guards.config.sh) — it hand-mirrors these
+    // globs (plus the node:test tree scripts/docs-conformance/, which vitest
+    // does not cover); adding a covered tree here without updating it silently
+    // un-guards that tree.
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/mcp/src/**/*.test.ts",
@@ -45,8 +45,7 @@ export default defineConfig({
       // unit test (Clerk can't resolve `var()`, so the tokens are duplicated as
       // hex and the test catches drift). A plain data module with no DOM/React
       // dependency, so it lives in the fast node tier rather than e2e like the
-      // rest of apps/app's routes. KEEP IN SYNC with GUARD_SOURCE_RE in
-      // scripts/guards.config.sh (see the reminder there).
+      // rest of apps/app's routes.
       "apps/app/app/theme/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
