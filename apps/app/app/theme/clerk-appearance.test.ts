@@ -12,16 +12,15 @@
 //      CHANGE DETECTOR against the values ADR-0086 records — an edit to the
 //      module without a matching edit here fails. It does NOT read theme.css,
 //      so it cannot catch the shared tokens moving underneath it; a cross-file
-//      guard (like the unlock page's, see unlock-route.test.ts) is a follow-up
+//      guard (like the unlock page's in apps/app/app/server/unlock-route.test.ts)
+//      is a follow-up
 //      once the #323 token re-theme lands and theme.css carries these values.
-import { dark } from "@clerk/themes";
 import { describe, expect, it } from "vitest";
 import { clerkAppearance } from "./clerk-appearance";
 
 describe("clerkAppearance (ADR-0086 ClickUp light)", () => {
-  it("applies no dark baseTheme — light is Clerk's default", () => {
-    expect(clerkAppearance.baseTheme).toBeUndefined();
-    expect(clerkAppearance.baseTheme).not.toBe(dark);
+  it("sets no baseTheme — light is Clerk's default", () => {
+    expect(clerkAppearance).not.toHaveProperty("baseTheme");
   });
 
   it("pins the ClickUp light literals recorded in ADR-0086", () => {

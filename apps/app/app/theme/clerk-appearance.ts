@@ -17,11 +17,11 @@
 // values (a change detector), not against the shared theme.css — keep them in
 // lockstep with theme.css by hand until a cross-file guard exists.
 export const clerkAppearance = {
-  // No base-theme import: `baseTheme: undefined` is Clerk's light default and is
-  // runtime-identical to omitting the key, while keeping the "no dark override"
-  // decision explicit in code (and unit-pinnable — @clerk/themes has no `light`
-  // to compare against).
-  baseTheme: undefined,
+  // No `baseTheme` key at all — that IS Clerk's light default (ADR-0086's Clerk
+  // amendment prescribes omitting it). The unit test pins the key as absent.
+  // When dark returns as the deferred `.dark {}` follow-up, note that the
+  // installed @clerk/shared types mark `baseTheme` deprecated in favour of
+  // `theme`.
   variables: {
     colorPrimary: "#7B68EE",
     colorText: "#2A2E34",
