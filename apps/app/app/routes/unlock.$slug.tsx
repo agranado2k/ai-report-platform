@@ -80,15 +80,15 @@ const escapeAttr = (s: string) =>
 const PAGE_STYLE = `<style>
 :root {
   color-scheme: light;
-  --bg: #F5F6F8;
-  --surface: #FFFFFF;
-  --border-strong: #D6D8DE;
-  --fg: #2A2E34;
-  --muted: #656F7D;
-  --subtle: #A2ABB8;
-  --brand: #7B68EE;
-  --brand-hover: #5F4FD6;
-  --on-brand: #FFFFFF;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border-strong: #d6d8de;
+  --fg: #2a2e34;
+  --muted: #656f7d;
+  --subtle: #a2abb8;
+  --brand: #7b68ee;
+  --brand-hover: #5f4fd6;
+  --on-brand: #ffffff;
 }
 * { box-sizing: border-box }
 body {

@@ -21,32 +21,32 @@
    * controls, autofill, date/select popups) renders light, not dark. */
   color-scheme: light;
   /* surfaces — near-white page, white cards, faint violet-tinted raised */
-  --bg: #F5F6F8;
-  --surface: #FFFFFF;
-  --surface-raised: #F2F1FD;
-  --border: #E6E7EB;
-  --border-strong: #D6D8DE;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-raised: #f2f1fd;
+  --border: #e6e7eb;
+  --border-strong: #d6d8de;
   /* text — dark ink on light */
-  --fg: #2A2E34;
-  --muted: #656F7D;
-  --subtle: #A2ABB8;
+  --fg: #2a2e34;
+  --muted: #656f7d;
+  --subtle: #a2abb8;
   /* brand — ClickUp violet → hover */
-  --brand: #7B68EE;
-  --brand-hover: #5F4FD6;
-  --on-brand: #FFFFFF;
+  --brand: #7b68ee;
+  --brand-hover: #5f4fd6;
+  --on-brand: #ffffff;
   /* accent + semantic (ClickUp light) — --accent is the cool supporting tone
    * (retuned from Forge & Ember's sage). The ClickUp accent story is the
    * pink/sky pair: pink lives in the additive --accent-2, sky in --accent and
    * reused as the semantic --info (info deliberately shares the sky hue). */
-  --accent: #49CCF9;
-  --accent-2: #FD71AF;
-  --success: #2ECC71;
-  --warning: #FFC800;
-  --danger: #E8465E;
-  --info: #49CCF9;
+  --accent: #49ccf9;
+  --accent-2: #fd71af;
+  --success: #2ecc71;
+  --warning: #ffc800;
+  --danger: #e8465e;
+  --info: #49ccf9;
   /* hero/CTA gradient — violet → pink; opt-in, so components reach for a token
    * instead of hard-coding the two hexes. */
-  --brand-gradient: linear-gradient(135deg, #7B68EE 0%, #FD71AF 100%);
+  --brand-gradient: linear-gradient(135deg, #7b68ee 0%, #fd71af 100%);
 }
 
 @theme inline {
