@@ -85,7 +85,7 @@ const PAGE_STYLE = `<style>
   --border-strong: #d6d8de;
   --fg: #2a2e34;
   --muted: #656f7d;
-  --subtle: #a2abb8;
+  --subtle: #6b7684;
   --brand: #7b68ee;
   --brand-hover: #5f4fd6;
   --on-brand: #ffffff;

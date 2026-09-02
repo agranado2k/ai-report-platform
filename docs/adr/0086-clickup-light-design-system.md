@@ -61,6 +61,18 @@ Chosen: **option 6, ClickUp — a bright, light design system.**
     `#D6D8DE`;
   - text `#2A2E34` / muted `#656F7D` / subtle `#A2ABB8`;
   - semantic success `#2ECC71`, warning `#FFC800`, danger `#E8465E`, info `#49CCF9`;
+
+    **Amendment (2026-09-02, #331 / PRD #330):** the redesign adds accessibility-driven
+    text tiers because several of the values above **fail WCAG AA when used as text on the
+    light ground** (they are *fill* colours). `--subtle` is darkened `#A2ABB8` → **`#6B7684`**
+    (≥ 4.6:1 on `--surface`), and each semantic colour gains a dark **`-fg` text tier** —
+    success `#15803D`, warning `#B45309`, danger `#C62839`, info `#0E7490` (all ≥ 4.6:1 on
+    `--bg`) — paired with a light **`-soft` fill** (`#E6F8EE` / `#FFF6D6` / `#FDEAED` /
+    `#E4F7FE`). **Text takes the `-fg` tier; the base hue stays the fill.** **Links use
+    `--brand-hover` (5.9:1), never `--brand` (4.2:1).** Also additive: `--brand-soft`
+    (interactive tint), `--hover` (neutral hover fill), `--placeholder`, a `--brand-ring`
+    focus token, a `--shadow-xs` step, and a `--ease` motion token. All additive — no
+    existing token renamed. Values: report `Z0W60dI8hu` §§9–10.
   - radii control `12px` / card `16px`; **soft, diffuse shadows** (a light ground uses
     shadow for elevation, unlike Forge & Ember's border-led dark elevation);
   - fonts unchanged — Inter (UI) + JetBrains Mono (code); no new faces vendored here.
