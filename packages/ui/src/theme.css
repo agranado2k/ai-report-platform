@@ -1,40 +1,52 @@
-/* Design tokens — "Forge & Ember" (ADR-0058, amends ADR-0050). The single
- * source of truth for the app's look. Re-theme by editing this file.
+/* Design tokens — "ClickUp light" (ADR-0086, supersedes ADR-0058; amends
+ * ADR-0050). The single source of truth for the app's look. Re-theme by
+ * editing this file. Consumed by BOTH apps/app and apps/view (ADR-0071).
  *
  * Pattern (Tailwind v4 idiom): primitive values are CSS variables on :root;
  * `@theme inline` maps them to Tailwind utilities by REFERENCE (bg-surface,
  * text-muted, rounded-card, font-sans, shadow-md, …). Because the utilities
  * resolve `var(--…)` at runtime, a re-theme is ZERO component-class changes.
  *
- * Forge & Ember is WARM-DARK BY DEFAULT — :root carries the dark palette
- * directly (copper/ember on warm ink, parchment text). A future light mode
- * would be an additive `.light { --…: … }` block + a toggle; no component edits. */
+ * ClickUp light is LIGHT BY DEFAULT — :root carries the light palette directly
+ * (bright violet brand with pink/sky accents on near-white surfaces, dark ink
+ * text). This INVERTS ADR-0058's plan: light lives on :root, and dark is
+ * deferred to a future additive `.dark { --…: … }` block + a toggle (no
+ * component edits). The `@custom-variant dark` hook is retained; no `.dark {}`
+ * values are shipped now. */
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* Warm-dark is the default — tell the UA so native chrome (scrollbars, form
-   * controls, autofill, date/select popups) renders dark, not light. */
-  color-scheme: dark;
-  /* surfaces — warm ink */
-  --bg: #1a1410;
-  --surface: #241c16;
-  --surface-raised: #2c231b;
-  --border: rgba(242, 233, 220, 0.1);
-  --border-strong: rgba(242, 233, 220, 0.16);
-  /* text — parchment */
-  --fg: #f2e9dc;
-  --muted: #c6b9a6;
-  --subtle: #9a8b78;
-  /* brand — copper → ember */
-  --brand: #c8762d;
-  --brand-hover: #e8a04c;
-  --on-brand: #231405;
-  /* accent + semantic (retuned warm) */
-  --accent: #8a9a7b;
-  --success: #7fb069;
-  --warning: #e8a04c;
-  --danger: #d9614c;
+  /* Light is the default — tell the UA so native chrome (scrollbars, form
+   * controls, autofill, date/select popups) renders light, not dark. */
+  color-scheme: light;
+  /* surfaces — near-white page, white cards, faint violet-tinted raised */
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-raised: #f2f1fd;
+  --border: #e6e7eb;
+  --border-strong: #d6d8de;
+  /* text — dark ink on light */
+  --fg: #2a2e34;
+  --muted: #656f7d;
+  --subtle: #a2abb8;
+  /* brand — ClickUp violet → hover */
+  --brand: #7b68ee;
+  --brand-hover: #5f4fd6;
+  --on-brand: #ffffff;
+  /* accent + semantic (ClickUp light) — --accent is the cool supporting tone
+   * (retuned from Forge & Ember's sage). The ClickUp accent story is the
+   * pink/sky pair: pink lives in the additive --accent-2, sky in --accent and
+   * reused as the semantic --info (info deliberately shares the sky hue). */
+  --accent: #49ccf9;
+  --accent-2: #fd71af;
+  --success: #2ecc71;
+  --warning: #ffc800;
+  --danger: #e8465e;
+  --info: #49ccf9;
+  /* hero/CTA gradient — violet → pink; opt-in, so components reach for a token
+   * instead of hard-coding the two hexes. */
+  --brand-gradient: linear-gradient(135deg, #7b68ee 0%, #fd71af 100%);
 }
 
 @theme inline {
@@ -50,21 +62,28 @@
   --color-brand-hover: var(--brand-hover);
   --color-on-brand: var(--on-brand);
   --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  /* the violet→pink gradient, exposed as a theme token so components opt in via
+   * a reference (e.g. `bg-[var(--gradient-brand)]`) rather than hard-coded color */
+  --gradient-brand: var(--brand-gradient);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
-  --radius-control: 8px;
-  --radius-card: 12px;
+  --radius-control: 12px;
+  --radius-card: 16px;
 
-  /* warm-dark shadows — borders do most of the elevation work on dark surfaces */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, 0.75), 0 2px 8px rgba(0, 0, 0, 0.5);
+  /* light-ground shadows — soft, diffuse, low-opacity black does the elevation
+   * work (unlike Forge & Ember's border-led dark elevation). */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow-lg: 0 16px 40px -12px rgba(16, 24, 40, 0.18), 0 4px 12px rgba(16, 24, 40, 0.08);
 }
 
 /* Base element defaults so unstyled text still picks up the theme. */

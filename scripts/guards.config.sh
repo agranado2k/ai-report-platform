@@ -28,7 +28,7 @@
 # scripts/docs-conformance/. KEEP IN SYNC with the `include` globs in
 # vitest.config.ts (which carries the matching reminder) — a tree covered there
 # but absent here is silently un-guarded.
-GUARD_SOURCE_RE='^(packages/[^/]+/src/|apps/mcp/src/|apps/app/app/server/|apps/view/app/(server|edit)/|scripts/docs-conformance/).*\.(ts|tsx|mjs)$'
+GUARD_SOURCE_RE='^(packages/[^/]+/src/|apps/mcp/src/|apps/app/app/(server|theme)/|apps/view/app/(server|edit)/|scripts/docs-conformance/).*\.(ts|tsx|mjs)$'
 
 # Paths that match SOURCE but must NOT count as source: the test files
 # themselves, type declarations (no behaviour to test), and
