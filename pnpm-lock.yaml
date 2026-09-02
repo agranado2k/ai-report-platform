@@ -78,9 +78,6 @@ importers:
       '@clerk/remix':
         specifier: ^4.13.49
         version: 4.13.49(@remix-run/react@2.17.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3))(@remix-run/server-runtime@2.17.5(typescript@5.9.3))(react-dom@18.3.1(react@18.3.1))(react-router@6.30.4(react@18.3.1))(react@18.3.1)
-      '@clerk/themes':
-        specifier: ^2.4.57
-        version: 2.4.57(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.0.2
@@ -1167,10 +1164,6 @@ packages:
         optional: true
       cypress:
         optional: true
-
-  '@clerk/themes@2.4.57':
-    resolution: {integrity: sha512-Nb3bO79rMTU/MPVTC/dde6LG27/IgOMKIYi5KSvAmO4ZUHlj0OWufu6CMvz5OYVZ0YdyMnTBU2aPGRUiRzO+2w==}
-    engines: {node: '>=18.17.0'}
 
   '@clerk/types@4.101.25':
     resolution: {integrity: sha512-gPxm3hlBkP7B9EfKyp3/UDonNOjg7Z0UvqfrMj5u8gA8nyzvC1UFYtSTTmTfgSY82+5Yo38YV0DYu9vNf6t9CQ==}
@@ -9922,14 +9915,6 @@ snapshots:
       dotenv: 17.2.2
     optionalDependencies:
       '@playwright/test': 1.60.0
-    transitivePeerDependencies:
-      - react
-      - react-dom
-
-  '@clerk/themes@2.4.57(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
-    dependencies:
-      '@clerk/shared': 3.47.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      tslib: 2.8.1
     transitivePeerDependencies:
       - react
       - react-dom
