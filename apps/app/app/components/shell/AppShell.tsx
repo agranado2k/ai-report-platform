@@ -9,11 +9,23 @@ import {
   UploadIcon,
   UsersIcon,
 } from "arp-ui";
-import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import { Logo } from "../Logo";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { FolderNavTree } from "./FolderNavTree";
-import { crumbsFor, isRailToggle, type NavFolder } from "./shell-nav";
+import {
+  crumbsFor,
+  isEditableTarget,
+  isNavActive,
+  isRailToggle,
+  type NavFolder,
+} from "./shell-nav";
 
 // The 2026 persistent app shell (#333, report Z0W60dI8hu §02): a sidebar on the
 // page ground beside content on white. DATA is prop-driven (the _app layout
@@ -115,29 +127,10 @@ export function AppShell({
 }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Restore the persisted rail state and wire the ⌘B / Ctrl+B toggle. Guarded:
-  // localStorage throws in private windows / when site data is blocked.
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(RAIL_KEY) === "1") setCollapsed(true);
-    } catch {}
-    const onKey = (e: KeyboardEvent) => {
-      if (isRailToggle(e)) {
-        e.preventDefault();
-        setCollapsed((c) => {
-          const next = !c;
-          try {
-            localStorage.setItem(RAIL_KEY, next ? "1" : "0");
-          } catch {}
-          return next;
-        });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  const toggle = () =>
+  // One persist-and-flip, shared by the ⌘B chord and the header button so the
+  // two entry points can't drift. localStorage is guarded: it throws in
+  // private windows / when site data is blocked.
+  const toggleCollapsed = useCallback(() => {
     setCollapsed((c) => {
       const next = !c;
       try {
@@ -145,6 +138,24 @@ export function AppShell({
       } catch {}
       return next;
     });
+  }, []);
+
+  // Restore the persisted rail state and wire the ⌘B / Ctrl+B toggle.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(RAIL_KEY) === "1") setCollapsed(true);
+    } catch {}
+    const onKey = (e: KeyboardEvent) => {
+      if (!isRailToggle(e)) return;
+      // Don't swallow the chord while the user is typing in a field (e.g. the
+      // upload form or an api-keys input) — only toggle when focus is chrome.
+      if (isEditableTarget(e.target as HTMLElement | null)) return;
+      e.preventDefault();
+      toggleCollapsed();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleCollapsed]);
 
   const crumbs = crumbsFor(activePath, navFolders, selectedFolderId);
 
@@ -177,7 +188,7 @@ export function AppShell({
             icon={<DocumentIcon />}
             label="Reports"
             href="/"
-            active={activePath === "/"}
+            active={isNavActive(activePath, "/")}
             collapsed={collapsed}
           />
           <NavItem icon={<UsersIcon />} label="Shared with me" collapsed={collapsed} soon />
@@ -199,7 +210,7 @@ export function AppShell({
             icon={<KeyIcon />}
             label="API keys & MCP"
             href="/settings/api-keys"
-            active={activePath.startsWith("/settings")}
+            active={isNavActive(activePath, "/settings")}
             collapsed={collapsed}
           />
         </nav>
@@ -222,7 +233,7 @@ export function AppShell({
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
           <button
             type="button"
-            onClick={toggle}
+            onClick={toggleCollapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-pressed={collapsed}
             title="Toggle sidebar (⌘B)"

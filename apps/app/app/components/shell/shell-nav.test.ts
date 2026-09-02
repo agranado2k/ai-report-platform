@@ -7,6 +7,7 @@ import {
   buildFolderTree,
   crumbsFor,
   folderTrail,
+  isEditableTarget,
   isNavActive,
   isRailToggle,
   type NavFolder,
@@ -82,5 +83,18 @@ describe("crumbsFor", () => {
       "Settings",
       "API keys",
     ]);
+  });
+});
+
+describe("isEditableTarget", () => {
+  it("is true for a contenteditable host or an input/textarea/select ancestor", () => {
+    expect(isEditableTarget({ isContentEditable: true })).toBe(true);
+    expect(isEditableTarget({ closest: (s: string) => (s.includes("input") ? {} : null) })).toBe(
+      true,
+    );
+  });
+  it("is false for no target or a non-field target", () => {
+    expect(isEditableTarget(null)).toBe(false);
+    expect(isEditableTarget({ closest: () => null })).toBe(false);
   });
 });

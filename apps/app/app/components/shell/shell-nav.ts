@@ -92,3 +92,14 @@ export function crumbsFor(
   if (pathname.startsWith("/settings")) return [{ label: "Settings" }, { label: "API keys" }];
   return [{ label: "Reports", href: "/" }];
 }
+
+/** True when a keyboard event's target is an editable field, so a global
+ *  shortcut (⌘B) must NOT steal the key while the user is typing. Pure over
+ *  the target's shape so it's testable without a DOM. */
+export function isEditableTarget(
+  el: { isContentEditable?: boolean; closest?: (selector: string) => unknown } | null,
+): boolean {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  return typeof el.closest === "function" && el.closest("input, textarea, select") != null;
+}
