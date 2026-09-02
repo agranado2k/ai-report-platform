@@ -48,7 +48,7 @@ const REQUIRED_PRIMITIVES: Record<string, string> = {
   "--border-strong": "#d6d8de",
   "--fg": "#2a2e34",
   "--muted": "#656f7d",
-  "--subtle": "#a2abb8",
+  "--subtle": "#6b7684", // darkened for WCAG AA on the light ground (T1)
   "--brand": "#7b68ee",
   "--brand-hover": "#5f4fd6",
   "--on-brand": "#ffffff",
@@ -67,6 +67,36 @@ describe("theme.css token contract (ADR-0086, ClickUp light)", () => {
       expect(declValue(root, token)?.toLowerCase()).toBe(hex);
     });
   }
+
+  // Additive redesign tokens (T1, PRD #330). Interactive-state tints, the
+  // muted placeholder, and a soft-fill + dark-text-tier pair per semantic
+  // colour so semantic text clears WCAG AA on the light ground. Values from
+  // the App Shell Mockups report (Z0W60dI8hu, section 10).
+  for (const [token, hex] of Object.entries({
+    "--brand-soft": "#f2f1fd",
+    "--hover": "#eef0f3",
+    "--placeholder": "#8a94a3",
+    "--success-soft": "#e6f8ee",
+    "--success-fg": "#15803d",
+    "--warning-soft": "#fff6d6",
+    "--warning-fg": "#b45309",
+    "--danger-soft": "#fdeaed",
+    "--danger-fg": "#c62839",
+    "--info-soft": "#e4f7fe",
+    "--info-fg": "#0e7490",
+  } as Record<string, string>)) {
+    it(`declares ${token}: ${hex} on :root`, () => {
+      expect(declValue(root, token)?.toLowerCase()).toBe(hex);
+    });
+  }
+
+  it("declares a translucent brand focus-ring token on :root", () => {
+    expect(declValue(root, "--brand-ring")).toMatch(/rgb\(|rgba\(/);
+  });
+
+  it("declares a motion-easing token on :root", () => {
+    expect(declValue(root, "--ease")).toMatch(/cubic-bezier/);
+  });
 
   it("declares color-scheme: light on :root (light is the default — ADR-0086)", () => {
     expect(declValue(root, "color-scheme")).toBe("light");
@@ -87,7 +117,27 @@ describe("theme.css token contract (ADR-0086, ClickUp light)", () => {
   }
 
   // The additive tokens are only useful if they reach utilities / references.
-  for (const mapping of ["--color-accent-2", "--color-info", "--gradient-brand"]) {
+  for (const mapping of [
+    "--color-accent-2",
+    "--color-info",
+    "--gradient-brand",
+    // additive redesign mappings (T1): interactive tints, placeholder, the
+    // semantic soft/text-tier pairs, the focus ring, the xs shadow, easing.
+    "--color-brand-soft",
+    "--color-hover",
+    "--color-placeholder",
+    "--color-success-soft",
+    "--color-success-fg",
+    "--color-warning-soft",
+    "--color-warning-fg",
+    "--color-danger-soft",
+    "--color-danger-fg",
+    "--color-info-soft",
+    "--color-info-fg",
+    "--color-brand-ring",
+    "--shadow-xs",
+    "--ease-standard",
+  ]) {
     it(`maps ${mapping} in the @theme inline block`, () => {
       expect(declValue(themeCss, mapping)).toBeTruthy();
     });

@@ -29,7 +29,7 @@
   /* text — dark ink on light */
   --fg: #2a2e34;
   --muted: #656f7d;
-  --subtle: #a2abb8;
+  --subtle: #6b7684;
   /* brand — ClickUp violet → hover */
   --brand: #7b68ee;
   --brand-hover: #5f4fd6;
@@ -47,6 +47,29 @@
   /* hero/CTA gradient — violet → pink; opt-in, so components reach for a token
    * instead of hard-coding the two hexes. */
   --brand-gradient: linear-gradient(135deg, #7b68ee 0%, #fd71af 100%);
+
+  /* ---- 2026 app-shell redesign, additive (T1, PRD #330 / report Z0W60dI8hu) ---- */
+  /* interactive-state tints: brand-soft = active nav / selected row; hover =
+   * neutral hover fill and the secondary-button ground. */
+  --brand-soft: #f2f1fd;
+  --hover: #eef0f3;
+  /* placeholder / disabled text — lighter than --subtle, decorative only. */
+  --placeholder: #8a94a3;
+  /* semantic soft-fill + dark text-tier pairs. The base --success/--warning/
+   * --danger/--info are fills; used AS TEXT on the light ground they fail WCAG
+   * AA, so text takes the -fg tier (all ≥ 4.6:1 on --bg) over the -soft fill. */
+  --success-soft: #e6f8ee;
+  --success-fg: #15803d;
+  --warning-soft: #fff6d6;
+  --warning-fg: #b45309;
+  --danger-soft: #fdeaed;
+  --danger-fg: #c62839;
+  --info-soft: #e4f7fe;
+  --info-fg: #0e7490;
+  /* focus ring — translucent brand, drawn as a 3px box-shadow (zero offset). */
+  --brand-ring: rgb(123 104 238 / 0.35);
+  /* motion — the standard hover/press/colour easing. */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @theme inline {
@@ -67,6 +90,19 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
+  /* additive redesign colour utilities (T1) */
+  --color-brand-soft: var(--brand-soft);
+  --color-hover: var(--hover);
+  --color-placeholder: var(--placeholder);
+  --color-success-soft: var(--success-soft);
+  --color-success-fg: var(--success-fg);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-fg: var(--danger-fg);
+  --color-info-soft: var(--info-soft);
+  --color-info-fg: var(--info-fg);
+  --color-brand-ring: var(--brand-ring);
 
   /* the violet→pink gradient, exposed as a theme token so components opt in via
    * a reference (e.g. `bg-[var(--gradient-brand)]`) rather than hard-coded color */
@@ -81,9 +117,13 @@
 
   /* light-ground shadows — soft, diffuse, low-opacity black does the elevation
    * work (unlike Forge & Ember's border-led dark elevation). */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.05);
   --shadow-lg: 0 16px 40px -12px rgba(16, 24, 40, 0.18), 0 4px 12px rgba(16, 24, 40, 0.08);
+
+  /* transition-timing-function utility (ease-standard) — the redesign's motion. */
+  --ease-standard: var(--ease);
 }
 
 /* Base element defaults so unstyled text still picks up the theme. */
