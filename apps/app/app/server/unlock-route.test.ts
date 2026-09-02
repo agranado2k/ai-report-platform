@@ -270,15 +270,16 @@ describe("/unlock/{slug} — the inlined palette tracks packages/ui/src/theme.cs
     }
   });
 
-  it("stays dark-only, like the rest of the product", async () => {
-    // The first cut honoured `prefers-color-scheme` and rendered LIGHT in a
-    // browser where the dashboard beside it rendered dark. theme.css sets
-    // `color-scheme: dark` unconditionally; there is no light mode to opt into.
+  it("stays light-only, like the rest of the product", async () => {
+    // ADR-0086 makes light the product default: theme.css sets
+    // `color-scheme: light` unconditionally and dark is a deferred additive
+    // follow-up. This page never honours `prefers-color-scheme`, so it can't
+    // render dark in a browser where the dashboard beside it renders light.
     await seed(buildReport(PRIVATE));
     state.actor = { orgId: ORG, userId: OWNER };
     const page = await ((await loader(args(SLUG))) as Response).text();
 
-    expect(page).toContain("color-scheme: dark");
+    expect(page).toContain("color-scheme: light");
     expect(page).not.toContain("prefers-color-scheme");
   });
 });
