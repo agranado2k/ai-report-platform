@@ -127,13 +127,27 @@ function sharingMenu(html: string, folderName: string): string {
   return html.slice(start, end === -1 ? html.length : end);
 }
 
-/** The badge a folder row renders. The row is `<a …>…name…</a><span …>BADGE`,
- *  so the badge is the first `<span>` text after the folder's own name. */
+/** The badge a folder row renders. The management row is `<a …>…name…</a><span
+ *  …>BADGE`, so the badge is the first rounded-full `<span>` after the folder's
+ *  own name. Since the 2026 app shell (#333), the folder NAME also appears in
+ *  the shell's lightweight nav rail (navigation only, NO badge) — and the rail
+ *  renders first — so the first `>name</span>` is the rail, not the managed
+ *  row. Scan every occurrence and return the badge of the one a visibility
+ *  badge actually follows (the dashboard's management tree). The double
+ *  listing is the transient #334 reconciles. */
 function badgeFor(html: string, folderName: string): string {
-  const at = html.indexOf(`>${folderName}</span>`);
+  const needle = `>${folderName}</span>`;
+  let at = html.indexOf(needle);
   expect(at, `folder "${folderName}" is not in this sidebar`).toBeGreaterThan(-1);
-  const after = html.slice(at, at + 600);
-  const badge = after.match(/<span class="[^"]*rounded-full[^"]*"[^>]*>([^<]*)</);
+  let badge: RegExpMatchArray | null = null;
+  while (at !== -1) {
+    const m = html.slice(at, at + 600).match(/<span class="[^"]*rounded-full[^"]*"[^>]*>([^<]*)</);
+    if (m) {
+      badge = m;
+      break;
+    }
+    at = html.indexOf(needle, at + 1);
+  }
   expect(badge, `no visibility badge rendered for "${folderName}"`).not.toBeNull();
   return (badge?.[1] ?? "").trim();
 }
