@@ -13,7 +13,13 @@ export function Switch({
 }: Omit<ComponentProps<"input">, "type" | "role" | "className"> & { className?: string }) {
   return (
     <label className={cx("relative inline-flex cursor-pointer items-center", className)}>
-      <input type="checkbox" className="peer sr-only" {...props} />
+      {/* role="switch" is announced correctly on a native checkbox: the UA maps
+       * `checked` to aria-checked implicitly (ARIA in HTML), so no explicit
+       * aria-checked is needed — biome's useAriaPropsForRole doesn't model
+       * that native mapping, hence the ignore. This is what makes the control
+       * read as a SWITCH, not a checkbox (the whole point of the component). */}
+      {/* biome-ignore lint/a11y/useAriaPropsForRole: native checkbox exposes checked as aria-checked implicitly */}
+      <input type="checkbox" role="switch" className="peer sr-only" {...props} />
       <span
         aria-hidden="true"
         className={

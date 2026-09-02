@@ -44,4 +44,4 @@ export { Radio } from "./Radio";
 export { Sheet, type SheetSide } from "./Sheet";
 export { Switch } from "./Switch";
 export { Tab, Tabs } from "./Tabs";
-export { Toast } from "./Toast";
+export { Toast, type ToastTone } from "./Toast";

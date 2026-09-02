@@ -29,9 +29,11 @@ export function Banner({
   title?: ReactNode;
   action?: ReactNode;
 }) {
+  // An error must be announced assertively; polite `status` would defer it.
+  const role = tone === "danger" ? "alert" : "status";
   return (
     <div
-      role="status"
+      role={role}
       className={cx(
         "grid grid-cols-[1rem_1fr_auto] items-start gap-x-3 gap-y-0.5 rounded-control border px-4 py-3 text-sm",
         tones[tone],

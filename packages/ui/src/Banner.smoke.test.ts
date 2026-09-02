@@ -18,4 +18,8 @@ describe("Banner", () => {
     expect(html).toContain("Review");
     expect(html).toContain('role="status"');
   });
+  it("a danger banner announces assertively (role=alert), not politely", () => {
+    const html = r(h(Banner, { tone: "danger", title: "Failed" }, "too big"));
+    expect(html).toContain('role="alert"');
+  });
 });

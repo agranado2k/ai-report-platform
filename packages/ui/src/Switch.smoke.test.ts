@@ -7,6 +7,7 @@ describe("Switch", () => {
   it("is a role=switch checkbox visually hidden behind a peer-driven track", () => {
     const html = r(h(Switch, { name: "notify", defaultChecked: true }));
     expect(html).toContain('type="checkbox"');
+    expect(html).toContain('role="switch"');
     expect(html).toContain("sr-only");
     expect(html).toContain("peer-checked:bg-brand");
     expect(html).toContain("checked");
