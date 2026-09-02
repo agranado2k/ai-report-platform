@@ -59,10 +59,11 @@ const escapeAttr = (s: string) =>
  *
  * The palette is the arp-ui token set (`packages/ui/src/theme.css`) — the
  * single source of truth shared by BOTH origins — re-declared here, because a
- * raw Response has no build step to @import it. The product is dark-only
- * (`color-scheme: dark`), so this page is too: an earlier cut honoured
- * `prefers-color-scheme` and rendered LIGHT in a browser where the dashboard
- * beside it rendered dark.
+ * raw Response has no build step to @import it. The product is light-only
+ * (`color-scheme: light`, ADR-0086 — dark is a deferred additive follow-up), so
+ * this page is too: it declares one unconditional light palette and never
+ * honours `prefers-color-scheme`, so it can never render dark in a browser where
+ * the dashboard beside it renders light.
  *
  * Re-declaring is a standing drift risk — nothing about editing `theme.css`
  * would otherwise tell you this page exists — so the tokens are hoisted into
@@ -78,16 +79,16 @@ const escapeAttr = (s: string) =>
  */
 const PAGE_STYLE = `<style>
 :root {
-  color-scheme: dark;
-  --bg: #1a1410;
-  --surface: #241c16;
-  --border-strong: rgba(242, 233, 220, 0.16);
-  --fg: #f2e9dc;
-  --muted: #c6b9a6;
-  --subtle: #9a8b78;
-  --brand: #c8762d;
-  --brand-hover: #e8a04c;
-  --on-brand: #231405;
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border-strong: #d6d8de;
+  --fg: #2a2e34;
+  --muted: #656f7d;
+  --subtle: #a2abb8;
+  --brand: #7b68ee;
+  --brand-hover: #5f4fd6;
+  --on-brand: #ffffff;
 }
 * { box-sizing: border-box }
 body {
