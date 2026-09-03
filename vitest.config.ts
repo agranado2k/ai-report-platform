@@ -47,6 +47,13 @@ export default defineConfig({
       // dependency, so it lives in the fast node tier rather than e2e like the
       // rest of apps/app's routes.
       "apps/app/app/theme/**/*.test.ts",
+      // App-shell chrome (#333): pure-logic modules (folder-tree build,
+      // breadcrumbs, active-nav, rail-collapse reducer) and node-render smoke
+      // tests of the presentational shell. No DOM/browser — the shell is a
+      // pure prop-driven component, so it lives in the fast node tier (the
+      // ADR-0079 browser harness is editor-only). KEEP IN SYNC with
+      // GUARD_SOURCE_RE in scripts/guards.config.sh.
+      "apps/app/app/components/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
       // The browser tier's own node-tier guards (ADR-0079): properties of the
