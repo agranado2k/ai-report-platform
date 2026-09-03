@@ -127,27 +127,28 @@ function sharingMenu(html: string, folderName: string): string {
   return html.slice(start, end === -1 ? html.length : end);
 }
 
-/** The badge a folder row renders. The management row is `<a …>…name…</a><span
- *  …>BADGE`, so the badge is the first rounded-full `<span>` after the folder's
- *  own name. Since the 2026 app shell (#333), the folder NAME also appears in
- *  the shell's lightweight nav rail (navigation only, NO badge) — and the rail
- *  renders first — so the first `>name</span>` is the rail, not the managed
- *  row. Scan every occurrence and return the badge of the one a visibility
- *  badge actually follows (the dashboard's management tree). The double
- *  listing is the transient #334 reconciles. */
-function badgeFor(html: string, folderName: string): string {
+/** The HTML window at a folder's MANAGEMENT row — the occurrence of its name
+ *  that a visibility badge (a rounded-full `<span>`) follows. Since the 2026
+ *  app shell (#333) the folder NAME also appears in the shell's lightweight
+ *  nav rail (navigation only, NO badge) — and the rail renders FIRST — so the
+ *  first `>name</span>` is the rail, not the managed row. Scan for the one a
+ *  badge follows. The double listing is the transient #334 reconciles. */
+function managedRow(html: string, folderName: string, len = 600): string {
   const needle = `>${folderName}</span>`;
   let at = html.indexOf(needle);
   expect(at, `folder "${folderName}" is not in this sidebar`).toBeGreaterThan(-1);
-  let badge: RegExpMatchArray | null = null;
   while (at !== -1) {
-    const m = html.slice(at, at + 600).match(/<span class="[^"]*rounded-full[^"]*"[^>]*>([^<]*)</);
-    if (m) {
-      badge = m;
-      break;
-    }
+    const win = html.slice(at, at + len);
+    if (/<span class="[^"]*rounded-full[^"]*"[^>]*>/.test(win)) return win;
     at = html.indexOf(needle, at + 1);
   }
+  throw new Error(`no managed (badged) row rendered for "${folderName}"`);
+}
+
+function badgeFor(html: string, folderName: string): string {
+  const badge = managedRow(html, folderName).match(
+    /<span class="[^"]*rounded-full[^"]*"[^>]*>([^<]*)</,
+  );
   expect(badge, `no visibility badge rendered for "${folderName}"`).not.toBeNull();
   return (badge?.[1] ?? "").trim();
 }
@@ -225,10 +226,12 @@ Then("the owner's sidebar names the parent folder in full on hover", async ({ re
     `title="${PARENT_NAME}"`,
   );
   // (Apostrophes are HTML-escaped by React SSR, so match a plain fragment.)
-  const at = html.indexOf(`>${PARENT_NAME}</span>`);
-  expect(html.slice(at, at + 600), "the badge must explain the state it abbreviates").toContain(
-    "Not visible to your whole org.",
-  );
+  // Scope to the MANAGED row — the shell's nav rail (#333) also renders the
+  // name but carries no badge/explanation.
+  expect(
+    managedRow(html, PARENT_NAME),
+    "the badge must explain the state it abbreviates",
+  ).toContain("Not visible to your whole org.");
 });
 
 Then("the owner's sidebar renders no sharing controls for the Root folder", async ({ request }) => {
