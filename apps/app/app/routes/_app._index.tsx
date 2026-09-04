@@ -37,6 +37,7 @@ import {
   Select,
   StatusBadge,
 } from "../components";
+import { ReportFilter } from "../components/reports/ReportFilter";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
 import { editabilityNotice } from "../server/editability-notice.server";
@@ -666,28 +667,12 @@ export default function Index() {
     <PageShell>
       <AppHeader title="Your reports" />
 
-      {/* Search (GET) — org-wide; preserves the folder filter when set. */}
-      <Form method="get" className="mb-6 flex items-center gap-2">
-        <Input
-          name="q"
-          defaultValue={q}
-          placeholder="Search reports by title or slug…"
-          aria-label="Search reports"
-          className="w-full max-w-sm"
-        />
-        {selectedFolderId ? <input type="hidden" name="folder" value={selectedFolderId} /> : null}
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
-        {q ? (
-          <Link
-            to={selectedFolderId ? `/?folder=${selectedFolderId}` : "/"}
-            className="text-sm text-muted hover:text-fg"
-          >
-            Clear
-          </Link>
-        ) : null}
-      </Form>
+      {/* Filter-as-you-type (#334): debounced ?q= navigation, no submit; "/"
+          focuses it. The folder filter is preserved and the cursor resets
+          (report-filter.ts). */}
+      <div className="mb-6 flex items-center gap-2">
+        <ReportFilter defaultQuery={q} />
+      </div>
 
       <div className="flex items-start gap-6">
         {/* Sidebar: folder tree (clicking a folder filters the list). */}
@@ -777,86 +762,75 @@ export default function Index() {
               }
             />
           ) : (
-            <ul>
+            <div className="overflow-hidden rounded-card border border-border">
+              <div className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted">
+                <span>Name</span>
+                <span>Status</span>
+                <span>Sharing</span>
+                <span className="sr-only">Actions</span>
+              </div>
               {items.map((r) => (
-                <li
+                <div
                   key={r.slug}
-                  className="relative flex items-center gap-3 border-b border-border py-3 transition-colors last:border-0 hover:bg-surface-raised"
+                  className="relative grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-0 hover:bg-hover"
                 >
-                  {/* Stretched-link pattern (CSP-safe, zero extra JS): this is the
-                      ONLY thing that opens the report — clicking anywhere in the
-                      row does. Owner-open (ADR-0056): /reports/{slug}/open mints an
-                      owner access token, so the owner reaches their own report
-                      directly — no password/magic link even when it's private; the
-                      viewer still gates everyone else.
-
-                      Z-INDEX LAYERING: this overlay is `absolute inset-0` with an
-                      explicit `z-0`. Per CSS stacking rules, a positioned element
-                      with z-index 0 paints ABOVE any plain, non-positioned in-flow
-                      sibling (the title text, slug/folder line, status badge below)
-                      even though the overlay is visually invisible — so clicks on
-                      those regions correctly fall through to /open. The kebab
-                      `<details>` is given `relative z-10` so IT (and everything
-                      inside its panel — Move, Delete, Rename) wins the hit-test
-                      over this overlay and is never swallowed by it. */}
-                  <a
-                    href={`/reports/${r.slug}/open`}
-                    className="absolute inset-0 z-0 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-                  >
-                    <span className="sr-only">Open {r.title}</span>
-                  </a>
-                  <div className="min-w-0 flex-1">
-                    <p className="block max-w-full truncate px-1.5 py-0.5 text-sm font-medium text-fg">
-                      {r.title}
-                    </p>
-                    <div className="mt-0.5 flex items-center gap-2 pl-1.5 text-xs text-subtle">
+                  {/* Stretched-link open overlay (CSP-safe, ADR-0056 owner-open).
+                      z-0 paints above plain in-flow cells so clicking the name /
+                      status opens the report; interactive cells lift to z-10.
+                      A PROCESSING report (not yet published) is not openable —
+                      no overlay, so the row is inert until its clean version is
+                      live (#334; the StatusBadge shows the pulsing Processing). */}
+                  {r.isPublished ? (
+                    <a
+                      href={`/reports/${r.slug}/open`}
+                      className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+                    >
+                      <span className="sr-only">Open {r.title}</span>
+                    </a>
+                  ) : null}
+                  {/* Name: title + slug + folder tag + (ADR-0080) editability note */}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-fg">{r.title}</p>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
                       <code className="font-mono">{r.slug}</code>
                       <span className="inline-flex items-center gap-1">
-                        <FolderIcon className="h-3.5 w-3.5" />
+                        <FolderIcon className="size-3.5" />
                         {folderName(r.displayFolderId)}
                       </span>
+                      {r.editabilityNotice ? (
+                        <Badge
+                          tone="neutral"
+                          className="relative z-10"
+                          title={r.editabilityNotice.title}
+                        >
+                          {r.editabilityNotice.label}
+                        </Badge>
+                      ) : null}
                     </div>
                   </div>
-                  <StatusBadge isPublished={r.isPublished} />
-                  {/* ADR-0080 — why the Edit affordance won't work, said BEFORE
-                      the user clicks it and gets bounced back to read-only. The
-                      row still links to /open: this explains, it does not gate
-                      (the editor's own attempt-and-degrade stays the authority).
-                      `relative z-10` so the tooltip target isn't swallowed by
-                      the stretched-link overlay. */}
-                  {r.editabilityNotice ? (
-                    <Badge
-                      tone="neutral"
-                      className="relative z-10"
-                      title={r.editabilityNotice.title}
-                    >
-                      {r.editabilityNotice.label}
-                    </Badge>
-                  ) : null}
-                  {/* Sharing (ADR-0078 §12). Its own kebab, next to the actions
-                      one, because "who can see this" is a different decision
-                      from "rename / move / delete" and folding them together
-                      would put a destructive action one row from a sharing
-                      one. `relative z-10` lifts it above the stretched-link
-                      overlay, exactly like the actions menu below. */}
-                  <ReportSharingMenu
-                    node={r.sharing}
-                    choices={sharingChoices}
-                    pendingState={
-                      reportOutcome?.reportSlug === r.slug
-                        ? (reportOutcome.pendingSharing ?? null)
-                        : null
-                    }
-                  />
-                  {/* Row actions behind a native <details> menu — no JS, CSP-safe.
-                      `relative z-10` lifts it (Move/Delete/Rename) above the
-                      stretched-link overlay above. */}
-                  <details className="relative z-10 shrink-0">
-                    <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden">
-                      <MoreIcon className="h-4 w-4" />
+                  {/* Status */}
+                  <div>
+                    <StatusBadge isPublished={r.isPublished} />
+                  </div>
+                  {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay */}
+                  <div className="relative z-10 justify-self-start">
+                    <ReportSharingMenu
+                      node={r.sharing}
+                      choices={sharingChoices}
+                      pendingState={
+                        reportOutcome?.reportSlug === r.slug
+                          ? (reportOutcome.pendingSharing ?? null)
+                          : null
+                      }
+                    />
+                  </div>
+                  {/* Row actions behind a native <details> menu — no JS, CSP-safe */}
+                  <details className="relative z-10 shrink-0 justify-self-end">
+                    <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
+                      <MoreIcon className="size-4" />
                       <span className="sr-only">Actions for {r.title}</span>
                     </summary>
-                    <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-lg">
+                    <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-md">
                       <RenameReportForm slug={r.slug} title={r.title} />
                       <Form method="post" className="flex items-center gap-1.5 p-1">
                         <input type="hidden" name="intent" value="move" />
@@ -893,9 +867,9 @@ export default function Index() {
                       </Form>
                     </div>
                   </details>
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
 
           {hasPrev || hasNext ? (
