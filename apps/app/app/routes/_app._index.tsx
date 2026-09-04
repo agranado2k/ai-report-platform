@@ -20,24 +20,18 @@ import {
 } from "arp-domain";
 import {
   AppHeader,
-  Badge,
   Button,
   buttonClass,
   cx,
   EmptyState,
-  FolderIcon,
   type FolderNode,
   type FolderShareRow,
   FolderTree,
   Input,
-  MoreIcon,
   PageShell,
-  RenameReportForm,
-  ReportSharingMenu,
-  Select,
-  StatusBadge,
 } from "../components";
 import { ReportFilter } from "../components/reports/ReportFilter";
+import { ReportRow } from "../components/reports/ReportRow";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
 import { editabilityNotice } from "../server/editability-notice.server";
@@ -763,112 +757,35 @@ export default function Index() {
             />
           ) : (
             <div className="overflow-hidden rounded-card border border-border">
-              <div className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted">
+              {/* Visual column header; the rows below are a real <ul>/<li> so
+                  list semantics (lost when T4a replaced the <ul> with a div
+                  grid — #346) are restored. A full ARIA table with column
+                  association is the interaction ticket's call (#347). */}
+              <div
+                aria-hidden="true"
+                className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted"
+              >
                 <span>Name</span>
                 <span>Status</span>
                 <span>Sharing</span>
-                <span className="sr-only">Actions</span>
+                <span>Actions</span>
               </div>
-              {items.map((r) => (
-                <div
-                  key={r.slug}
-                  className="relative grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-0 hover:bg-hover"
-                >
-                  {/* Stretched-link open overlay (CSP-safe, ADR-0056 owner-open).
-                      z-0 paints above plain in-flow cells so clicking the name /
-                      status opens the report; interactive cells lift to z-10.
-                      A PROCESSING report (not yet published) is not openable —
-                      no overlay, so the row is inert until its clean version is
-                      live (#334; the StatusBadge shows the pulsing Processing). */}
-                  {r.isPublished ? (
-                    <a
-                      href={`/reports/${r.slug}/open`}
-                      className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
-                    >
-                      <span className="sr-only">Open {r.title}</span>
-                    </a>
-                  ) : null}
-                  {/* Name: title + slug + folder tag + (ADR-0080) editability note */}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-fg">{r.title}</p>
-                    <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
-                      <code className="font-mono">{r.slug}</code>
-                      <span className="inline-flex items-center gap-1">
-                        <FolderIcon className="size-3.5" />
-                        {folderName(r.displayFolderId)}
-                      </span>
-                      {r.editabilityNotice ? (
-                        <Badge
-                          tone="neutral"
-                          className="relative z-10"
-                          title={r.editabilityNotice.title}
-                        >
-                          {r.editabilityNotice.label}
-                        </Badge>
-                      ) : null}
-                    </div>
-                  </div>
-                  {/* Status */}
-                  <div>
-                    <StatusBadge isPublished={r.isPublished} />
-                  </div>
-                  {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay */}
-                  <div className="relative z-10 justify-self-start">
-                    <ReportSharingMenu
-                      node={r.sharing}
-                      choices={sharingChoices}
-                      pendingState={
-                        reportOutcome?.reportSlug === r.slug
-                          ? (reportOutcome.pendingSharing ?? null)
-                          : null
-                      }
-                    />
-                  </div>
-                  {/* Row actions behind a native <details> menu — no JS, CSP-safe */}
-                  <details className="relative z-10 shrink-0 justify-self-end">
-                    <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
-                      <MoreIcon className="size-4" />
-                      <span className="sr-only">Actions for {r.title}</span>
-                    </summary>
-                    <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-md">
-                      <RenameReportForm slug={r.slug} title={r.title} />
-                      <Form method="post" className="flex items-center gap-1.5 p-1">
-                        <input type="hidden" name="intent" value="move" />
-                        <input type="hidden" name="slug" value={r.slug} />
-                        <Select
-                          name="toFolderId"
-                          defaultValue={r.displayFolderId}
-                          aria-label={`Move ${r.title} to folder`}
-                          size="sm"
-                          className="min-w-0 flex-1 text-xs"
-                        >
-                          {folders.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.name}
-                            </option>
-                          ))}
-                        </Select>
-                        <Button type="submit" size="sm">
-                          Move
-                        </Button>
-                      </Form>
-                      <Form method="post" className="p-1">
-                        <input type="hidden" name="intent" value="delete-report" />
-                        <input type="hidden" name="slug" value={r.slug} />
-                        <input type="hidden" name="folder" value={r.folderId} />
-                        <Button
-                          type="submit"
-                          size="sm"
-                          variant="danger"
-                          className="w-full justify-start"
-                        >
-                          Delete report
-                        </Button>
-                      </Form>
-                    </div>
-                  </details>
-                </div>
-              ))}
+              <ul className="list-none">
+                {items.map((r) => (
+                  <ReportRow
+                    key={r.slug}
+                    report={r}
+                    folders={folders}
+                    folderLabel={folderName(r.displayFolderId)}
+                    sharingChoices={sharingChoices}
+                    pendingSharing={
+                      reportOutcome?.reportSlug === r.slug
+                        ? (reportOutcome.pendingSharing ?? null)
+                        : null
+                    }
+                  />
+                ))}
+              </ul>
             </div>
           )}
 
