@@ -31,6 +31,49 @@ function errorResponse(status: number, message: string): Response {
 // live version yet. Our own static HTML, so the strict view CSP + a meta-refresh
 // (no script) are fine. noindex. The gate only emits `interstitial` AFTER the
 // ACL gate has granted access (M7 / PR #170 ordering — see gate.server.ts).
+//
+// Styled to the product's light identity (App Shell Mockups Z0W60dI8hu, SECTION
+// 05; ADR-0086): the palette is inlined because a raw Response has no build step
+// to @import packages/ui/src/theme.css, and the values mirror that file
+// (light-only — `color-scheme: light`, never `prefers-color-scheme`). The
+// spinner is a pure CSS animation (no script) and honours reduced-motion.
+// `style-src 'self' 'unsafe-inline'` on the enforcing VIEW_CSP allows the inline
+// <style>; the report-only shadow already flags inline styling here (the page's
+// prior inline `style=` attribute did too), so this adds no NEW enforced risk.
+const SCANNING_STYLE = `<style>
+:root {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --fg: #2a2e34;
+  --muted: #656f7d;
+  --subtle: #6b7684;
+  --brand: #7b68ee;
+  --brand-soft: #f2f1fd;
+}
+* { box-sizing: border-box }
+body {
+  margin: 0; min-height: 100vh; padding: 2rem 1.5rem;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  background: var(--bg); color: var(--fg); text-align: center;
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { width: 100%; max-width: 34rem }
+.eyebrow {
+  font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--subtle); margin: 0 0 1.75rem;
+}
+.spinner {
+  width: 28px; height: 28px; margin: 0 auto 1.5rem; border-radius: 50%;
+  border: 3px solid var(--brand-soft); border-top-color: var(--brand);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none } }
+h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 600; margin: 0 0 .75rem }
+p { margin: 0; color: var(--muted) }
+</style>`;
+
 function scanningHoldingPage(): Response {
   const headers = viewHeaders();
   headers.set("content-type", "text/html; charset=utf-8");
@@ -39,10 +82,11 @@ function scanningHoldingPage(): Response {
   const body = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta http-equiv="refresh" content="5" />
-<title>Scanning…</title></head>
-<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;text-align:center">
-<h1>Scanning…</h1><p>This report is being checked. This page refreshes automatically.</p>
-</body></html>`;
+<title>Scanning…</title>${SCANNING_STYLE}</head>
+<body><main><p class="eyebrow">Centaur Spec</p>
+<div class="spinner" aria-hidden="true"></div>
+<h1>Scanning…</h1><p>This report is being checked for safety. This page refreshes automatically.</p>
+</main></body></html>`;
   return new Response(body, { status: 200, headers });
 }
 
