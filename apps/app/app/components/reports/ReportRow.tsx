@@ -5,12 +5,13 @@ import { RenameReportForm } from "../RenameReportForm";
 import { ReportSharingMenu } from "../ReportSharingMenu";
 import { StatusBadge } from "../StatusBadge";
 
-// One report row of the dashboard table (#335). Extracted from the route so it
-// is prop-driven and node-render smoke-testable (a real <li>, so list semantics — the #346 regression from the <ul>→<div> grid — are restored) (the route itself has no unit
-// seam), and so the ARIA table semantics + the hover-reveal live in one place.
-// Behaviour is unchanged from T4a (#334) — the sharing kebab and the
-// rename/move/delete <details> menu are the same controls; the interaction
-// layer (keyboard model, multi-select/bulk, a unified menu) is #347.
+// One report row of the dashboard table (#335). Extracted from the route (which
+// had no unit seam) so it is prop-driven and node-render smoke-testable, and a
+// real <li> so the list semantics T4a's <div> grid dropped (#346) are restored.
+// The hover-reveal lives here too. Behaviour is unchanged from T4a (#334) — the
+// sharing kebab and the rename/move/delete <details> menu are the same controls;
+// the interaction layer (keyboard model, multi-select/bulk, a unified menu, and
+// a full ARIA table with column association) is #347.
 
 /** The client-safe row shape the loader ships (a subset of the dashboard item). */
 export interface ReportRowItem {

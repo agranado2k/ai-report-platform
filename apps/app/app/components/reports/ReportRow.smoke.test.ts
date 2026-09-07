@@ -55,7 +55,7 @@ describe("ReportRow", () => {
     const html = render({ isPublished: true });
     expect(html).toMatch(/^<li/);
     expect(html).toContain("Q3 roadmap");
-    expect(html).toContain("abc");
+    expect(html).toMatch(/<code[^>]*>abc<\/code>/); // slug in the Name cell, not the href/sharing
     expect(html).toContain("Root");
   });
   it("a published report is openable — the stretched-link overlay to /open", () => {
@@ -63,5 +63,10 @@ describe("ReportRow", () => {
   });
   it("a processing (unpublished) report is inert — no open overlay", () => {
     expect(render({ isPublished: false })).not.toContain("/reports/abc/open");
+  });
+  it("actions menu is keyboard-reachable (focus-within reveal, not hover-only) and holds the actions", () => {
+    const html = render({ isPublished: true });
+    expect(html).toContain("focus-within:opacity-100");
+    expect(html).toContain("Delete report");
   });
 });

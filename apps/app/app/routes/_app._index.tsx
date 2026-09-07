@@ -768,7 +768,7 @@ export default function Index() {
                 <span>Name</span>
                 <span>Status</span>
                 <span>Sharing</span>
-                <span>Actions</span>
+                <span className="sr-only">Actions</span>
               </div>
               <ul className="list-none">
                 {items.map((r) => (
