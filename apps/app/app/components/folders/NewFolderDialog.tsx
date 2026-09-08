@@ -1,6 +1,7 @@
 import { Form } from "@remix-run/react";
 import { Button, cx, DialogFooter, DialogTitle, Input } from "arp-ui";
 import { useCallback, useEffect, useRef } from "react";
+import { openModal } from "../dialog";
 
 // The "New folder" dialog (#336, report Z0W60dI8hu §02): creating a folder gets
 // a deliberate dialog step rather than an always-present inline field. Built on
@@ -36,7 +37,9 @@ export function NewFolderDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
-  const openDialog = useCallback(() => dialogRef.current?.showModal(), []);
+  // openModal guards showModal(): the error path below re-opens a dialog a
+  // failed <Form> submit left open, and showModal() on an open dialog throws.
+  const openDialog = useCallback(() => openModal(dialogRef.current), []);
 
   // Palette entry point: the "New folder" action dispatches this event.
   useEffect(() => {

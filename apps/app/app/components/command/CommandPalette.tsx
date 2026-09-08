@@ -10,6 +10,7 @@ import {
   UploadIcon,
 } from "arp-ui";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { openModal } from "../dialog";
 import { makeToast, TOAST_EVENT } from "../feedback/toast";
 import { OPEN_NEW_FOLDER_EVENT } from "../folders/NewFolderDialog";
 import {
@@ -76,7 +77,9 @@ export function CommandPalette({
       setQuery("");
       setActive(0);
       setOpen(true);
-      dialogRef.current?.showModal();
+      // Guard: ⌘K while the palette is already open would throw on a second
+      // showModal() (InvalidStateError). openModal opens only when closed.
+      openModal(dialogRef.current);
       // Focus the field after the dialog paints.
       window.requestAnimationFrame(() => inputRef.current?.focus());
     };
