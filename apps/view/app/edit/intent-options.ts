@@ -9,6 +9,9 @@
 // nothing at runtime, and `Record<Intent, …>` below still gives us
 // drift-safety.
 import type { Intent } from "arp-domain";
+// TYPE-ONLY import (erased at build): only the `BadgeTone` union, no arp-ui
+// runtime — the tone map below is data, consumed by the Comments panel's pills.
+import type { BadgeTone } from "arp-ui";
 
 /** Human-facing labels, keyed by the domain `Intent` union. Typed as
  *  `Record<Intent, string>` so it stays EXHAUSTIVE at compile time: adding a
@@ -21,6 +24,21 @@ export const INTENT_LABELS: Record<Intent, string> = {
   enhancement: "Enhance",
   add: "Add",
   remove: "Remove",
+};
+
+/** The Badge tone each intent wears as a scannable pill in the Comments panel
+ *  (T8, report Z0W60dI8hu §06 — "the intents become pills the reader can
+ *  scan"). Typed `Record<Intent, BadgeTone>` so it stays EXHAUSTIVE at compile
+ *  time, same drift-safety as `INTENT_LABELS`. Semantic, not decorative: `add`
+ *  reads as additive (success/green), `remove` as removal (danger/red),
+ *  `enhancement` as a suggestion to weigh (warning/amber), and `note` as a
+ *  neutral remark (info/sky) — presentation only, the intents themselves are
+ *  unchanged. */
+export const INTENT_TONES: Record<Intent, BadgeTone> = {
+  note: "info",
+  enhancement: "warning",
+  add: "success",
+  remove: "danger",
 };
 
 /** The comment-intent options surfaced in the composers (ADR-0064 Decision 8),

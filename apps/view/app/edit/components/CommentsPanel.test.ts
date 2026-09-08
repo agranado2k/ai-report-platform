@@ -54,6 +54,81 @@ describe("authorLabel", () => {
   });
 });
 
+describe("CommentsPanel presentation (T8, §06)", () => {
+  const openNote: CommentWire = {
+    ...base,
+    id: "comment_open",
+    intent: "note",
+    body: "still open",
+    anchor: { version_pinned: { version_id: "version_1", text_quote: "the quoted passage" } },
+  };
+  const resolvedEnhancement: CommentWire = {
+    ...base,
+    id: "comment_resolved",
+    intent: "enhancement",
+    body: "already handled",
+    resolved_at: "2026-07-09T00:00:00.000Z",
+  };
+
+  function render(comments: readonly CommentWire[]): string {
+    return renderToStaticMarkup(
+      createElement(CommentsPanel, {
+        appOrigin: "https://app.example",
+        slug: "report-1",
+        editToken: "et",
+        comments,
+        onCommentsChange: () => {},
+        commentRanges: [],
+        versions: [],
+      }),
+    );
+  }
+
+  it("renders an Open/Resolved filter with per-status counts", () => {
+    const html = render([openNote, resolvedEnhancement]);
+    expect(html).toContain("Filter threads");
+    expect(html).toContain("Open");
+    expect(html).toContain("Resolved");
+  });
+
+  it("shows every intent as a scannable pill — note included (§06)", () => {
+    // The earlier design hid the `note` pill; §06 wants the intent always
+    // legible so a thread reads as a thread.
+    const html = render([openNote]);
+    expect(html).toContain("Note");
+  });
+
+  it("renders the quoted selection as a <blockquote>", () => {
+    const html = render([openNote]);
+    expect(html).toContain("<blockquote");
+    expect(html).toContain("the quoted passage");
+  });
+
+  it("defaults to Open: an open thread shows, a resolved one is hidden", () => {
+    const html = render([openNote, resolvedEnhancement]);
+    expect(html).toContain("still open");
+    expect(html).not.toContain("already handled");
+  });
+
+  it("shows the focused thread even when it is off-filter (item B)", () => {
+    // A resolved thread clicked from its highlight must not be hidden by the
+    // default Open filter.
+    const html = renderToStaticMarkup(
+      createElement(CommentsPanel, {
+        appOrigin: "https://app.example",
+        slug: "report-1",
+        editToken: "et",
+        comments: [openNote, resolvedEnhancement],
+        onCommentsChange: () => {},
+        commentRanges: [],
+        versions: [],
+        focusedCommentId: "comment_resolved",
+      }),
+    );
+    expect(html).toContain("already handled");
+  });
+});
+
 describe("CommentsPanel composer contract (ticket #298)", () => {
   it("never renders a new-comment composer — it points at the Selection toolbar instead", () => {
     // The pendingSelection-driven auto-open is RETIRED: the panel takes no

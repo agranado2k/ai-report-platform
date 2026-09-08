@@ -608,12 +608,27 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
         {/* The document pane fills the viewport height and scrolls on its OWN
             (the report iframe carries the scroll), edge-to-edge with no chrome
             padding — it should read like a real web page, not a card in a form. */}
-        <main className="min-w-0 flex-1 overflow-hidden print:overflow-visible">
+        <main className="min-w-0 flex-1 overflow-hidden bg-bg print:overflow-visible print:bg-transparent">
           {/* ReportEditor stays mounted at ALL times (even when hidden) so
               in-progress edits are never lost by switching to Compare — the mode
               switch only toggles visibility via CSS. `h-full` makes the iframe
-              fill the pane so the report body (inside it) is what scrolls. */}
-          <div className={mode === "edit" ? "h-full" : "hidden"}>
+              fill the pane so the report body (inside it) is what scrolls.
+              T8 (§06): the document now sits on a PAPER SURFACE centred on the
+              page ground — the `bg-bg` ground above, a `bg-surface` column here,
+              capped at `max-w-[820px]` and centred with `mx-auto`. The cap is a
+              MAX, not a fixed width: at the browser-harness pane (1000px viewport
+              − 320px panel = 680px, the width the anchor specs derive their
+              geometry from) it does NOT bind, so the editing surface stays 680px
+              wide and no harness/anchor-scroll geometry changes — the paper
+              column only appears on screens wider than the cap. Paper styling
+              (ground/fill/shadow) is cosmetic; it does not resize the surface. */}
+          <div
+            className={
+              mode === "edit"
+                ? "mx-auto h-full w-full max-w-[820px] bg-surface shadow-sm ring-1 ring-border/60 print:max-w-none print:shadow-none print:ring-0"
+                : "hidden"
+            }
+          >
             <ReportEditor
               key={slug}
               ref={editorRef}
