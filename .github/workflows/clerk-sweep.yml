@@ -1,7 +1,7 @@
 name: Clerk dev-instance sweep
 
-# Manual sweep of LEAKED run-scoped e2e identities off the shared Clerk DEV
-# instance (issue #266).
+# Scheduled + manual sweep of LEAKED run-scoped e2e identities off the shared
+# Clerk DEV instance (issue #266, scheduled cadence added by #354).
 #
 # WHY IT EXISTS. The `@run-scoped` smoke fixtures mint throwaway Clerk users on
 # the dev instance that previews authenticate against, and each one joins the
@@ -22,8 +22,21 @@ name: Clerk dev-instance sweep
 # which is byte-identical to `RUN_SCOPED_EMAIL_PATTERN_SOURCE` in
 # tests/e2e/support/clerk-fixture-identity.ts — a unit test pins that literal
 # so the two cannot drift silently. `NEVER_SWEEP` is a second, exact-match
-# guard over the standing fixtures. It defaults to a DRY RUN. It targets one
-# named org on one named (dev/test) instance, via a `sk_test` secret.
+# guard over the standing fixtures. A manual dispatch defaults to a DRY RUN; the
+# scheduled run below sweeps for real but only at the concurrency-safe age gate.
+# It targets one named org on one named (dev/test) instance, via a `sk_test`
+# secret.
+#
+# TRIGGERS. `workflow_dispatch` is the operator's escalation lever, input-driven
+# exactly as before. `schedule` reclaims leaks that leave NO teardown behind (a
+# SIGKILL'd / cancelled job) on a cadence, so the org's membership cap can no
+# longer silently fill between PR runs. The `schedule` event carries NO
+# `inputs`, so `${{ inputs.x }}` is empty on a scheduled run; every use of an
+# input below is defaulted with `${{ inputs.x || '<default>' }}` so a scheduled
+# run resolves to dry_run=false, older_than_hours=24 (mirroring
+# SWEEP_MIN_AGE_HOURS — never 0 on a schedule), while a dispatch keeps its
+# input-driven behaviour ('false'/'0' are truthy non-empty strings, so a
+# dispatch's explicit choices win over the defaults).
 
 on:
   workflow_dispatch:
@@ -39,6 +52,10 @@ on:
         description: "Only sweep identities older than N hours (0 = every run-scoped identity)"
         type: string
         default: "0"
+  # Reclaim leaks with no teardown on a cadence: every 6 hours. Non-dry-run,
+  # age-gated at 24h (see the defaulting note above) — never widened to 0.
+  schedule:
+    - cron: "0 */6 * * *"
 
 # Reads nothing from the repo and writes nothing to it — the only credential in
 # play is the Clerk secret, passed explicitly below.
@@ -59,8 +76,13 @@ jobs:
       # (ADR-0074). Named explicitly so this workflow can never be pointed at
       # another org by accident.
       ORG_ID: org_3HK9gdegaQZ1qdkGPgN3RGOTWVO
-      DRY_RUN: ${{ inputs.dry_run }}
-      OLDER_THAN_HOURS: ${{ inputs.older_than_hours }}
+      # Effective values, computed once so the env, the validation, and both
+      # step `if:`s all read the SAME resolution. On `schedule` there are no
+      # inputs (empty string → falsy), so these fall back to the safe defaults;
+      # on `workflow_dispatch` the explicit inputs ('true'/'false'/'0'/… are
+      # non-empty, hence truthy) win.
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      OLDER_THAN_HOURS: ${{ inputs.older_than_hours || '24' }}
       # ── KEEP BYTE-IDENTICAL to RUN_SCOPED_EMAIL_PATTERN_SOURCE in ──────────
       #    tests/e2e/support/clerk-fixture-identity.ts.
       # `<prefix>-<runId>+clerk_test@agranado.com`, anchored both ends:
@@ -175,7 +197,10 @@ jobs:
           fi
 
       - name: Dry run — report only
-        if: inputs.dry_run == 'true'
+        # Gate on the SAME effective value as $DRY_RUN above — a bare
+        # `inputs.dry_run` is empty on a schedule, which would leave BOTH this
+        # step and the delete step skipped.
+        if: ${{ (inputs.dry_run || 'false') == 'true' }}
         env:
           MATCHED: ${{ steps.collect.outputs.matched }}
         run: |
@@ -184,7 +209,9 @@ jobs:
           echo "Re-run this workflow with dry_run=false to delete them."
 
       - name: Delete memberships and users
-        if: inputs.dry_run == 'false'
+        # The complement of the dry-run guard, on the SAME effective value: on a
+        # schedule this resolves to 'false' and the delete runs (dry_run=false).
+        if: ${{ (inputs.dry_run || 'false') == 'false' }}
         env:
           MATCHED: ${{ steps.collect.outputs.matched }}
         run: |
