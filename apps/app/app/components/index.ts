@@ -1,6 +1,9 @@
 export {
+  AlertTriangleIcon,
   Badge,
   type BadgeTone,
+  Banner,
+  type BannerTone,
   Button,
   type ButtonSize,
   type ButtonVariant,
