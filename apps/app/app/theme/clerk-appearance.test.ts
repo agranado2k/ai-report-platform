@@ -23,7 +23,11 @@ describe("clerkAppearance (ADR-0086 ClickUp light)", () => {
     expect(clerkAppearance).not.toHaveProperty("baseTheme");
   });
 
-  it("pins the ClickUp light literals recorded in ADR-0086", () => {
+  it("pins the section-05 light literals (App Shell Mockups Z0W60dI8hu, ADR-0086)", () => {
+    // colorPrimary is the brand violet; fontSize 0.875rem (=14px) and
+    // borderRadius 0.5rem (=8px) are the section-05 auth-card literals. Clerk
+    // can't resolve var(), so these duplicate the ADR-0086 token values as a
+    // change detector — an edit to the module without a matching edit here fails.
     expect(clerkAppearance.variables).toEqual({
       colorPrimary: "#7B68EE",
       colorText: "#2A2E34",
@@ -32,7 +36,19 @@ describe("clerkAppearance (ADR-0086 ClickUp light)", () => {
       colorInputBackground: "#F5F6F8",
       colorInputText: "#2A2E34",
       fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif',
-      borderRadius: "12px",
+      fontSize: "0.875rem",
+      borderRadius: "0.5rem",
+    });
+  });
+
+  it("pins the section-05 layout: logo outside, social buttons a top block", () => {
+    // Section 05: "logo placed outside the card, social buttons on top as a
+    // block button." The host page draws the Centaur mark itself; logoPlacement
+    // 'outside' keeps Clerk's own logo slot (unset here) above the card too.
+    expect(clerkAppearance.layout).toEqual({
+      logoPlacement: "outside",
+      socialButtonsPlacement: "top",
+      socialButtonsVariant: "blockButton",
     });
   });
 });
