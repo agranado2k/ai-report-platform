@@ -123,22 +123,37 @@ type LinkError = keyof typeof LINK_ERROR_MESSAGES;
  *  measuring first paint is never visible. */
 const OFFSCREEN: ToolbarPosition = { left: -9999, top: -9999, placement: "above" };
 
-// Not arp-ui's `Button`: the bar sits on `bg-surface-raised`, so ghost's
-// `hover:bg-surface-raised` would be an invisible hover — this inverts to
-// `hover:bg-surface` — and these are square icon slots, not text buttons.
-// The focus-visible ring matches Button's exactly (claude-review #301 H-7):
-// a `role="toolbar"` full of buttons with no visible keyboard focus would be
-// the only such buttons in the product.
+// The compact DARK floating pill (T8, report Z0W60dI8hu §06). The bar is a dark
+// ink surface (the container's inline `background: var(--fg)` below overrides
+// arp-ui `Floating`'s light `bg-surface-raised`), so the buttons invert to
+// light-on-dark: a translucent-white idle that lifts to solid white on hover,
+// and a filled active state. Not arp-ui's `Button` — these are square icon
+// slots, not text buttons. The focus-visible ring matches Button's (claude-
+// review #301 H-7): a `role="toolbar"` full of buttons with no visible keyboard
+// focus would be the only such buttons in the product.
 //
-// Active (pressed) styling reuses the hover treatment as a STEADY state —
-// same box metrics either way, so the mount-time size measurement stays
-// valid. The idle/active split exists because `text-muted` and `text-fg`
-// would otherwise compete in one class list, where stylesheet order (not
-// class order) decides — a silent coin flip.
+// Active (pressed) styling reuses a filled treatment as a STEADY state — same
+// box metrics either way, so the mount-time size measurement stays valid. The
+// idle/active split exists because the two colour treatments would otherwise
+// compete in one class list, where stylesheet order (not class order) decides —
+// a silent coin flip.
 const buttonBase =
-  "inline-flex h-7 min-w-7 items-center justify-center rounded-control px-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
-const buttonClass = `${buttonBase} text-muted hover:bg-surface hover:text-fg`;
-const activeButtonClass = `${buttonBase} bg-surface text-fg`;
+  "inline-flex h-7 min-w-7 items-center justify-center rounded-control px-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60";
+const buttonClass = `${buttonBase} text-white/70 hover:bg-white/15 hover:text-white`;
+const activeButtonClass = `${buttonBase} bg-white/20 text-white`;
+
+// The dark pill's own surface treatment, applied as INLINE STYLE on the
+// `Floating` container (which merges caller `style` before its positioning
+// keys). Inline — not a Tailwind class — for the same reason `Floating`'s
+// position is: the browser-test harness mounts real components with no Tailwind
+// stylesheet, so a class-based dark fill would silently render as the light
+// default there. `var(--fg)` is the dark-ink token (theme.css); a hairline
+// translucent-white border keeps the pill's edge legible on light documents.
+const PILL_SURFACE = {
+  background: "var(--fg)",
+  borderColor: "rgb(255 255 255 / 0.12)",
+  color: "var(--on-brand)",
+} as const;
 
 // The URL input matches the icon buttons' metrics; `size={24}` (an HTML
 // attribute, not CSS) gives it a usable baseline width even where no
@@ -243,6 +258,7 @@ export function SelectionToolbar({
       aria-label="Selection toolbar"
       data-testid="selection-toolbar"
       data-placement={placed.placement}
+      style={PILL_SURFACE}
       className={linkOpen ? "flex flex-col gap-1 p-1" : "flex items-center gap-0.5 p-1"}
       onMouseDown={(event) => event.preventDefault()}
     >
@@ -358,7 +374,7 @@ export function SelectionToolbar({
           >
             <span className="underline">↗</span>
           </button>
-          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-white/20" />
           {/* Block actions (ticket #300). aria-pressed distinguishes the
               LEVEL, not just "some heading": only the button matching
               formats.headingLevel reads pressed (an H4-H6 in the document —
@@ -375,7 +391,7 @@ export function SelectionToolbar({
               <span className="text-xs font-semibold">H{level}</span>
             </button>
           ))}
-          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-white/20" />
           <button
             type="button"
             aria-label="Bullet list"
@@ -399,7 +415,7 @@ export function SelectionToolbar({
               1.
             </span>
           </button>
-          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-white/20" />
           <button
             type="button"
             aria-label="More actions"

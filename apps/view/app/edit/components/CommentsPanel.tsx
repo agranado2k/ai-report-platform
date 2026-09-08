@@ -28,11 +28,12 @@
 import type { Intent } from "arp-domain";
 import { Badge, Button, Card, cx, Select, Textarea } from "arp-ui";
 import { useEffect, useRef, useState } from "react";
+import { countRootsByStatus, type ThreadFilter, threadVisibleUnderFilter } from "../comment-filter";
 import { authorInitials, isEdited, relativeTime, truncationNote } from "../comment-format";
 import { orderRootComments, type ResolvedRange, versionNoForPin } from "../comment-order";
 import { editComment, replyToComment, resolveComment } from "../comments-client";
 import { handleComposerKeyDown } from "../composer-keys";
-import { INTENT_LABELS, INTENT_OPTIONS } from "../intent-options";
+import { INTENT_LABELS, INTENT_OPTIONS, INTENT_TONES } from "../intent-options";
 import type { CommentWire, VersionWire } from "../wire-types";
 
 export interface CommentsPanelProps {
@@ -97,18 +98,58 @@ function Avatar({ name, email }: { readonly name: string | null; readonly email:
   );
 }
 
-/** The comment's intent as a chip (comment-display-polish). `note` is the
- *  common default — kept calm by omitting the chip entirely; every other intent
- *  gets a visible `brand` badge with its human label. `intent` is a bounded
- *  enum on the wire (typed `string`); the label lookup falls back to the raw
- *  value, and React auto-escapes it either way. */
+/** The comment's intent as a scannable pill (T8, report Z0W60dI8hu §06 — "the
+ *  intents become pills the reader can scan"). EVERY intent now wears a pill in
+ *  its own semantic tone (`INTENT_TONES`), `note` included — the earlier design
+ *  hid `note` for calm, but §06 wants a thread to read AS a thread at a glance,
+ *  which means the intent is always legible. `intent` is a bounded enum on the
+ *  wire (typed `string`); the tone/label lookups fall back to a neutral pill
+ *  and the raw value, and React auto-escapes it either way. */
 function IntentChip({ intent }: { readonly intent: string }) {
-  if (intent === "note") return null;
+  const tone = INTENT_TONES[intent as Intent] ?? "neutral";
   const label = INTENT_LABELS[intent as Intent] ?? intent;
   return (
-    <Badge tone="brand" className="text-[10px]">
+    <Badge tone={tone} className="text-[10px]">
       {label}
     </Badge>
+  );
+}
+
+/** One status pill in the panel's Open/Resolved filter (T8, §06). A pressed
+ *  chip inverts to the dark ink fill so the active status reads at a glance; the
+ *  count rides along. Presentation only — the filter changes what is shown,
+ *  never the comment data. */
+function FilterChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  readonly label: string;
+  readonly count: number;
+  readonly active: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cx(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        active ? "bg-fg text-bg" : "bg-hover text-muted hover:text-fg",
+      )}
+    >
+      {label}
+      <span
+        className={cx(
+          "rounded-full px-1.5 text-[10px] tabular-nums",
+          active ? "bg-bg/25 text-bg" : "bg-surface text-subtle",
+        )}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
@@ -426,9 +467,12 @@ function CommentThread({
             )}
           </div>
         </div>
-        <p className="mb-1 text-xs italic text-subtle">
-          "{root.anchor.version_pinned.text_quote.slice(0, 80)}"
-        </p>
+        {/* The quoted selection (T8, §06): rendered as a real <blockquote>
+            with a brand rule so the thread reads as anchored to a passage.
+            Semantic element, not a role-on-div (biome useSemanticElements). */}
+        <blockquote className="mb-1 border-l-2 border-brand/40 pl-2 text-xs italic text-subtle">
+          {root.anchor.version_pinned.text_quote.slice(0, 80)}
+        </blockquote>
         {editOpen ? (
           <div className="mt-1">
             <Textarea
@@ -619,23 +663,56 @@ export function CommentsPanel({
   // anchor lives in the document — resolved position first, raw
   // relative.from as the fallback, created_at last (../comment-order.ts).
   const orderedRoots = orderRootComments(comments, commentRanges);
+
+  // The Open/Resolved filter (T8, §06): Open by default — an editor lands on
+  // the work still to do. Presentation only; the full list still flows to the
+  // route (highlights, counts). A thread clicked from its highlight (item B)
+  // stays visible against the filter, so the click can never be swallowed.
+  const [filter, setFilter] = useState<ThreadFilter>("open");
+  const counts = countRootsByStatus(comments);
+  const visibleRoots = orderedRoots.filter(({ comment: root }) =>
+    threadVisibleUnderFilter(root, filter, focusedCommentId ?? null),
+  );
+
   // Note: shownCount is the ROOT-thread count; the fetch cap counts all comments
   // (incl. replies), so in a reply-heavy truncated set this number is an
   // approximation of how many were fetched — acceptable for a "some hidden" hint.
-  const truncNote = truncationNote(orderedRoots.length, hasMore ?? false);
+  const truncNote = truncationNote(visibleRoots.length, hasMore ?? false);
 
   return (
     <section className="flex w-full flex-col gap-2" aria-label="Comments">
+      {/* The Open/Resolved filter (T8, §06). A <fieldset> (biome
+          useSemanticElements: a group of related controls is a fieldset, not a
+          role="group" div) with a visually-hidden legend as its accessible name;
+          the default border/padding are reset so it reads as a chip row. */}
+      <fieldset className="mb-1 flex items-center gap-1.5 border-0 p-0">
+        <legend className="sr-only">Filter threads</legend>
+        <FilterChip
+          label="Open"
+          count={counts.open}
+          active={filter === "open"}
+          onClick={() => setFilter("open")}
+        />
+        <FilterChip
+          label="Resolved"
+          count={counts.resolved}
+          active={filter === "resolved"}
+          onClick={() => setFilter("resolved")}
+        />
+      </fieldset>
+
       {/* The read-side hint names the ONE creation path (ticket #298): the
           Floating composer behind the Selection toolbar's "…" bubble. */}
       <p className="mb-2 text-xs text-subtle">
         Select text in the document and use the toolbar's “…” bubble to add a comment.
       </p>
 
-      {orderedRoots.length === 0 ? (
-        <p className="text-sm text-muted">No comments yet.</p>
+      {visibleRoots.length === 0 ? (
+        <p className="text-sm text-muted">
+          {filter === "open" ? "No open comments." : "No resolved comments."}
+        </p>
       ) : (
-        orderedRoots.map(({ comment: root, degraded, position }) => (
+        visibleRoots.map(({ comment: root, degraded, position }) => (
           <CommentThread
             key={root.id}
             appOrigin={appOrigin}

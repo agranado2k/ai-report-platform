@@ -105,4 +105,12 @@ describe("SelectionToolbar", () => {
     const html = render(NO_FORMATS);
     expect(html).toContain("left:-9999px");
   });
+
+  it("renders as a dark pill — the surface carries the dark-ink fill (T8, §06)", () => {
+    // The dark fill is INLINE STYLE (not a Tailwind class) so it survives the
+    // no-Tailwind browser-test harness, the same reason `Floating`'s position
+    // is inline. `var(--fg)` is theme.css's dark-ink token.
+    const html = render(NO_FORMATS);
+    expect(html).toContain("background:var(--fg)");
+  });
 });

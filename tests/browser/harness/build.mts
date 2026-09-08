@@ -33,21 +33,25 @@ import * as esbuild from "esbuild";
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..", "..", "..", "apps", "view");
 
-/** One generated page PER FIXTURE. A single shared output path would mean two
- *  spec files that build different fixtures overwrite each other's page — and
- *  because the suite runs `workers: 1`, the loser would silently be tested
- *  against the winner's report instead of failing. */
-function pageFor(fixture: string): string {
-  return join(here, `index.${basename(fixture).replace(/\.html$/, "")}.generated.html`);
+/** One generated page PER (ENTRY, FIXTURE) pair. A single shared output path
+ *  would mean two spec files that build different fixtures — or the same fixture
+ *  with a different entry — overwrite each other's page, and because the suite
+ *  runs `workers: 1`, the loser would silently be tested against the winner's
+ *  page instead of failing. The entry basename is in the path so the comments
+ *  harness (entry-comments.tsx) never collides with the editor harness. */
+function pageFor(fixture: string, entry: string): string {
+  const f = basename(fixture).replace(/\.html$/, "");
+  const e = basename(entry).replace(/\.tsx$/, "");
+  return join(here, `index.${e}.${f}.generated.html`);
 }
 
-export async function buildHarness(fixture = "report.html"): Promise<string> {
+export async function buildHarness(fixture = "report.html", entry = "entry.tsx"): Promise<string> {
   const bundle = await esbuild.build({
     stdin: {
-      contents: readFileSync(join(here, "entry.tsx"), "utf8"),
+      contents: readFileSync(join(here, entry), "utf8"),
       resolveDir: appDir,
       loader: "tsx",
-      sourcefile: "entry.tsx",
+      sourcefile: entry,
     },
     absWorkingDir: appDir,
     bundle: true,
@@ -62,7 +66,7 @@ export async function buildHarness(fixture = "report.html"): Promise<string> {
   const report = readFileSync(join(here, fixture), "utf8");
   const inlineSafe = (s: string) => s.replace(/<\/script>/g, "<\\/script>");
 
-  const page = pageFor(fixture);
+  const page = pageFor(fixture, entry);
   writeFileSync(
     page,
     `<!doctype html>
@@ -73,8 +77,14 @@ html,body{margin:0;height:100%;overflow:hidden}
 .root-layout{display:flex;flex-direction:column;height:100%}
 .topbar{flex:0 0 auto;box-sizing:border-box;height:53px;border-bottom:1px solid #ccc;font:14px system-ui;padding:8px}
 .pane-row{display:flex;flex:1 1 auto;min-height:0}
-.doc-pane{min-width:0;flex:1 1 auto;overflow:hidden}
-.editor-slot{height:100%}
+/* T8 (§06) paper surface, MIRRORED from apps/view's /edit route: a page ground
+   on the pane, a centred paper column capped at 820px. The cap is a MAX — at
+   this harness's 680px pane (1000px viewport − 320px panel) it does NOT bind,
+   so the editing surface stays 680px wide and every anchor-scroll geometry
+   number is unchanged; the ground/paper are cosmetic. Kept here so the harness
+   does not silently test a chrome the route no longer renders. */
+.doc-pane{min-width:0;flex:1 1 auto;overflow:hidden;background:#f5f6f8}
+.editor-slot{height:100%;max-width:820px;margin:0 auto;background:#fff}
 .side-panel{flex:0 0 320px;border-left:1px solid #ccc;font:14px system-ui}
 .editor-iframe{width:100%;height:100%;border:0}
 </style></head><body>

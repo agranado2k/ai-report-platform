@@ -55,5 +55,14 @@ export default defineConfig({
       grep: /@real-report/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // T8 (§06): the Comments panel's Open/Resolved filter, mounted in its own
+      // report-less harness (harness/entry-comments.tsx). A separate project (a
+      // separate tag) because it shares neither the report fixtures nor the
+      // editor iframe the other two projects grep for.
+      name: "comments-panel",
+      grep: /@comments-panel/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
   ],
 });
