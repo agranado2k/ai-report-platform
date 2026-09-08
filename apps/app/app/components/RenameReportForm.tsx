@@ -1,5 +1,7 @@
 import { useFetcher } from "@remix-run/react";
 import { Button, Input } from "arp-ui";
+import { useEffect, useRef } from "react";
+import { makeToast, TOAST_EVENT } from "./feedback/toast";
 
 type RenameResult = { ok: true } | { error: string };
 
@@ -21,6 +23,24 @@ export function RenameReportForm({ slug, title }: { slug: string; title: string 
   const fetcher = useFetcher<RenameResult>();
   const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
   const busy = fetcher.state !== "idle";
+
+  // Close the loop with a toast on a successful rename (report §08). The inline
+  // field stays for the edit itself (a single-field edit needs no dialog); the
+  // toast is the confirmation the rest of the mutations get from their redirect
+  // flash. Guarded against re-firing on revalidation with a one-shot ref.
+  const toasted = useRef(false);
+  useEffect(() => {
+    if (fetcher.state !== "idle") {
+      toasted.current = false;
+      return;
+    }
+    if (fetcher.data && "ok" in fetcher.data && !toasted.current) {
+      toasted.current = true;
+      window.dispatchEvent(
+        new CustomEvent(TOAST_EVENT, { detail: makeToast({ title: "Report renamed" }) }),
+      );
+    }
+  }, [fetcher.state, fetcher.data]);
 
   return (
     <div className="p-1">

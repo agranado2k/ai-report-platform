@@ -5,7 +5,7 @@ import {
   type MetaFunction,
   redirect,
 } from "@remix-run/node";
-import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
+import { Link, useActionData, useLoaderData } from "@remix-run/react";
 import { MAX_SHARING_BULK_APPLY } from "arp-application";
 import {
   type AppError,
@@ -20,16 +20,15 @@ import {
 } from "arp-domain";
 import {
   AppHeader,
-  Button,
   buttonClass,
   cx,
   EmptyState,
   type FolderNode,
   type FolderShareRow,
   FolderTree,
-  Input,
   PageShell,
 } from "../components";
+import { NewFolderDialog } from "../components/folders/NewFolderDialog";
 import { ReportFilter } from "../components/reports/ReportFilter";
 import { ReportRow } from "../components/reports/ReportRow";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
@@ -416,7 +415,7 @@ export async function action(args: ActionFunctionArgs) {
       { slug: slug.value, toFolderId: toFolderId.value },
     );
     if (!r.ok) return errorToJson(r.error);
-    return redirect(`/?folder=${rawTo}`);
+    return redirect(`/?folder=${rawTo}&flash=report-moved`);
   }
 
   if (intent === "rename-report") {
@@ -436,13 +435,19 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "delete-report") {
     const slug = makeSlug(String(form.get("slug") ?? ""));
     const folder = String(form.get("folder") ?? "").trim();
+    // The report title rides along so the success toast can name what was
+    // deleted (report §08); it never reaches a use case — purely for the flash.
+    const title = String(form.get("title") ?? "").trim();
     if (!slug.ok) return json({ error: "Invalid delete request." }, { status: 400 });
     const r = await ops().deleteReport(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { slug: slug.value },
     );
     if (!r.ok) return errorToJson(r.error);
-    return redirect(folder ? `/?folder=${folder}` : "/");
+    const flash = new URLSearchParams({ flash: "report-deleted" });
+    if (folder) flash.set("folder", folder);
+    if (title) flash.set("title", title);
+    return redirect(`/?${flash.toString()}`);
   }
 
   // ── ADR-0078 §12: report sharing, from the dashboard ────────────────────
@@ -503,7 +508,7 @@ export async function action(args: ActionFunctionArgs) {
       { folderId: folderId.value, name },
     );
     if (!r.ok) return errorToJson(r.error);
-    return redirect(`/?folder=${rawId}`);
+    return redirect(`/?folder=${rawId}&flash=folder-renamed`);
   }
 
   if (intent === "delete-folder") {
@@ -516,7 +521,7 @@ export async function action(args: ActionFunctionArgs) {
       { folderId: folderId.value },
     );
     if (!r.ok) return errorToJson(r.error);
-    return redirect("/");
+    return redirect("/?flash=folder-deleted");
   }
 
   // ── ADR-0076 §6: folder visibility + sharing, from the dashboard ─────────
@@ -596,7 +601,7 @@ export async function action(args: ActionFunctionArgs) {
     { parentId: parentId.value, name },
   );
   if (!r.ok) return errorToJson(r.error);
-  return redirect(`/?folder=${rawParent}`);
+  return redirect(`/?folder=${rawParent}&flash=folder-created`);
 }
 
 export default function Index() {
@@ -817,44 +822,30 @@ export default function Index() {
           ) : null}
 
           {createParent ? (
-            // KEYED on how many folders the sidebar is showing, for the same
-            // reason the sharing forms are keyed on their folder's state: a
-            // successful create changes the count, remounts this form, and the
-            // name that was just used stops sitting in the field waiting to be
-            // submitted a second time (2026-08-03 dogfood, I-4 — pre-existing,
-            // not from #230/#234). A REFUSED create leaves the count alone, so
-            // the rejected name stays put to be edited and retried.
-            <Form
-              method="post"
-              key={`new-folder-${folders.length}`}
-              className="mt-6 flex items-center gap-2"
-            >
-              <input type="hidden" name="parentId" value={createParent} />
-              <Input
-                name="name"
-                placeholder={
-                  selectedFolderId ? `New folder in ${scopeLabel}` : "New folder (in Root)"
+            // Creating a folder gets a deliberate dialog step (#336, report §02)
+            // — the inline field became the "New folder" dialog, also reachable
+            // from the ⌘K palette. It posts the SAME `new-folder` intent the
+            // action (and the e2e suite) already drive. A REFUSED create echoes
+            // its error back here; the dialog re-opens with the rejected name to
+            // fix. NEW-FOLDER failures only: every folder-sharing failure also
+            // carries `error`, so an unnarrowed guard would surface a colleague's
+            // refusal here too — `folderOutcome` is that channel, this is not.
+            <div className="mt-6">
+              <NewFolderDialog
+                key={`new-folder-${folders.length}`}
+                parentId={createParent}
+                parentLabel={selectedFolderId ? scopeLabel : "Root"}
+                error={
+                  !folderOutcome &&
+                  !reportOutcome &&
+                  actionData &&
+                  "error" in actionData &&
+                  actionData.error
+                    ? actionData.error
+                    : null
                 }
-                required
-                autoComplete="off"
-                className="w-64"
               />
-              <Button type="submit" variant="secondary">
-                + New folder
-              </Button>
-              {/* NEW-FOLDER failures only. Every folder-sharing failure also
-                  carries `error`, so an unnarrowed guard rendered a refusal on
-                  a colleague's folder here too — a second time, next to
-                  "+ New folder", reading as if folder creation had failed.
-                  `folderOutcome` is the sharing channel; this is not it. */}
-              {!folderOutcome &&
-              !reportOutcome &&
-              actionData &&
-              "error" in actionData &&
-              actionData.error ? (
-                <span className="text-sm text-danger">✗ {actionData.error}</span>
-              ) : null}
-            </Form>
+            </div>
           ) : null}
         </section>
       </div>
