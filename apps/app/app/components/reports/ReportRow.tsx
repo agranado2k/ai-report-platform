@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { RenameReportForm } from "../RenameReportForm";
 import { ReportSharingMenu } from "../ReportSharingMenu";
 import { StatusBadge } from "../StatusBadge";
+import { DeleteReportDialog } from "./DeleteReportDialog";
 
 // One report row of the dashboard table (#335). Extracted from the route (which
 // had no unit seam) so it is prop-driven and node-render smoke-testable, and a
@@ -124,14 +125,11 @@ export function ReportRow({
                 Move
               </Button>
             </Form>
-            <Form method="post" className="p-1">
-              <input type="hidden" name="intent" value="delete-report" />
-              <input type="hidden" name="slug" value={r.slug} />
-              <input type="hidden" name="folder" value={r.folderId} />
-              <Button type="submit" size="sm" variant="danger" className="w-full justify-start">
-                Delete report
-              </Button>
-            </Form>
+            {/* Destructive: a deliberate confirm dialog (#336, report §02),
+                not a one-click submit. Posts the SAME delete-report intent. */}
+            <div className="p-1">
+              <DeleteReportDialog slug={r.slug} title={r.title} folder={r.folderId} />
+            </div>
           </div>
         </details>
       </div>
