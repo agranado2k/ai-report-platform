@@ -34,19 +34,15 @@ import { scopesFromForm } from "../server/api-key-scopes.server";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { appOrigin, ops } from "../server/container.server";
 import { errorToJson } from "../server/http.server";
+import { mcpEndpointFrom } from "../server/mcp-endpoint";
 
 export const meta: MetaFunction = () => [{ title: "API keys & MCP — Centaur" }];
 
-/** The MCP server lives at `mcp.<apex>` (a sibling of this app at `app.<apex>`);
- *  derive its `/mcp` endpoint from the app origin so the Connect helper is right
- *  in prod without the app holding an MCP_ORIGIN env. Assumes the `app.<apex>`
- *  topology — the host swap is a no-op on any other origin (preview `*.vercel.app`
- *  shows the preview host; an apex/custom APP_ORIGIN would want MCP_ORIGIN wired). */
+/** The MCP `/mcp` endpoint for this request's app origin (ADR-0051). The
+ *  derivation lives in `mcp-endpoint.ts` (unit-tested + shared with the ⌘K
+ *  palette's "Copy MCP endpoint" action). */
 function mcpEndpoint(request: Request): string {
-  const url = new URL(appOrigin(request));
-  url.host = url.host.replace(/^app\./, "mcp.");
-  url.pathname = "/mcp";
-  return url.toString();
+  return mcpEndpointFrom(appOrigin(request));
 }
 
 export async function loader(args: LoaderFunctionArgs) {
