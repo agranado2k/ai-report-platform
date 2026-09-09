@@ -285,6 +285,27 @@ describe("SECURITY — the widened retention set is still an allowlist", () => {
     expect(out).toMatch(/rel="[^"]*noopener[^"]*"/);
     expect(out).toMatch(/rel="[^"]*noreferrer[^"]*"/);
   });
+
+  // `class` on `<section>` (ticket #359) joins `id` as a retained attribute
+  // whose VALUE reaches a real DOM attribute, so it needs the same escaping
+  // guarantee — asserted the same structural way as the hostile-id test
+  // above (re-parse the output, look for the INJECTED attribute) rather than
+  // by string matching, because `onload=` legitimately appears inside the
+  // escaped value. This pins linkedom as load-bearing for `class` too: the
+  // package has swapped DOM backends once already (jsdom → linkedom,
+  // ADR-0062 §3), and a backend that did not escape `"` would turn every
+  // retained section class into an injection point.
+  it("escapes an attribute-breaking section class — it can never become a new attribute", () => {
+    const hostileClass = 'x" onload="alert(1)';
+    const out = roundTrip(`<section class="x&quot; onload=&quot;alert(1)"><p>t</p></section>`);
+    expect(out).toContain("&quot;"); // the quote is escaped, not emitted raw
+    const document = getDomEnvironmentDocument();
+    const probe = document.createElement("div");
+    probe.innerHTML = out;
+    const section = probe.querySelector("section");
+    expect(section?.getAttribute("onload")).toBeNull();
+    expect(section?.getAttribute("class")).toBe(hostileClass);
+  });
 });
 
 describe("duplicate id dedupe at serialize time (first wins)", () => {
