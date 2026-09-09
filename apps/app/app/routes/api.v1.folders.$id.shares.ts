@@ -12,14 +12,17 @@
 // person by email (never write — folder writes stay owner-or-org). Same gate.
 // Thin transport adapter over the deepened `handle()` seam + `ops()`; the use
 // cases own the authz.
-import { type AppError, makeFolderId, type Result } from "arp-domain";
-import { errorToHttp, type HttpResponse, listFolderSharesToHttp, shareFolderToHttp } from "arp-http";
+
 import type { FolderShare } from "arp-application";
-import { ops } from "../server/container.server";
+import { type AppError, makeFolderId, type Result } from "arp-domain";
 import {
-  type FolderManageContext,
-  loadFolderManageContext,
-} from "../server/folder-sharing.server";
+  errorToHttp,
+  type HttpResponse,
+  listFolderSharesToHttp,
+  shareFolderToHttp,
+} from "arp-http";
+import { ops } from "../server/container.server";
+import { type FolderManageContext, loadFolderManageContext } from "../server/folder-sharing.server";
 import { handle, methods } from "../server/handle.server";
 
 /** The `?include=manage` success body — the panel reads it straight off

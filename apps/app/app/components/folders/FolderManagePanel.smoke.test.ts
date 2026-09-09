@@ -65,7 +65,11 @@ const manageContext = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function render(n: FolderManageNode, manageData: unknown = undefined, writeData: unknown = undefined) {
+function render(
+  n: FolderManageNode,
+  manageData: unknown = undefined,
+  writeData: unknown = undefined,
+) {
   state.call = 0;
   state.manageData = manageData;
   state.writeData = writeData;
@@ -124,14 +128,19 @@ describe("FolderManagePanel (ADR-0087)", () => {
   it("renders the cascade checkbox with its counted, direction-aware label", () => {
     const html = render(
       node(),
-      manageContext({ cascadeLabel: "Also share the 3 folders inside this one with the whole org" }),
+      manageContext({
+        cascadeLabel: "Also share the 3 folders inside this one with the whole org",
+      }),
     );
     expect(html).toContain("Also share the 3 folders inside this one");
     expect(html).toContain('name="cascade"');
   });
 
   it("shows THE warning before the action when the server composed one", () => {
-    const html = render(node(), manageContext({ shareWarning: "You'll become this folder's owner." }));
+    const html = render(
+      node(),
+      manageContext({ shareWarning: "You'll become this folder's owner." }),
+    );
     expect(html).toContain("become this folder"); // apostrophe HTML-escaped by SSR
   });
 

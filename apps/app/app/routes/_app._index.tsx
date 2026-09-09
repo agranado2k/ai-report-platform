@@ -19,10 +19,7 @@ import {
   visibleFolderOrRoot,
 } from "arp-domain";
 import { AppHeader, buttonClass, cx, EmptyState, PageShell } from "../components";
-import {
-  FolderManagePanel,
-  type FolderManageNode,
-} from "../components/folders/FolderManagePanel";
+import { type FolderManageNode, FolderManagePanel } from "../components/folders/FolderManagePanel";
 import { NewFolderDialog } from "../components/folders/NewFolderDialog";
 import { ReportFilter } from "../components/reports/ReportFilter";
 import { ReportRow } from "../components/reports/ReportRow";
@@ -34,8 +31,8 @@ import {
   cascadeIsPartial,
   cascadeSummary,
   type FolderManagementActor,
-  folderManagement,
   type FolderOutcomeTone,
+  folderManagement,
   folderOutcomeTone,
   folderVisibilityBadge,
   INERT_SHARE_NOTICE,
@@ -48,6 +45,7 @@ import {
  *  roster-derived badge count and the bulk-apply count are loaded lazily by the
  *  panel, not here. */
 type DashboardFolder = FolderManageNode & { readonly parentId: string | null };
+
 import { errorToJson, errorToJsonParts } from "../server/http.server";
 import { log } from "../server/log.server";
 import {

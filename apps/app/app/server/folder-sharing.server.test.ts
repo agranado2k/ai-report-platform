@@ -23,11 +23,11 @@ import {
   cascadeSummary,
   folderFormKey,
   folderManageContext,
-  loadFolderManageContext,
   folderManagement,
   folderOutcomeTone,
   folderShareWarning,
   folderVisibilityBadge,
+  loadFolderManageContext,
   MAX_CASCADE,
   NO_SCOPE_REASON,
   NON_OWNER_REASON,
@@ -688,7 +688,11 @@ describe("folderManageContext (ADR-0087 — the lazy manage payload)", () => {
     Array.from({ length: n }, (_, i) => ({ email: `p${i}@x.test`, grantedAt: "2026-09-08" }));
 
   it("recomputes the badge to 'Shared with N' once the private roster is known", () => {
-    const ctx = folderManageContext({ visibility: "private", shares: rows(2), reportSharing: null });
+    const ctx = folderManageContext({
+      visibility: "private",
+      shares: rows(2),
+      reportSharing: null,
+    });
     expect(ctx.badge.label).toBe("Shared with 2");
     expect(ctx.badge.tone).toBe("brand");
   });

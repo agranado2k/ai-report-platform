@@ -201,16 +201,19 @@ When("the owner creates a run-scoped parent folder", async ({ request }) => {
   expect(parentFolderId, "the new parent folder must be listed for its creator").toBeTruthy();
 });
 
-When("the owner creates a run-scoped child folder inside the parent folder", async ({ request }) => {
-  await submit(
-    request,
-    ownerSession.jwt,
-    { intent: "new-folder", parentId: parentFolderId as string, name: CHILD_NAME },
-    "create the child folder",
-  );
-  childFolderId = await folderIdByName(request, ownerSession.jwt, CHILD_NAME);
-  expect(childFolderId, "the new child folder must be listed for its creator").toBeTruthy();
-});
+When(
+  "the owner creates a run-scoped child folder inside the parent folder",
+  async ({ request }) => {
+    await submit(
+      request,
+      ownerSession.jwt,
+      { intent: "new-folder", parentId: parentFolderId as string, name: CHILD_NAME },
+      "create the child folder",
+    );
+    childFolderId = await folderIdByName(request, ownerSession.jwt, CHILD_NAME);
+    expect(childFolderId, "the new child folder must be listed for its creator").toBeTruthy();
+  },
+);
 
 // ── The content header + the lazy manage payload ────────────────────────────
 
@@ -277,22 +280,21 @@ Then(
       parentFolderId as string,
       "owner manage payload",
     );
-    expect(ctx.cascadeLabel).toContain("Also share the 1 folder inside this one with the whole org");
+    expect(ctx.cascadeLabel).toContain(
+      "Also share the 1 folder inside this one with the whole org",
+    );
   },
 );
 
-Then(
-  "the owner's manage payload lists the colleague's email",
-  async ({ request }) => {
-    const ctx = await manageContext(
-      request,
-      ownerSession.jwt,
-      parentFolderId as string,
-      "owner manage payload (shared)",
-    );
-    expect(ctx.shares.map((s) => s.email)).toContain(COLLEAGUE_EMAIL);
-  },
-);
+Then("the owner's manage payload lists the colleague's email", async ({ request }) => {
+  const ctx = await manageContext(
+    request,
+    ownerSession.jwt,
+    parentFolderId as string,
+    "owner manage payload (shared)",
+  );
+  expect(ctx.shares.map((s) => s.email)).toContain(COLLEAGUE_EMAIL);
+});
 
 Then(
   "the owner's manage payload badges the parent folder {string}",
@@ -337,19 +339,15 @@ Then(
   },
 );
 
-Then(
-  "the colleague's manage read for the parent folder is refused",
-  async ({ request }) => {
-    // The lazy read IS the authorization gate (owner-or-legacy + acl:write): a
-    // member who can SEE the folder but does not own it is refused the roster,
-    // never handed an empty one.
-    const res = await request.get(
-      `/api/v1/folders/${parentFolderId}/shares?include=manage`,
-      { headers: auth(colleagueSession.jwt) },
-    );
-    expect(res.status(), "a non-owner must not read a folder's roster").toBeGreaterThanOrEqual(400);
-  },
-);
+Then("the colleague's manage read for the parent folder is refused", async ({ request }) => {
+  // The lazy read IS the authorization gate (owner-or-legacy + acl:write): a
+  // member who can SEE the folder but does not own it is refused the roster,
+  // never handed an empty one.
+  const res = await request.get(`/api/v1/folders/${parentFolderId}/shares?include=manage`, {
+    headers: auth(colleagueSession.jwt),
+  });
+  expect(res.status(), "a non-owner must not read a folder's roster").toBeGreaterThanOrEqual(400);
+});
 
 // ── The shell nav rail (folder visibility to another member) ─────────────────
 
@@ -382,14 +380,11 @@ Then("the colleague's rail still shows the child folder", async ({ request }) =>
   ).toBe(true);
 });
 
-Then(
-  "the colleague's rail shows neither the parent nor the child folder",
-  async ({ request }) => {
-    const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
-    expect(railShowsFolder(html, PARENT_NAME)).toBe(false);
-    expect(railShowsFolder(html, CHILD_NAME), "the cascade must reach the descendant").toBe(false);
-  },
-);
+Then("the colleague's rail shows neither the parent nor the child folder", async ({ request }) => {
+  const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
+  expect(railShowsFolder(html, PARENT_NAME)).toBe(false);
+  expect(railShowsFolder(html, CHILD_NAME), "the cascade must reach the descendant").toBe(false);
+});
 
 // ── Visibility toggles, with and without the cascade ────────────────────────
 

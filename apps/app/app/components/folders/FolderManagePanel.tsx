@@ -3,13 +3,13 @@ import { useFetcher } from "@remix-run/react";
 // the client bundle, so the panel stays free of `arp-domain`'s `node:crypto` and
 // of the server module's `ops()` — it renders conclusions the server computed.
 import type { FolderVisibility } from "arp-domain";
+import { Badge, type BadgeTone, Button, Checkbox, cx, Input } from "arp-ui";
+import { useEffect, useRef } from "react";
 import type {
   FolderManageContext,
   FolderOutcomeTone,
   FolderShareRow,
 } from "../../server/folder-sharing.server";
-import { Badge, type BadgeTone, Button, Checkbox, cx, Input } from "arp-ui";
-import { useEffect, useRef } from "react";
 import { makeToast, TOAST_EVENT } from "../feedback/toast";
 
 /**
