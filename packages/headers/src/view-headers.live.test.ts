@@ -23,7 +23,7 @@
 // `preview-isolation.yml` with the same isolated `view_url` the e2e smoke
 // already uses.
 import { describe, expect, it } from "vitest";
-import { viewHeaders } from "./view-headers";
+import { VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
 
 const VIEW_BASE_URL = process.env.VIEW_BASE_URL;
 
@@ -59,6 +59,39 @@ describe.skipIf(!VIEW_BASE_URL)("security-headers gate — live viewer preview",
     const sandboxOf = (h: Headers) =>
       policies(h.get("Content-Security-Policy")).find((p) => p.startsWith("sandbox")) ?? "";
     expect(sandboxOf(await fetchViewerHeaders())).toBe(sandboxOf(expected));
+  });
+
+  // ADR-0087. The unit suite proves `viewHeaders()` BUILDS the allowlist; only
+  // this gate proves the edge actually SERVES it. A Vercel/Cloudflare layer
+  // rewriting or collapsing a widened directive is invisible to a unit test,
+  // and a silently-dropped allowlist looks exactly like the bug this change
+  // fixes — the report renders in a fallback font again.
+  it("serves the artifact-parity allowlist on the enforcing policy", async () => {
+    const enforcing =
+      policies((await fetchViewerHeaders()).get("Content-Security-Policy")).find((p) =>
+        p.startsWith("default-src"),
+      ) ?? "";
+    expect(enforcing).toContain(
+      `style-src 'self' 'unsafe-inline' ${VIEW_CSP_ALLOWLIST.styleSrc.join(" ")};`,
+    );
+    expect(enforcing).toContain(`font-src 'self' data: ${VIEW_CSP_ALLOWLIST.fontSrc.join(" ")};`);
+    expect(enforcing).toContain(
+      `script-src 'self' 'unsafe-inline' ${VIEW_CSP_ALLOWLIST.scriptSrc.join(" ")};`,
+    );
+  });
+
+  it("serves frame-ancestors 'self' — and still pins every outbound directive", async () => {
+    const enforcing =
+      policies((await fetchViewerHeaders()).get("Content-Security-Policy")).find((p) =>
+        p.startsWith("default-src"),
+      ) ?? "";
+    expect(enforcing).toContain("frame-ancestors 'self';");
+    // The ADR-0087 safety argument, asserted against what the EDGE serves:
+    // widening the loading directives must not have widened the sending ones.
+    expect(enforcing).toContain("connect-src 'self';");
+    expect(enforcing).toContain("img-src 'self' data: blob:;");
+    expect(enforcing).toContain("form-action 'self';");
+    expect(enforcing).toContain("object-src 'none';");
   });
 
   it("serves the report-only shadow policy unchanged", async () => {
