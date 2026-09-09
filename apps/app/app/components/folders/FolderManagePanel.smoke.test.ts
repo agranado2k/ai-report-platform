@@ -135,6 +135,30 @@ describe("FolderManagePanel (ADR-0087)", () => {
     expect(html).toContain("become this folder"); // apostrophe HTML-escaped by SSR
   });
 
+  it("refuses browser form restoration on the cascade box and the share field", () => {
+    // Half of the I-2/I-4 guarantee (2026-08-03 dogfood): autocomplete=off stops
+    // the BROWSER restoring a cascade tick or a submitted address across a reload
+    // — which no React key can reach. React serialises the prop verbatim as
+    // `autoComplete`, valid HTML the parser lowercases, so match case-insensitively.
+    const html = render(
+      node(),
+      manageContext({ cascadeLabel: "Also share the 1 folder inside this one with the whole org" }),
+    );
+    expect(html).toMatch(/name="cascade"[^>]*\bautocomplete="off"/i);
+    expect(html).toMatch(/type="email"[^>]*\bautocomplete="off"/i);
+  });
+
+  it("an org-visible folder with no individual shares never claims only-you-can-see", () => {
+    // ADR-0076 exists because folder names leaked org-wide: an org folder with an
+    // empty roster must not answer "Only you can see this folder".
+    const html = render(
+      node({ visibility: "org" }),
+      manageContext({ shares: [], badge: { label: "Org", tone: "warning", title: "org" } }),
+    );
+    expect(html).toContain("everyone in your org can already see this folder");
+    expect(html).not.toContain("Only you can see this folder");
+  });
+
   it("renders a write outcome in its data-driven tone (partial ⇒ warning)", () => {
     const html = render(node(), manageContext(), {
       folderId: "fldr_abc",

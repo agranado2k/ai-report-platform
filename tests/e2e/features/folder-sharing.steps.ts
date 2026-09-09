@@ -11,10 +11,23 @@ import {
 
 const { Given, When, Then, After } = createBdd();
 
-// ADR-0076 §6 — the dashboard sharing UI, driven through its OWN Remix action
-// (a form POST to `/`, cookie-auth door) rather than the Bearer `/api/v1`
-// routes, because the action IS the thing under test: the browser never calls
-// the JSON API. Assertions read the server-rendered sidebar markup.
+// ADR-0087 — folder management RELOCATED from the in-body sidebar tree to the
+// content-header panel. Two surfaces now carry the behaviour, and this suite
+// drives both through the same cookie-auth doors a browser click uses:
+//   • WRITES still post to the dashboard's OWN Remix action (form POST to
+//     `/?index`) — the panel submits these intents via useFetcher; at the HTTP
+//     boundary they are identical.
+//   • the lazy ROSTER / cascade / bulk-apply context is read over
+//     `GET /api/v1/folders/{id}/shares?include=manage` — the exact request the
+//     panel's `useFetcher.load()` fires (the panel's management body is
+//     client-rendered, so it never appears in the dashboard's initial HTML).
+//   • folder VISIBILITY to another member is observed on the `_app` shell nav
+//     RAIL, the sole navigation surface (the in-body tree is gone).
+//   • the content-header BADGE (count-less) is read from the dashboard SSR.
+//
+// The client fetcher INTERACTION itself (clicking "Manage ▾"; the form-remount
+// / autocomplete=off restoration guard) is covered by the panel's node-render
+// smoke test (ADR-0079); a full real-browser drive is the deferred aspiration.
 //
 // Step phrasing is deliberately distinct from every other suite (the
 // playwright-bdd step registry is global). Module state is safe under
@@ -25,7 +38,7 @@ const OWNER_EMAIL = runScopedTeamEmail("fsown", RUN_ID);
 const COLLEAGUE_EMAIL = runScopedTeamEmail("fscol", RUN_ID);
 
 /** Run-scoped folder names: a leaked folder from an earlier run can neither
- *  satisfy nor break this run's "is it in the sidebar?" assertions. */
+ *  satisfy nor break this run's "is it in the rail?" assertions. */
 const PARENT_NAME = `arp-fs-parent-${RUN_ID}`;
 const CHILD_NAME = `arp-fs-child-${RUN_ID}`;
 
@@ -35,9 +48,7 @@ let ownerSession: TestSession;
 let colleagueSession: TestSession;
 let parentFolderId: string | undefined;
 let childFolderId: string | undefined;
-/** The document returned by the LAST dashboard POST — the action's own
- *  re-render, which carries the outcome banner. */
-let lastActionHtml = "";
+let rootFolderId: string | undefined;
 
 function requireSecretKey(): string {
   const secretKey = process.env.E2E_CLERK_SECRET_KEY;
@@ -73,27 +84,25 @@ async function dashboard(
 /** The dashboard's action URL. `?index` is NOT decoration: an index route and
  *  its parent share the URL `/`, so a bare `POST /` addresses the ROOT route —
  *  which has no action, and Remix answers 405 without ever running the
- *  dashboard's. `<Form method="post">` inside an index route appends `?index`
- *  itself (`useFormAction`), so this IS the URL a browser click submits to. */
+ *  dashboard's. The panel's `fetcher.Form` inside this index route appends
+ *  `?index` itself, so this IS the URL a browser click submits to. */
 const DASHBOARD_ACTION = "/?index";
 
-/** Submit one of the dashboard's own forms (urlencoded, exactly as a browser
- *  would) and return the re-rendered document. */
+/** Submit one of the dashboard's own forms (urlencoded, exactly as the panel's
+ *  fetcher would) and assert it was accepted. */
 async function submit(
   request: APIRequestContext,
   jwt: string,
   form: Record<string, string>,
   label: string,
-): Promise<string> {
+): Promise<void> {
   const res = await request.post(DASHBOARD_ACTION, { headers: auth(jwt), form });
   const html = await res.text();
   expect(res.status(), `${label}: ${html.slice(0, 600)}`).toBeLessThan(400);
-  return html;
 }
 
 /** Resolve folder ids by NAME through the JSON API. Ids are opaque and the
- *  markup that carries them is an implementation detail; the UI assertions
- *  below are what pin the rendered sidebar. */
+ *  markup that carries them is an implementation detail. */
 async function folderIdByName(
   request: APIRequestContext,
   jwt: string,
@@ -111,49 +120,52 @@ async function folderIdByName(
   return match?.id;
 }
 
-/** Everything inside the `<details>` sharing menu for a named folder. The
- *  summary's accessible name is an ATTRIBUTE (`aria-label`), not text — React
- *  SSR splits `text {expression}` with a comment node, so an attribute is the
- *  only stable hook. Menus never nest, so the next `</details>` closes this
- *  one and bounds the slice exactly. */
-function menuMarker(folderName: string): string {
-  return `aria-label="Sharing options for ${folderName}"`;
+interface ManageWire {
+  readonly shares: ReadonlyArray<{ email: string; grantedAt: string }>;
+  readonly reportSharing: { visibleCount: number; overCap: boolean } | null;
+  readonly badge: { label: string };
+  readonly cascadeLabel: string | null;
+  readonly shareWarning: string | null;
 }
 
-function sharingMenu(html: string, folderName: string): string {
-  const start = html.indexOf(menuMarker(folderName));
-  expect(start, `no sharing menu rendered for "${folderName}"`).toBeGreaterThan(-1);
-  const end = html.indexOf("</details>", start);
-  return html.slice(start, end === -1 ? html.length : end);
+/** The lazy management payload — the exact request the panel's "Manage ▾" fires
+ *  (ADR-0087). Owner-or-legacy + `acl:write` gated, so a non-owner is refused
+ *  here, not handed an empty roster. */
+async function manageContext(
+  request: APIRequestContext,
+  jwt: string,
+  folderId: string,
+  label: string,
+): Promise<ManageWire> {
+  const res = await request.get(`/api/v1/folders/${folderId}/shares?include=manage`, {
+    headers: auth(jwt),
+  });
+  const text = await res.text();
+  expect(res.status(), `${label}: ${text.slice(0, 400)}`).toBe(200);
+  return JSON.parse(text) as ManageWire;
 }
 
-/** The HTML window at a folder's MANAGEMENT row — the occurrence of its name
- *  that a visibility badge (a rounded-full `<span>`) follows. Since the 2026
- *  app shell (#333) the folder NAME also appears in the shell's lightweight
- *  nav rail (navigation only, NO badge) — and the rail renders FIRST — so the
- *  first `>name</span>` is the rail, not the managed row. Scan for the one a
- *  badge follows. The double listing is the transient #334 reconciles. */
-function managedRow(html: string, folderName: string, len = 600): string {
-  const needle = `>${folderName}</span>`;
-  let at = html.indexOf(needle);
-  expect(at, `folder "${folderName}" is not in this sidebar`).toBeGreaterThan(-1);
-  while (at !== -1) {
-    const win = html.slice(at, at + len);
-    if (/<span class="[^"]*rounded-full[^"]*"[^>]*>/.test(win)) return win;
-    at = html.indexOf(needle, at + 1);
-  }
-  throw new Error(`no managed (badged) row rendered for "${folderName}"`);
-}
-
-function badgeFor(html: string, folderName: string): string {
-  const badge = managedRow(html, folderName).match(
-    /<span class="[^"]*rounded-full[^"]*"[^>]*>([^<]*)</,
+/** The count-less visibility badge in the dashboard's content-header PANEL (the
+ *  only `<section>` with the panel's card class — the selected folder). */
+function contentHeaderBadge(html: string): string {
+  const at = html.indexOf("rounded-card border border-border bg-surface px-4 py-3");
+  expect(at, "no content-header management panel rendered for the selected folder").toBeGreaterThan(
+    -1,
   );
-  expect(badge, `no visibility badge rendered for "${folderName}"`).not.toBeNull();
+  const badge = html.slice(at, at + 700).match(/rounded-full[^"]*"[^>]*>([^<]*)</);
+  expect(badge, "no visibility badge in the content header").not.toBeNull();
   return (badge?.[1] ?? "").trim();
 }
 
-function showsFolder(html: string, folderName: string): boolean {
+/** The panel's "Manage ▾" disclosure — present only for a manageable folder. */
+function hasManageDisclosure(html: string): boolean {
+  return /Manage<span aria-hidden="true">/.test(html);
+}
+
+/** The shell nav rail renders a folder as `<span class="truncate">name</span>`
+ *  (FolderNavTree). It is the sole navigation surface, so this reflects folder
+ *  VISIBILITY to whoever is signed in. */
+function railShowsFolder(html: string, folderName: string): boolean {
   return html.includes(`>${folderName}</span>`);
 }
 
@@ -171,163 +183,236 @@ Given("a folder-sharing colleague identity is signed in", async () => {
   colleagueSession = await mintTestSessionFor(secretKey, COLLEAGUE_EMAIL);
 });
 
-// ── Creating folders through the sidebar's own form ─────────────────────────
+// ── Creating folders through the dashboard's own form ───────────────────────
 
-When(
-  "the owner creates a run-scoped parent folder from the dashboard sidebar",
-  async ({ request }) => {
-    // The owner's first WRITE — this is what JIT-provisions them into the
-    // team domain's canonical org (their session carries a decoy org, which
-    // the mirror-miss branch must ignore).
-    const rootId = await folderIdByName(request, ownerSession.jwt, null);
-    expect(rootId, "the org Root folder must exist (root-always-org, ADR-0076)").toBeTruthy();
-    await submit(
-      request,
-      ownerSession.jwt,
-      { intent: "new-folder", parentId: rootId as string, name: PARENT_NAME },
-      "create the parent folder",
-    );
-    parentFolderId = await folderIdByName(request, ownerSession.jwt, PARENT_NAME);
-    expect(parentFolderId, "the new parent folder must be listed for its creator").toBeTruthy();
-  },
-);
+When("the owner creates a run-scoped parent folder", async ({ request }) => {
+  // The owner's first WRITE — this JIT-provisions them into the team domain's
+  // canonical org (their session carries a decoy org, which the mirror-miss
+  // branch must ignore).
+  rootFolderId = await folderIdByName(request, ownerSession.jwt, null);
+  expect(rootFolderId, "the org Root folder must exist (root-always-org, ADR-0076)").toBeTruthy();
+  await submit(
+    request,
+    ownerSession.jwt,
+    { intent: "new-folder", parentId: rootFolderId as string, name: PARENT_NAME },
+    "create the parent folder",
+  );
+  parentFolderId = await folderIdByName(request, ownerSession.jwt, PARENT_NAME);
+  expect(parentFolderId, "the new parent folder must be listed for its creator").toBeTruthy();
+});
 
-When(
-  "the owner creates a run-scoped child folder inside the parent folder",
-  async ({ request }) => {
-    await submit(
-      request,
-      ownerSession.jwt,
-      { intent: "new-folder", parentId: parentFolderId as string, name: CHILD_NAME },
-      "create the child folder",
-    );
-    childFolderId = await folderIdByName(request, ownerSession.jwt, CHILD_NAME);
-    expect(childFolderId, "the new child folder must be listed for its creator").toBeTruthy();
-  },
-);
+When("the owner creates a run-scoped child folder inside the parent folder", async ({ request }) => {
+  await submit(
+    request,
+    ownerSession.jwt,
+    { intent: "new-folder", parentId: parentFolderId as string, name: CHILD_NAME },
+    "create the child folder",
+  );
+  childFolderId = await folderIdByName(request, ownerSession.jwt, CHILD_NAME);
+  expect(childFolderId, "the new child folder must be listed for its creator").toBeTruthy();
+});
 
-// ── The sidebar's rendered state ───────────────────────────────────────────
+// ── The content header + the lazy manage payload ────────────────────────────
 
 Then(
-  "the owner's sidebar badges the parent folder {string}",
+  "the owner's content header badges the parent folder {string}",
   async ({ request }, expected: string) => {
-    const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
-    expect(badgeFor(html, PARENT_NAME)).toBe(expected);
+    // Selecting the folder renders its content-header panel (name + count-less
+    // badge); the badge is upgraded to "Shared with N" only after the client
+    // roster load, which is asserted on the manage payload instead.
+    const html = await dashboard(
+      request,
+      ownerSession.jwt,
+      `?folder=${parentFolderId}`,
+      "owner dashboard (folder selected)",
+    );
+    expect(contentHeaderBadge(html)).toBe(expected);
   },
 );
 
-Then("the owner's sidebar names the parent folder in full on hover", async ({ request }) => {
-  // The sidebar clips folder names ("Architectu…"), and the row carried no
-  // `title` and no `aria-label` — so a truncated name could not be read at all
-  // without opening the folder (2026-08-03 dogfood, I-1). The badge carries one
-  // too, because its own label is deliberately terse.
-  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
-  expect(html, "the folder link must carry its full name as a tooltip").toContain(
+Then("the owner's content header names the parent folder in full", async ({ request }) => {
+  // The name is clipped for width; the full name lives in a `title` so it can be
+  // read on hover without opening anything (2026-08-03 dogfood, I-1).
+  const html = await dashboard(
+    request,
+    ownerSession.jwt,
+    `?folder=${parentFolderId}`,
+    "owner dashboard (folder selected)",
+  );
+  expect(html, "the folder name must carry its full text as a tooltip").toContain(
     `title="${PARENT_NAME}"`,
   );
-  // (Apostrophes are HTML-escaped by React SSR, so match a plain fragment.)
-  // Scope to the MANAGED row — the shell's nav rail (#333) also renders the
-  // name but carries no badge/explanation.
-  expect(
-    managedRow(html, PARENT_NAME),
-    "the badge must explain the state it abbreviates",
-  ).toContain("Not visible to your whole org.");
 });
 
-Then("the owner's sidebar renders no sharing controls for the Root folder", async ({ request }) => {
-  // ADR-0076 §3: the domain rejects ANY visibility call on the Root, in either
-  // direction — so the sidebar must not offer one (render-then-error is a lie).
-  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
-  expect(html, "the Root must not get a sharing kebab").not.toContain(menuMarker("Root"));
-  // …while the same page DOES offer them for a manageable folder, proving the
-  // absence above is the Root rule and not a page that rendered no menus.
-  expect(html).toContain(menuMarker(PARENT_NAME));
+Then("the owner's content header offers no management for the Root folder", async ({ request }) => {
+  // ADR-0087 §Root: the domain refuses every visibility/share/rename/delete on
+  // the Root, so its content header is HUSHED — no panel, no name, no "Manage".
+  const rootHtml = await dashboard(
+    request,
+    ownerSession.jwt,
+    `?folder=${rootFolderId}`,
+    "owner dashboard (Root selected)",
+  );
+  expect(hasManageDisclosure(rootHtml), "the Root must not offer management").toBe(false);
+  // …while a manageable folder on the same surface DOES, proving the absence is
+  // the Root rule and not a page that rendered no panel at all.
+  const parentHtml = await dashboard(
+    request,
+    ownerSession.jwt,
+    `?folder=${parentFolderId}`,
+    "owner dashboard (parent selected)",
+  );
+  expect(hasManageDisclosure(parentHtml)).toBe(true);
 });
 
-Then("the colleague's sidebar does not show the parent folder", async ({ request }) => {
+Then(
+  "the owner's manage payload names the cascade direction and the count",
+  async ({ request }) => {
+    // "Also apply to everything inside" said the same thing whether it was about
+    // to hide two folders or publish twenty. The label is computed server-side
+    // from the actor's visible tree and carried in the manage payload.
+    const ctx = await manageContext(
+      request,
+      ownerSession.jwt,
+      parentFolderId as string,
+      "owner manage payload",
+    );
+    expect(ctx.cascadeLabel).toContain("Also share the 1 folder inside this one with the whole org");
+  },
+);
+
+Then(
+  "the owner's manage payload lists the colleague's email",
+  async ({ request }) => {
+    const ctx = await manageContext(
+      request,
+      ownerSession.jwt,
+      parentFolderId as string,
+      "owner manage payload (shared)",
+    );
+    expect(ctx.shares.map((s) => s.email)).toContain(COLLEAGUE_EMAIL);
+  },
+);
+
+Then(
+  "the owner's manage payload badges the parent folder {string}",
+  async ({ request }, expected: string) => {
+    // "Shared with N" is derivable only where the roster was loaded — which is
+    // exactly the manage payload the panel fetches on "Manage ▾".
+    const ctx = await manageContext(
+      request,
+      ownerSession.jwt,
+      parentFolderId as string,
+      "owner manage payload (badge)",
+    );
+    expect(ctx.badge.label).toBe(expected);
+  },
+);
+
+Then("the owner's manage payload roster is empty", async ({ request }) => {
+  const ctx = await manageContext(
+    request,
+    ownerSession.jwt,
+    parentFolderId as string,
+    "owner manage payload (empty)",
+  );
+  expect(ctx.shares).toHaveLength(0);
+  expect(ctx.shares.map((s) => s.email)).not.toContain(COLLEAGUE_EMAIL);
+});
+
+Then(
+  "the owner's org-shared manage payload does not claim only they can see the folder",
+  async ({ request }) => {
+    // ADR-0076 exists because folder names leaked org-wide. An org-visible
+    // folder with no INDIVIDUAL shares must read "Org" with an empty roster —
+    // never a privacy claim.
+    const ctx = await manageContext(
+      request,
+      ownerSession.jwt,
+      parentFolderId as string,
+      "owner manage payload (org)",
+    );
+    expect(ctx.badge.label).toBe("Org");
+    expect(ctx.shares, "an org-visible folder has no individual shares yet").toHaveLength(0);
+  },
+);
+
+Then(
+  "the colleague's manage read for the parent folder is refused",
+  async ({ request }) => {
+    // The lazy read IS the authorization gate (owner-or-legacy + acl:write): a
+    // member who can SEE the folder but does not own it is refused the roster,
+    // never handed an empty one.
+    const res = await request.get(
+      `/api/v1/folders/${parentFolderId}/shares?include=manage`,
+      { headers: auth(colleagueSession.jwt) },
+    );
+    expect(res.status(), "a non-owner must not read a folder's roster").toBeGreaterThanOrEqual(400);
+  },
+);
+
+// ── The shell nav rail (folder visibility to another member) ─────────────────
+
+Then("the colleague's rail does not show the parent folder", async ({ request }) => {
   const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
   expect(
-    showsFolder(html, PARENT_NAME),
-    "a private folder's NAME must not reach a colleague's sidebar (ADR-0076)",
+    railShowsFolder(html, PARENT_NAME),
+    "a private folder's NAME must not reach a colleague's rail (ADR-0076)",
   ).toBe(false);
 });
 
-Then("the colleague's sidebar shows the parent folder", async ({ request }) => {
+Then("the colleague's rail shows the parent folder", async ({ request }) => {
   const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
-  expect(showsFolder(html, PARENT_NAME)).toBe(true);
+  expect(railShowsFolder(html, PARENT_NAME)).toBe(true);
 });
 
-Then(
-  "the colleague's sharing menu for the parent folder is refused with a reason",
-  async ({ request }) => {
-    // A member who can SEE a folder they don't own gets the controls disabled
-    // with the server's own rule spelled out — the loader mirrors
-    // `loadManagedFolder` rather than inventing a client-side rule.
-    const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
-    const menu = sharingMenu(html, PARENT_NAME);
-    // The application layer's own `FOLDER_NOT_MANAGEABLE`, not a phrasing the
-    // UI invented. Apostrophes are HTML-escaped by React SSR, so match the
-    // plain tail.
-    expect(menu).toContain("owner can manage its sharing");
-    expect(menu, "a non-owner must not get a live visibility toggle").not.toContain(
-      "set-folder-visibility",
-    );
-  },
-);
-
-Then("the colleague's sidebar no longer shows the parent folder", async ({ request }) => {
+Then("the colleague's rail no longer shows the parent folder", async ({ request }) => {
   const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
-  expect(showsFolder(html, PARENT_NAME)).toBe(false);
+  expect(railShowsFolder(html, PARENT_NAME)).toBe(false);
 });
 
-Then("the colleague's sidebar still shows the child folder", async ({ request }) => {
+Then("the colleague's rail still shows the child folder", async ({ request }) => {
   // THE GAP, made visible: the child is still org-visible, and because its
   // parent is now invisible to the colleague it grafts under Root — its name
   // leaks from a folder its owner believes they just made private.
   const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
   expect(
-    showsFolder(html, CHILD_NAME),
+    railShowsFolder(html, CHILD_NAME),
     "ADR-0076's repair is per-folder: an already-org descendant survives the parent going private",
   ).toBe(true);
 });
 
 Then(
-  "the colleague's sidebar shows neither the parent nor the child folder",
+  "the colleague's rail shows neither the parent nor the child folder",
   async ({ request }) => {
     const html = await dashboard(request, colleagueSession.jwt, "", "colleague dashboard");
-    expect(showsFolder(html, PARENT_NAME)).toBe(false);
-    expect(showsFolder(html, CHILD_NAME), "the cascade must reach the descendant").toBe(false);
+    expect(railShowsFolder(html, PARENT_NAME)).toBe(false);
+    expect(railShowsFolder(html, CHILD_NAME), "the cascade must reach the descendant").toBe(false);
   },
 );
 
 // ── Visibility toggles, with and without the cascade ────────────────────────
 
-When(
-  "the owner shares the parent folder with the whole org from the sidebar",
-  async ({ request }) => {
-    lastActionHtml = await submit(
-      request,
-      ownerSession.jwt,
-      { intent: "set-folder-visibility", folderId: parentFolderId as string, visibility: "org" },
-      "share the parent folder org-wide",
-    );
-  },
-);
+When("the owner shares the parent folder with the whole org", async ({ request }) => {
+  await submit(
+    request,
+    ownerSession.jwt,
+    { intent: "set-folder-visibility", folderId: parentFolderId as string, visibility: "org" },
+    "share the parent folder org-wide",
+  );
+});
 
-When(
-  "the owner shares the child folder with the whole org from the sidebar",
-  async ({ request }) => {
-    lastActionHtml = await submit(
-      request,
-      ownerSession.jwt,
-      { intent: "set-folder-visibility", folderId: childFolderId as string, visibility: "org" },
-      "share the child folder org-wide",
-    );
-  },
-);
+When("the owner shares the child folder with the whole org", async ({ request }) => {
+  await submit(
+    request,
+    ownerSession.jwt,
+    { intent: "set-folder-visibility", folderId: childFolderId as string, visibility: "org" },
+    "share the child folder org-wide",
+  );
+});
 
 When("the owner makes the parent folder private WITHOUT the cascade", async ({ request }) => {
-  lastActionHtml = await submit(
+  await submit(
     request,
     ownerSession.jwt,
     { intent: "set-folder-visibility", folderId: parentFolderId as string, visibility: "private" },
@@ -336,8 +421,8 @@ When("the owner makes the parent folder private WITHOUT the cascade", async ({ r
 });
 
 When("the owner makes the parent folder private WITH the cascade", async ({ request }) => {
-  // `cascade=on` is exactly what the checkbox submits.
-  lastActionHtml = await submit(
+  // `cascade=on` is exactly what the panel's checkbox submits.
+  await submit(
     request,
     ownerSession.jwt,
     {
@@ -350,171 +435,25 @@ When("the owner makes the parent folder private WITH the cascade", async ({ requ
   );
 });
 
-Then("the cascade result names the child folder as changed", async () => {
-  // Honest reporting: the banner names what it actually changed, and would
-  // name (with the server's reason) anything it could not.
-  expect(lastActionHtml).toContain("applied to 1 folder inside");
-  expect(lastActionHtml).toContain(CHILD_NAME);
-  expect(lastActionHtml, "nothing failed, so nothing may be reported as failed").not.toContain(
-    "NOT changed",
-  );
-  // Nothing was ADOPTED: the child has an owner (its creator), so the cascade
-  // must not claim an ownership change it did not make.
-  expect(lastActionHtml).not.toContain("You're now the owner of");
-});
-
-Then("the owner's cascade checkbox names the direction and the count", async ({ request }) => {
-  // "Also apply to everything inside this folder" said the same thing whether
-  // it was about to hide two folders or publish twenty. The label is now
-  // computed server-side from the actor's visible tree.
-  const html = await dashboard(request, ownerSession.jwt, "", "owner dashboard");
-  const menu = sharingMenu(html, PARENT_NAME);
-  expect(menu).toContain("Also share the 1 folder inside this one with the whole org");
-});
-
-Then("the owner's sharing fields refuse browser form restoration", async ({ request }) => {
-  // Half of the I-2/I-4 guarantee (2026-08-03 dogfood): the React key remounts
-  // the forms after an action, and `autocomplete="off"` stops the BROWSER
-  // restoring a cascade tick or a submitted address across a reload or a
-  // back-navigation — which no key can reach. A cascade box that comes back
-  // ticked under a panel that has flipped direction is one click from bulk
-  // EXPOSING the subtree, so both halves are pinned.
-  const html = await dashboard(
-    request,
-    ownerSession.jwt,
-    `?manage=${parentFolderId}`,
-    "owner dashboard (managing)",
-  );
-  const menu = sharingMenu(html, PARENT_NAME);
-  // The WHOLE `<input …>` tag carrying the marker, not "the text between the
-  // marker and the next `>`": which side of `name` the attribute lands on is
-  // a React/primitive implementation detail (both primitives spread the
-  // caller's props after their own — today), and an order-sensitive slice
-  // stops proving anything the moment that order moves.
-  // `type="email"` rather than `name="email"`: the roster's per-row Remove
-  // forms carry a HIDDEN `name="email"` too, and matching that one would test
-  // the wrong element the moment the folder has a grantee.
-  const fieldTag = (marker: string): string => {
-    const at = menu.indexOf(marker);
-    expect(at, `no field matching ${marker} in the sharing menu`).toBeGreaterThan(-1);
-    const tagStart = menu.lastIndexOf("<", at);
-    const tagEnd = menu.indexOf(">", at);
-    return menu.slice(tagStart, tagEnd === -1 ? menu.length : tagEnd + 1);
-  };
-  // Case-INSENSITIVE on purpose: React DOM serialises this prop verbatim as
-  // `autoComplete="off"` (it is one of the handful — `maxLength`, `srcSet` —
-  // whose attribute name it keeps camelCased). That is valid HTML: attribute
-  // names are case-insensitive, the parser lowercases it, and the browser
-  // honours it — so the guarantee holds and the ASSERTION is what must bend.
-  // Anchored on a leading space + `="off"` so it cannot be satisfied by some
-  // other attribute (`data-autocomplete`) or by `autocomplete="on"`.
-  const refusesRestoration = /\sautocomplete\s*=\s*"off"/i;
-  expect(fieldTag('name="cascade"'), "the cascade checkbox must not be restorable").toMatch(
-    refusesRestoration,
-  );
-  expect(fieldTag('type="email"'), "the share field must not be restorable").toMatch(
-    refusesRestoration,
-  );
-});
-
 // ── Person shares ──────────────────────────────────────────────────────────
 
-When(
-  "the owner shares the parent folder with the colleague's email from the sidebar",
-  async ({ request }) => {
-    lastActionHtml = await submit(
-      request,
-      ownerSession.jwt,
-      {
-        intent: "share-folder",
-        folderId: parentFolderId as string,
-        email: COLLEAGUE_EMAIL,
-      },
-      "share the parent folder by email",
-    );
-  },
-);
+When("the owner shares the parent folder with the colleague's email", async ({ request }) => {
+  await submit(
+    request,
+    ownerSession.jwt,
+    { intent: "share-folder", folderId: parentFolderId as string, email: COLLEAGUE_EMAIL },
+    "share the parent folder by email",
+  );
+});
 
-When("the owner removes the colleague's share from the sidebar", async ({ request }) => {
-  lastActionHtml = await submit(
+When("the owner removes the colleague's share", async ({ request }) => {
+  await submit(
     request,
     ownerSession.jwt,
     { intent: "unshare-folder", folderId: parentFolderId as string, email: COLLEAGUE_EMAIL },
     "remove the colleague's share",
   );
 });
-
-Then(
-  "the owner's share roster for the parent folder lists the colleague's email",
-  async ({ request }) => {
-    // `?manage=<id>` is what the "Manage who it's shared with →" link opens, and
-    // the only thing that makes the loader fetch a roster.
-    const html = await dashboard(
-      request,
-      ownerSession.jwt,
-      `?manage=${parentFolderId}`,
-      "owner dashboard (managing)",
-    );
-    const menu = sharingMenu(html, PARENT_NAME);
-    expect(menu).toContain(COLLEAGUE_EMAIL);
-    expect(menu, "the out-of-org inert-share warning must be shown next to the field").toContain(
-      "folder listings are org-scoped",
-    );
-  },
-);
-
-Then(
-  "the owner's managed sidebar badges the parent folder {string}",
-  async ({ request }, expected: string) => {
-    // "Shared with N" is only derivable where the roster was actually loaded —
-    // the loader pays for exactly one, the folder in `?manage=<id>`. Everywhere
-    // else the badge honestly falls back to Private/Org.
-    const html = await dashboard(
-      request,
-      ownerSession.jwt,
-      `?manage=${parentFolderId}`,
-      "owner dashboard (managing)",
-    );
-    expect(badgeFor(html, PARENT_NAME)).toBe(expected);
-  },
-);
-
-Then("the owner's share roster for the parent folder is empty", async ({ request }) => {
-  const html = await dashboard(
-    request,
-    ownerSession.jwt,
-    `?manage=${parentFolderId}`,
-    "owner dashboard (managing)",
-  );
-  const menu = sharingMenu(html, PARENT_NAME);
-  expect(menu).toContain("Not shared with anyone yet.");
-  // The WHOLE sentence, not just its first half: "Only you can see this
-  // folder" is a claim about VISIBILITY, and asserting only "Not shared with
-  // anyone yet." let it render under an "Org" badge unnoticed.
-  expect(menu).toContain("Only you can see this folder.");
-  expect(menu).not.toContain(COLLEAGUE_EMAIL);
-});
-
-Then(
-  "the owner's org-shared roster does NOT claim only they can see the folder",
-  async ({ request }) => {
-    // ADR-0076 exists because folder names leaked org-wide. An org-visible
-    // folder with no individual shares must never answer "Only you can see
-    // this folder" — that is the exact false assurance the model repairs.
-    const html = await dashboard(
-      request,
-      ownerSession.jwt,
-      `?manage=${parentFolderId}`,
-      "owner dashboard (managing, org-visible)",
-    );
-    const menu = sharingMenu(html, PARENT_NAME);
-    expect(badgeFor(html, PARENT_NAME)).toBe("Org");
-    expect(menu, "an org-visible folder must not assert privacy").not.toContain(
-      "Only you can see this folder",
-    );
-    expect(menu).toContain("everyone in your org can already see this folder");
-  },
-);
 
 // Best-effort accumulation bound, pass or fail: delete the folders this run
 // created (deepest first — a non-empty folder is refused), then the run-scoped
@@ -524,11 +463,9 @@ After({ tags: "@run-scoped" }, async ({ request }) => {
   const secretKey = process.env.E2E_CLERK_SECRET_KEY;
   if (!secretKey) return;
   // playwright-bdd's hook registry is GLOBAL, so this fires after EVERY
-  // @run-scoped scenario — including team-org-upload's. Without this guard it
-  // re-ran there with THIS module's stale folder ids and a deleted user's JWT,
-  // issuing a DELETE for a folder that belongs to a finished run. Our own
-  // fixtures being present is what identifies our scenario; they are cleared
-  // at the end of this hook, so a second firing is inert.
+  // @run-scoped scenario. Our own fixtures being present is what identifies our
+  // scenario; they are cleared at the end of this hook, so a second firing is
+  // inert.
   if (!ownerFixture && !colleagueFixture) return;
   for (const id of [childFolderId, parentFolderId]) {
     if (!id) continue;
@@ -542,8 +479,7 @@ After({ tags: "@run-scoped" }, async ({ request }) => {
   if (colleagueFixture) await cleanupTeamFixture(secretKey, colleagueFixture);
   ownerFixture = undefined;
   colleagueFixture = undefined;
-  // Reset the folder ids too, or a later firing would target folders that no
-  // longer exist with credentials that no longer work.
   parentFolderId = undefined;
   childFolderId = undefined;
+  rootFolderId = undefined;
 });
