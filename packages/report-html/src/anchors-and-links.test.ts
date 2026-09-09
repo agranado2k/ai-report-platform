@@ -300,3 +300,35 @@ describe("duplicate id dedupe at serialize time (first wins)", () => {
     expect(idsIn(out)).toEqual(["dup"]);
   });
 });
+
+describe("section class retention (ticket #359)", () => {
+  it("preserves class attribute on <section> through a round-trip", () => {
+    const out = roundTrip('<section class="slide"><p>content</p></section>');
+    expect(out).toContain('class="slide"');
+  });
+
+  it("preserves multiple classes on <section> with order intact", () => {
+    const out = roundTrip('<section class="slide deck"><p>content</p></section>');
+    expect(out).toContain('class="slide deck"');
+  });
+
+  it("does not emit class attribute when section has no class", () => {
+    const out = roundTrip('<section><p>content</p></section>');
+    // The section should not have a class attribute at all
+    expect(out).not.toMatch(/<section[^>]*class=/);
+  });
+
+  it("preserves both class and id on <section>", () => {
+    const out = roundTrip('<section class="slide" id="sec1"><p>content</p></section>');
+    expect(out).toContain('class="slide"');
+    expect(out).toContain('id="sec1"');
+  });
+
+  it("still parses as <section>, not as div.card or other classed block", () => {
+    // This verifies the priority guard: a classed section should parse as section,
+    // not as one of the other classed-div rules (card, resrow, etc.)
+    const out = roundTrip('<section class="card"><p>text</p></section>');
+    expect(out).toMatch(/<section[^>]*>/);
+    expect(out).not.toMatch(/<div class="card"[^>]*>/);
+  });
+});
