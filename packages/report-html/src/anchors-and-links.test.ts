@@ -345,9 +345,14 @@ describe("section class retention (ticket #359)", () => {
     expect(out).toContain('id="sec1"');
   });
 
-  it("still parses as <section>, not as div.card or other classed block", () => {
-    // This verifies the priority guard: a classed section should parse as section,
-    // not as one of the other classed-div rules (card, resrow, etc.)
+  it("a classed <section> still resolves to sectionNode, never to a classed-div rule", () => {
+    // NOT a priority guard — `sectionNode` sets no `priority`, and none is
+    // needed: the competing classed-block rules are scoped to a different
+    // ELEMENT (`div.card`, `div.grid`, `ul.checklist`), and the generic
+    // catch-all excludes `section` outright (HTML_BLOCK_TAGS in
+    // generic-block.ts). So the tag alone disambiguates and the class value
+    // never participates in rule selection. Kept as a regression guard in
+    // case a future rule is ever widened to `.card` without a tag.
     const out = roundTrip('<section class="card"><p>text</p></section>');
     expect(out).toMatch(/<section[^>]*>/);
     expect(out).not.toMatch(/<div class="card"[^>]*>/);
