@@ -14,7 +14,7 @@
 // the UI and the server cannot drift: a control this module enables is a
 // control the use case will accept, and vice versa.
 
-import { FOLDER_NOT_MANAGEABLE } from "arp-application";
+import { FOLDER_NOT_MANAGEABLE, type FolderShare, MAX_SHARING_BULK_APPLY } from "arp-application";
 import {
   type AppError,
   canManageFolder,
@@ -432,12 +432,173 @@ export function cascadeSummary(outcome: CascadeOutcome): string {
   return `${applied}${adoptedTail}${failedTail}`;
 }
 
+/** The tone the panel renders a folder write's structured outcome in (ADR-0076
+ *  §6, carried through ADR-0087). `error` dominates (a refusal is a refusal even
+ *  if a `partial` flag rode along), then a partial cascade reads as a WARNING —
+ *  data-driven, off `partial`, never inferred from a re-read roster — and a
+ *  clean run is a success. The switch lives here, under test, rather than as a
+ *  nested ternary the panel could invert unnoticed. */
+export type FolderOutcomeTone = "success" | "warning" | "danger";
+
+export function folderOutcomeTone(outcome: {
+  readonly error: string | null;
+  readonly partial: boolean;
+}): FolderOutcomeTone {
+  if (outcome.error) return "danger";
+  if (outcome.partial) return "warning";
+  return "success";
+}
+
+/** The report bulk-apply context the panel offers, shaped exactly as the
+ *  dashboard's `?manage=` loader used to compute it (ADR-0078 §5): the count is
+ *  what THIS viewer can see, capped, plus whether the folder is over the cap. */
+export interface FolderReportSharingContext {
+  readonly visibleCount: number;
+  readonly overCap: boolean;
+}
+
+/** The lazy management payload the content-header panel loads on "Manage ▾"
+ *  (ADR-0087): the roster, the bulk-apply context, and the badge + form key
+ *  RECOMPUTED with the real roster count now that it is known — so the panel
+ *  never has to import `arp-domain` to turn "3 shares" into "Shared with 3" or
+ *  into the remount key that stops a stale field surviving the next state. */
+export interface FolderManageContext {
+  readonly shares: readonly FolderShareRow[];
+  readonly reportSharing: FolderReportSharingContext | null;
+  readonly badge: FolderBadge;
+  readonly formKey: string;
+  /** THE one warning shown before the action (ADR-0076 §6), composed
+   *  server-side for the CURRENT toggle direction; null when there is nothing to
+   *  warn about. Carried in the manage payload so the panel body — which only
+   *  renders after the lazy load — is self-contained. */
+  readonly shareWarning: string | null;
+  /** The direction-aware, counted cascade label, or null (nothing inside, or
+   *  more than one change may cover). */
+  readonly cascadeLabel: string | null;
+}
+
+/** One row of a folder's share roster, as the panel renders it: the grantee's
+ *  normalized email plus a pre-formatted granted-at date (formatted server-side
+ *  so the markup is stable and locale drift can't hydrate-mismatch). */
+export interface FolderShareRow {
+  readonly email: string;
+  readonly grantedAt: string;
+}
+
+/** Shape the lazy manage payload (ADR-0087) — PURE, so the badge/form-key
+ *  recompute is a unit test, not a fact the fetcher island re-derives. Both the
+ *  badge and the form key turn on the same two facts (the folder's visibility
+ *  and how many people it is shared with), so they can never disagree about
+ *  whether the roster moved. */
+export function folderManageContext(input: {
+  readonly visibility: FolderVisibility;
+  readonly shares: readonly FolderShareRow[];
+  readonly reportSharing: FolderReportSharingContext | null;
+  readonly shareWarning?: string | null;
+  readonly cascadeLabel?: string | null;
+}): FolderManageContext {
+  const shareCount = input.shares.length;
+  return {
+    shares: input.shares,
+    reportSharing: input.reportSharing,
+    badge: folderVisibilityBadge({ visibility: input.visibility, shareCount }),
+    formKey: folderFormKey({ visibility: input.visibility, shareCount }),
+    shareWarning: input.shareWarning ?? null,
+    cascadeLabel: input.cascadeLabel ?? null,
+  };
+}
+
 /** The acting principal the three ADR-0076 management use cases authorize
  *  against — `TenancyActor` plus the `acl:write` scope they all gate on. */
 export interface FolderManagementActor {
   readonly orgId: OrgId;
   readonly userId: UserId;
   readonly scopes: readonly string[];
+}
+
+/** The three `ops()` calls the lazy manage load composes, as an injected seam
+ *  so the orchestration is unit-testable without a real container (mirrors
+ *  `CascadeOps`). Each is exactly the container method the dashboard already
+ *  wires; only the fields this load reads are typed. */
+export interface ManageContextOps {
+  listFolders(
+    actor: { readonly orgId: OrgId; readonly userId: UserId },
+    input: Record<string, never>,
+  ): Promise<Result<{ readonly items: readonly Folder[] }, AppError>>;
+  listFolderShares(
+    actor: FolderManagementActor,
+    input: { readonly folderId: FolderId },
+  ): Promise<Result<readonly FolderShare[], AppError>>;
+  searchReports(
+    actor: { readonly orgId: OrgId; readonly userId: UserId },
+    input: { readonly folderId: FolderId; readonly limit: number },
+  ): Promise<Result<{ readonly items: readonly unknown[] }, AppError>>;
+}
+
+/**
+ * Load the lazy management payload for ONE folder (ADR-0087 — the "Manage ▾"
+ * read). This is the expensive, sensitive query the dashboard used to gate
+ * behind `?manage=`; it now runs only when the panel opens, over
+ * `GET /shares?include=manage`.
+ *
+ * The roster read runs FIRST and IS the authorization gate: `listFolderShares`
+ * is owner-or-legacy + `acl:write` (ADR-0076), so a folder this actor may not
+ * manage returns the use case's own refusal — the panel renders its
+ * roster-unavailable state rather than an empty roster (an error must never read
+ * as "not shared with anyone"). The visibility comes off the SAME visible tree
+ * the dashboard builds; the report count is the viewer-scoped, capped bulk-apply
+ * scope (ADR-0078 §5). An unknown count leaves `reportSharing` null — no offer
+ * for a number we could not read, exactly as the dashboard loader decided.
+ */
+export async function loadFolderManageContext(
+  ops: ManageContextOps,
+  actor: FolderManagementActor,
+  folderId: FolderId,
+): Promise<Result<FolderManageContext, AppError>> {
+  const sharesR = await ops.listFolderShares(actor, { folderId });
+  if (!sharesR.ok) return sharesR;
+  const shares: readonly FolderShareRow[] = sharesR.value.map((s) => ({
+    email: s.granteeEmail,
+    // Formatted server-side so the markup is stable (no locale drift between
+    // the SSR pass and hydration — the same rule the dashboard loader applied).
+    grantedAt: new Date(s.grantedAt).toISOString().slice(0, 10),
+  }));
+
+  const foldersR = await ops.listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
+  const wireId = folderIdToWire(folderId);
+  const tree = foldersR.ok ? visibleFolderTree(foldersR.value.items) : [];
+  const node = tree.find((n) => n.id === wireId);
+  const visibility: FolderVisibility = node?.visibility ?? "private";
+  // The warning + cascade label are direction-aware: they describe the toggle
+  // the panel is about to offer, which is the OPPOSITE of the current state.
+  const target: FolderVisibility = visibility === "org" ? "private" : "org";
+  const scope = node ? cascadeScope(tree, wireId) : null;
+  const shareWarning = scope
+    ? folderShareWarning({ legacy: node?.ownerId === null, target, scope })
+    : null;
+  const cascade = scope ? cascadeLabel({ target, scope }) : null;
+
+  let reportSharing: FolderReportSharingContext | null = null;
+  const countR = await ops.searchReports(
+    { orgId: actor.orgId, userId: actor.userId },
+    { folderId, limit: MAX_SHARING_BULK_APPLY + 1 },
+  );
+  if (countR.ok) {
+    reportSharing = {
+      visibleCount: Math.min(countR.value.items.length, MAX_SHARING_BULK_APPLY),
+      overCap: countR.value.items.length > MAX_SHARING_BULK_APPLY,
+    };
+  }
+
+  return ok(
+    folderManageContext({
+      visibility,
+      shares,
+      reportSharing,
+      shareWarning,
+      cascadeLabel: cascade,
+    }),
+  );
 }
 
 /** The two `ops()` calls the cascade makes, as an injected seam — this is what

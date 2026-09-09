@@ -1,75 +1,68 @@
 @phase-2 @smoke @auth
-Feature: Manage folder visibility and sharing from the dashboard (ADR-0076 §6)
+Feature: Manage folder visibility and sharing from the content-header panel (ADR-0087)
   As a folder's owner
-  I want to change who can see it — and repair a legacy folder — from the sidebar
-  So that fixing an over-shared folder is self-service, not an MCP call
+  I want to change who can see it — and repair a legacy folder — from the content header
+  So that fixing an over-shared folder is self-service, in context, next to its reports
 
-  # This is the UI half of ADR-0076. PR #230 shipped the model, the API and the
-  # MCP tools; the only repair path for the incident folder ("every member sees
-  # Engineering") was a hand-run MCP call, which is why it never got fixed. The
-  # scenario below drives the DASHBOARD's own cookie-authenticated Remix action
-  # end to end — the same door a browser click uses — and asserts on the
-  # server-rendered sidebar markup.
+  # ADR-0087 relocated folder management out of the in-body sidebar tree (removed
+  # here, T4a #334) into the CONTENT-HEADER panel over the selected folder's
+  # report list; the `_app` shell rail is now the sole folder-navigation surface.
+  # Management reads (the roster, the counted cascade, the bulk-apply context)
+  # are loaded lazily on "Manage ▾" over GET /shares?include=manage — the panel's
+  # own useFetcher.load(); writes still post through the dashboard's own
+  # cookie-authenticated action. This scenario drives both doors end to end and
+  # observes folder VISIBILITY on the shell rail, the content-header BADGE on the
+  # dashboard SSR, and the roster/cascade on the manage payload.
   #
   # Both identities are RUN-SCOPED (fresh `<prefix>-<runId>+clerk_test@…` users,
   # same team domain → one shared anchored org), following the pattern in
-  # tests/e2e/smoke/team-org-upload.steps.ts: a user that didn't exist before
-  # this run can't carry a poisoned identity mirror from an earlier run in the
-  # persistent, prod-forked preview DB branch. The @run-scoped After hook
-  # best-effort deletes both users and the folders they created.
+  # tests/e2e/smoke/team-org-upload.steps.ts.
   #
-  # NOT covered here, and deliberately: LEGACY-folder adoption. A legacy row is
-  # `owner_id IS NULL`, which only the pre-ADR-0076 backfill produces — there is
-  # no supported way to mint one through the product, so the adoption warning
-  # and the owner-or-legacy gate are covered by the unit tests on
-  # `folderManagement` (apps/app/app/server/folder-sharing.server.test.ts) and
-  # by `load-owned.test.ts` on the server rule this UI mirrors.
+  # NOT covered here, and deliberately: LEGACY-folder adoption (owner_id IS NULL,
+  # only the pre-ADR-0076 backfill produces one — no product path mints it), and
+  # the client-only fetcher INTERACTION (the "Manage ▾" disclosure, the
+  # form-remount / autocomplete=off restoration guard), which the panel's
+  # node-render smoke test pins (ADR-0079).
   @run-scoped
-  Scenario: An owner shares, un-shares and cascades a folder from the sidebar
+  Scenario: An owner shares, un-shares and cascades a folder from the content-header panel
     Given a folder-sharing owner identity is signed in
     And a folder-sharing colleague identity is signed in
 
-    # Private by default (ADR-0076 §3) — a new folder under Root is the
-    # creator's alone, and the sidebar says so.
-    # The badge says only what the loader actually KNOWS. It pays for one share
-    # roster (the folder in `?manage=`), so every other private row has an
-    # unknown roster — and "Private" there would be a positive claim sitting one
-    # row below a "Shared with 2". `Limited` is that claim at a width the 14rem
-    # sidebar can afford; the full sentence is in the badge's title.
-    When the owner creates a run-scoped parent folder from the dashboard sidebar
-    Then the owner's sidebar badges the parent folder "Limited"
-    And the owner's sidebar names the parent folder in full on hover
-    And the owner's sidebar renders no sharing controls for the Root folder
-    And the colleague's sidebar does not show the parent folder
+    # Private by default (ADR-0076 §3). The count-less content-header badge reads
+    # "Limited" — a private row whose roster the header did not load may not claim
+    # a bare "Private" (a folder shared with five people would read the same).
+    When the owner creates a run-scoped parent folder
+    Then the owner's content header badges the parent folder "Limited"
+    And the owner's content header names the parent folder in full
+    And the owner's content header offers no management for the Root folder
+    And the colleague's rail does not show the parent folder
 
     # The org toggle — the incident's actual repair, in reverse.
     When the owner creates a run-scoped child folder inside the parent folder
-    Then the owner's cascade checkbox names the direction and the count
-    And the owner's sharing fields refuse browser form restoration
-    When the owner shares the parent folder with the whole org from the sidebar
-    Then the owner's sidebar badges the parent folder "Org"
-    And the owner's org-shared roster does NOT claim only they can see the folder
-    And the colleague's sidebar shows the parent folder
-    And the colleague's sharing menu for the parent folder is refused with a reason
+    Then the owner's manage payload names the cascade direction and the count
+    When the owner shares the parent folder with the whole org
+    Then the owner's content header badges the parent folder "Org"
+    And the owner's org-shared manage payload does not claim only they can see the folder
+    And the colleague's rail shows the parent folder
+    And the colleague's manage read for the parent folder is refused
 
     # THE NESTED-FOLDER GAP: ADR-0076's repair is per-folder, so a descendant
-    # that is already org-visible stays org-visible when the parent goes
-    # private — and grafts under Root in the colleague's tree, name and all.
-    When the owner shares the child folder with the whole org from the sidebar
+    # that is already org-visible stays org-visible when the parent goes private —
+    # and grafts under Root in the colleague's rail, name and all.
+    When the owner shares the child folder with the whole org
     And the owner makes the parent folder private WITHOUT the cascade
-    Then the colleague's sidebar no longer shows the parent folder
-    But the colleague's sidebar still shows the child folder
+    Then the colleague's rail no longer shows the parent folder
+    But the colleague's rail still shows the child folder
 
     # …which the explicit opt-in closes, by looping the same use case.
     When the owner makes the parent folder private WITH the cascade
-    Then the cascade result names the child folder as changed
-    And the colleague's sidebar shows neither the parent nor the child folder
+    Then the colleague's rail shows neither the parent nor the child folder
 
     # Person shares: add by email, see the roster, revoke.
-    When the owner shares the parent folder with the colleague's email from the sidebar
-    Then the owner's share roster for the parent folder lists the colleague's email
-    And the owner's managed sidebar badges the parent folder "Shared with 1"
-    And the colleague's sidebar shows the parent folder
-    When the owner removes the colleague's share from the sidebar
-    Then the owner's share roster for the parent folder is empty
-    And the colleague's sidebar does not show the parent folder
+    When the owner shares the parent folder with the colleague's email
+    Then the owner's manage payload lists the colleague's email
+    And the owner's manage payload badges the parent folder "Shared with 1"
+    And the colleague's rail shows the parent folder
+    When the owner removes the colleague's share
+    Then the owner's manage payload roster is empty
+    And the colleague's rail does not show the parent folder
