@@ -13,6 +13,12 @@
 // `fixtures/anchors-and-links.html` puts ids on `<h2>`/`<h3>`/`<p>`/`<div>`/
 // `<li>`/`<td>`/`<blockquote>` (each of which resolves to a DIFFERENT node spec
 // with a DIFFERENT `toDOM` shape) and exercises the `target`/`rel` variants.
+//
+// ALSO HOSTED HERE: `<section>` class retention (ticket #359, the last describe
+// block). It is the same round-trip seam on the same node spec — `sectionNode`
+// is where the `id` half of the retained set was already pinned — so the two
+// halves of "what survives an edit-save on a section" stay in one file rather
+// than drifting apart in two.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
