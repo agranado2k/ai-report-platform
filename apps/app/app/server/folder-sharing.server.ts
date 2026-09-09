@@ -467,6 +467,14 @@ export interface FolderManageContext {
   readonly reportSharing: FolderReportSharingContext | null;
   readonly badge: FolderBadge;
   readonly formKey: string;
+  /** THE one warning shown before the action (ADR-0076 §6), composed
+   *  server-side for the CURRENT toggle direction; null when there is nothing to
+   *  warn about. Carried in the manage payload so the panel body — which only
+   *  renders after the lazy load — is self-contained. */
+  readonly shareWarning: string | null;
+  /** The direction-aware, counted cascade label, or null (nothing inside, or
+   *  more than one change may cover). */
+  readonly cascadeLabel: string | null;
 }
 
 /** One row of a folder's share roster, as the panel renders it: the grantee's
@@ -486,6 +494,8 @@ export function folderManageContext(input: {
   readonly visibility: FolderVisibility;
   readonly shares: readonly FolderShareRow[];
   readonly reportSharing: FolderReportSharingContext | null;
+  readonly shareWarning?: string | null;
+  readonly cascadeLabel?: string | null;
 }): FolderManageContext {
   const shareCount = input.shares.length;
   return {
@@ -493,6 +503,8 @@ export function folderManageContext(input: {
     reportSharing: input.reportSharing,
     badge: folderVisibilityBadge({ visibility: input.visibility, shareCount }),
     formKey: folderFormKey({ visibility: input.visibility, shareCount }),
+    shareWarning: input.shareWarning ?? null,
+    cascadeLabel: input.cascadeLabel ?? null,
   };
 }
 
@@ -554,10 +566,17 @@ export async function loadFolderManageContext(
 
   const foldersR = await ops.listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
   const wireId = folderIdToWire(folderId);
-  const node = foldersR.ok
-    ? visibleFolderTree(foldersR.value.items).find((n) => n.id === wireId)
-    : undefined;
+  const tree = foldersR.ok ? visibleFolderTree(foldersR.value.items) : [];
+  const node = tree.find((n) => n.id === wireId);
   const visibility: FolderVisibility = node?.visibility ?? "private";
+  // The warning + cascade label are direction-aware: they describe the toggle
+  // the panel is about to offer, which is the OPPOSITE of the current state.
+  const target: FolderVisibility = visibility === "org" ? "private" : "org";
+  const scope = node ? cascadeScope(tree, wireId) : null;
+  const shareWarning = scope
+    ? folderShareWarning({ legacy: node?.ownerId === null, target, scope })
+    : null;
+  const cascade = scope ? cascadeLabel({ target, scope }) : null;
 
   let reportSharing: FolderReportSharingContext | null = null;
   const countR = await ops.searchReports(
@@ -571,7 +590,15 @@ export async function loadFolderManageContext(
     };
   }
 
-  return ok(folderManageContext({ visibility, shares, reportSharing }));
+  return ok(
+    folderManageContext({
+      visibility,
+      shares,
+      reportSharing,
+      shareWarning,
+      cascadeLabel: cascade,
+    }),
+  );
 }
 
 /** The two `ops()` calls the cascade makes, as an injected seam — this is what

@@ -757,6 +757,23 @@ describe("loadFolderManageContext (ADR-0087 — the lazy Manage read)", () => {
     expect(r.value.reportSharing).toEqual({ visibleCount: 3, overCap: false });
   });
 
+  it("composes the direction-aware cascade label off the visible tree", async () => {
+    // folder "2" (private) with a child "3" inside → the toggle would take it
+    // to org, and the label names the direction + the count of what is inside.
+    const folders = ok({
+      items: [
+        build({ id: "1", parentId: null, name: "Root" }),
+        build({ id: "2", visibility: "private" }),
+        build({ id: "3", parentId: "2", name: "Kept" }),
+      ],
+    });
+    const r = await loadFolderManageContext(makeOps({ folders }), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.cascadeLabel).toContain("with the whole org");
+    expect(r.value.cascadeLabel).toContain("1 folder");
+  });
+
   it("propagates the roster refusal — an unmanageable folder is the use case's 403, not empty", async () => {
     const denied = err(notAllowed("you don't own this folder"));
     const r = await loadFolderManageContext(makeOps({ shares: denied }), actor, fid("2"));

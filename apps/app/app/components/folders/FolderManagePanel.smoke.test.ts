@@ -48,8 +48,6 @@ const node = (over: Partial<FolderManageNode> = {}): FolderManageNode => ({
   manageable: true,
   blockedReason: null,
   badge: { label: "Private", tone: "neutral", title: "Only you can see this folder." },
-  shareWarning: null,
-  cascadeLabel: null,
   ...over,
 });
 
@@ -62,6 +60,8 @@ const manageContext = (over: Record<string, unknown> = {}) => ({
   reportSharing: { visibleCount: 4, overCap: false },
   badge: { label: "Shared with 2", tone: "brand", title: "shared with 2 people" },
   formKey: "private:2",
+  shareWarning: null,
+  cascadeLabel: null,
   ...over,
 });
 
@@ -122,13 +122,16 @@ describe("FolderManagePanel (ADR-0087)", () => {
   });
 
   it("renders the cascade checkbox with its counted, direction-aware label", () => {
-    const html = render(node({ cascadeLabel: "Also share the 3 folders inside this one with the whole org" }), manageContext());
+    const html = render(
+      node(),
+      manageContext({ cascadeLabel: "Also share the 3 folders inside this one with the whole org" }),
+    );
     expect(html).toContain("Also share the 3 folders inside this one");
     expect(html).toContain('name="cascade"');
   });
 
   it("shows THE warning before the action when the server composed one", () => {
-    const html = render(node({ shareWarning: "You'll become this folder's owner." }), manageContext());
+    const html = render(node(), manageContext({ shareWarning: "You'll become this folder's owner." }));
     expect(html).toContain("become this folder"); // apostrophe HTML-escaped by SSR
   });
 

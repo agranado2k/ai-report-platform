@@ -52,8 +52,6 @@ export interface FolderManageNode {
   /** The count-less badge (roster not loaded) — replaced by the loaded badge
    *  once "Manage ▾" fetches the roster. */
   readonly badge: { readonly label: string; readonly tone: BadgeTone; readonly title: string };
-  readonly shareWarning: string | null;
-  readonly cascadeLabel: string | null;
 }
 
 /** The dashboard action's folder-scoped outcome, in the panel's read of it. */
@@ -256,9 +254,9 @@ function ManageBody({
           of it (ADR-0076 §6 + §cascade): adoption of this folder if legacy, of
           the legacy folders inside it if the cascade runs, and — in the org
           direction — how many currently-private folders would be published. */}
-      {node.shareWarning ? (
+      {ctx.shareWarning ? (
         <p role="note" className="mb-2 rounded-control bg-warning/12 p-1.5 text-xs text-warning">
-          {node.shareWarning}
+          {ctx.shareWarning}
         </p>
       ) : null}
 
@@ -270,7 +268,7 @@ function ManageBody({
         <input type="hidden" name="intent" value="set-folder-visibility" />
         <input type="hidden" name="folderId" value={node.id} />
         <input type="hidden" name="visibility" value={nextVisibility} />
-        {node.cascadeLabel ? (
+        {ctx.cascadeLabel ? (
           <label
             htmlFor={`cascade-${node.id}`}
             className="flex items-start gap-1.5 text-xs text-muted"
@@ -282,7 +280,7 @@ function ManageBody({
               autoComplete="off"
               className="mt-0.5"
             />
-            <span>{node.cascadeLabel}</span>
+            <span>{ctx.cascadeLabel}</span>
           </label>
         ) : null}
         <Button type="submit" size="sm" className="w-full justify-center">

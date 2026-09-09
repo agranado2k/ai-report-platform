@@ -32,14 +32,11 @@ import { editabilityNotice } from "../server/editability-notice.server";
 import {
   applyFolderVisibility,
   cascadeIsPartial,
-  cascadeLabel,
-  cascadeScope,
   cascadeSummary,
   type FolderManagementActor,
   folderManagement,
   type FolderOutcomeTone,
   folderOutcomeTone,
-  folderShareWarning,
   folderVisibilityBadge,
   INERT_SHARE_NOTICE,
   ROSTER_UNAVAILABLE_NOTICE,
@@ -142,10 +139,11 @@ export async function loader(args: LoaderFunctionArgs) {
   );
 
   // The cheap, tree-derived facts every folder needs (ADR-0087). The roster,
-  // the roster-derived badge count and the bulk-apply count are NOT computed
-  // here any more — the content-header panel loads them lazily on "Manage ▾".
-  // The badge is therefore the count-less one (Org / Limited / Private); the
-  // panel upgrades it to "Shared with N" once it has the roster.
+  // the roster-derived badge count, the bulk-apply count AND the warning /
+  // cascade label are NOT computed here any more — the content-header panel
+  // loads them lazily on "Manage ▾" (GET /shares?include=manage). The badge is
+  // the count-less one (Org / Limited / Private); the panel upgrades it to
+  // "Shared with N" once it has the roster.
   const folders: DashboardFolder[] = grafted.map((f) => {
     const m = management.get(f.id) ?? {
       isRoot: f.parentId === null,
@@ -153,11 +151,6 @@ export async function loader(args: LoaderFunctionArgs) {
       legacy: f.ownerId === null,
       blockedReason: null,
     };
-    // The direction the toggle would take this folder, which is what makes the
-    // warning and the checkbox label sayable up front — both stay on the node so
-    // the panel can render them the moment it opens, before the roster lands.
-    const target = f.visibility === "org" ? ("private" as const) : ("org" as const);
-    const scope = m.manageable ? cascadeScope(grafted, f.id) : null;
     return {
       id: f.id,
       parentId: f.parentId,
@@ -166,8 +159,6 @@ export async function loader(args: LoaderFunctionArgs) {
       isRoot: m.isRoot,
       manageable: m.manageable,
       blockedReason: m.blockedReason,
-      shareWarning: scope ? folderShareWarning({ legacy: m.legacy, target, scope }) : null,
-      cascadeLabel: scope ? cascadeLabel({ target, scope }) : null,
       badge: folderVisibilityBadge({ visibility: f.visibility, shareCount: null }),
     };
   });
