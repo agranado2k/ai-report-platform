@@ -23,6 +23,7 @@ import {
   cascadeSummary,
   folderFormKey,
   folderManageContext,
+  loadFolderManageContext,
   folderManagement,
   folderOutcomeTone,
   folderShareWarning,
@@ -718,5 +719,67 @@ describe("folderManageContext (ADR-0087 — the lazy manage payload)", () => {
     expect(
       folderManageContext({ visibility: "private", shares: [], reportSharing }).reportSharing,
     ).toEqual(reportSharing);
+  });
+});
+
+describe("loadFolderManageContext (ADR-0087 — the lazy Manage read)", () => {
+  const share = (email: string) => ({
+    folderId: fid("2"),
+    granteeEmail: email,
+    granteeUserId: null,
+    grantedBy: me,
+    grantedAt: Date.parse("2026-09-08T00:00:00Z"),
+  });
+
+  function makeOps(over?: {
+    shares?: Result<readonly ReturnType<typeof share>[], AppError>;
+    folders?: Result<{ items: readonly Folder[] }, AppError>;
+    reports?: Result<{ items: readonly unknown[] }, AppError>;
+  }) {
+    return {
+      listFolderShares: async () => over?.shares ?? ok([share("a@x.test"), share("b@x.test")]),
+      listFolders: async () =>
+        over?.folders ??
+        ok({ items: [build({ id: "1", parentId: null, name: "Root" }), build({ id: "2" })] }),
+      searchReports: async () => over?.reports ?? ok({ items: [{}, {}, {}] }),
+    } as const;
+  }
+
+  const actor = { orgId: org, userId: me, scopes: SCOPED };
+
+  it("shapes the roster, the visibility badge and the report count together", async () => {
+    const r = await loadFolderManageContext(makeOps(), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.shares.map((s) => s.email)).toEqual(["a@x.test", "b@x.test"]);
+    expect(r.value.shares[0]?.grantedAt).toBe("2026-09-08");
+    expect(r.value.badge.label).toBe("Shared with 2");
+    expect(r.value.reportSharing).toEqual({ visibleCount: 3, overCap: false });
+  });
+
+  it("propagates the roster refusal — an unmanageable folder is the use case's 403, not empty", async () => {
+    const denied = err(notAllowed("you don't own this folder"));
+    const r = await loadFolderManageContext(makeOps({ shares: denied }), actor, fid("2"));
+    expect(r.ok).toBe(false);
+  });
+
+  it("caps the bulk-apply count and flags over-cap", async () => {
+    const many = ok({ items: Array.from({ length: MAX_CASCADE + 5 }, () => ({})) });
+    // MAX_SHARING_BULK_APPLY drives the cap; over its ceiling, overCap is true.
+    const r = await loadFolderManageContext(makeOps({ reports: many }), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.reportSharing?.overCap).toBe(true);
+  });
+
+  it("leaves the bulk-apply offer null when the count could not be read", async () => {
+    const r = await loadFolderManageContext(
+      makeOps({ reports: err(notAllowed("boom")) }),
+      actor,
+      fid("2"),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.reportSharing).toBeNull();
   });
 });

@@ -14,7 +14,7 @@
 // the UI and the server cannot drift: a control this module enables is a
 // control the use case will accept, and vice versa.
 
-import { FOLDER_NOT_MANAGEABLE } from "arp-application";
+import { FOLDER_NOT_MANAGEABLE, type FolderShare, MAX_SHARING_BULK_APPLY } from "arp-application";
 import {
   type AppError,
   canManageFolder,
@@ -502,6 +502,76 @@ export interface FolderManagementActor {
   readonly orgId: OrgId;
   readonly userId: UserId;
   readonly scopes: readonly string[];
+}
+
+/** The three `ops()` calls the lazy manage load composes, as an injected seam
+ *  so the orchestration is unit-testable without a real container (mirrors
+ *  `CascadeOps`). Each is exactly the container method the dashboard already
+ *  wires; only the fields this load reads are typed. */
+export interface ManageContextOps {
+  listFolders(
+    actor: { readonly orgId: OrgId; readonly userId: UserId },
+    input: Record<string, never>,
+  ): Promise<Result<{ readonly items: readonly Folder[] }, AppError>>;
+  listFolderShares(
+    actor: FolderManagementActor,
+    input: { readonly folderId: FolderId },
+  ): Promise<Result<readonly FolderShare[], AppError>>;
+  searchReports(
+    actor: { readonly orgId: OrgId; readonly userId: UserId },
+    input: { readonly folderId: FolderId; readonly limit: number },
+  ): Promise<Result<{ readonly items: readonly unknown[] }, AppError>>;
+}
+
+/**
+ * Load the lazy management payload for ONE folder (ADR-0087 — the "Manage ▾"
+ * read). This is the expensive, sensitive query the dashboard used to gate
+ * behind `?manage=`; it now runs only when the panel opens, over
+ * `GET /shares?include=manage`.
+ *
+ * The roster read runs FIRST and IS the authorization gate: `listFolderShares`
+ * is owner-or-legacy + `acl:write` (ADR-0076), so a folder this actor may not
+ * manage returns the use case's own refusal — the panel renders its
+ * roster-unavailable state rather than an empty roster (an error must never read
+ * as "not shared with anyone"). The visibility comes off the SAME visible tree
+ * the dashboard builds; the report count is the viewer-scoped, capped bulk-apply
+ * scope (ADR-0078 §5). An unknown count leaves `reportSharing` null — no offer
+ * for a number we could not read, exactly as the dashboard loader decided.
+ */
+export async function loadFolderManageContext(
+  ops: ManageContextOps,
+  actor: FolderManagementActor,
+  folderId: FolderId,
+): Promise<Result<FolderManageContext, AppError>> {
+  const sharesR = await ops.listFolderShares(actor, { folderId });
+  if (!sharesR.ok) return sharesR;
+  const shares: readonly FolderShareRow[] = sharesR.value.map((s) => ({
+    email: s.granteeEmail,
+    // Formatted server-side so the markup is stable (no locale drift between
+    // the SSR pass and hydration — the same rule the dashboard loader applied).
+    grantedAt: new Date(s.grantedAt).toISOString().slice(0, 10),
+  }));
+
+  const foldersR = await ops.listFolders({ orgId: actor.orgId, userId: actor.userId }, {});
+  const wireId = folderIdToWire(folderId);
+  const node = foldersR.ok
+    ? visibleFolderTree(foldersR.value.items).find((n) => n.id === wireId)
+    : undefined;
+  const visibility: FolderVisibility = node?.visibility ?? "private";
+
+  let reportSharing: FolderReportSharingContext | null = null;
+  const countR = await ops.searchReports(
+    { orgId: actor.orgId, userId: actor.userId },
+    { folderId, limit: MAX_SHARING_BULK_APPLY + 1 },
+  );
+  if (countR.ok) {
+    reportSharing = {
+      visibleCount: Math.min(countR.value.items.length, MAX_SHARING_BULK_APPLY),
+      overCap: countR.value.items.length > MAX_SHARING_BULK_APPLY,
+    };
+  }
+
+  return ok(folderManageContext({ visibility, shares, reportSharing }));
 }
 
 /** The two `ops()` calls the cascade makes, as an injected seam — this is what
