@@ -313,7 +313,7 @@ describe("section class retention (ticket #359)", () => {
   });
 
   it("does not emit class attribute when section has no class", () => {
-    const out = roundTrip('<section><p>content</p></section>');
+    const out = roundTrip("<section><p>content</p></section>");
     // The section should not have a class attribute at all
     expect(out).not.toMatch(/<section[^>]*class=/);
   });
