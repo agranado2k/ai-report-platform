@@ -361,6 +361,14 @@ paths:
         sees the folder. Such a grant is still accepted and listed here — it
         starts working if they later join — so this roster may include emails
         that currently resolve to nobody.
+
+
+        With `?include=manage` (ADR-0087) the response is instead a
+        `folder_manage_context` — the roster PLUS the folder's visibility badge
+        recomputed with the real share count, the direction-aware cascade label,
+        THE warning, and the viewer-scoped bulk-apply count — the lazy payload
+        the dashboard's content-header panel loads on "Manage ▾". Same
+        authorization gate as the plain roster.
       security:
         - apiKey: []
       parameters:
@@ -369,9 +377,19 @@ paths:
           required: true
           schema: { type: string, pattern: '^folder_[0-9A-Za-z]{22}$', example: 'folder_3QmK9vXr2pLnB4cD8eF6gH' }
           description: The folder id.
+        - name: include
+          in: query
+          required: false
+          schema: { type: string, enum: [manage] }
+          description: >
+            `manage` (ADR-0087) returns a folder_manage_context — the roster plus
+            the management context the content-header panel needs — instead of a
+            plain folder_share list.
       responses:
         '200':
-          description: A list envelope of folder_share resources.
+          description: >
+            A list envelope of folder_share resources, or — with
+            `?include=manage` — a folder_manage_context.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FolderShareList' }
