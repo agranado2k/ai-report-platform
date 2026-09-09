@@ -60,16 +60,24 @@ Chosen: **option 1**. Concretely:
   cascade label and the bulk-apply context. The roster query runs **only** when
   management is opened; `shares === null` still means "never asked", distinct from an
   empty roster.
-- **Writes (REST + fetcher island).** Each write is a `fetcher.submit` to the existing
-  REST endpoint — share → `POST /shares`, unshare → `DELETE /shares/:email`,
-  visibility/cascade → `POST /visibility`, rename → `PATCH /:id`, delete → `DELETE /:id`
-  — plus a **new `POST /api/v1/folders/:id/apply-sharing`** wrapping the existing
-  bulk-apply use case (the same one MCP's `folders_apply_sharing_to_reports` exposes).
-  On success the panel re-fires the roster fetcher and resets its forms via fetcher
-  state. **The dashboard's folder-management action intents are retired**
-  (`share-folder`, `unshare-folder`, `set-folder-visibility`, `apply-folder-sharing`,
-  `rename-folder`, `delete-folder`). Deleting the *selected* folder is the one write
-  that navigates — to "All reports", with a mutation toast (ADR-0086/#336).
+- **Writes — delivered in two phases.** The end state is a fetcher island whose writes
+  go to the folder REST endpoints. This is split so the high-value *relocation* lands
+  first without being gated on a transport refactor that `apps/app` cannot exercise
+  hermetically (ADR-0079):
+  - **Phase 1 (#345 / this PR): relocation over the existing, tested transport.** The
+    panel's writes fire in place via the current cookie-authenticated **dashboard action
+    intents**, re-firing the roster fetcher + a toast on success. Every invariant below is
+    preserved because the write path is unchanged — only the surface moved.
+  - **Phase 2 (follow-up): migrate the writes to REST + retire the intents.** Point the six
+    writes at the folder REST endpoints — share → `POST /shares`, unshare →
+    `DELETE /shares/:email`, visibility/cascade → `POST /visibility`, rename → `PATCH /:id`,
+    delete → `DELETE /:id`, and bulk-apply → the **already-existing** `POST /api/v1/folders/:id/reports/sharing`
+    (the same use case MCP's `folders_apply_sharing_to_reports` exposes — **no new endpoint
+    is needed**; ADR-0087 originally mis-stated this as a new `…/apply-sharing` route) — then
+    retire the now-unused dashboard intents (`share-folder`, `unshare-folder`,
+    `set-folder-visibility`, `apply-folder-sharing`, `rename-folder`, `delete-folder`).
+  - Deleting the *selected* folder is the one write that navigates — to "All reports",
+    with a mutation toast (ADR-0086/#336) — in both phases.
 - **Outcome feedback (ADR-0076 §6 preserved).** Every REST write returns a **structured
   outcome** (`summary` / `partial` / `error` / refused set); the panel renders it in the
   success/warning/danger tones and raises the mutation toast. A partial cascade returns
@@ -97,11 +105,14 @@ Chosen: **option 1**. Concretely:
 - **Positive.** One navigation surface; management in context; the roster stays lazy;
   in-place, snappy management; the REST API becomes the single write path for folder
   management (the same seam MCP already uses), so behaviour is exercised by two callers.
-- **Negative / cost.** A larger diff than a mechanical move: a new bulk-apply REST
-  endpoint, a fetcher island, and an e2e rewrite. `apps/app` interaction still has no
+- **Negative / cost.** A larger diff than a mechanical move: the content panel + fetcher
+  island, the extended lazy read, and an e2e rewrite. `apps/app` interaction still has no
   hermetic browser tier, so the fetcher read/write/cascade flow is only covered against
-  a live preview (a known ADR-0079 gap). If the slice runs long it should split — the
-  bulk-apply endpoint is the natural first tracer.
+  a live preview (a known ADR-0079 gap). The write-transport migration (Phase 2) is
+  deferred to a follow-up ticket precisely because it is a pure refactor over already-tested
+  endpoints with no hermetic local coverage — landing it separately keeps the relocation's
+  value un-gated on it. The bulk-apply endpoint it will reuse **already exists**
+  (`POST /:id/reports/sharing`).
 - **Invariants carried through, verbatim.** ADR-0078's `acl:write` gate and use cases;
   `shares === null` = never-asked; the `formKey` reset; ADR-0076 §6 partial-cascade-warns.
 - **Supersedes-in-part ADR-0078**: only its *surface* and *write transport* change. Its
