@@ -11,7 +11,7 @@ import type { EditViewHeadersOptions, SecureHeadersOptions } from "./types";
 //
 // `defaultSrc`/`imgSrc`/`baseUri`/`formAction`/`objectSrc`/`workerSrc`/
 // `reportTo` are used byte-for-byte by every profile. Two entries are NOT,
-// since ADR-0087: the public enforcing profile appends the Viewer CSP
+// since ADR-0088: the public enforcing profile appends the Viewer CSP
 // allowlist to `fontSrc`, and replaces `frameAncestors` with
 // `frame-ancestors 'self'`. Both remain byte-for-byte in the report-only
 // shadow policy and the edit profile, which is why they still live here.
@@ -28,7 +28,7 @@ const CSP_SHARED = {
 } as const;
 
 /**
- * The **Viewer CSP allowlist** (ADR-0087, amending ADR-013) — the named set of
+ * The **Viewer CSP allowlist** (ADR-0088, amending ADR-013) — the named set of
  * external hosts the PUBLIC viewer profile lets a report load passive assets
  * from, so a self-contained agent-authored artifact renders here the way it
  * renders where it was authored ("artifact parity"): the designed typeface,
@@ -74,7 +74,7 @@ const VIEW_CSP = [
   CSP_SHARED.imgSrc,
   withAllowlist(CSP_SHARED.fontSrc, VIEW_CSP_ALLOWLIST.fontSrc),
   "connect-src 'self'",
-  // ADR-0087: 'self', not CSP_SHARED's 'none' — the viewer origin may frame
+  // ADR-0088: 'self', not CSP_SHARED's 'none' — the viewer origin may frame
   // its own reports (a preview pane, a side-by-side). `app.<domain>` is a
   // different origin and an attacker's page is not 'self', so clickjacking a
   // report stays impossible. The edit profile keeps `frame-ancestors 'none'`.

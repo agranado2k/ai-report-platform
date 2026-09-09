@@ -61,7 +61,7 @@ describe.skipIf(!VIEW_BASE_URL)("security-headers gate — live viewer preview",
     expect(sandboxOf(await fetchViewerHeaders())).toBe(sandboxOf(expected));
   });
 
-  // ADR-0087. The unit suite proves `viewHeaders()` BUILDS the allowlist; only
+  // ADR-0088. The unit suite proves `viewHeaders()` BUILDS the allowlist; only
   // this gate proves the edge actually SERVES it. A Vercel/Cloudflare layer
   // rewriting or collapsing a widened directive is invisible to a unit test,
   // and a silently-dropped allowlist looks exactly like the bug this change
@@ -86,7 +86,7 @@ describe.skipIf(!VIEW_BASE_URL)("security-headers gate — live viewer preview",
         p.startsWith("default-src"),
       ) ?? "";
     expect(enforcing).toContain("frame-ancestors 'self';");
-    // The ADR-0087 safety argument, asserted against what the EDGE serves:
+    // The ADR-0088 safety argument, asserted against what the EDGE serves:
     // widening the loading directives must not have widened the sending ones.
     expect(enforcing).toContain("connect-src 'self';");
     expect(enforcing).toContain("img-src 'self' data: blob:;");

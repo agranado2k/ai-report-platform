@@ -1,4 +1,4 @@
-# ADR-0087: Artifact-parity allowlist on the viewer CSP, and `frame-ancestors 'self'`
+# ADR-0088: Artifact-parity allowlist on the viewer CSP, and `frame-ancestors 'self'`
 
 - **Status**: Accepted (2026-09-09) — amends ADR-013 (viewer security header stack)
 - **Deciders**: operator

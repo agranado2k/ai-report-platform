@@ -6039,12 +6039,12 @@ Verified: `pnpm docs:check` green, `pnpm docs:check:test` 106/106, `pnpm lint`
 
 ---
 
-### 2026-09-09 — ADR-0087: artifact-parity allowlist on the viewer CSP (#360)
+### 2026-09-09 — ADR-0088: artifact-parity allowlist on the viewer CSP (#360)
 
 The public viewer's enforcing CSP (ADR-013) blocked the two things an
 agent-authored HTML artifact routinely reaches for — a Google Fonts `<link>` and
 a pinned-CDN `<script>` — so every such report degraded to a fallback serif with
-a dead chart, silently, with nothing surfaced to its author. **ADR-0087** (amends
+a dead chart, silently, with nothing surfaced to its author. **ADR-0088** (amends
 ADR-013) adds the **Viewer CSP allowlist**: one named constant
 (`VIEW_CSP_ALLOWLIST`, `packages/headers`) carrying `fonts.googleapis.com`
 (`style-src`), `fonts.gstatic.com` (`font-src`) and `cdnjs.cloudflare.com` +
