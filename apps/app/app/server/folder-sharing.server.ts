@@ -432,6 +432,70 @@ export function cascadeSummary(outcome: CascadeOutcome): string {
   return `${applied}${adoptedTail}${failedTail}`;
 }
 
+/** The tone the panel renders a folder write's structured outcome in (ADR-0076
+ *  §6, carried through ADR-0087). `error` dominates (a refusal is a refusal even
+ *  if a `partial` flag rode along), then a partial cascade reads as a WARNING —
+ *  data-driven, off `partial`, never inferred from a re-read roster — and a
+ *  clean run is a success. The switch lives here, under test, rather than as a
+ *  nested ternary the panel could invert unnoticed. */
+export type FolderOutcomeTone = "success" | "warning" | "danger";
+
+export function folderOutcomeTone(outcome: {
+  readonly error: string | null;
+  readonly partial: boolean;
+}): FolderOutcomeTone {
+  if (outcome.error) return "danger";
+  if (outcome.partial) return "warning";
+  return "success";
+}
+
+/** The report bulk-apply context the panel offers, shaped exactly as the
+ *  dashboard's `?manage=` loader used to compute it (ADR-0078 §5): the count is
+ *  what THIS viewer can see, capped, plus whether the folder is over the cap. */
+export interface FolderReportSharingContext {
+  readonly visibleCount: number;
+  readonly overCap: boolean;
+}
+
+/** The lazy management payload the content-header panel loads on "Manage ▾"
+ *  (ADR-0087): the roster, the bulk-apply context, and the badge + form key
+ *  RECOMPUTED with the real roster count now that it is known — so the panel
+ *  never has to import `arp-domain` to turn "3 shares" into "Shared with 3" or
+ *  into the remount key that stops a stale field surviving the next state. */
+export interface FolderManageContext {
+  readonly shares: readonly FolderShareRow[];
+  readonly reportSharing: FolderReportSharingContext | null;
+  readonly badge: FolderBadge;
+  readonly formKey: string;
+}
+
+/** One row of a folder's share roster, as the panel renders it: the grantee's
+ *  normalized email plus a pre-formatted granted-at date (formatted server-side
+ *  so the markup is stable and locale drift can't hydrate-mismatch). */
+export interface FolderShareRow {
+  readonly email: string;
+  readonly grantedAt: string;
+}
+
+/** Shape the lazy manage payload (ADR-0087) — PURE, so the badge/form-key
+ *  recompute is a unit test, not a fact the fetcher island re-derives. Both the
+ *  badge and the form key turn on the same two facts (the folder's visibility
+ *  and how many people it is shared with), so they can never disagree about
+ *  whether the roster moved. */
+export function folderManageContext(input: {
+  readonly visibility: FolderVisibility;
+  readonly shares: readonly FolderShareRow[];
+  readonly reportSharing: FolderReportSharingContext | null;
+}): FolderManageContext {
+  const shareCount = input.shares.length;
+  return {
+    shares: input.shares,
+    reportSharing: input.reportSharing,
+    badge: folderVisibilityBadge({ visibility: input.visibility, shareCount }),
+    formKey: folderFormKey({ visibility: input.visibility, shareCount }),
+  };
+}
+
 /** The acting principal the three ADR-0076 management use cases authorize
  *  against — `TenancyActor` plus the `acl:write` scope they all gate on. */
 export interface FolderManagementActor {

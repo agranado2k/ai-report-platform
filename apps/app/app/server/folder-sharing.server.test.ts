@@ -22,7 +22,9 @@ import {
   cascadeScope,
   cascadeSummary,
   folderFormKey,
+  folderManageContext,
   folderManagement,
+  folderOutcomeTone,
   folderShareWarning,
   folderVisibilityBadge,
   MAX_CASCADE,
@@ -659,5 +661,62 @@ describe("applyFolderVisibility (ADR-0076 §cascade — the loop, under test at 
     const r = await applyFolderVisibility(f.ops, cascadeActor, parentInput(false));
     expect(r.ok).toBe(true);
     expect(f.calls).toHaveLength(1);
+  });
+});
+
+describe("folderOutcomeTone (ADR-0087 — the panel's success/warning/danger switch)", () => {
+  it("reads a refusal as danger", () => {
+    expect(folderOutcomeTone({ error: "Nope.", partial: false })).toBe("danger");
+  });
+
+  it("lets the error dominate even when a partial flag rode along", () => {
+    expect(folderOutcomeTone({ error: "Nope.", partial: true })).toBe("danger");
+  });
+
+  it("reads a partial cascade as a warning — data-driven, off `partial`", () => {
+    expect(folderOutcomeTone({ error: null, partial: true })).toBe("warning");
+  });
+
+  it("reads a clean run as a success", () => {
+    expect(folderOutcomeTone({ error: null, partial: false })).toBe("success");
+  });
+});
+
+describe("folderManageContext (ADR-0087 — the lazy manage payload)", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ email: `p${i}@x.test`, grantedAt: "2026-09-08" }));
+
+  it("recomputes the badge to 'Shared with N' once the private roster is known", () => {
+    const ctx = folderManageContext({ visibility: "private", shares: rows(2), reportSharing: null });
+    expect(ctx.badge.label).toBe("Shared with 2");
+    expect(ctx.badge.tone).toBe("brand");
+  });
+
+  it("badges a private folder with no shares 'Private' — not the count-less 'Limited'", () => {
+    const ctx = folderManageContext({ visibility: "private", shares: [], reportSharing: null });
+    expect(ctx.badge.label).toBe("Private");
+  });
+
+  it("keeps an org folder 'Org' whatever the roster holds", () => {
+    const ctx = folderManageContext({ visibility: "org", shares: rows(3), reportSharing: null });
+    expect(ctx.badge.label).toBe("Org");
+  });
+
+  it("keys the forms on visibility + the real roster count, so a share remounts them", () => {
+    expect(
+      folderManageContext({ visibility: "private", shares: rows(1), reportSharing: null }).formKey,
+    ).toBe("private:1");
+    expect(
+      folderManageContext({ visibility: "private", shares: rows(2), reportSharing: null }).formKey,
+    ).not.toBe(
+      folderManageContext({ visibility: "private", shares: rows(1), reportSharing: null }).formKey,
+    );
+  });
+
+  it("passes the bulk-apply context through untouched", () => {
+    const reportSharing = { visibleCount: 4, overCap: false };
+    expect(
+      folderManageContext({ visibility: "private", shares: [], reportSharing }).reportSharing,
+    ).toEqual(reportSharing);
   });
 });
