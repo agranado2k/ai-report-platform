@@ -158,7 +158,7 @@ decision matrix:
 | --- | --- | --- |
 | canWrite (owner or grantee) | valid `et=` on the query | `setCookieAndRedirect` → §4 |
 | canWrite | valid `arp_view` cookie | `serve`, `capability: "write"` |
-| owner, capability **absent**, verified `oa` | `arp_view_oa` cookie or `oa=` query | `serve`, `capability: "ownerRead"` — read-only chrome, **no Edit action** |
+| owner, capability **absent**, verified `oa` | `arp_view_oa` cookie or `oa=` query | `serve`, `capability: "ownerRead"` — read-only chrome, **no Edit action**, **+ `arp_unlock`** (§4c) |
 | anyone, capability **rejected** (expired/tampered/rotated secret) | — | `redirect` → `{appOrigin}/reports/{slug}/open` (the funnel) |
 | anonymous / unauthorised | nothing | `redirect` → the same funnel, which bounces them to the app home → sign-in |
 | no funnel available (no secret / no `appOrigin`), no `oa` | — | `redirect` → the bare `/{slug}` |
@@ -179,6 +179,19 @@ capability: today an owner whose edit round-trip fails is dumped on the bare
 `/{slug}?access=<oa>` with no chrome at all. The token, the check
 (`acceptOwnerFallback`: valid HMAC, this slug, unexpired, `owner === true`, 1 KiB cap) and
 the resulting access are identical — they now arrive with a title bar.
+
+**"Same access" is a claim the serve arm has to pay for, not an aspiration.** This arm is
+reached with no hand-off behind it — the capability is *absent*, so §4's 303 never ran —
+and the framed `GET /<slug>` carries `arp_unlock` and nothing else. A `serve` that set no
+cookie would therefore wrap chrome around the **unlock wall** for every non-`public`
+report, granting strictly *less* than the bare `/{slug}?access=<oa>` it claims to improve
+on, where `decideView`'s `grant` branch does redeem the cookie. So the `serve` arm carries
+a `cookies` list and issues that same redemption. It is written as **one rule over both
+capabilities** — any serve holding a verified `oa` issues it — rather than as an
+`ownerRead` special case: on the `write` arm it is a harmless refresh of what the 303
+already set, and a rule that holds on every arm cannot rot when the matrix grows a row,
+which the Consequences name as this design's failure mode. Only `arp_unlock` may ever
+appear in that list; a capability cookie there would be §4(a)'s exact violation.
 
 ### 4. The cookie hand-off — the interface #363 builds against
 
@@ -216,8 +229,8 @@ save. Note the ordering dependency this relies on: no `oa` under `/<slug>/edit` 
 makes that branch funnel rather than degrade, so **`arp_view_oa` must stay scoped to
 `/<slug>/view`**. A test pins it.
 
-**(c) `arp_unlock` is issued on the happy path, and that is a bounded widening — not a
-reduction.** Today an owner reaching `/edit` never gets an `arp_unlock` cookie; the `oa`
+**(c) `arp_unlock` is issued on the happy path — and, per §3, on any `serve` holding a
+verified `oa` — and that is a bounded widening, not a reduction.** Today an owner reaching `/edit` never gets an `arp_unlock` cookie; the `oa`
 token is redeemed only on a degrade, via `/{slug}?access=<oa>`. Under the owner view the
 frame *needs* that cookie, so the happy path issues it. What is added: an owner's browser
 holds a report-scoped read capability for up to the `oa` token's life (`OWNER_TTL_SECONDS`,
@@ -258,8 +271,8 @@ and this is the viewer origin's second authenticated first-party route.
 
 Naming: `editViewHeaders` now serves two routes and its name has narrowed past its
 meaning. Renaming it to something like `authenticatedViewHeaders` is a **recorded
-mechanical follow-up**, deliberately not done here — a rename across a security-header
-surface does not belong in the same diff as a new authenticated route.
+mechanical follow-up — #375**, deliberately not done here: a rename across a
+security-header surface does not belong in the same diff as a new authenticated route.
 
 ### 6. Why the chrome page is safe to be non-sandboxed (ADR-0069)
 

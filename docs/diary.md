@@ -6124,7 +6124,11 @@ and `arp_view_oa` sit at **`Path=/<slug>/view`, never `/<slug>`** — that is th
 request the sandboxed frame makes, so a write capability there would be handed to
 the untrusted report's own navigation. `arp_unlock` at `Path=/<slug>` is redeemed
 from the **verified** `oa` so the framed navigation serves; nothing is minted (the
-view origin still only verifies). Recorded as a bounded widening, not a reduction:
+view origin still only verifies). Any `serve` holding a verified `oa` issues that
+cookie, not just the 303 — caught in review on PR #373: the `ownerRead` arm is
+reached with no hand-off behind it, so without it the read-only degrade wrapped
+chrome around the **unlock wall** and granted strictly *less* than the bare
+`/{slug}?access=<oa>` it claims to improve on. Recorded as a bounded widening, not a reduction:
 that cookie is now issued on the happy path, byte-identical to what the existing
 `?access=` redemption already produces. The Edit action is a **plain link** to
 `/<slug>/edit`, which — holding no capability under that Path — funnels through the
