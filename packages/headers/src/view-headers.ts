@@ -185,10 +185,18 @@ function normalizeOrigin(origin: string): string {
  *   `private, max-age=60, must-revalidate`) — the edit route is
  *   authenticated and per-user; nothing about it should be cached, even
  *   privately, across sessions/devices.
- * - Everything else (`default-src`, `style-src` incl. `'unsafe-inline'` for
- *   Tailwind, `img-src`, `font-src`, `frame-ancestors 'none'`,
- *   `base-uri 'none'`, `form-action 'self'`, `object-src 'none'`,
- *   `worker-src 'self'`, the report-only shadow policy, COOP/CORP/
+ * - `style-src 'self' 'unsafe-inline'` (for Tailwind), `font-src 'self'
+ *   data:` and `frame-ancestors 'none'` — since ADR-0088 these are three
+ *   directives where the edit profile is NARROWER than the public one, not
+ *   identical to it: the public profile appends the Viewer CSP allowlist to
+ *   `style-src`/`font-src` and relaxes `frame-ancestors` to `'self'`. The
+ *   edit route is the TRUSTED first-party editor, not an agent-authored
+ *   artifact that needs parity with where it was generated, so it carries no
+ *   allowlist and stays wholly unframeable. Asserted by the leak tests in
+ *   view-headers.test.ts ("no allowlist host reaches the edit profile").
+ * - Everything else (`default-src`, `img-src`, `base-uri 'none'`,
+ *   `form-action 'self'`, `object-src 'none'`, `worker-src 'self'`, the
+ *   report-only shadow policy, COOP/CORP/
  *   Origin-Agent-Cluster/Referrer-Policy/Permissions-Policy/nosniff/HSTS/
  *   Report-To) is IDENTICAL to the public profile — the edit route is
  *   additive, not a general loosening (ADR-0063 Decision 1).
