@@ -46,7 +46,7 @@ Chosen: **option 1**.
 
 ### 1. One probe, beside the other one, calling the editor's own functions
 
-`packages/report-html/src/fidelity.ts` exports `probeFidelity`, which takes the uploaded HTML and whether the ReportVersion carries an editor source sidecar, and returns a verdict plus the lost items. It **calls** `splitShell`, `parseBody` and the editor's serialiser — the same functions the `/edit` loader and the save path call — and compares the serialised body to the uploaded body. It re-derives no schema condition, exactly as `probeEditability` re-derives no loader condition. The two probes sit side by side in the same package for the same reason: the predicate lives once, where the editor's code is reachable.
+`packages/report-html/src/fidelity-probe.ts` exports `probeFidelity`, which takes the uploaded HTML and whether the ReportVersion carries an editor source sidecar, and returns a verdict plus the lost items. It **calls** `splitShell`, `parseBody` and the editor's serialiser — the same functions the `/edit` loader and the save path call — and compares the serialised body to the uploaded body. It re-derives no schema condition, exactly as `probeEditability` re-derives no loader condition. The two probes sit side by side in the same package for the same reason: the predicate lives once, where the editor's code is reachable.
 
 The comparison runs through a **normaliser** that removes the differences a round trip is *entitled* to make: insignificant whitespace, attribute order, entity encoding, and self-closing forms. What survives normalisation is real content loss. The probe reports it as **lost items** — element names and attribute names, deduplicated — which is what an affordance can put in a sentence.
 
@@ -97,7 +97,7 @@ And, inheriting ADR-0080 §4's general rule unchanged: **fidelity is read by thi
 
 ## More information
 
-- Implementation: `packages/report-html/src/fidelity.ts` (the probe + the normaliser), `packages/adapters/src/fidelity-probe.ts` (the port implementation), `packages/application/src/ports.ts` (`FidelityProbe`), `packages/application/src/use-cases/upload-report.ts` (the one call site), `packages/db/drizzle/0023_report_versions_fidelity.sql`.
+- Implementation: `packages/report-html/src/fidelity-probe.ts` (the probe + the normaliser), `packages/adapters/src/fidelity-probe.ts` (the port implementation), `packages/application/src/ports.ts` (`FidelityProbe`), `packages/application/src/use-cases/upload-report.ts` (the one call site), `packages/db/drizzle/0023_report_versions_fidelity.sql`.
 - Schema contract: `docs/db-design.md` — `report_versions.fidelity` + the `version_fidelity` enum.
 - Wire contract: `docs/api/openapi.yaml` — `ReportSummary.fidelity`, `VersionSummary.fidelity`, `ContentResult.fidelity`.
 - Term: **Fidelity** in `docs/domain-glossary.md` (Reports & Folders context).
