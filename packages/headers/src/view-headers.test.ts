@@ -118,7 +118,13 @@ describe("viewHeaders", () => {
       for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
         expect(host.startsWith("https://")).toBe(true);
         expect(host).not.toContain("*");
-        expect(host.length).toBeGreaterThan("https://".length);
+        // Shape, not just length: a bare `https://` + one label ("https://x")
+        // cleared the old `length > "https://".length` floor while being no
+        // kind of host at all. Require a dotted host, an optional path, and
+        // no quote character (which would smuggle in a CSP keyword source
+        // like `'unsafe-eval'` past the wildcard check above).
+        expect(host).toMatch(/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+(\/[\w.-]+)*\/?$/);
+        expect(host).not.toContain("'");
       }
     });
 
