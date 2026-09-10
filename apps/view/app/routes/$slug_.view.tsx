@@ -19,40 +19,14 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { editViewHeaders, viewHeaders } from "arp-headers/view";
+import { editViewHeaders } from "arp-headers/view";
 import { useEffect, useState } from "react";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { decideServe, editDegradeLine } from "../server/gate.server";
+import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
 import { OwnerViewTopBar } from "../view/components/OwnerViewTopBar";
 import { ReportFrame } from "../view/components/ReportFrame";
 import { shareStateLabel } from "../view/share-state";
-
-// The public CSP profile for responses that carry NO chrome — a bare 404, or a
-// redirect. Mirrors `$slug_.edit.tsx`: a response with no first-party UI in it
-// gets the stricter, unauthenticated header set.
-function notFoundResponse(): Response {
-  const headers = viewHeaders();
-  headers.set("content-type", "text/plain; charset=utf-8");
-  headers.set("cache-control", "no-store");
-  headers.set("x-robots-tag", "noindex, nofollow");
-  return new Response("Not found", { status: 404, headers });
-}
-
-function redirectResponse(
-  to: string,
-  status: 302 | 303,
-  cookies: readonly string[] = [],
-): Response {
-  const headers = viewHeaders();
-  headers.set("location", to);
-  // APPEND, never set — the owner view's hand-off carries up to THREE
-  // capabilities in one response (ADR-0089 §4), and `set` would silently
-  // collapse them to the last one.
-  for (const cookie of cookies) headers.append("set-cookie", cookie);
-  headers.set("cache-control", "no-store");
-  headers.set("x-robots-tag", "noindex, nofollow");
-  return new Response(null, { status, headers });
-}
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const { secret, appOrigin } = viewerAccessConfig();
@@ -67,10 +41,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     nowSeconds: Math.floor(Date.now() / 1000),
   });
 
-  if (decision.kind === "error") throw notFoundResponse();
-  if (decision.kind === "redirect") return redirectResponse(decision.to, 302);
+  if (decision.kind === "error") throw viewerTextResponse(404, "Not found");
+  if (decision.kind === "redirect") return viewerRedirectResponse(decision.to, 302);
   if (decision.kind === "setCookieAndRedirect") {
-    return redirectResponse(decision.to, 303, decision.cookies);
+    return viewerRedirectResponse(decision.to, 303, decision.cookies);
   }
   if (!appOrigin) {
     // The gate never returns "serve" with `appOrigin` unset — it degrades
@@ -81,7 +55,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // own target, which carries the owner `?access=` fallback when one is in
     // play — and leave a line, rather than stranding an owner silently.
     console.warn(editDegradeLine(slug, decision.ownerFallback, "gate-decision-unusable"));
-    return redirectResponse(decision.degradeTo, 302);
+    return viewerRedirectResponse(decision.degradeTo, 302);
   }
 
   // ADR-0089 §5: the chrome page wears ADR-0063's AUTHENTICATED profile.

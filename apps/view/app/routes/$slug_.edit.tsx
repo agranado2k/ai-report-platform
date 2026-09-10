@@ -59,7 +59,7 @@ import {
   type ReportEditorHandle,
   type SelectionGeometry,
 } from "arp-editor";
-import { editViewHeaders, viewHeaders } from "arp-headers/view";
+import { editViewHeaders } from "arp-headers/view";
 import { type PMDocJson, reinjectShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addComment, listComments } from "../edit/comments-client";
@@ -94,35 +94,7 @@ import {
   editDegradeLine,
   editUnopenableLine,
 } from "../server/gate.server";
-
-function notFoundResponse(): Response {
-  const headers = viewHeaders();
-  headers.set("content-type", "text/plain; charset=utf-8");
-  headers.set("cache-control", "no-store");
-  headers.set("x-robots-tag", "noindex, nofollow");
-  return new Response("Not found", { status: 404, headers });
-}
-
-// The fallback for every "can't/shouldn't render the editor" case below: an
-// expired/invalid/absent edit capability just becomes a normal (possibly
-// gated) view of the report, exactly like ADR-0056's unlock flow degrades to
-// the public viewer rather than erroring. Uses `viewHeaders()` (the PUBLIC
-// CSP profile), not `editViewHeaders()` — this response never carries editor
-// content or the edit token, so it gets the stricter, unauthenticated-route
-// header set.
-//
-// `to` is the gate's own degrade location — which routes an OWNER through the
-// viewer's `?access=` flow when the `oa=` fallback token is present (Phase 5-E
-// hotfix, see gate.server.ts's degradeLocation). Every caller now takes it from
-// `degradeTargetFor`; the post-gate DOCUMENT failures no longer redirect at all
-// (they render the unopenable page), so nothing hard-codes `/${slug}` any more.
-function redirectToPublicViewer(to: string): Response {
-  const headers = viewHeaders();
-  headers.set("location", to);
-  headers.set("cache-control", "no-store");
-  headers.set("x-robots-tag", "noindex, nofollow");
-  return new Response(null, { status: 302, headers });
-}
+import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const { secret, appOrigin } = viewerAccessConfig();
@@ -141,20 +113,16 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     nowSeconds: Math.floor(Date.now() / 1000),
   });
 
-  if (decision.kind === "error") throw notFoundResponse();
-  if (decision.kind === "redirect") return redirectToPublicViewer(decision.to);
+  if (decision.kind === "error") throw viewerTextResponse(404, "Not found");
+  if (decision.kind === "redirect") return viewerRedirectResponse(decision.to, 302);
   if (decision.kind === "setCookieAndRedirect") {
     // Valid `?et=` hand-off: mint the arp_edit cookie and 303 to the clean
     // URL — drops the token out of the address bar/history/referer, exactly
-    // like $slug.tsx's `grant` → unlock-cookie flow.
-    const headers = viewHeaders();
-    headers.set("location", decision.to);
-    // APPEND: the edit hand-off persists BOTH the edit cookie and (for an
-    // owner) the `oa` fallback that the stripped query would otherwise lose.
-    for (const cookie of decision.cookies) headers.append("set-cookie", cookie);
-    headers.set("cache-control", "no-store");
-    headers.set("x-robots-tag", "noindex, nofollow");
-    return new Response(null, { status: 303, headers });
+    // like $slug.tsx's `grant` → unlock-cookie flow. The cookies are APPENDED
+    // (the shared helper's contract): the edit hand-off persists BOTH the edit
+    // cookie and, for an owner, the `oa` fallback the stripped query would
+    // otherwise lose.
+    return viewerRedirectResponse(decision.to, 303, decision.cookies);
   }
   if (!appOrigin) {
     // The gate never returns "serve" with appOrigin unset — it degrades those
@@ -186,7 +154,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     console.warn(
       editDegradeLine(params.slug ?? "", fallback.ownerFallback, "gate-decision-unusable"),
     );
-    return redirectToPublicViewer(fallback.to);
+    return viewerRedirectResponse(fallback.to, 302);
   }
 
   // A valid, already-redeemed arp_edit cookie, and a clean live version to
