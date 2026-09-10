@@ -109,6 +109,28 @@ describe("probeFidelity — would the editor KEEP these bytes (ADR-0090)", () =>
     expect(verdict?.lostAttributes).not.toContain("style");
   });
 
+  it("does not report an element that survives elsewhere in the document", () => {
+    // The element twin of the rule above, and the sharper half of it: the
+    // round trip DELETES the first anchor outright (the schema does not retain
+    // a `javascript:` href), yet the verdict is `lossless` because the second
+    // anchor keeps the NAME `a` present. Measured, not assumed — the same
+    // document with that anchor as its only `<a>` reports `lossy` with
+    // lostElements `["a"]`.
+    //
+    // This is the accepted cost of measuring by name presence rather than
+    // occurrence count (ADR-0090): counting would mark the entire existing
+    // corpus lossy and leave the field as uninformative as byte equality. It
+    // is pinned here so a future "fix" has to argue with the record rather
+    // than silently reverse it. Fidelity is advisory, never authorization —
+    // nothing gates on this verdict, so a false `lossless` costs a missing
+    // warning, never a security decision.
+    const html =
+      '<html><body><p><a href="javascript:alert(1)">x</a></p><p><a href="/safe">y</a></p></body></html>';
+    const verdict = probeFidelity(html);
+    expect(verdict?.fidelity).toBe("lossless");
+    expect(verdict?.lostElements).not.toContain("a");
+  });
+
   it("reports a lost element even when its siblings survive", () => {
     const html = "<html><body><p>keep</p><script>alert(1)</script></body></html>";
     const verdict = probeFidelity(html);
