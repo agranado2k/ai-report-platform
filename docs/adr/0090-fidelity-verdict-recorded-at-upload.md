@@ -99,7 +99,7 @@ And, inheriting ADR-0080 §4's general rule unchanged: **fidelity is read by thi
 
 - Implementation: `packages/report-html/src/fidelity-probe.ts` (the probe + the normaliser), `packages/adapters/src/fidelity-probe.ts` (the port implementation), `packages/application/src/ports.ts` (`FidelityProbe`), `packages/application/src/use-cases/upload-report.ts` (the one call site), `packages/db/drizzle/0023_report_versions_fidelity.sql`.
 - Schema contract: `docs/db-design.md` — `report_versions.fidelity` + the `version_fidelity` enum.
-- Wire contract: `docs/api/openapi.yaml` — `ReportSummary.fidelity`, `VersionSummary.fidelity`, `ContentResult.fidelity`.
+- Wire contract: `docs/api/openapi.yaml` — `ReportSummary.fidelity`, `VersionSummary.fidelity`, `ReportContent.fidelity`.
 - Term: **Fidelity** in `docs/domain-glossary.md` (Reports & Folders context).
 - Amends: `docs/adr/0080-record-editability-at-upload.md` — this record adds the second verdict; ADR-0080's own decisions stand unchanged.
 - Ticket #362, PRD #356.
