@@ -22,9 +22,12 @@ import {
   cascadeScope,
   cascadeSummary,
   folderFormKey,
+  folderManageContext,
   folderManagement,
+  folderOutcomeTone,
   folderShareWarning,
   folderVisibilityBadge,
+  loadFolderManageContext,
   MAX_CASCADE,
   NO_SCOPE_REASON,
   NON_OWNER_REASON,
@@ -659,5 +662,145 @@ describe("applyFolderVisibility (ADR-0076 §cascade — the loop, under test at 
     const r = await applyFolderVisibility(f.ops, cascadeActor, parentInput(false));
     expect(r.ok).toBe(true);
     expect(f.calls).toHaveLength(1);
+  });
+});
+
+describe("folderOutcomeTone (ADR-0087 — the panel's success/warning/danger switch)", () => {
+  it("reads a refusal as danger", () => {
+    expect(folderOutcomeTone({ error: "Nope.", partial: false })).toBe("danger");
+  });
+
+  it("lets the error dominate even when a partial flag rode along", () => {
+    expect(folderOutcomeTone({ error: "Nope.", partial: true })).toBe("danger");
+  });
+
+  it("reads a partial cascade as a warning — data-driven, off `partial`", () => {
+    expect(folderOutcomeTone({ error: null, partial: true })).toBe("warning");
+  });
+
+  it("reads a clean run as a success", () => {
+    expect(folderOutcomeTone({ error: null, partial: false })).toBe("success");
+  });
+});
+
+describe("folderManageContext (ADR-0087 — the lazy manage payload)", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ email: `p${i}@x.test`, grantedAt: "2026-09-08" }));
+
+  it("recomputes the badge to 'Shared with N' once the private roster is known", () => {
+    const ctx = folderManageContext({
+      visibility: "private",
+      shares: rows(2),
+      reportSharing: null,
+    });
+    expect(ctx.badge.label).toBe("Shared with 2");
+    expect(ctx.badge.tone).toBe("brand");
+  });
+
+  it("badges a private folder with no shares 'Private' — not the count-less 'Limited'", () => {
+    const ctx = folderManageContext({ visibility: "private", shares: [], reportSharing: null });
+    expect(ctx.badge.label).toBe("Private");
+  });
+
+  it("keeps an org folder 'Org' whatever the roster holds", () => {
+    const ctx = folderManageContext({ visibility: "org", shares: rows(3), reportSharing: null });
+    expect(ctx.badge.label).toBe("Org");
+  });
+
+  it("keys the forms on visibility + the real roster count, so a share remounts them", () => {
+    expect(
+      folderManageContext({ visibility: "private", shares: rows(1), reportSharing: null }).formKey,
+    ).toBe("private:1");
+    expect(
+      folderManageContext({ visibility: "private", shares: rows(2), reportSharing: null }).formKey,
+    ).not.toBe(
+      folderManageContext({ visibility: "private", shares: rows(1), reportSharing: null }).formKey,
+    );
+  });
+
+  it("passes the bulk-apply context through untouched", () => {
+    const reportSharing = { visibleCount: 4, overCap: false };
+    expect(
+      folderManageContext({ visibility: "private", shares: [], reportSharing }).reportSharing,
+    ).toEqual(reportSharing);
+  });
+});
+
+describe("loadFolderManageContext (ADR-0087 — the lazy Manage read)", () => {
+  const share = (email: string) => ({
+    folderId: fid("2"),
+    granteeEmail: email,
+    granteeUserId: null,
+    grantedBy: me,
+    grantedAt: Date.parse("2026-09-08T00:00:00Z"),
+  });
+
+  function makeOps(over?: {
+    shares?: Result<readonly ReturnType<typeof share>[], AppError>;
+    folders?: Result<{ items: readonly Folder[] }, AppError>;
+    reports?: Result<{ items: readonly unknown[] }, AppError>;
+  }) {
+    return {
+      listFolderShares: async () => over?.shares ?? ok([share("a@x.test"), share("b@x.test")]),
+      listFolders: async () =>
+        over?.folders ??
+        ok({ items: [build({ id: "1", parentId: null, name: "Root" }), build({ id: "2" })] }),
+      searchReports: async () => over?.reports ?? ok({ items: [{}, {}, {}] }),
+    } as const;
+  }
+
+  const actor = { orgId: org, userId: me, scopes: SCOPED };
+
+  it("shapes the roster, the visibility badge and the report count together", async () => {
+    const r = await loadFolderManageContext(makeOps(), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.shares.map((s) => s.email)).toEqual(["a@x.test", "b@x.test"]);
+    expect(r.value.shares[0]?.grantedAt).toBe("2026-09-08");
+    expect(r.value.badge.label).toBe("Shared with 2");
+    expect(r.value.reportSharing).toEqual({ visibleCount: 3, overCap: false });
+  });
+
+  it("composes the direction-aware cascade label off the visible tree", async () => {
+    // folder "2" (private) with a child "3" inside → the toggle would take it
+    // to org, and the label names the direction + the count of what is inside.
+    const folders = ok({
+      items: [
+        build({ id: "1", parentId: null, name: "Root" }),
+        build({ id: "2", visibility: "private" }),
+        build({ id: "3", parentId: "2", name: "Kept" }),
+      ],
+    });
+    const r = await loadFolderManageContext(makeOps({ folders }), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.cascadeLabel).toContain("with the whole org");
+    expect(r.value.cascadeLabel).toContain("1 folder");
+  });
+
+  it("propagates the roster refusal — an unmanageable folder is the use case's 403, not empty", async () => {
+    const denied = err(notAllowed("you don't own this folder"));
+    const r = await loadFolderManageContext(makeOps({ shares: denied }), actor, fid("2"));
+    expect(r.ok).toBe(false);
+  });
+
+  it("caps the bulk-apply count and flags over-cap", async () => {
+    const many = ok({ items: Array.from({ length: MAX_CASCADE + 5 }, () => ({})) });
+    // MAX_SHARING_BULK_APPLY drives the cap; over its ceiling, overCap is true.
+    const r = await loadFolderManageContext(makeOps({ reports: many }), actor, fid("2"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.reportSharing?.overCap).toBe(true);
+  });
+
+  it("leaves the bulk-apply offer null when the count could not be read", async () => {
+    const r = await loadFolderManageContext(
+      makeOps({ reports: err(notAllowed("boom")) }),
+      actor,
+      fid("2"),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.reportSharing).toBeNull();
   });
 });
