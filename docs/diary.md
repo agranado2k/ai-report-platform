@@ -6036,3 +6036,51 @@ counts).
 
 Verified: `pnpm docs:check` green, `pnpm docs:check:test` 106/106, `pnpm lint`
 (biome ci) clean, `pnpm test:scripts` (agents-mapping) 46/46.
+
+### 2026-09-09 — Spike: framing the byte-for-byte viewer under first-party chrome (owner view)
+
+**Context.** A slide-deck report (`ZmsH1iKiTl`) rendered perfectly as a Claude artifact
+and lost its styling and interaction on Centaur Spec. Diagnosis: (1) the owner-open flow
+always lands in `/<slug>/edit`, whose ProseMirror schema drops `<script>`, flattens
+`<svg>` and strips `class` from `<section>` (ADR-0062 §3 — its own driver calls a dropped
+class a regression, so a schema fix is due regardless); (2) the public view CSP blocks
+Google Fonts; (3) the deck relied on the artifact host's injected `[hidden]{display:none!important}`
+reset — its own `.slide{display:flex}` beats the UA `[hidden]` rule everywhere else.
+`/grill-me` settled the plan: owner lands on a new authenticated `/<slug>/view` (first-party
+chrome + the raw `/<slug>` in a sandboxed iframe), `frame-ancestors 'self'` on the raw
+response, an artifact-parity allowlist (Google Fonts + cdnjs + jsdelivr/npm; `connect-src`
+stays `'self'`), a per-version `fidelity` field, and upload `warnings[]`. The plan hinged
+on three feasibility questions, spiked per `/prototype`:
+
+**Questions.** (Q1) A same-origin iframe with
+`sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"` (no
+`allow-same-origin`) still sends a `Path=/<slug>; HttpOnly; Secure; SameSite=Lax` cookie on
+its navigation request. (Q2) With `allow="fullscreen"` on that iframe, report script can
+call `requestFullscreen` from a user gesture. (Q3) A response carrying the ADR-013 pair
+(enforcing CSP + a second `sandbox` CSP header) with `frame-ancestors 'self'` renders inside
+that iframe with inline scripts running.
+
+**Verdict: all three TRUE.** Chromium 148.0.7778.96 (Playwright 1.60.0), headless and
+headed, against a throwaway Node server on `localhost`:
+
+- Q1: the iframe navigation (`sec-fetch-dest: iframe`) carried `arp_unlock=…`; the gate
+  served the report. Inside the frame `document.cookie` throws `SecurityError` and
+  `parent.document` throws `SecurityError` (opaque origin, as intended).
+- Q2: `requestFullscreen()` resolved and `document.fullscreenElement` was set. Negative
+  control: without `allow="fullscreen"` it throws `TypeError: Disallowed by permissions
+  policy` and `document.fullscreenEnabled` is `false` — the attribute is load-bearing.
+- Q3: scripts ran, `postMessage` reached the chrome page (event origin `"null"`),
+  `history.replaceState('#…')` worked inside the frame, and the chrome page's URL hash
+  forwarded to the iframe `src` arrived as `location.hash` — deep links to a slide survive.
+  Keyboard events reach the framed document once the chrome focuses the iframe on load.
+
+**Surprises.** (a) Chromium warned that the chrome page was site-keyed while the framed
+report requested `Origin-Agent-Cluster: ?1` — the `/<slug>/view` route must send the same
+header stack so the origin is uniformly origin-keyed. (b) The spike's own two-slide test
+doc reproduced the `[hidden]` defect: the hidden slide computed `display: flex` and
+intercepted the click meant for the fullscreen button.
+
+**Unblocks.** The owner-view route can rely on the existing unlock cookie (no token in the
+iframe `src`), and the iframe attribute set is settled:
+`sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" allow="fullscreen"`.
+Spike code deleted; the PRD follows via `/to-prd`.
