@@ -2,6 +2,7 @@ export { Badge, type BadgeTone } from "./Badge";
 export { Banner, type BannerTone } from "./Banner";
 export { Button, type ButtonSize, type ButtonVariant, buttonClass } from "./Button";
 export { Card } from "./Card";
+export { ChromeBar, type ChromeBarProps, chromeBarPillClass } from "./ChromeBar";
 export { Checkbox } from "./Checkbox";
 export { cx } from "./cx";
 export { Dialog, DialogFooter, DialogTitle } from "./Dialog";
