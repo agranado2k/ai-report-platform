@@ -134,6 +134,37 @@ function unlockCookie(slug: string, token: string, maxAgeSeconds: number): strin
 }
 
 /**
+ * An AUTHENTICATED surface under a report — the URL segment it lives on and
+ * the two cookies scoped to it. Named as one thing so a surface cannot
+ * half-exist: adding a route without adding its cookie pair (or, worse,
+ * borrowing another surface's) is the mistake this record makes unavailable.
+ *
+ * It sits HERE, above the builders, because both directions go through it: the
+ * two `Set-Cookie` builders below take a `Surface` (never a name plus a literal
+ * segment), and `readCapability` reads both cookies back off one. A builder
+ * that took the pieces separately would let a caller pair one surface's cookie
+ * NAME with another's `Path` — the half-existence this record exists to forbid,
+ * reintroduced one argument at a time.
+ */
+interface Surface {
+  readonly segment: string;
+  readonly capabilityCookie: string;
+  readonly ownerCookie: string;
+}
+
+const EDIT_SURFACE: Surface = {
+  segment: "edit",
+  capabilityCookie: EDIT_COOKIE,
+  ownerCookie: EDIT_OWNER_COOKIE,
+};
+
+const OWNER_VIEW_SURFACE: Surface = {
+  segment: "view",
+  capabilityCookie: OWNER_VIEW_COOKIE,
+  ownerCookie: OWNER_VIEW_OWNER_COOKIE,
+};
+
+/**
  * Build a `Set-Cookie` for a capability scoped to ONE authenticated surface
  * under a report — `/<slug>/edit`, `/<slug>/view`. The `surface` segment in
  * the `Path` is the whole security argument and the reason this is a
@@ -146,6 +177,10 @@ function unlockCookie(slug: string, token: string, maxAgeSeconds: number): strin
  * `maxAgeSeconds` is always the carried token's remaining life
  * (`claims.exp - nowSeconds`) so a cookie never outlives the capability
  * inside it — there is no independent expiry anywhere in this file.
+ *
+ * The two `Surface`-taking builders below are what the purposes actually call;
+ * this stays private to them so no call site ever names a cookie and a segment
+ * separately.
  */
 function surfaceCookie(
   name: string,
@@ -157,16 +192,38 @@ function surfaceCookie(
   return `${name}=${value}; Path=/${slug}/${surface}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-/** Build the `Set-Cookie` value for the `arp_edit` cookie. */
-function editCookie(slug: string, token: string, maxAgeSeconds: number): string {
-  return surfaceCookie(EDIT_COOKIE, slug, "edit", token, maxAgeSeconds);
+/** A surface's OWN capability cookie — the redeemed Edit token, under that
+ *  surface's `Path` (`arp_edit` for /edit, `arp_view` for the owner view). One
+ *  builder for both, because the posture is one posture: differing here would
+ *  be a security difference nobody decided. */
+function capabilityCookie(
+  surface: Surface,
+  slug: string,
+  token: string,
+  maxAgeSeconds: number,
+): string {
+  return surfaceCookie(surface.capabilityCookie, slug, surface.segment, token, maxAgeSeconds);
 }
 
-/** The owner-fallback cookie. The value is percent-encoded (and decoded on
- *  read) so a token containing a `;`, `,` or space can never split the header
- *  — `searchParams.get("oa")` hands us the DECODED token. */
-function ownerFallbackCookie(slug: string, oa: string, maxAgeSeconds: number): string {
-  return surfaceCookie(EDIT_OWNER_COOKIE, slug, "edit", encodeURIComponent(oa), maxAgeSeconds);
+/** A surface's owner-fallback cookie. The percent-encoding lives HERE rather
+ *  than at each call site — `readOwnerFallbackCookie` is the one place that
+ *  undoes it, and an encode restated per caller is an encode one caller can
+ *  forget, at which point a token containing a `;`, `,` or space splits the
+ *  `Set-Cookie` header. The value arrives DECODED (`searchParams.get("oa")`
+ *  decodes, and so does the cookie read), so this is the only encode. */
+function ownerFallbackCookie(
+  surface: Surface,
+  slug: string,
+  oa: string,
+  maxAgeSeconds: number,
+): string {
+  return surfaceCookie(
+    surface.ownerCookie,
+    slug,
+    surface.segment,
+    encodeURIComponent(oa),
+    maxAgeSeconds,
+  );
 }
 
 /**
@@ -580,8 +637,8 @@ async function decideEdit(
       // clean-URL bounce — and 303. Drops both tokens out of the address
       // bar/history/referer, exactly like the view path's grant.
       cookies: [
-        editCookie(slug, cap.token, cap.maxAge),
-        ...(oa ? [ownerFallbackCookie(slug, oa, cap.maxAge)] : []),
+        capabilityCookie(EDIT_SURFACE, slug, cap.token, cap.maxAge),
+        ...(oa ? [ownerFallbackCookie(EDIT_SURFACE, slug, oa, cap.maxAge)] : []),
       ],
       to: `/${slug}/edit`,
     };
@@ -636,9 +693,10 @@ async function decideEdit(
 //
 //   2. An ABSENT capability backed by a verified `oa` SERVES, read-only,
 //      instead of redirecting to the bare viewer. The rejection-vs-absence
-//      routing itself (ADR-0063 Phase 5-G) is inherited unchanged: a
-//      *rejected* token still funnels to the mint, because a rejection says
-//      the round-trip broke and the mint is what repairs it.
+//      routing itself (ADR-0063 Phase 5-G) is inherited unchanged — and
+//      inherited by CALLING `funnelTarget`, which is the ONE implementation
+//      of that rule and carries its full rationale. Only what this purpose
+//      does with a NON-funnelled denial differs from /edit.
 async function decideOwnerView(
   request: Request,
   url: URL,
@@ -652,16 +710,10 @@ async function decideOwnerView(
     return {
       kind: "setCookieAndRedirect",
       cookies: [
-        surfaceCookie(OWNER_VIEW_COOKIE, slug, OWNER_VIEW_SURFACE.segment, cap.token, cap.maxAge),
+        capabilityCookie(OWNER_VIEW_SURFACE, slug, cap.token, cap.maxAge),
         ...(oa
           ? [
-              surfaceCookie(
-                OWNER_VIEW_OWNER_COOKIE,
-                slug,
-                OWNER_VIEW_SURFACE.segment,
-                encodeURIComponent(oa),
-                cap.maxAge,
-              ),
+              ownerFallbackCookie(OWNER_VIEW_SURFACE, slug, oa, cap.maxAge),
               // Max-Age is the `oa` token's OWN remaining life, not the edit
               // token's. Capping it at the edit capability's ~15 min would
               // start bouncing the FRAME to the unlock wall mid-session — the
@@ -676,14 +728,17 @@ async function decideOwnerView(
 
   let capability: OwnerViewCapability = "write";
   if (cap.kind === "refused") {
-    const canFunnel = Boolean(deps.secret && deps.appOrigin);
-    if (canFunnel && (cap.cause === "rejected" || !oa)) {
-      // The funnel, not a degrade — the happy path for a writer whose token
-      // needs re-minting, and the door an anonymous visitor is shown (the app
-      // bounces them to sign-in). Decided BEFORE the report is looked up, so
-      // a nonexistent report answers identically: no existence leak.
-      return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
-    }
+    // The SAME funnel `deniedEdit` applies, inherited by CALL rather than by
+    // copy (ADR-0089 §3: "deliberately inherited rather than re-decided") —
+    // `funnelTarget` owns the rejection-vs-absence ordering and the both-deps
+    // guard, and owning it in one place is what stops the two purposes forking
+    // it. Answered BEFORE the report is looked up, so a nonexistent report
+    // answers identically: no existence leak.
+    const funnel = funnelTarget(slug, oa, cap.cause, deps);
+    if (funnel) return { kind: "redirect", to: funnel };
+    // No funnel and no fallback: the bare public viewer, warned. With a
+    // verified `oa` this is instead ADR-0089 §3's `ownerRead` row — the same
+    // token and check as the `?access=` degrade it replaces, now under chrome.
     if (!oa) return degradedEdit(slug, undefined, "edit-token-denied", deps);
     capability = "ownerRead";
   }
@@ -780,30 +835,6 @@ function readOwnerFallbackCookie(
   }
 }
 
-/**
- * An AUTHENTICATED surface under a report — the URL segment it lives on and
- * the two cookies scoped to it. Named as one thing so a surface cannot
- * half-exist: adding a route without adding its cookie pair (or, worse,
- * borrowing another surface's) is the mistake this record makes unavailable.
- */
-interface Surface {
-  readonly segment: string;
-  readonly capabilityCookie: string;
-  readonly ownerCookie: string;
-}
-
-const EDIT_SURFACE: Surface = {
-  segment: "edit",
-  capabilityCookie: EDIT_COOKIE,
-  ownerCookie: EDIT_OWNER_COOKIE,
-};
-
-const OWNER_VIEW_SURFACE: Surface = {
-  segment: "view",
-  capabilityCookie: OWNER_VIEW_COOKIE,
-  ownerCookie: OWNER_VIEW_OWNER_COOKIE,
-};
-
 /** What the request proved about its holder, before any report is looked up.
  *  Extracted so the two authenticated purposes share ONE reading of the
  *  `?et=` / cookie / `?oa=` seam and differ only in what they DO about it. */
@@ -822,7 +853,8 @@ type Capability =
       readonly claims: EditClaims;
       readonly oa: string | undefined;
     }
-  /** No usable capability. `cause` decides funnel-vs-degrade (see `deniedEdit`). */
+  /** No usable capability. `cause` decides funnel-vs-degrade — the rule is
+   *  `funnelTarget`, which both authenticated purposes call. */
   | {
       readonly kind: "refused";
       readonly cause: EditDenialCause;
@@ -905,18 +937,29 @@ function degradedEdit(
 }
 
 /** Why the edit capability was refused. The two are NOT interchangeable — see
- *  `deniedEdit`, which routes them differently.
+ *  `funnelTarget`, which routes them differently for both authenticated
+ *  purposes.
  *
  *  - `rejected`: a token WAS presented (query or cookie) and did not verify —
  *    expired, tampered with, or minted under a since-rotated secret.
  *  - `absent`: no token at all, or no secret with which to judge one. */
 type EditDenialCause = "rejected" | "absent";
 
-/** The edit purpose's denied branch — the funnel to the app's ONE edit-token
- *  mint, `GET {appOrigin}/reports/{slug}/open`. The app re-authenticates the
- *  session and re-mints `et=` for canWrite users (owner or write-grantee), and
- *  bounces everyone else to its home ("/" → sign-in for anonymous visitors), so
- *  a grantee's road into /edit doesn't dead-end at the read-only viewer.
+/** Where a denied AUTHENTICATED request should be funnelled — the app's ONE
+ *  edit-token mint, `GET {appOrigin}/reports/{slug}/open` — or `undefined` when
+ *  this denial is not one the mint can repair and the caller must degrade
+ *  instead. The app re-authenticates the session and re-mints `et=` for
+ *  canWrite users (owner or write-grantee), and bounces everyone else to its
+ *  home ("/" → sign-in for anonymous visitors), so a grantee's road into an
+ *  authenticated surface doesn't dead-end at the read-only viewer.
+ *
+ *  ONE implementation for BOTH authenticated purposes — `deniedEdit` and
+ *  `decideOwnerView`. ADR-0089 §3 lists this rule among the two things the
+ *  owner view "deliberately inherit[s] rather than re-decide[s] … a rule two
+ *  production incidents paid for", and inheritance-by-COPY is how a rule gets
+ *  re-decided by accident: the next reader fixes the copy in front of them and
+ *  the ordering below silently forks. It is a shared function so that cannot
+ *  happen, and so this comment documents the only implementation there is.
  *
  *  ORDERING (reordered 2026-08-06 — this used to answer `if (oa)` FIRST):
  *
@@ -925,19 +968,20 @@ type EditDenialCause = "rejected" | "absent";
  *    what broke, and the mint is the thing that repairs it. Answering `oa`
  *    first was safe only while `oa` could arrive on the query alone — it was
  *    then present exactly once, on the request that had just been minted. Now
- *    that it is cookie-carried it survives the whole edit session, so it also
+ *    that it is cookie-carried it survives the whole session, so it also
  *    catches every LATER rejection: an expired cookie, a rotated secret, clock
  *    skew. Degrading those to read-only removes the recovery path in exactly
  *    the secret-rotation scenario Phase 5-E exists for, and leaves a
  *    still-entitled owner read-only for the fallback's remaining 24h.
- *  - `absent`, with a verified `oa` → the `oa` degrade, unchanged. Nothing was
- *    rejected, so nothing points at the mint round-trip; and the `oa` in hand
- *    is a WORKING capability for the read-only view rather than a gamble on
- *    another hop.
- *  - anything, with no funnel available (no secret / no appOrigin) → the `oa`
- *    degrade if one is in hand, else the bare public viewer. This is what keeps
- *    the unlock wall unreachable for an owner even when the app origin is
- *    unset.
+ *  - `absent`, with a verified `oa` → NO funnel: the caller's `oa` outcome,
+ *    unchanged (a degrade off /edit, read-only chrome off the owner view).
+ *    Nothing was rejected, so nothing points at the mint round-trip; and the
+ *    `oa` in hand is a WORKING capability for the read-only view rather than a
+ *    gamble on another hop.
+ *  - anything, with no funnel available (no secret / no appOrigin) → NO funnel:
+ *    the caller's `oa` outcome if one is in hand, else the bare public viewer.
+ *    This is what keeps the unlock wall unreachable for an owner even when the
+ *    app origin is unset.
  *
  *  Loop safety: /open → /edit?et=… → arp_edit cookie → served; a non-writer
  *  exits at the app home, never bouncing back here. The funnel is guarded on
@@ -949,18 +993,31 @@ type EditDenialCause = "rejected" | "absent";
  *  a silent read-only degrade. The reorder deliberately EXTENDS that residual
  *  loop to owners: a loud loop the operator can see beats an owner quietly
  *  parked in read-only, which is how the 2026-08-06 incident stayed invisible. */
+function funnelTarget(
+  slug: string,
+  oa: string | undefined,
+  cause: EditDenialCause,
+  deps: GateDeps,
+): string | undefined {
+  const canFunnel = Boolean(deps.secret && deps.appOrigin);
+  return canFunnel && (cause === "rejected" || !oa)
+    ? `${deps.appOrigin}/reports/${slug}/open`
+    : undefined;
+}
+
+/** The edit purpose's denied branch: the funnel when `funnelTarget` offers one,
+ *  the `oa` degrade when it does not. The ordering rule itself lives on
+ *  `funnelTarget`, which the owner view calls too. */
 function deniedEdit(
   slug: string,
   oa: string | undefined,
   cause: EditDenialCause,
   deps: GateDeps,
 ): EditDecision {
-  const canFunnel = Boolean(deps.secret && deps.appOrigin);
-  if (canFunnel && (cause === "rejected" || !oa)) {
-    // NOT a degrade — the funnel is the happy path for a writer whose token
-    // simply needs re-minting. It re-enters through the mint, so no warning.
-    return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
-  }
+  // NOT a degrade — the funnel is the happy path for a writer whose token
+  // simply needs re-minting. It re-enters through the mint, so no warning.
+  const funnel = funnelTarget(slug, oa, cause, deps);
+  if (funnel) return { kind: "redirect", to: funnel };
   // Observability (claude-review #187): when an OWNER's edit-token round-trip
   // is denied and we degrade them to a read-only view (`oa` present), emit a
   // structured signal — the secret-misalignment class of incident is then
