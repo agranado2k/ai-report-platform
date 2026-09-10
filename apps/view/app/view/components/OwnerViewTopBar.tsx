@@ -37,7 +37,17 @@ export function OwnerViewTopBar({
   return (
     <ChromeBar
       docTitle={docTitle}
-      pill={<span className={chromeBarPillClass(Boolean(shareState))}>{shareState}</span>}
+      pill={
+        // Always the FILLED pill. `shareStateLabel` is total over `AclMode`'s
+        // five modes and every one of its labels is a non-empty phrase, so this
+        // pill always carries a message; the empty-slot case
+        // `chromeBarPillClass(false)` exists for — the editor's save-status
+        // pill, holding its slot while idle — cannot arise on this surface.
+        // This read as `Boolean(shareState)`, which looked like a guard and was
+        // a constant `true`: a branch no test could ever take, and one that
+        // disguised the invariant as a runtime question.
+        <span className={chromeBarPillClass(true)}>{shareState}</span>
+      }
     >
       {/* Anchors wearing the button look (`buttonClass`) rather than
           `<Button>`: both actions are plain navigations, and a real link is
