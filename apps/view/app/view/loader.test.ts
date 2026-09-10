@@ -21,7 +21,7 @@ import {
   userId,
   versionId,
 } from "arp-domain";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const SLUG = "abcde12345";
 const SECRET = "view-access-secret";
@@ -32,7 +32,23 @@ const state = vi.hoisted(() => ({
   reports: null as unknown as InMemoryReportRepository,
   appOrigin: undefined as string | undefined,
   secret: undefined as string | undefined,
+  // The seam for the loader's DEFENSIVE `!appOrigin` branch. The gate never
+  // returns "serve" with `appOrigin` unset — it degrades those itself — so
+  // that branch is unreachable through the real gate, and the only way to
+  // exercise it is to force the pathological Decision the loader is written
+  // to survive. `null` means "use the real gate", which is what every other
+  // test in this file does.
+  forcedDecision: null as unknown,
 }));
+
+vi.mock("../server/gate.server", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../server/gate.server")>();
+  return {
+    ...real,
+    decideServe: async (...args: Parameters<typeof real.decideServe>) =>
+      state.forcedDecision ?? real.decideServe(...(args as Parameters<typeof real.decideServe>)),
+  };
+});
 
 vi.mock("../server/container.server", () => ({
   viewerAccessConfig: () => ({ secret: state.secret, appOrigin: state.appOrigin }),
@@ -76,8 +92,15 @@ async function get(path: string, cookie?: string): Promise<Response> {
 const editToken = () => mintEditToken(SLUG, "user_1", 900, SECRET, NOW);
 const ownerAccess = () => mintAccessToken(SLUG, 86_400, SECRET, NOW, { owner: true });
 
+afterEach(() => {
+  // Fake timers leak across FILES in a shared environment; a suite that never
+  // restores them makes an unrelated failure elsewhere look like a flake.
+  vi.useRealTimers();
+});
+
 beforeEach(async () => {
   vi.useFakeTimers();
+  state.forcedDecision = null;
   state.reports = new InMemoryReportRepository();
   state.appOrigin = APP_ORIGIN;
   state.secret = SECRET;
@@ -166,12 +189,17 @@ describe("GET /<slug>/view — the loader payload", () => {
     expect(body).not.toMatch(/"(editToken|token|oa|access)"\s*:/);
   });
 
-  it("offers Edit to a write capability, and withholds it on the owner-read degrade", async () => {
-    const write = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
-    expect(JSON.parse(await write.text()).canEdit).toBe(true);
+  it("offers Edit to a write capability", async () => {
+    const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
+    expect(JSON.parse(await res.text()).canEdit).toBe(true);
+  });
 
-    const readOnly = await get(`/${SLUG}/view`, `arp_view_oa=${encodeURIComponent(ownerAccess())}`);
-    expect(JSON.parse(await readOnly.text()).canEdit).toBe(false);
+  it("withholds Edit on the owner-read degrade", async () => {
+    // Split from the case above deliberately: as one `it` a failure named
+    // neither capability, and the read-only half never ran at all if the
+    // write half failed first.
+    const res = await get(`/${SLUG}/view`, `arp_view_oa=${encodeURIComponent(ownerAccess())}`);
+    expect(JSON.parse(await res.text()).canEdit).toBe(false);
   });
 
   it("re-issues the frame's unlock cookie on the read-only serve", async () => {
@@ -195,10 +223,51 @@ describe("GET /<slug>/view — the loader payload", () => {
     expect(res.headers.getSetCookie()).toEqual([]);
   });
 
-  it("carries the report title and the framed src", async () => {
+  it("carries the report title, its slug and its share state", async () => {
     const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
     const data = JSON.parse(await res.text());
+
     expect(data.docTitle).toBe("Quarterly deck");
     expect(data.slug).toBe(SLUG);
+    // The chrome's share-state label is report-derived and user-facing: the
+    // failure mode of getting it wrong is telling an owner that a PRIVATE
+    // report is public. `share-state.test.ts` pins the whole AclMode map;
+    // this pins that the loader reads the report's OWN mode to build it.
+    expect(data.shareState).toBe("Private");
+  });
+});
+
+describe("GET /<slug>/view — the loader's defensive `!appOrigin` narrowing", () => {
+  it("degrades through the gate's own target and leaves a line, rather than stranding an owner", async () => {
+    // Unreachable through the real gate — it degrades an unset `appOrigin`
+    // itself — so this forces the pathological Decision the branch exists to
+    // survive. It is not dead code: `appOrigin` is the ROUTE's own local (its
+    // header profile needs it for `connect-src`), read independently of the
+    // Decision, so the two can only be kept in agreement by the gate. If they
+    // ever disagree, this is the difference between an owner degrading with a
+    // log line and `editViewHeaders(undefined)` failing open.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.appOrigin = undefined;
+    state.forcedDecision = {
+      kind: "serve",
+      report: buildReport(),
+      version: {},
+      capability: "ownerRead",
+      cookies: [],
+      degradeTo: `/${SLUG}?access=owner-token`,
+      ownerFallback: true,
+    };
+
+    const res = await get(`/${SLUG}/view`);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`/${SLUG}?access=owner-token`);
+    // The owner-specific event name is what makes this visible in an incident
+    // query rather than only inferable from user reports.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("owner-edit-degraded-to-view");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("gate-decision-unusable");
+
+    warn.mockRestore();
   });
 });
