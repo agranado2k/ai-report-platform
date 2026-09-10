@@ -118,6 +118,22 @@ report it was loaded into, not the platform or its data. Both hosts are the main
 SRI-serving, immutably-versioned CDNs the artifact ecosystem already standardizes on; the
 alternative (`'unsafe-inline'` scripts, already granted) is not meaningfully safer.
 
+**What "four named hosts" does not mean.** Both CDNs are open registries, not curated
+file sets: jsDelivr's `/npm/` prefix resolves *any* published npm package, and cdnjs
+serves any library it has indexed. Read the script grant as "arbitrary third-party JS
+from two hosts", because that is what it is. The honest marginal risk is therefore a
+**supply-chain dependency** on cdnjs and jsDelivr, not a new capability for the report:
+`script-src` already carries `'unsafe-inline'`, so a report's author could already run
+arbitrary script of their own choosing: what changes is that they can now also run
+someone else's. The `/npm/` path is a real narrowing on a direct request — CSP matches a
+trailing-slash path segment-wise, so `https://cdn.jsdelivr.net/gh/<any GitHub repo>` is
+refused (CSP3 §6.7.2.12). It is not a hard boundary: the path component of a source
+expression is enforced only while the redirect count is zero (CSP3 §6.7.2.8 step 3.6 —
+§7.6 "Paths and Redirects" drops it deliberately, so that CSP cannot be brute-forced into
+a cross-origin path-probing oracle), so a *redirected* script URL is matched on
+scheme/host/port alone. Treat `/npm/` as best-effort narrowing, and the host-wide
+`cdnjs.cloudflare.com` entry as the honest floor of what this allowlist grants.
+
 ### Why `frame-ancestors 'self'` and not `'none'`
 
 `'self'` permits exactly one embedder: `view.<domain>` itself. Clickjacking a report into
