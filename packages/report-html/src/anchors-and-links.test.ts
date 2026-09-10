@@ -13,6 +13,12 @@
 // `fixtures/anchors-and-links.html` puts ids on `<h2>`/`<h3>`/`<p>`/`<div>`/
 // `<li>`/`<td>`/`<blockquote>` (each of which resolves to a DIFFERENT node spec
 // with a DIFFERENT `toDOM` shape) and exercises the `target`/`rel` variants.
+//
+// ALSO HOSTED HERE: `<section>` class retention (ticket #359, the last describe
+// block). It is the same round-trip seam on the same node spec — `sectionNode`
+// is where the `id` half of the retained set was already pinned — so the two
+// halves of "what survives an edit-save on a section" stay in one file rather
+// than drifting apart in two.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -285,6 +291,43 @@ describe("SECURITY — the widened retention set is still an allowlist", () => {
     expect(out).toMatch(/rel="[^"]*noopener[^"]*"/);
     expect(out).toMatch(/rel="[^"]*noreferrer[^"]*"/);
   });
+
+  // `class` on `<section>` (ticket #359) joins `id` as a retained attribute
+  // whose VALUE reaches a real DOM attribute, so it needs the same escaping
+  // guarantee — asserted the same structural way as the hostile-id test
+  // above (re-parse the output, look for the INJECTED attribute) rather than
+  // by string matching, because `onload=` legitimately appears inside the
+  // escaped value. This pins linkedom as load-bearing for `class` too: the
+  // package has swapped DOM backends once already (jsdom → linkedom,
+  // ADR-0062 §3), and a backend that did not escape `"` would turn every
+  // retained section class into an injection point.
+  it("escapes an attribute-breaking section class — it can never become a new attribute", () => {
+    const hostileClass = 'x" onload="alert(1)';
+    const out = roundTrip(`<section class="x&quot; onload=&quot;alert(1)"><p>t</p></section>`);
+    expect(out).toContain("&quot;"); // the quote is escaped, not emitted raw
+    const document = getDomEnvironmentDocument();
+    const probe = document.createElement("div");
+    probe.innerHTML = out;
+    const section = probe.querySelector("section");
+    expect(section?.getAttribute("onload")).toBeNull();
+    expect(section?.getAttribute("class")).toBe(hostileClass);
+  });
+
+  // The escaping test above closes the PARSE-time and serialize-time ends,
+  // but `Node.fromJSON` — how `diffRendered`/`diffDocs` rebuild docs from the
+  // CLIENT-SUPPLIED `_source.json` sidecar — bypasses `getAttrs` entirely
+  // (the PR #156 lesson, see `withId`'s doc comment in schema/attrs.ts). So a
+  // sidecar could otherwise hand `sectionNode.toDOM` a non-string `class` and
+  // have it written straight into a real DOM attribute. `id` is already
+  // guarded this way (the test above, via the `withId` sweep); this is the
+  // same guard for the newly retained `class`.
+  it("Node.fromJSON: a non-string section class is REJECTED by the attr validator", () => {
+    const doc = parseBody('<section class="ok"><p>t</p></section>') as Record<string, unknown>;
+    const content = doc.content as Array<Record<string, unknown>>;
+    const section = content[0] as Record<string, unknown>;
+    (section.attrs as Record<string, unknown>).class = { toString: () => 'x" onload="alert(1)' };
+    expect(() => PMNode.fromJSON(reportSchema, doc)).toThrow();
+  });
 });
 
 describe("duplicate id dedupe at serialize time (first wins)", () => {
@@ -298,5 +341,42 @@ describe("duplicate id dedupe at serialize time (first wins)", () => {
   it("dedupes across DIFFERENT element types too", () => {
     const out = roundTrip('<h2 id="dup">h</h2><section id="dup"></section>');
     expect(idsIn(out)).toEqual(["dup"]);
+  });
+});
+
+describe("section class retention (ticket #359)", () => {
+  it("preserves class attribute on <section> through a round-trip", () => {
+    const out = roundTrip('<section class="slide"><p>content</p></section>');
+    expect(out).toContain('class="slide"');
+  });
+
+  it("preserves multiple classes on <section> with order intact", () => {
+    const out = roundTrip('<section class="slide deck"><p>content</p></section>');
+    expect(out).toContain('class="slide deck"');
+  });
+
+  it("does not emit class attribute when section has no class", () => {
+    const out = roundTrip("<section><p>content</p></section>");
+    // The section should not have a class attribute at all
+    expect(out).not.toMatch(/<section[^>]*class=/);
+  });
+
+  it("preserves both class and id on <section>", () => {
+    const out = roundTrip('<section class="slide" id="sec1"><p>content</p></section>');
+    expect(out).toContain('class="slide"');
+    expect(out).toContain('id="sec1"');
+  });
+
+  it("a classed <section> still resolves to sectionNode, never to a classed-div rule", () => {
+    // NOT a priority guard — `sectionNode` sets no `priority`, and none is
+    // needed: the competing classed-block rules are scoped to a different
+    // ELEMENT (`div.card`, `div.grid`, `ul.checklist`), and the generic
+    // catch-all excludes `section` outright (HTML_BLOCK_TAGS in
+    // generic-block.ts). So the tag alone disambiguates and the class value
+    // never participates in rule selection. Kept as a regression guard in
+    // case a future rule is ever widened to `.card` without a tag.
+    const out = roundTrip('<section class="card"><p>text</p></section>');
+    expect(out).toMatch(/<section[^>]*>/);
+    expect(out).not.toMatch(/<div class="card"[^>]*>/);
   });
 });
