@@ -1,26 +1,35 @@
 import type { NodeSpec } from "prosemirror-model";
 
 /**
- * `section` (ADR-0062 §3) — a top-level report section. Retains `id`
- * (never `class` — the fixture's `<section>` elements are always bare
- * except for the id the sidebar TOC anchors to, e.g. `href="#summary"`;
- * dropping it would silently break every in-page anchor link).
+ * `section` (ADR-0062 §3, ticket #359) — a top-level report section. Retains `id`
+ * (for the sidebar TOC anchors, e.g. `href="#summary"`) and `class`
+ * (for styled sections like slide decks, e.g. `<section class="slide">`).
+ * Both are preserved verbatim through edit-save cycles.
  */
 export const sectionNode: NodeSpec = {
   group: "block",
   content: "block*",
-  attrs: { id: { default: null } },
+  // `class` carries `validate: "string|null"` for the same reason `withId`
+  // puts it on `id` (schema/attrs.ts): `Node.fromJSON` rebuilds docs from the
+  // client-supplied `_source.json` sidecar and bypasses `getAttrs`, so
+  // without the validator a non-string `class` reaches `toDOM` directly.
+  // `id`'s own guard arrives from the global `withId` sweep in schema.ts.
+  attrs: { id: { default: null }, class: { default: null, validate: "string|null" } },
   parseDOM: [
     {
       tag: "section",
       getAttrs(dom: HTMLElement) {
-        return { id: dom.getAttribute("id") };
+        return {
+          id: dom.getAttribute("id"),
+          class: dom.getAttribute("class"),
+        };
       },
     },
   ],
   toDOM(node) {
     const attrs: Record<string, string> = {};
     if (node.attrs.id) attrs.id = node.attrs.id;
+    if (node.attrs.class) attrs.class = node.attrs.class;
     return ["section", attrs, 0];
   },
 };
