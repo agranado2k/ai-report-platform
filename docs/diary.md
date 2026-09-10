@@ -6106,3 +6106,47 @@ the strict report-only shadow policy, and the ADR-0063 `/edit` profile. Also
 rejected: fonts-only, and a separate frameable alias path. Unit tests and the live
 `security-headers` gate both assert against the exported constant, never a
 restated string. Glossary + ADR index updated in the same change.
+
+### 2026-09-10 — ADR-0089: the owner view, first-party chrome over the framed report (#361)
+
+The owner was the one principal who could not see their own report as published:
+since ADR-0063 Phase 5 the dashboard lands them in `/<slug>/edit`, whose schema
+drops `<script>`, flattens `<svg>` and strips `class` from `<section>`. **ADR-0089**
+adds the authenticated **`GET view.<domain>/<slug>/view`** — a thin chrome strip
+(title, share state, Versions, Edit) above the **canonical `/<slug>` itself**, in a
+sandboxed iframe. `GET /<slug>` is unchanged, which is the point: chrome on the
+canonical URL (for everyone, or worse, only for owners — a response body that
+depends on the requester's credentials) and a host reset injected into report bytes
+were both rejected on that ground.
+
+**The interface #363/#364/#366 build against** is the cookie hand-off. `arp_view`
+and `arp_view_oa` sit at **`Path=/<slug>/view`, never `/<slug>`** — that is the
+request the sandboxed frame makes, so a write capability there would be handed to
+the untrusted report's own navigation. `arp_unlock` at `Path=/<slug>` is redeemed
+from the **verified** `oa` so the framed navigation serves; nothing is minted (the
+view origin still only verifies). Recorded as a bounded widening, not a reduction:
+that cookie is now issued on the happy path, byte-identical to what the existing
+`?access=` redemption already produces. The Edit action is a **plain link** to
+`/<slug>/edit`, which — holding no capability under that Path — funnels through the
+app's one edit-token mint and gets `canWrite` re-checked live. Known limitation,
+named rather than hidden: a write-grantee on a private report gets the unlock
+hand-off *inside* the frame, because an `owner:true` claim for a non-owner is a
+privilege escalation; the door is a grantee-safe read token, its own ticket.
+
+The gate stays ONE gate — a third `Purpose` returning `OwnerViewDecision`, with
+ADR-0063's rejection-vs-absence funnel routing inherited rather than re-decided.
+Headers **reuse `editViewHeaders` unchanged**, so `packages/headers` is untouched;
+the profile already carried `frame-src 'self'`, `frame-ancestors 'none'` and the
+`Origin-Agent-Cluster: ?1` the spike proved non-negotiable. Renaming that builder
+past its now-too-narrow name is a recorded mechanical follow-up.
+
+**ADR-0079 §4 is amended**: "hermetic" now means "nothing outside the process"
+rather than "no server". Both halves of the framing contract are unexpressible over
+`file://` — cookies and `frame-ancestors` each need a real origin — so the browser
+tier gained its first served-over-HTTP project, binding an ephemeral loopback server
+and serving the REAL header builders. It proves what ADR-0088's Evidence note
+promised would land with this ticket: a first-party view-origin page frames the
+report and the framed navigation carries the unlock cookie; a sandboxed report in an
+opaque origin that tries to frame a sibling is refused by `frame-ancestors 'self'`
+and its navigation carries no unlock cookie. Worktree `owner-view`, branch
+`feat/owner-view`.
