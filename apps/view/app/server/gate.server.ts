@@ -401,6 +401,16 @@ export type OwnerViewDecision =
       readonly report: Report;
       readonly version: ReportVersion;
       readonly capability: OwnerViewCapability;
+      /** `Set-Cookie` values the served chrome must APPEND (never `set`).
+       *
+       *  Exactly one cookie ever appears here and it is always `arp_unlock` at
+       *  `Path=/<slug>`, redeemed from a VERIFIED `oa`: the framed navigation
+       *  to `/<slug>` carries that cookie and nothing else, so without it the
+       *  chrome renders around an unlock WALL for every non-public report
+       *  (ADR-0089 §4c). A capability cookie must NEVER reach this list —
+       *  `Path=/<slug>` is the untrusted report's own request (§4a). Empty
+       *  when no `oa` is in hand, which is the write-grantee case §8 records. */
+      readonly cookies: readonly string[];
       /** Where the route must send a visitor it cannot render for, carrying
        *  the owner `?access=` fallback when one is in play. */
       readonly degradeTo: string;
@@ -620,6 +630,9 @@ async function decideEdit(
 //      here (the view origin never mints, ADR-0056's keystone): this is the
 //      same redemption `decideView`'s `grant` branch already performs on the
 //      same token, one hop earlier and without the address-bar round-trip.
+//      The SERVE arm re-issues that same unlock cookie whenever a verified
+//      `oa` is in hand, because `ownerRead` is reached with no hand-off
+//      behind it — see the `cookies` field on the serve arm.
 //
 //   2. An ABSENT capability backed by a verified `oa` SERVES, read-only,
 //      instead of redirecting to the bare viewer. The rejection-vs-absence
@@ -690,6 +703,15 @@ async function decideOwnerView(
     report: outcome.value.report,
     version: outcome.value.version,
     capability,
+    // The frame's read capability, re-issued on EVERY serve that holds a
+    // verified `oa` rather than only on the 303. On the `write` arm that is a
+    // refresh (the hand-off set it already); on `ownerRead` it is the whole
+    // point — that arm is reached with no hand-off behind it, so nothing else
+    // would ever put `arp_unlock` on the browser and §3's "same token, same
+    // check, same access" would be false for every non-public report.
+    // Deliberately one rule over both arms: an arm-specific cookie is what
+    // rots when the matrix grows a fourth row.
+    cookies: oa ? [unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps))] : [],
     degradeTo: degradeLocation(slug, oa),
     ownerFallback: oa !== undefined,
   };

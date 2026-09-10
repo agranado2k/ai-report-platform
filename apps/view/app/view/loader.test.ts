@@ -174,6 +174,27 @@ describe("GET /<slug>/view — the loader payload", () => {
     expect(JSON.parse(await readOnly.text()).canEdit).toBe(false);
   });
 
+  it("re-issues the frame's unlock cookie on the read-only serve", async () => {
+    // The gate decides it (ADR-0089 §3/§4c); what only a route test can hold
+    // honest is that the 200 response actually CARRIES it — a `serve` arm that
+    // grew a cookie the loader never applied would leave the frame at the
+    // unlock wall with a fully green decision matrix.
+    const res = await get(`/${SLUG}/view`, `arp_view_oa=${encodeURIComponent(ownerAccess())}`);
+
+    expect(res.status).toBe(200);
+    const cookies = res.headers.getSetCookie();
+    expect(cookies).toEqual([
+      `arp_unlock=${ownerAccess()}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+  });
+
+  it("sets no cookie at all when there is no `oa` to redeem", async () => {
+    const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
   it("carries the report title and the framed src", async () => {
     const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
     const data = JSON.parse(await res.text());

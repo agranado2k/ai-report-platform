@@ -98,6 +98,13 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const headers = editViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 
+  // The frame's own read capability (ADR-0089 §4c). APPEND, for the same
+  // reason the redirect does — and note what this list may contain: only
+  // `arp_unlock` at `Path=/<slug>`, never a capability cookie, because
+  // `/<slug>` is the request the sandboxed iframe makes (§4a). The gate is
+  // what enforces that; this loader only applies what it decided.
+  for (const cookie of decision.cookies) headers.append("set-cookie", cookie);
+
   // SECURITY (ADR-0089 §6): nothing capability-bearing goes into this payload.
   // The sharpest contrast with `/edit`, which deliberately hydrates its edit
   // token so client JS can Bearer it at the app-origin API — the owner view

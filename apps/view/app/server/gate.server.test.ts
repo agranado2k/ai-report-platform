@@ -1345,6 +1345,60 @@ describe("decideServe — purpose: ownerView — serving", () => {
     expect(decision.ownerFallback).toBe(true);
   });
 
+  it("the read-only serve carries the unlock cookie the framed /<slug> needs", async () => {
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}`,
+    });
+
+    // ADR-0089 §3 says the `ownerRead` degrade is "same token, same check,
+    // same ACCESS" as the `/<slug>?access=<oa>` it replaces. That is only true
+    // if the FRAME can read the report: the framed navigation to `/<slug>`
+    // carries `arp_unlock` and nothing else (§4a), so an `ownerRead` serve
+    // that set no cookie wrapped chrome around an unlock WALL on every
+    // non-public report — strictly LESS access than the path it improves on.
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("ownerRead");
+    expect(decision.cookies).toEqual([
+      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+  });
+
+  it("re-issues it on the `write` serve too — one rule, not a per-arm special case", async () => {
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}; ${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}`,
+    });
+
+    // The hand-off already set this cookie, so on the `write` arm the re-issue
+    // is a refresh rather than a repair. It is written as ONE rule — a served
+    // owner view with a verified `oa` in hand always leaves the frame able to
+    // read — because a rule that holds on every serve arm cannot rot when a
+    // fourth arm is added, which the matrix comment names as the failure mode.
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("write");
+    expect(decision.cookies).toEqual([
+      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+  });
+
+  it("sets NO cookie for a write-grantee, who has no `oa` to redeem (§8)", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}`,
+    });
+
+    // A non-owner canWrite user is deliberately never minted an `owner: true`
+    // token (the ADR-0063 review #146 escalation), so there is nothing here to
+    // redeem and the serve must not invent one. ADR-0089 §8's limitation — the
+    // grantee's frame is gated on its own merits — stays exactly as recorded.
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("write");
+    expect(decision.cookies).toEqual([]);
+  });
+
   it("does NOT consult the Acl — a public report needs the same capability", async () => {
     const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PUBLIC }));
     // No capability at all: the owner view is authenticated even for a report
