@@ -162,6 +162,7 @@ decision matrix:
 | anyone, capability **rejected** (expired/tampered/rotated secret) | — | `redirect` → `{appOrigin}/reports/{slug}/open` (the funnel) |
 | anonymous / unauthorised | nothing | `redirect` → the same funnel, which bounces them to the app home → sign-in |
 | no funnel available (no secret / no `appOrigin`), no `oa` | — | `redirect` → the bare `/{slug}` |
+| no `appOrigin`, verified `oa` | `arp_view_oa` cookie or `oa=` query | `redirect` → `/{slug}?access=<oa>` — the owner degrade, not the bare viewer. The chrome is never rendered without an `appOrigin` (its header profile needs one for `connect-src`, so it fails closed), but an owner holding a working read capability is still walked through it rather than past it. Note a missing *secret* cannot reach this row: without one nothing can verify an `oa`, so that case is the row above. |
 | report deleted / flagged / not found / mid-scan / lookup failed | — | degrade to the public viewer, which owns that state machine (ADR-0038 §2) |
 
 Two things are deliberately inherited rather than re-decided:
