@@ -35,7 +35,7 @@ export interface AppTestHarness {
   /** The editor's open-time precondition (ADR-0080) — scripted, so a test can
    *  make an upload un-editable without hand-crafting a document. */
   readonly editability: FakeEditabilityProbe;
-  /** Whether the editor would KEEP the bytes (ADR-0089) — scripted, so a test can
+  /** Whether the editor would KEEP the bytes (ADR-0090) — scripted, so a test can
    *  make an upload lossy without hand-crafting a slide deck. */
   readonly fidelity: FakeFidelityProbe;
   readonly idempotency: InMemoryIdempotencyStore;

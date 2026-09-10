@@ -14,7 +14,7 @@ export { DIFF_DEL_CLASS, DIFF_INS_CLASS } from "./diff-schema.js";
 export type { Editability } from "./editability.js";
 export { probeEditability } from "./editability.js";
 // The editor's RETENTION question, the orthogonal twin of the one above: not
-// "can it open these bytes" but "would it keep them" (ADR-0089).
+// "can it open these bytes" but "would it keep them" (ADR-0090).
 export type { Fidelity, FidelityVerdict, NormalizedNode } from "./fidelity-probe.js";
 export { normalizeBody, probeFidelity } from "./fidelity-probe.js";
 export type { HtmlFallbackDiff } from "./html-fallback.js";

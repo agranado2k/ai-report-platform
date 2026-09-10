@@ -109,9 +109,9 @@ describe("createReport", () => {
     expect(report.versions[0]?.editability).toBe("unsplittable");
   });
 
-  it("leaves fidelity UNKNOWN (null) when the caller did not probe (ADR-0089)", () => {
+  it("leaves fidelity UNKNOWN (null) when the caller did not probe (ADR-0090)", () => {
     // Same rule as editability, and for the same reason: `null` means "nobody
-    // asked". Defaulting to `lossless` would assert, for every pre-ADR-0089
+    // asked". Defaulting to `lossless` would assert, for every pre-ADR-0090
     // row, precisely the claim the field exists to stop assuming.
     expect(newReport().versions[0]?.fidelity).toBeNull();
   });
@@ -134,7 +134,7 @@ describe("createReport", () => {
     expect(report.versions[0]?.fidelity).toBe("lossy");
   });
 
-  it("carries editability and fidelity independently — the orthogonal pair (ADR-0089)", () => {
+  it("carries editability and fidelity independently — the orthogonal pair (ADR-0090)", () => {
     // `editable` + `lossy` is the whole point of a second field: it is the
     // case a fourth editability value could not represent.
     const { report } = createReport({
@@ -225,7 +225,7 @@ describe("addVersion", () => {
   it("records fidelity per version — a re-upload's verdict never rewrites v1's", () => {
     // A re-upload that adds a script must not retro-label the lossless version
     // that preceded it, and a re-upload that removes one must not be reported
-    // as still lossy. It is a fact about ONE set of bytes (ADR-0089).
+    // as still lossy. It is a fact about ONE set of bytes (ADR-0090).
     const r = createReport({
       id: reportId("r1"),
       orgId: orgId("o1"),

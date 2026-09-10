@@ -6107,7 +6107,7 @@ rejected: fonts-only, and a separate frameable alias path. Unit tests and the li
 `security-headers` gate both assert against the exported constant, never a
 restated string. Glossary + ADR index updated in the same change.
 
-### 2026-09-10 — ADR-0089: Fidelity, the second verdict on a ReportVersion's bytes
+### 2026-09-10 — ADR-0090: Fidelity, the second verdict on a ReportVersion's bytes
 
 `editable` was never the reassurance it read as. The `Report HTML schema` is a
 constrained document vocabulary, not an HTML superset, so the PRD #356 slide deck
@@ -6115,7 +6115,7 @@ constrained document vocabulary, not an HTML superset, so the PRD #356 slide dec
 `hidden` — opens in the editor cleanly and would be republished with its
 interactivity deleted. Nothing in the system could say so.
 
-**ADR-0089** (amends ADR-0080) adds **Fidelity**: a nullable per-ReportVersion
+**ADR-0090** (amends ADR-0080) adds **Fidelity**: a nullable per-ReportVersion
 `version_fidelity` enum (`lossless` / `lossy`, migration `0023`), recorded at write
 time beside Editability. Deliberately a second field rather than a fourth
 editability value — `editable` + `lossy` is the case that matters and one enum

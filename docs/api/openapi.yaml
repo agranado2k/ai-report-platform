@@ -1557,7 +1557,7 @@ components:
           nullable: true
           enum: [lossless, lossy]
           description: >
-            The **LIVE** version's Fidelity (ADR-0089) — whether the editor would
+            The **LIVE** version's Fidelity (ADR-0090) — whether the editor would
             KEEP what this report currently serves, as opposed to merely open it
             (that is `editability`; the two are orthogonal, and `editable` +
             `lossy` is the case that matters). `null` when the report has no live
@@ -1682,7 +1682,7 @@ components:
           nullable: true
           enum: [lossless, lossy]
           description: >
-            **Fidelity** (ADR-0089) — whether a parse-then-serialise round trip
+            **Fidelity** (ADR-0090) — whether a parse-then-serialise round trip
             through the report schema would KEEP these bytes. `lossless` — no
             element and no attribute is dropped; `lossy` — at least one is (a
             deck's inline `<script>` and `<svg>` are the motivating case). `null`
@@ -1808,7 +1808,7 @@ components:
           nullable: true
           enum: [lossless, lossy]
           description: >
-            **Fidelity** (ADR-0089) — whether a parse-then-serialise round trip
+            **Fidelity** (ADR-0090) — whether a parse-then-serialise round trip
             through the report schema would KEEP these bytes. `lossless` — no
             element and no attribute is dropped; `lossy` — at least one is (a
             deck's inline `<script>` and `<svg>` are the motivating case). `null`

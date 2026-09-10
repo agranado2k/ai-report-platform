@@ -69,7 +69,7 @@ export const versionEditabilityEnum = pgEnum("version_editability", [
   "unparsable",
 ]);
 
-// ADR-0089 — whether the editor would KEEP a version's bytes, the orthogonal
+// ADR-0090 — whether the editor would KEEP a version's bytes, the orthogonal
 // twin of `version_editability`: `lossless` = a parse-then-serialise round trip
 // through the Report HTML schema loses no element and no attribute; `lossy` =
 // it drops at least one (a deck's inline <script>/<svg> are the motivating
@@ -288,9 +288,9 @@ export const reportVersions = pgTable(
     // read R2. Metadata ABOUT the stored bytes; the viewer still streams them
     // verbatim (ADR-0038) whatever this says.
     editability: versionEditabilityEnum("editability"),
-    // Whether the editor would KEEP these bytes (ADR-0089). Nullable with NO
+    // Whether the editor would KEEP these bytes (ADR-0090). Nullable with NO
     // default, inheriting ADR-0080's backfill policy verbatim: NULL means
-    // "never probed" — every row written before ADR-0089, plus every row whose
+    // "never probed" — every row written before ADR-0090, plus every row whose
     // editability is not `editable`, because there was no round trip to run.
     // Written once and never rewritten (`upsertVersions` refreshes only
     // `scan_status` on conflict). Advisory: nothing gates on it.

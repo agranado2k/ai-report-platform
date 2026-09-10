@@ -161,7 +161,7 @@ describe("loadReportContent", () => {
     expect(result.value.source).toBeUndefined();
   });
 
-  it("carries THIS version's recorded Fidelity, not the report's live one (ADR-0089)", async () => {
+  it("carries THIS version's recorded Fidelity, not the report's live one (ADR-0090)", async () => {
     // A content read addresses ONE set of bytes, so the verdict it returns must
     // be that version's. Answering with the live version's would misreport
     // exactly the case version history exists to show: the save that changed

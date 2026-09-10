@@ -21,7 +21,7 @@ export interface ReportContentOutcome {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
-  /** THIS version's Fidelity (ADR-0089); `null` = never probed. */
+  /** THIS version's Fidelity (ADR-0090); `null` = never probed. */
   readonly fidelity: VersionFidelity | null;
 }
 
@@ -39,7 +39,7 @@ export function reportContentToHttp(
     content_type: contentType,
     html,
     ...(source !== undefined ? { source } : {}),
-    // ADR-0089 — emitted as `null` when never probed, never omitted: unlike
+    // ADR-0090 — emitted as `null` when never probed, never omitted: unlike
     // `source`, whose absence is itself the answer, a missing key here would
     // collapse UNKNOWN into `lossless`.
     fidelity,

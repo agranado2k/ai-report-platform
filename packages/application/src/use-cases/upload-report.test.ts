@@ -458,7 +458,7 @@ describe("uploadReport — Editability (ADR-0080)", () => {
   });
 });
 
-describe("uploadReport — Fidelity (ADR-0089)", () => {
+describe("uploadReport — Fidelity (ADR-0090)", () => {
   it("records the probed verdict on the new version", async () => {
     const { deps, reports, fidelity } = makeDeps();
     fidelity.setVerdict({ fidelity: "lossy", lostElements: ["script"], lostAttributes: [] });
@@ -477,7 +477,7 @@ describe("uploadReport — Fidelity (ADR-0089)", () => {
   it("does NOT consult the fidelity probe when the document cannot be opened", async () => {
     // The gate, at its seam. There is no round trip to run on bytes the editor
     // cannot split or parse, so there is no honest verdict — and asking anyway
-    // would spend a full parse to manufacture one (ADR-0089 §2).
+    // would spend a full parse to manufacture one (ADR-0090 §2).
     const { deps, reports, editability, fidelity } = makeDeps();
     editability.setVerdict("unsplittable");
     await uploadReport(deps, cmd());

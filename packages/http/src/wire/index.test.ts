@@ -109,7 +109,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
   });
 
   it("reportBody emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
-    // ADR-0089 inherits the rule: "nobody probed this" must stay
+    // ADR-0090 inherits the rule: "nobody probed this" must stay
     // distinguishable from "lossless". Omitting the key would collapse them.
     const body = reportBody(
       {
@@ -129,7 +129,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
 
   it("reportBody carries editability and fidelity independently", () => {
     // `editable` + `lossy` — the pair a fourth editability value could not
-    // express, and the reason ADR-0089 adds a field instead of a value.
+    // express, and the reason ADR-0090 adds a field instead of a value.
     const body = reportBody(
       {
         id: reportId(R1),

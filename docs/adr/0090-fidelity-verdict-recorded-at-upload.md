@@ -1,4 +1,4 @@
-# ADR-0089: Fidelity — record at write time whether the editor would KEEP a ReportVersion's bytes
+# ADR-0090: Fidelity — record at write time whether the editor would KEEP a ReportVersion's bytes
 
 - **Status**: Accepted
 - **Date**: 2026-09-10
@@ -65,7 +65,7 @@ The application layer reaches it through a `FidelityProbe` port implemented in `
 
 ### 4. UNKNOWN is `null`, and there is no backfill
 
-Identical to ADR-0080 §3, for identical reasons: a migration cannot read R2, so it cannot honestly give an existing row a verdict. The column is nullable with **no default**. `null` means *nobody probed this* — never "lossless", which would assert for the whole pre-0089 corpus precisely the claim this field exists to stop assuming.
+Identical to ADR-0080 §3, for identical reasons: a migration cannot read R2, so it cannot honestly give an existing row a verdict. The column is nullable with **no default**. `null` means *nobody probed this* — never "lossless", which would assert for the whole pre-0090 corpus precisely the claim this field exists to stop assuming.
 
 `null` is emitted explicitly on the wire rather than omitted, so a client can tell UNKNOWN from `lossless`. A backfill sweep is a named follow-up, not part of this change.
 

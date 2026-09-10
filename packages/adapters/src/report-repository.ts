@@ -287,9 +287,9 @@ export class DrizzleReportRepository implements ReportRepository {
           // the user a silent redirect. NULL for an unpublished report (no live
           // version) and for every version written before ADR-0080.
           editability: reportVersions.editability,
-          // ADR-0089 — the LIVE version's recorded Fidelity, riding the SAME
+          // ADR-0090 — the LIVE version's recorded Fidelity, riding the SAME
           // 1:1 join, so it costs no extra round-trip. NULL for an unpublished
-          // report, for every version written before ADR-0089, and for every
+          // report, for every version written before ADR-0090, and for every
           // version the probe had no round trip to run on.
           fidelity: reportVersions.fidelity,
         })

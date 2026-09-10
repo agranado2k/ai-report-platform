@@ -61,7 +61,7 @@ export interface UploadReportDeps extends CanWriteDeps {
   /** The editor's own open-time precondition (ADR-0080), run at write time so
    *  "views fine, won't edit" is a recorded state rather than a surprise. */
   readonly editability: EditabilityProbe;
-  /** What a save through the editor would COST this version (ADR-0089) — the
+  /** What a save through the editor would COST this version (ADR-0090) — the
    *  orthogonal twin, run at the same moment through the same seam. */
   readonly fidelity: FidelityProbe;
   readonly idempotency: IdempotencyStore;
@@ -160,7 +160,7 @@ export async function uploadReport(
   // state knowable before a user discovers it as a silent redirect.
   const editability = probeEditability(deps, bundle, cmd.sourceDoc !== undefined);
 
-  // 2d. Fidelity (ADR-0089). The orthogonal question: not whether the editor
+  // 2d. Fidelity (ADR-0090). The orthogonal question: not whether the editor
   // can OPEN these bytes but whether it would KEEP them. Probed ONLY when the
   // answer to the first question is `editable` — on bytes the editor cannot
   // split or parse there is no round trip to run, so there is no honest
@@ -369,7 +369,7 @@ function probeEditability(
 }
 
 /**
- * The fidelity twin (ADR-0089). Same UNKNOWN rule for the same reason: with no
+ * The fidelity twin (ADR-0090). Same UNKNOWN rule for the same reason: with no
  * entry-document bytes there is nothing to round-trip, and guessing `lossless`
  * would be the false assurance the field exists to remove.
  *
@@ -410,7 +410,7 @@ function create(
         sizeBytes: bundle.sizeBytes,
         origin: cmd.origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
         editability, // ADR-0080 — null when nothing could be probed
-        fidelity, // ADR-0089 — null when unprobed OR not `editable`
+        fidelity, // ADR-0090 — null when unprobed OR not `editable`
       }),
     ),
   );
@@ -448,7 +448,7 @@ async function reUpload(
     sizeBytes: bundle.sizeBytes,
     origin: origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
     editability, // ADR-0080 — this version's own verdict, never v1's
-    fidelity, // ADR-0089 — likewise per version
+    fidelity, // ADR-0090 — likewise per version
   });
 }
 

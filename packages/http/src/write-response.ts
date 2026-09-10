@@ -75,7 +75,7 @@ function liveEditability(r: Report): VersionEditability | null {
   return r.versions.find((v) => v.id === r.liveVersionId)?.editability ?? null;
 }
 
-/** The live version's Fidelity (ADR-0089), the twin of the above. `null` when
+/** The live version's Fidelity (ADR-0090), the twin of the above. `null` when
  *  the report has no live version yet, or that version was never probed. */
 function liveFidelity(r: Report): VersionFidelity | null {
   return r.versions.find((v) => v.id === r.liveVersionId)?.fidelity ?? null;

@@ -33,9 +33,9 @@ export interface ReportVersion {
    *  predating ADR-0080. Advisory metadata ABOUT the stored bytes: nothing gates
    *  on it, and the served bytes are never altered by it (ADR-0038). */
   readonly editability: VersionEditability | null;
-  /** Whether the editor would KEEP these bytes (ADR-0089) — the orthogonal twin of
+  /** Whether the editor would KEEP these bytes (ADR-0090) — the orthogonal twin of
    *  `editability`, recorded at the same moment. `null` = unknown (never probed):
-   *  every version predating ADR-0089, and every version the probe had no round
+   *  every version predating ADR-0090, and every version the probe had no round
    *  trip to run on. Advisory: a `lossy` version is still fully editable. */
   readonly fidelity: VersionFidelity | null;
 }

@@ -12,7 +12,7 @@ const fixture = (name: string) =>
 /**
  * The normaliser is what makes the comparison mean something. Without it every
  * document would compare unequal for reasons that are not loss at all, and the
- * verdict would carry no information — the same failure mode ADR-0089 rejects
+ * verdict would carry no information — the same failure mode ADR-0090 rejects
  * byte equality for. These four are the differences a round trip is ENTITLED
  * to make.
  */
@@ -42,7 +42,7 @@ describe("normalizeBody — the four differences a round trip is entitled to mak
   });
 });
 
-describe("probeFidelity — would the editor KEEP these bytes (ADR-0089)", () => {
+describe("probeFidelity — would the editor KEEP these bytes (ADR-0090)", () => {
   it("answers an editor-origin version lossless WITHOUT parsing it", () => {
     // The deck is provably lossy when parsed (see below). Carrying a
     // `_source.json` sidecar must still answer `lossless`, because that body
@@ -104,7 +104,7 @@ describe("probeFidelity — would the editor KEEP these bytes (ADR-0089)", () =>
     // out: the schema normalises a few away per element. That is not the loss
     // this verdict is about, and counting occurrences would mark the ENTIRE
     // existing corpus lossy — leaving the field as uninformative as byte
-    // equality would (ADR-0089, "the normaliser is a judgement call").
+    // equality would (ADR-0090, "the normaliser is a judgement call").
     const verdict = probeFidelity(fixture("ai-readiness-report.html"));
     expect(verdict?.lostAttributes).not.toContain("style");
   });
@@ -118,7 +118,7 @@ describe("probeFidelity — would the editor KEEP these bytes (ADR-0089)", () =>
 
   it("answers UNKNOWN for bytes the shell split cannot handle", () => {
     // No usable <body> boundary: there is no round trip to run, so there is no
-    // honest verdict to give. UNKNOWN is null, never a guess (ADR-0089 §4).
+    // honest verdict to give. UNKNOWN is null, never a guess (ADR-0090 §4).
     // The input is pinned against the REAL predicate rather than assumed —
     // ADR-0062 Amendment 4 already moved this line once (body-less documents
     // became splittable), and migration 0022 had to reset the corpus for it.

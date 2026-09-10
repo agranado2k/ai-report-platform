@@ -1,4 +1,4 @@
-// ReportHtmlFidelityProbe — the FidelityProbe port (ADR-0089), backed by the
+// ReportHtmlFidelityProbe — the FidelityProbe port (ADR-0090), backed by the
 // editor's own code.
 //
 // The twin of `ReportHtmlEditabilityProbe`, and it exists for the same reason:

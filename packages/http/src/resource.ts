@@ -71,7 +71,7 @@ export function reportBody(
     // carries it off a 1:1 join on `live_version_id`, so listing a page of
     // reports costs no extra round-trip.
     editability: r.editability,
-    // ADR-0089 — the live version's retention verdict, beside the open-time one.
+    // ADR-0090 — the live version's retention verdict, beside the open-time one.
     fidelity: r.fidelity,
     mode: ctx.mode,
   };
@@ -125,7 +125,7 @@ export function versionBody(
     origin: v.origin,
     // ADR-0080 — this version's own recorded verdict; null when never probed.
     editability: v.editability,
-    // ADR-0089 — and whether the editor would KEEP it; null when never probed.
+    // ADR-0090 — and whether the editor would KEEP it; null when never probed.
     fidelity: v.fidelity,
     mode: ctx.mode,
   };

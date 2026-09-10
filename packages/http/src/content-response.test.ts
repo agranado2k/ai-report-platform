@@ -72,7 +72,7 @@ describe("reportContentToHttp", () => {
   });
 });
 
-describe("reportContentToHttp — Fidelity (ADR-0089)", () => {
+describe("reportContentToHttp — Fidelity (ADR-0090)", () => {
   it("emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
     // `source` is the ONE key this resource drops, because its absence is
     // itself the answer ("no sidecar"). Fidelity is not like that: dropping it

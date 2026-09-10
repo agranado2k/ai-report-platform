@@ -49,7 +49,7 @@ describe("ReportHtmlFidelityProbe", () => {
 
   it("never throws, whatever the bytes are", () => {
     // An upload is never rejected for being lossy, so this must never become a
-    // new crash site on the write path (ADR-0089).
+    // new crash site on the write path (ADR-0090).
     expect(() => probe.probe(new Uint8Array([0xff, 0xfe, 0x00, 0x01]), false)).not.toThrow();
   });
 });

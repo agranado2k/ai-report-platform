@@ -818,7 +818,7 @@ export class FakeEditabilityProbe implements EditabilityProbe {
   }
 }
 
-/** A scripted {@link FidelityProbe} (ADR-0089). Records every call so a test can
+/** A scripted {@link FidelityProbe} (ADR-0090). Records every call so a test can
  *  assert WHETHER it was consulted at all — the gate ("only when editability is
  *  `editable`") is a property of the caller, and an unconsulted probe is how you
  *  see it holding. Defaults to `lossless` with nothing lost.

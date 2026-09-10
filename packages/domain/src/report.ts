@@ -60,7 +60,7 @@ export interface CreateReportParams {
   /** The editor's open-time verdict on these bytes (ADR-0080). Omitted ⇒ `null`
    *  (UNKNOWN) — the domain never invents a verdict it did not run. */
   readonly editability?: VersionEditability | null;
-  /** Whether the editor would KEEP these bytes (ADR-0089). Omitted ⇒ `null`
+  /** Whether the editor would KEEP these bytes (ADR-0090). Omitted ⇒ `null`
    *  (UNKNOWN), for the same reason: `lossless` is a claim, not a default. */
   readonly fidelity?: VersionFidelity | null;
 }
@@ -113,7 +113,7 @@ export interface AddVersionParams {
    *  (UNKNOWN). Recorded per version — a re-upload never rewrites its
    *  predecessor's verdict. */
   readonly editability?: VersionEditability | null;
-  /** Whether the editor would KEEP these bytes (ADR-0089). Omitted ⇒ `null`
+  /** Whether the editor would KEEP these bytes (ADR-0090). Omitted ⇒ `null`
    *  (UNKNOWN). Per version for the same reason as `editability`. */
   readonly fidelity?: VersionFidelity | null;
 }

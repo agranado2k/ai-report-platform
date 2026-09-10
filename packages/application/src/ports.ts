@@ -87,7 +87,7 @@ export interface ReportSummary {
    *  WHY editing is unavailable instead of handing the user a silent redirect —
    *  which is the whole user-visible point of recording the verdict. */
   readonly editability: VersionEditability | null;
-  /** The LIVE version's Fidelity (ADR-0089) — whether the editor would KEEP its
+  /** The LIVE version's Fidelity (ADR-0090) — whether the editor would KEEP its
    *  bytes, as opposed to merely open them. `null` when there is no live version
    *  yet, or it was never probed. Rides the SAME 1:1 left join as `editability`,
    *  so it costs nothing extra. Advisory: a `lossy` report is still editable. */
@@ -153,7 +153,7 @@ export interface ReportVersionSummary {
   /** The editor's recorded open-time verdict on this version's bytes
    *  (ADR-0080); `null` = never probed. */
   readonly editability: VersionEditability | null;
-  /** Whether the editor would KEEP this version's bytes (ADR-0089); `null` =
+  /** Whether the editor would KEEP this version's bytes (ADR-0090); `null` =
    *  never probed. Per version, so version history shows which save changed
    *  the answer. */
   readonly fidelity: VersionFidelity | null;
@@ -518,7 +518,7 @@ export interface EditabilityProbe {
   probe(entryDocument: Uint8Array, hasSourceDoc: boolean): VersionEditability;
 }
 
-// ── Fidelity probe (ADR-0089) ─────────────────────────────────────────────
+// ── Fidelity probe (ADR-0090) ─────────────────────────────────────────────
 /**
  * What a save through the editor would COST this version — the orthogonal twin
  * of `EditabilityProbe`, run at the same moment through the same seam.

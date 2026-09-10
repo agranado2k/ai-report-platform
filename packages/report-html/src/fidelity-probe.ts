@@ -1,5 +1,5 @@
 /**
- * Would the editor KEEP these bytes? (ADR-0089)
+ * Would the editor KEEP these bytes? (ADR-0090)
  *
  * `probeEditability` (ADR-0080) answers whether the editor can OPEN a
  * document. This answers the orthogonal question it leaves open: having
@@ -181,7 +181,7 @@ export function probeFidelity(html: string, hasSourceDoc = false): FidelityVerdi
  * The generated-report fixture round-trips 45 `style` attributes in and 41
  * out, because the schema normalises a few away per element. Counting
  * occurrences would therefore mark the entire existing corpus `lossy` and
- * leave the field as uninformative as the byte equality ADR-0089 rejects. The
+ * leave the field as uninformative as the byte equality ADR-0090 rejects. The
  * accepted cost is stated in that record: a partial loss of a name that
  * survives elsewhere is deliberately not reported.
  */
