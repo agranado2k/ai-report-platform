@@ -56,6 +56,7 @@ export function reportBody(
     readonly folderId: FolderId;
     /** The LIVE version's Editability (ADR-0080); `null` = unknown. */
     readonly editability: VersionEditability | null;
+    /** The LIVE version's Fidelity (ADR-0090); `null` = unknown. */
     readonly fidelity: VersionFidelity | null;
   },
   ctx: WireContext,
