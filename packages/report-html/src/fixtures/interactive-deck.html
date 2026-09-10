@@ -51,21 +51,21 @@
     </main>
 
     <script>
-      (function () {
+      (() => {
         var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
         var index = 0;
         function show(next) {
           index = Math.max(0, Math.min(slides.length - 1, next));
-          slides.forEach(function (slide, i) {
+          slides.forEach((slide, i) => {
             slide.hidden = i !== index;
           });
         }
-        document.addEventListener("keydown", function (event) {
+        document.addEventListener("keydown", (event) => {
           if (event.key === "ArrowRight") show(index + 1);
           if (event.key === "ArrowLeft") show(index - 1);
         });
-        document.querySelectorAll("[data-step]").forEach(function (button) {
-          button.addEventListener("click", function () {
+        document.querySelectorAll("[data-step]").forEach((button) => {
+          button.addEventListener("click", () => {
             show(index + Number(button.getAttribute("data-step")));
           });
         });

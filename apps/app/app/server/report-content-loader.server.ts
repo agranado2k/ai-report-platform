@@ -28,6 +28,7 @@ import {
   ok,
   type Result,
   type Slug,
+  type VersionFidelity,
   type VersionId,
   validationError,
 } from "arp-domain";
@@ -51,6 +52,8 @@ export interface LoadedReportContent {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's recorded Fidelity (ADR-0089); `null` = never probed. */
+  readonly fidelity: VersionFidelity | null;
 }
 
 /**
@@ -117,5 +120,8 @@ export async function loadReportContent(
     contentType: htmlR.value.contentType,
     html,
     ...(source !== undefined ? { source } : {}),
+    // ADR-0089 — read straight off the version being served, so a content read
+    // answers for THOSE bytes rather than for the report's live version.
+    fidelity: version.fidelity,
   });
 }

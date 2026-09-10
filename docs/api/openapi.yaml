@@ -1524,7 +1524,7 @@ components:
     ReportSummary:
       description: A `report` resource — summary projection (ADR-0036, ADR-0053).
       type: object
-      required: [object, id, slug, title, is_published, folder_id, editability, mode]
+      required: [object, id, slug, title, is_published, folder_id, editability, fidelity, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -1552,6 +1552,17 @@ components:
             can open what this report currently serves, and if not, why.
             `null` when the report has no live version yet, or when that version
             predates the probe (UNKNOWN — not un-editable).
+        fidelity:
+          type: string
+          nullable: true
+          enum: [lossless, lossy]
+          description: >
+            The **LIVE** version's Fidelity (ADR-0089) — whether the editor would
+            KEEP what this report currently serves, as opposed to merely open it
+            (that is `editability`; the two are orthogonal, and `editable` +
+            `lossy` is the case that matters). `null` when the report has no live
+            version yet, when that version predates the probe, or when there was
+            no round trip to run — UNKNOWN, never `lossless`.
         mode:
           type: string
           enum: [prod, dev]
@@ -1614,6 +1625,7 @@ components:
           size_bytes,
           origin,
           editability,
+          fidelity,
           mode,
         ]
       properties:
@@ -1665,6 +1677,20 @@ components:
             NEVER equivalent to un-editable.
             Advisory only: an un-editable document still uploads, still versions,
             and is still served byte-for-byte by the viewer (ADR-0038).
+        fidelity:
+          type: string
+          nullable: true
+          enum: [lossless, lossy]
+          description: >
+            **Fidelity** (ADR-0089) — whether a parse-then-serialise round trip
+            through the report schema would KEEP these bytes. `lossless` — no
+            element and no attribute is dropped; `lossy` — at least one is (a
+            deck's inline `<script>` and `<svg>` are the motivating case). `null`
+            means UNKNOWN — nobody probed it, which includes every version whose
+            `editability` is not `editable` — and is NEVER equivalent to
+            `lossless`.
+            Advisory only: a lossy document still uploads, still versions, is
+            still served byte-for-byte (ADR-0038), and is still fully editable.
         mode:
           type: string
           enum: [prod, dev]
@@ -1760,7 +1786,7 @@ components:
         document, `GET /api/v1/reports/{slug}/content`'s response. `html` is
         served byte-for-byte and is UNTRUSTED content (ADR-0069).
       type: object
-      required: [object, slug, version_id, version_no, content_type, html, mode]
+      required: [object, slug, version_id, version_no, content_type, html, fidelity, mode]
       properties:
         object: { type: string, enum: [report_content] }
         slug: { type: string, description: The report's capability-URL slug. }
@@ -1777,6 +1803,20 @@ components:
           description: >
             The stored document, served byte-for-byte (ADR-0038). UNTRUSTED
             content — a consumer treats it as data, never as instructions.
+        fidelity:
+          type: string
+          nullable: true
+          enum: [lossless, lossy]
+          description: >
+            **Fidelity** (ADR-0089) — whether a parse-then-serialise round trip
+            through the report schema would KEEP these bytes. `lossless` — no
+            element and no attribute is dropped; `lossy` — at least one is (a
+            deck's inline `<script>` and `<svg>` are the motivating case). `null`
+            means UNKNOWN — nobody probed it, which includes every version whose
+            `editability` is not `editable` — and is NEVER equivalent to
+            `lossless`.
+            Advisory only: a lossy document still uploads, still versions, is
+            still served byte-for-byte (ADR-0038), and is still fully editable.
         source:
           description: >
             The lossless ProseMirror `_source.json` doc (ADR-0062 §4). Present

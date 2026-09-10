@@ -13,6 +13,7 @@ const VERSION: VersionWire = {
   size_bytes: 4096,
   origin: "editor",
   editability: null,
+  fidelity: null,
   mode: "prod",
 };
 

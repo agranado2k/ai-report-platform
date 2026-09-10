@@ -8,7 +8,7 @@
 // ADR-0062 §4 `_source.json` ProseMirror doc) is included ONLY when the loader
 // resolved one; the key is OMITTED otherwise, never emitted as `null`, so a
 // caller can tell "no sidecar" from "an empty doc".
-import type { AppError, Result, VersionId } from "arp-domain";
+import type { AppError, Result, VersionFidelity, VersionId } from "arp-domain";
 import { versionIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import type { WireContext } from "./resource";
@@ -21,6 +21,8 @@ export interface ReportContentOutcome {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's Fidelity (ADR-0089); `null` = never probed. */
+  readonly fidelity: VersionFidelity | null;
 }
 
 export function reportContentToHttp(
@@ -28,7 +30,7 @@ export function reportContentToHttp(
   ctx: WireContext,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  const { slug, versionId, versionNo, contentType, html, source } = result.value;
+  const { slug, versionId, versionNo, contentType, html, source, fidelity } = result.value;
   const body: ReportContentWire = {
     object: "report_content" as const,
     slug,
@@ -37,6 +39,10 @@ export function reportContentToHttp(
     content_type: contentType,
     html,
     ...(source !== undefined ? { source } : {}),
+    // ADR-0089 — emitted as `null` when never probed, never omitted: unlike
+    // `source`, whose absence is itself the answer, a missing key here would
+    // collapse UNKNOWN into `lossless`.
+    fidelity,
     mode: ctx.mode,
   };
   return { status: 200, contentType: "application/json", body };

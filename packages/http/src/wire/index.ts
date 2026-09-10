@@ -23,6 +23,7 @@ import type {
   ReportSharingState,
   ScanStatus,
   VersionEditability,
+  VersionFidelity,
   VersionOrigin,
 } from "arp-domain";
 
@@ -77,6 +78,9 @@ export interface ReportWire {
    *  field exists to end. Advisory: an un-editable report still uploads, still
    *  versions, and still serves byte-for-byte (ADR-0038). */
   readonly editability: VersionEditability | null;
+  /** The LIVE version's Fidelity (ADR-0089); `null` = no live version, or never
+   *  probed. Advisory — a `lossy` report is still fully editable. */
+  readonly fidelity: VersionFidelity | null;
   readonly mode: WireMode;
 }
 
@@ -200,6 +204,10 @@ export interface VersionWire {
    *  written; `null` = never probed. Per-version, so version history shows
    *  exactly which save broke — or fixed — the editor. */
   readonly editability: VersionEditability | null;
+  /** THIS version's Fidelity (ADR-0089) — whether the editor would KEEP its
+   *  bytes, as opposed to merely open them; `null` = never probed. Per-version,
+   *  so version history shows which save started (or stopped) costing content. */
+  readonly fidelity: VersionFidelity | null;
   readonly mode: WireMode;
 }
 
@@ -275,6 +283,9 @@ export interface ReportContentWire {
   readonly content_type: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's Fidelity (ADR-0089). Emitted as `null` when never probed,
+   *  never omitted — unlike `source`, whose absence means "no sidecar". */
+  readonly fidelity: VersionFidelity | null;
   readonly mode: WireMode;
 }
 

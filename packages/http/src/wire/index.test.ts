@@ -70,6 +70,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
       editability: "unsplittable",
+      fidelity: null,
       mode: "prod",
     };
     expect(
@@ -81,6 +82,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
           isPublished: true,
           folderId: folderId(F1),
           editability: "unsplittable",
+          fidelity: null,
         },
         CTX,
       ),
@@ -98,11 +100,50 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
         isPublished: true,
         folderId: folderId(F1),
         editability: null,
+        fidelity: null,
       },
       CTX,
     );
     expect("editability" in body).toBe(true);
     expect(body.editability).toBeNull();
+  });
+
+  it("reportBody emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
+    // ADR-0089 inherits the rule: "nobody probed this" must stay
+    // distinguishable from "lossless". Omitting the key would collapse them.
+    const body = reportBody(
+      {
+        id: reportId(R1),
+        slug: "aaaaaaaaaa" as Report["slug"],
+        title: "T",
+        isPublished: true,
+        folderId: folderId(F1),
+        editability: "editable",
+        fidelity: null,
+      },
+      CTX,
+    );
+    expect("fidelity" in body).toBe(true);
+    expect(body.fidelity).toBeNull();
+  });
+
+  it("reportBody carries editability and fidelity independently", () => {
+    // `editable` + `lossy` — the pair a fourth editability value could not
+    // express, and the reason ADR-0089 adds a field instead of a value.
+    const body = reportBody(
+      {
+        id: reportId(R1),
+        slug: "aaaaaaaaaa" as Report["slug"],
+        title: "T",
+        isPublished: true,
+        folderId: folderId(F1),
+        editability: "editable",
+        fidelity: "lossy",
+      },
+      CTX,
+    );
+    expect(body.editability).toBe("editable");
+    expect(body.fidelity).toBe("lossy");
   });
 
   it("commentBody ALWAYS emits `author` and `edited_at` (null-filled, never omitted)", () => {
@@ -146,6 +187,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       sizeBytes: 4096,
       origin: "upload",
       editability: "editable",
+      fidelity: null,
     };
     const expected: VersionWire = {
       object: "version",
@@ -158,6 +200,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       size_bytes: 4096,
       origin: "upload",
       editability: "editable",
+      fidelity: null,
       mode: "prod",
     };
     expect(versionBody(summary, CTX)).toEqual(expected);
@@ -223,6 +266,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
       editability: null,
+      fidelity: null,
       mode: "prod",
       owner: userIdToWire(userId(U1)),
       acl: { mode: "allowlist", allowed_emails: ["a@example.com"], access_ttl_seconds: 604_800 },

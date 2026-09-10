@@ -19,6 +19,7 @@ import type {
   Result,
   UserId,
   VersionEditability,
+  VersionFidelity,
 } from "arp-domain";
 import { userIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
@@ -74,6 +75,12 @@ function liveEditability(r: Report): VersionEditability | null {
   return r.versions.find((v) => v.id === r.liveVersionId)?.editability ?? null;
 }
 
+/** The live version's Fidelity (ADR-0089), the twin of the above. `null` when
+ *  the report has no live version yet, or that version was never probed. */
+function liveFidelity(r: Report): VersionFidelity | null {
+  return r.versions.find((v) => v.id === r.liveVersionId)?.fidelity ?? null;
+}
+
 function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer): ReportDetailWire {
   const base = {
     ...reportBody(
@@ -87,6 +94,7 @@ function reportResource(r: Report, ctx: WireContext, viewer?: ReportViewer): Rep
         // report?" actually means. Null when nothing is live yet, or when that
         // version predates the probe.
         editability: liveEditability(r),
+        fidelity: liveFidelity(r),
       },
       ctx,
     ),

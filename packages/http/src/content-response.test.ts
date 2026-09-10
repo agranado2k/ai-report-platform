@@ -14,6 +14,7 @@ describe("reportContentToHttp", () => {
         versionNo: 3,
         contentType: "text/html; charset=utf-8",
         html: "<html><body><p>hi</p></body></html>",
+        fidelity: "lossy",
       }),
       CTX,
     );
@@ -27,13 +28,21 @@ describe("reportContentToHttp", () => {
       version_no: 3,
       content_type: "text/html; charset=utf-8",
       html: "<html><body><p>hi</p></body></html>",
+      fidelity: "lossy",
       mode: "prod",
     });
   });
 
   it("omits `source` entirely when the outcome carries none (no sidecar / not requested)", () => {
     const http = reportContentToHttp(
-      ok({ slug: "s", versionId: V, versionNo: 1, contentType: "text/html", html: "<x>" }),
+      ok({
+        slug: "s",
+        versionId: V,
+        versionNo: 1,
+        contentType: "text/html",
+        html: "<x>",
+        fidelity: null,
+      }),
       CTX,
     );
     expect(Object.hasOwn(http.body as object, "source")).toBe(false);
@@ -48,6 +57,7 @@ describe("reportContentToHttp", () => {
         versionNo: 1,
         contentType: "text/html",
         html: "<x>",
+        fidelity: null,
         source: doc,
       }),
       CTX,
@@ -59,5 +69,26 @@ describe("reportContentToHttp", () => {
     const http = reportContentToHttp(err(notFound("content not found")), CTX);
     expect(http.status).toBe(404);
     expect(http.contentType).toBe("application/problem+json");
+  });
+});
+
+describe("reportContentToHttp — Fidelity (ADR-0089)", () => {
+  it("emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
+    // `source` is the ONE key this resource drops, because its absence is
+    // itself the answer ("no sidecar"). Fidelity is not like that: dropping it
+    // would make UNKNOWN indistinguishable from `lossless`.
+    const http = reportContentToHttp(
+      ok({
+        slug: "s",
+        versionId: V,
+        versionNo: 1,
+        contentType: "text/html",
+        html: "<x>",
+        fidelity: null,
+      }),
+      CTX,
+    );
+    expect(Object.hasOwn(http.body as object, "fidelity")).toBe(true);
+    expect((http.body as { fidelity?: unknown }).fidelity).toBeNull();
   });
 });
