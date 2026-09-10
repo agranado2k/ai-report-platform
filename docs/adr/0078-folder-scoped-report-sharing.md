@@ -1,6 +1,6 @@
 # ADR-0078: Folder-scoped report sharing — an explicit bulk apply, an inherited default, and a read/write choice
 
-- **Status**: Accepted
+- **Status**: Accepted — **superseded-in-part by ADR-0087** (2026-09-08): the management *surface* moves to a content-header panel and its *writes* move to REST + `useFetcher` (these dashboard action intents are retired); this ADR's authorization model, invariants (`acl:write` gate, `shares === null` = never-asked, `formKey` reset) and use cases are unchanged.
 - **Date**: 2026-08-04
 - **Deciders**: agranado2k
 - **Relates to / amends**: **ADR-0060 (extends its WRITE seam** — `canWrite` gains a third leg; the "folder-level can layer on the same seam later" trade-off is what this cashes in), ADR-0076 (**does NOT reverse** its visibility-only separation — see Decision 2), ADR-0075 (the listing predicate gains an org-write leg), ADR-0059 (`set_acl`/`delete` stay owner-only — unchanged), ADR-0056 (the `Acl` stays read-only and keeps its five modes), ADR-0063 (an org-write actor gets `scope:"edit"`, **never** `owner:true`), ADR-0038 (the viewer is untouched), ADR-0039 (no derived-key fallback for the new state-setting ops), ADR-0046 (the new port gets a two-runner contract suite), ADR-0070 (three new audit actions), ADR-0016 (`acl:write` gates the new mutations).

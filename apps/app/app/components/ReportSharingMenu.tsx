@@ -3,7 +3,7 @@ import { Badge, Button, MoreIcon } from "arp-ui";
 
 /**
  * The per-report sharing control in the dashboard list (ADR-0078 §12) — the
- * report-row counterpart to `FolderShareMenu`.
+ * report-row counterpart to the folder-level `FolderManagePanel` (ADR-0087).
  *
  * IDIOM: the same native `<details>` kebab the report rows and the folder
  * sidebar already use — no JS, CSP-safe, degrades to a plain disclosure. It is

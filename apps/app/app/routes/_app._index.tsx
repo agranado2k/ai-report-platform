@@ -6,7 +6,6 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Link, useActionData, useLoaderData } from "@remix-run/react";
-import { MAX_SHARING_BULK_APPLY } from "arp-application";
 import {
   type AppError,
   folderIdToWire,
@@ -16,18 +15,11 @@ import {
   makeReportSharingState,
   makeSlug,
   reportIdToWire,
+  validationError,
   visibleFolderOrRoot,
 } from "arp-domain";
-import {
-  AppHeader,
-  buttonClass,
-  cx,
-  EmptyState,
-  type FolderNode,
-  type FolderShareRow,
-  FolderTree,
-  PageShell,
-} from "../components";
+import { AppHeader, buttonClass, cx, EmptyState, PageShell } from "../components";
+import { type FolderManageNode, FolderManagePanel } from "../components/folders/FolderManagePanel";
 import { NewFolderDialog } from "../components/folders/NewFolderDialog";
 import { ReportFilter } from "../components/reports/ReportFilter";
 import { ReportRow } from "../components/reports/ReportRow";
@@ -37,18 +29,23 @@ import { editabilityNotice } from "../server/editability-notice.server";
 import {
   applyFolderVisibility,
   cascadeIsPartial,
-  cascadeLabel,
-  cascadeScope,
   cascadeSummary,
   type FolderManagementActor,
-  folderFormKey,
+  type FolderOutcomeTone,
   folderManagement,
-  folderShareWarning,
+  folderOutcomeTone,
   folderVisibilityBadge,
   INERT_SHARE_NOTICE,
   ROSTER_UNAVAILABLE_NOTICE,
   visibleFolderTree,
 } from "../server/folder-sharing.server";
+
+/** The dashboard's per-folder shape (ADR-0087): the cheap, tree-derived facts
+ *  the content-header panel and the Move control need. The roster, the
+ *  roster-derived badge count and the bulk-apply count are loaded lazily by the
+ *  panel, not here. */
+type DashboardFolder = FolderManageNode & { readonly parentId: string | null };
+
 import { errorToJson, errorToJsonParts } from "../server/http.server";
 import { log } from "../server/log.server";
 import {
@@ -88,12 +85,10 @@ export async function loader(args: LoaderFunctionArgs) {
   // boundary).
   const afterRaw = url.searchParams.get("starting_after") || undefined;
   const beforeRaw = url.searchParams.get("ending_before") || undefined;
-  // `?manage=<folder id>` opens ONE folder's sharing panel (ADR-0076 §6). It
-  // is the only thing that makes this loader pay for a share roster — a roster
-  // per sidebar folder would be an N+1 on the dashboard's hot path, and every
-  // other folder's badge falls back to Private/Org rather than inventing a
-  // count it never fetched.
-  const manageRequested = url.searchParams.get("manage") ?? "";
+  // The per-folder share roster + bulk-apply count are no longer loaded here
+  // (ADR-0087): the content-header panel pays for them lazily, only when
+  // "Manage ▾" is opened, over GET /shares?include=manage. The dashboard loader
+  // now computes only the cheap, tree-derived facts every folder needs.
 
   const actorR = await resolveActorForRead(args);
   // The dashboard degrades to an empty list for both "no actor" and an infra
@@ -102,14 +97,13 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!actorR.ok) log.warn(`dashboard: resolveActorForRead failed — ${actorR.error.message}`);
   const actor = actorR.ok ? actorR.value : null;
   const empty = {
-    folders: [] as FolderNode[],
+    folders: [] as DashboardFolder[],
     items: [],
     hasPrev: false,
     hasNext: false,
     q,
     selectedFolderId: null,
     rootId: null,
-    manageFolderId: null as string | null,
     startingAfter: afterRaw ?? null,
     endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
@@ -142,76 +136,19 @@ export async function loader(args: LoaderFunctionArgs) {
     domainFolders.map((f) => [folderIdToWire(f.id), folderManagement(f, managementActor)]),
   );
 
-  // The one share roster this page loads (see `manageRequested` above). Asking
-  // for a folder that isn't manageable simply yields no roster — the use case
-  // would 403/404 anyway, and the loader must not turn that into a page error.
-  const manageTarget =
-    grafted.find((f) => f.id === manageRequested && management.get(f.id)?.manageable) ?? null;
-  let shares: readonly FolderShareRow[] | null = null;
-  // The roster load FAILED (transient DB error, or an actor the use case
-  // refuses). It must NOT collapse into an empty roster: that would render an
-  // error as the positive claim "not shared with anyone — only you can see this
-  // folder" for a folder that may be shared with five people. `null` already
-  // means "unknown" throughout this module; this flag says WHY it is unknown.
-  let sharesUnavailable = false;
-  if (manageTarget) {
-    const decoded = makeFolderId(manageTarget.id);
-    if (decoded.ok) {
-      const sharesR = await ops().listFolderShares(
-        { orgId: actor.orgId, userId: actor.userId, scopes: actor.scopes },
-        { folderId: decoded.value },
-      );
-      if (sharesR.ok) {
-        shares = sharesR.value.map((s) => ({
-          email: s.granteeEmail,
-          // Formatted server-side so the markup is stable (no locale drift
-          // between the SSR pass and hydration).
-          grantedAt: new Date(s.grantedAt).toISOString().slice(0, 10),
-        }));
-      } else {
-        log.warn(`dashboard: listFolderShares failed — ${sharesR.error.message}`);
-        sharesUnavailable = true;
-      }
-    }
-  }
-  // The ADR-0078 bulk apply offers a COUNT, so it has to have one. Paid for
-  // exactly like the share roster above: only for the folder in `?manage=`,
-  // one query, never per sidebar row (which would be an N+1 on the hot path).
-  // The count is the ACTOR's visible listing for that folder — precisely the
-  // scope the action will walk, so the offer and the outcome agree.
-  let manageReportCount: { readonly visibleCount: number; readonly overCap: boolean } | null = null;
-  if (manageTarget) {
-    const decoded = makeFolderId(manageTarget.id);
-    if (decoded.ok) {
-      const inFolder = await ops().searchReports(
-        { orgId: actor.orgId, userId: actor.userId },
-        { folderId: decoded.value, limit: MAX_SHARING_BULK_APPLY + 1 },
-      );
-      if (inFolder.ok) {
-        manageReportCount = {
-          visibleCount: Math.min(inFolder.value.items.length, MAX_SHARING_BULK_APPLY),
-          overCap: inFolder.value.items.length > MAX_SHARING_BULK_APPLY,
-        };
-      } else {
-        // Unknown is not zero. Leaving it null renders no offer at all, rather
-        // than an offer for a count we could not read.
-        log.warn(`dashboard: report count for bulk apply failed — ${inFolder.error.message}`);
-      }
-    }
-  }
-
-  const folders: FolderNode[] = grafted.map((f) => {
-    const own = manageTarget?.id === f.id ? shares : null;
+  // The cheap, tree-derived facts every folder needs (ADR-0087). The roster,
+  // the roster-derived badge count, the bulk-apply count AND the warning /
+  // cascade label are NOT computed here any more — the content-header panel
+  // loads them lazily on "Manage ▾" (GET /shares?include=manage). The badge is
+  // the count-less one (Org / Limited / Private); the panel upgrades it to
+  // "Shared with N" once it has the roster.
+  const folders: DashboardFolder[] = grafted.map((f) => {
     const m = management.get(f.id) ?? {
       isRoot: f.parentId === null,
       manageable: false,
       legacy: f.ownerId === null,
       blockedReason: null,
     };
-    // The direction the toggle would take this folder, which is what makes the
-    // warning and the checkbox label sayable up front.
-    const target = f.visibility === "org" ? ("private" as const) : ("org" as const);
-    const scope = m.manageable ? cascadeScope(grafted, f.id) : null;
     return {
       id: f.id,
       parentId: f.parentId,
@@ -220,19 +157,7 @@ export async function loader(args: LoaderFunctionArgs) {
       isRoot: m.isRoot,
       manageable: m.manageable,
       blockedReason: m.blockedReason,
-      shareWarning: scope ? folderShareWarning({ legacy: m.legacy, target, scope }) : null,
-      cascadeLabel: scope ? cascadeLabel({ target, scope }) : null,
-      shares: own,
-      sharesUnavailable: manageTarget?.id === f.id && sharesUnavailable,
-      badge: folderVisibilityBadge({
-        visibility: f.visibility,
-        shareCount: own?.length ?? null,
-      }),
-      // Both derive from the SAME two facts — what the org can see, and how
-      // many people were added — so the badge and the forms can never disagree
-      // about whether anything moved.
-      formKey: folderFormKey({ visibility: f.visibility, shareCount: own?.length ?? null }),
-      reportSharing: manageTarget?.id === f.id ? manageReportCount : null,
+      badge: folderVisibilityBadge({ visibility: f.visibility, shareCount: null }),
     };
   });
   // Only honor a folder filter that exists in the org (this existence check also
@@ -329,9 +254,7 @@ export async function loader(args: LoaderFunctionArgs) {
     q,
     selectedFolderId,
     rootId: root?.id ?? null,
-    manageFolderId: manageTarget?.id ?? null,
-    // The raw cursors, so "Manage who it's shared with →" can come back to the
-    // page the operator was actually on.
+    // The raw cursors, preserved so pagination survives a filter change.
     startingAfter: afterRaw ?? null,
     endingBefore: beforeRaw ?? null,
     inertShareNotice: INERT_SHARE_NOTICE,
@@ -350,6 +273,9 @@ interface FolderActionData {
   readonly error: string | null;
   readonly summary: string | null;
   readonly partial: boolean;
+  /** The success/warning/danger tone, decided server-side (ADR-0087) so the
+   *  content-header panel need not import the domain to map it. */
+  readonly tone: FolderOutcomeTone;
 }
 
 /** The shape every ADR-0078 report-sharing action returns, success or failure.
@@ -379,13 +305,25 @@ function reportOk(reportSlug: string, summary: string) {
  *  API, tagged with the folder so the sidebar renders the reason on that row. */
 function folderError(folderId: string, error: AppError) {
   const { message, status } = errorToJsonParts(error);
-  const data: FolderActionData = { folderId, error: message, summary: null, partial: false };
+  const data: FolderActionData = {
+    folderId,
+    error: message,
+    summary: null,
+    partial: false,
+    tone: folderOutcomeTone({ error: message, partial: false }),
+  };
   return json(data, { status });
 }
 
 /** A folder-scoped action success. */
 function folderOk(folderId: string, summary: string, partial = false) {
-  const data: FolderActionData = { folderId, error: null, summary, partial };
+  const data: FolderActionData = {
+    folderId,
+    error: null,
+    summary,
+    partial,
+    tone: folderOutcomeTone({ error: null, partial }),
+  };
   return json(data);
 }
 
@@ -500,27 +438,33 @@ export async function action(args: ActionFunctionArgs) {
   if (intent === "rename-folder") {
     const rawId = String(form.get("folderId") ?? "").trim();
     const name = String(form.get("name") ?? "");
-    if (!rawId) return json({ error: "Invalid rename request." }, { status: 400 });
+    if (!rawId) return folderError(rawId, validationError("Invalid rename request.", "name"));
     const folderId = makeFolderId(rawId);
-    if (!folderId.ok) return errorToJson(folderId.error);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
     const r = await ops().renameFolder(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value, name },
     );
-    if (!r.ok) return errorToJson(r.error);
-    return redirect(`/?folder=${rawId}&flash=folder-renamed`);
+    if (!r.ok) return folderError(rawId, r.error);
+    // Submitted from the content-header panel via useFetcher (ADR-0087): return
+    // the folder-scoped outcome so the panel revalidates the loader in place and
+    // renders a toast, instead of the old full-page redirect+flash.
+    return folderOk(rawId, `Renamed to ${r.value.name}.`);
   }
 
   if (intent === "delete-folder") {
     const rawId = String(form.get("folderId") ?? "").trim();
-    if (!rawId) return json({ error: "Invalid delete request." }, { status: 400 });
+    if (!rawId) return folderError(rawId, validationError("Invalid delete request.", "folderId"));
     const folderId = makeFolderId(rawId);
-    if (!folderId.ok) return errorToJson(folderId.error);
+    if (!folderId.ok) return folderError(rawId, folderId.error);
     const r = await ops().deleteFolder(
       { orgId: actor.value.orgId, userId: actor.value.userId },
       { folderId: folderId.value },
     );
-    if (!r.ok) return errorToJson(r.error);
+    if (!r.ok) return folderError(rawId, r.error);
+    // Deleting the SELECTED folder is the one management write that navigates
+    // (ADR-0087): back to All-reports, with a mutation toast (#336). The panel's
+    // fetcher follows this redirect.
     return redirect("/?flash=folder-deleted");
   }
 
@@ -613,9 +557,6 @@ export default function Index() {
     q,
     selectedFolderId,
     rootId,
-    manageFolderId,
-    startingAfter,
-    endingBefore,
     inertShareNotice,
     rosterUnavailableNotice,
     sharingChoices,
@@ -623,17 +564,19 @@ export default function Index() {
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   // A report sharing action's outcome, tagged with the report it belongs to.
+  // Folder-management outcomes no longer arrive here (ADR-0087): the panel posts
+  // its writes via useFetcher and renders their outcome itself.
   const reportOutcome = actionData && "reportSlug" in actionData ? actionData : null;
-  // A sharing action's outcome (success summary OR the server's refusal),
-  // tagged with the folder it belongs to.
-  const folderOutcome = actionData && "folderId" in actionData ? actionData : null;
-  const childrenOf = (parentId: string | null) => folders.filter((f) => f.parentId === parentId);
-  const root = folders.find((f) => f.parentId === null);
   // Plain lookup: the loader has already resolved every id the UI binds to
   // down to a folder that is actually in `folders` (see `displayFolderId`).
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name ?? "—";
   const createParent = selectedFolderId ?? rootId;
   const scopeLabel = selectedFolderId ? folderName(selectedFolderId) : "All reports";
+  // The selected folder's management node (ADR-0087) — the content-header panel
+  // renders for it; no selection (or Root) shows just the filter + report list.
+  const selectedFolder = selectedFolderId
+    ? (folders.find((f) => f.id === selectedFolderId) ?? null)
+    : null;
 
   // Cursor links (ADR-0053) preserve the active search + folder filter; the cursor
   // is the boundary report id (forward = starting_after, back = ending_before).
@@ -647,21 +590,6 @@ export default function Index() {
     return s ? `/?${s}` : "/";
   };
 
-  // "Manage who it's shared with →" — the same page plus `?manage=<id>`, which
-  // is what makes the loader fetch that ONE folder's share roster. Preserves
-  // the active search + folder filter so the link never loses the user's place.
-  const manageHref = (folderId: string) => {
-    const sp = new URLSearchParams();
-    if (q) sp.set("q", q);
-    if (selectedFolderId) sp.set("folder", selectedFolderId);
-    // The CURSOR too, or opening a folder's roster from page 3 silently resets
-    // the report list to page 1 under the operator.
-    if (startingAfter) sp.set("starting_after", startingAfter);
-    if (endingBefore) sp.set("ending_before", endingBefore);
-    sp.set("manage", folderId);
-    return `/?${sp.toString()}`;
-  };
-
   return (
     <PageShell>
       <AppHeader title="Your reports" />
@@ -673,59 +601,21 @@ export default function Index() {
         <ReportFilter defaultQuery={q} />
       </div>
 
-      <div className="flex items-start gap-6">
-        {/* Sidebar: folder tree (clicking a folder filters the list). */}
-        <nav className="w-56 shrink-0 border-r border-border pr-3">
-          <Link
-            to="/"
-            className={cx(
-              "block rounded-control py-1 pl-2 pr-2 text-sm no-underline transition-colors",
-              selectedFolderId
-                ? "text-fg hover:bg-surface-raised"
-                : "bg-brand/10 font-semibold text-brand",
-            )}
-          >
-            All reports
-          </Link>
-          {/* Sharing feedback (ADR-0076 §6). Lives ABOVE the tree because a
-              visibility toggle can be fired from a kebab that closes on the
-              next render — the operator must still see what happened, and a
-              partial cascade must read as a warning, never as a success. */}
-          {folderOutcome ? (
-            <p
-              role="status"
-              className={cx(
-                "my-2 rounded-control px-2 py-1.5 text-xs",
-                folderOutcome.error
-                  ? "bg-danger/10 text-danger"
-                  : folderOutcome.partial
-                    ? "bg-warning/12 text-warning"
-                    : "bg-success/12 text-success",
-              )}
-            >
-              <span className="font-medium">{folderName(folderOutcome.folderId)}: </span>
-              {folderOutcome.error ?? folderOutcome.summary}
-            </p>
-          ) : null}
-          {root ? (
-            <FolderTree
-              node={root}
-              childrenOf={childrenOf}
-              selectedId={selectedFolderId}
-              depth={0}
-              manageHref={manageHref}
-              inertShareNotice={inertShareNotice}
-              rosterUnavailableNotice={rosterUnavailableNotice}
-              personShareLimitNotice={personShareLimitNotice}
-              openMenuId={manageFolderId ?? folderOutcome?.folderId ?? null}
-            />
-          ) : (
-            <p className="px-2 py-1 text-sm text-subtle">No folders yet.</p>
-          )}
-        </nav>
+      {/* The folder-navigation rail now lives in the `_app` shell (ADR-0087);
+          the dashboard body is the report list, headed — when a folder is
+          selected — by its content-header management panel. The panel renders
+          nothing for Root or a non-selection. */}
+      <div className="min-w-0">
+        {selectedFolder ? (
+          <FolderManagePanel
+            node={selectedFolder}
+            inertShareNotice={inertShareNotice}
+            rosterUnavailableNotice={rosterUnavailableNotice}
+            personShareLimitNotice={personShareLimitNotice}
+          />
+        ) : null}
 
-        {/* Contents: the paged report list + pagination + new-folder form. */}
-        <section className="min-w-0 flex-1">
+        <section className="min-w-0">
           <p className="mb-3 text-sm text-muted">
             <span className="font-medium text-fg">{scopeLabel}</span>
             {q ? ` · matching “${q}”` : ""} · {items.length}
@@ -827,18 +717,19 @@ export default function Index() {
             // from the ⌘K palette. It posts the SAME `new-folder` intent the
             // action (and the e2e suite) already drive. A REFUSED create echoes
             // its error back here; the dialog re-opens with the rejected name to
-            // fix. NEW-FOLDER failures only: every folder-sharing failure also
-            // carries `error`, so an unnarrowed guard would surface a colleague's
-            // refusal here too — `folderOutcome` is that channel, this is not.
+            // fix. NEW-FOLDER failures only: a report outcome (`reportSlug`) and
+            // a folder-management outcome (`folderId`, now delivered to the
+            // panel's fetcher, not here) both also carry `error`, so the guard
+            // excludes them — otherwise a colleague's refusal would surface here.
             <div className="mt-6">
               <NewFolderDialog
                 key={`new-folder-${folders.length}`}
                 parentId={createParent}
                 parentLabel={selectedFolderId ? scopeLabel : "Root"}
                 error={
-                  !folderOutcome &&
-                  !reportOutcome &&
                   actionData &&
+                  !("reportSlug" in actionData) &&
+                  !("folderId" in actionData) &&
                   "error" in actionData &&
                   actionData.error
                     ? actionData.error
