@@ -312,6 +312,22 @@ describe("SECURITY — the widened retention set is still an allowlist", () => {
     expect(section?.getAttribute("onload")).toBeNull();
     expect(section?.getAttribute("class")).toBe(hostileClass);
   });
+
+  // The escaping test above closes the PARSE-time and serialize-time ends,
+  // but `Node.fromJSON` — how `diffRendered`/`diffDocs` rebuild docs from the
+  // CLIENT-SUPPLIED `_source.json` sidecar — bypasses `getAttrs` entirely
+  // (the PR #156 lesson, see `withId`'s doc comment in schema/attrs.ts). So a
+  // sidecar could otherwise hand `sectionNode.toDOM` a non-string `class` and
+  // have it written straight into a real DOM attribute. `id` is already
+  // guarded this way (the test above, via the `withId` sweep); this is the
+  // same guard for the newly retained `class`.
+  it("Node.fromJSON: a non-string section class is REJECTED by the attr validator", () => {
+    const doc = parseBody('<section class="ok"><p>t</p></section>') as Record<string, unknown>;
+    const content = doc.content as Array<Record<string, unknown>>;
+    const section = content[0] as Record<string, unknown>;
+    (section.attrs as Record<string, unknown>).class = { toString: () => 'x" onload="alert(1)' };
+    expect(() => PMNode.fromJSON(reportSchema, doc)).toThrow();
+  });
 });
 
 describe("duplicate id dedupe at serialize time (first wins)", () => {

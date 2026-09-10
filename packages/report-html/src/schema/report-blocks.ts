@@ -9,7 +9,12 @@ import type { NodeSpec } from "prosemirror-model";
 export const sectionNode: NodeSpec = {
   group: "block",
   content: "block*",
-  attrs: { id: { default: null }, class: { default: null } },
+  // `class` carries `validate: "string|null"` for the same reason `withId`
+  // puts it on `id` (schema/attrs.ts): `Node.fromJSON` rebuilds docs from the
+  // client-supplied `_source.json` sidecar and bypasses `getAttrs`, so
+  // without the validator a non-string `class` reaches `toDOM` directly.
+  // `id`'s own guard arrives from the global `withId` sweep in schema.ts.
+  attrs: { id: { default: null }, class: { default: null, validate: "string|null" } },
   parseDOM: [
     {
       tag: "section",
