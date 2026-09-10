@@ -122,18 +122,40 @@ function unlockCookie(slug: string, token: string, maxAgeSeconds: number): strin
   return `${UNLOCK_COOKIE}=${token}; Path=/${slug}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-/** Build the `Set-Cookie` value for the `arp_edit` cookie. `maxAgeSeconds` is the
- *  token's remaining life (`claims.exp - nowSeconds`) so the cookie never outlives
- *  the capability it carries — there is no independent expiry. */
+/**
+ * Build a `Set-Cookie` for a capability scoped to ONE authenticated surface
+ * under a report — `/<slug>/edit`, `/<slug>/view`. The `surface` segment in
+ * the `Path` is the whole security argument and the reason this is a
+ * parameter rather than a literal: a capability must reach the surface that
+ * needs it and NOTHING else, and in particular must never reach the bare
+ * `/<slug>`, which is the public read (and, since ADR-0089, the request the
+ * sandboxed iframe makes). Contrast `unlockCookie`, which is deliberately
+ * broader because it gates the whole report bundle.
+ *
+ * `maxAgeSeconds` is always the carried token's remaining life
+ * (`claims.exp - nowSeconds`) so a cookie never outlives the capability
+ * inside it — there is no independent expiry anywhere in this file.
+ */
+function surfaceCookie(
+  name: string,
+  slug: string,
+  surface: string,
+  value: string,
+  maxAgeSeconds: number,
+): string {
+  return `${name}=${value}; Path=/${slug}/${surface}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/** Build the `Set-Cookie` value for the `arp_edit` cookie. */
 function editCookie(slug: string, token: string, maxAgeSeconds: number): string {
-  return `${EDIT_COOKIE}=${token}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+  return surfaceCookie(EDIT_COOKIE, slug, "edit", token, maxAgeSeconds);
 }
 
 /** The owner-fallback cookie. The value is percent-encoded (and decoded on
  *  read) so a token containing a `;`, `,` or space can never split the header
  *  — `searchParams.get("oa")` hands us the DECODED token. */
 function ownerFallbackCookie(slug: string, oa: string, maxAgeSeconds: number): string {
-  return `${EDIT_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${slug}/edit; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+  return surfaceCookie(EDIT_OWNER_COOKIE, slug, "edit", encodeURIComponent(oa), maxAgeSeconds);
 }
 
 /**
