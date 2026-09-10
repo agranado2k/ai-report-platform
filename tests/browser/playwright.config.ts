@@ -64,5 +64,16 @@ export default defineConfig({
       grep: /@comments-panel/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // ADR-0089 §7: the owner view's framing contract — the one thing in this
+      // tier that is served over HTTP rather than `file://`, because neither
+      // `frame-ancestors` nor a cookie means anything without a real origin.
+      // The spec binds its own ephemeral loopback server and kills it in
+      // `afterAll`, so the tier stays hermetic in the sense ADR-0079 cared
+      // about: no deployment, no credentials, no database, no network.
+      name: "owner-view-framing",
+      grep: /@owner-view-framing/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
   ],
 });

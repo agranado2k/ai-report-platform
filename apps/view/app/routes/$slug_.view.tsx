@@ -1,0 +1,150 @@
+// The OWNER VIEW (ADR-0089) — `GET view.<domain>/<slug>/view`.
+//
+// A thin strip of first-party chrome above the CANONICAL `/<slug>` itself, in
+// a sandboxed iframe. What the owner sees is byte-for-byte what a share-link
+// visitor sees, plus chrome. `GET /<slug>` is not touched by any of this: the
+// byte-for-byte contract (ADR-0038) is the property this whole route exists to
+// preserve, and it is why the chrome lives on a second URL rather than being
+// injected into the report.
+//
+// FILENAME: the trailing `_` in `$slug_.view.tsx` is load-bearing and guarded
+// by `../view/owner-view-route-nesting.test.ts`. As `$slug.view.tsx` this would
+// dot-nest under `$slug.tsx`, so the PUBLIC viewer's loader would run first and
+// unlock-wall a private report before this loader ever ran — the exact P0 that
+// hit the editor (ADR-0063 Phase 5-F).
+//
+// Every serve rule lives in the ONE gate (`../server/gate.server.ts`,
+// decision-matrix-tested) under `purpose: "ownerView"`. This loader only
+// APPLIES the Decision.
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { editViewHeaders, viewHeaders } from "arp-headers/view";
+import { useEffect, useState } from "react";
+import { viewerAccessConfig, viewerDeps } from "../server/container.server";
+import { decideServe, editDegradeLine } from "../server/gate.server";
+import { OwnerViewTopBar } from "../view/components/OwnerViewTopBar";
+import { ReportFrame } from "../view/components/ReportFrame";
+import { shareStateLabel } from "../view/share-state";
+
+// The public CSP profile for responses that carry NO chrome — a bare 404, or a
+// redirect. Mirrors `$slug_.edit.tsx`: a response with no first-party UI in it
+// gets the stricter, unauthenticated header set.
+function notFoundResponse(): Response {
+  const headers = viewHeaders();
+  headers.set("content-type", "text/plain; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  headers.set("x-robots-tag", "noindex, nofollow");
+  return new Response("Not found", { status: 404, headers });
+}
+
+function redirectResponse(
+  to: string,
+  status: 302 | 303,
+  cookies: readonly string[] = [],
+): Response {
+  const headers = viewHeaders();
+  headers.set("location", to);
+  // APPEND, never set — the owner view's hand-off carries up to THREE
+  // capabilities in one response (ADR-0089 §4), and `set` would silently
+  // collapse them to the last one.
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+  headers.set("cache-control", "no-store");
+  headers.set("x-robots-tag", "noindex, nofollow");
+  return new Response(null, { status, headers });
+}
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const { secret, appOrigin } = viewerAccessConfig();
+  const { reports, grants } = viewerDeps();
+  const slug = params.slug ?? "";
+
+  const decision = await decideServe(request, slug, "ownerView", {
+    reports,
+    grants,
+    secret,
+    appOrigin,
+    nowSeconds: Math.floor(Date.now() / 1000),
+  });
+
+  if (decision.kind === "error") throw notFoundResponse();
+  if (decision.kind === "redirect") return redirectResponse(decision.to, 302);
+  if (decision.kind === "setCookieAndRedirect") {
+    return redirectResponse(decision.to, 303, decision.cookies);
+  }
+  if (!appOrigin) {
+    // The gate never returns "serve" with `appOrigin` unset — it degrades
+    // those itself. This is the same defensive narrowing `$slug_.edit.tsx`
+    // carries, and for the same reason: `appOrigin` is the ROUTE's own local
+    // (its header profile needs it), not something read back off the
+    // Decision. Degrade exactly the way the gate would — through the gate's
+    // own target, which carries the owner `?access=` fallback when one is in
+    // play — and leave a line, rather than stranding an owner silently.
+    console.warn(editDegradeLine(slug, decision.ownerFallback, "gate-decision-unusable"));
+    return redirectResponse(decision.degradeTo, 302);
+  }
+
+  // ADR-0089 §5: the chrome page wears ADR-0063's AUTHENTICATED profile.
+  // `viewHeaders()` would be wrong — its second, top-level `sandbox` CSP
+  // exists to drop UNTRUSTED REPORT BYTES into an opaque origin, and this
+  // document is our own first-party UI. What this profile gives us that the
+  // public one does not: `frame-src 'self'` (permission to frame the report
+  // from this side; `frame-ancestors 'self'` on the report's own response is
+  // the other half, ADR-0088) and `frame-ancestors 'none'` (the chrome itself
+  // is wholly unframeable). What it shares with the public profile, and what
+  // the spike made non-negotiable: `Origin-Agent-Cluster: ?1`, so the chrome
+  // and the report it frames are UNIFORMLY origin-keyed — Chromium warns when
+  // they disagree.
+  const headers = editViewHeaders({ appOrigin });
+  headers.set("x-robots-tag", "noindex, nofollow");
+
+  // SECURITY (ADR-0089 §6): nothing capability-bearing goes into this payload.
+  // The sharpest contrast with `/edit`, which deliberately hydrates its edit
+  // token so client JS can Bearer it at the app-origin API — the owner view
+  // calls nothing cross-origin, so it carries nothing, and its capability
+  // stays in HttpOnly cookies this page's own JS cannot read. Adding a
+  // client-side API call here would mean re-opening that argument.
+  return json(
+    {
+      slug: decision.report.slug,
+      docTitle: decision.report.title,
+      shareState: shareStateLabel(decision.report.acl.mode),
+      canEdit: decision.capability === "write",
+    },
+    { headers },
+  );
+}
+
+export default function OwnerView() {
+  const { slug, docTitle, shareState, canEdit } = useLoaderData<typeof loader>();
+
+  // The hash is a client-only fact — the server never receives a fragment —
+  // so it starts empty and is adopted on mount, and again on every
+  // `hashchange`, so pasting `#7` into the address bar moves the framed deck
+  // instead of doing nothing.
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden" data-testid="owner-view">
+      <OwnerViewTopBar
+        docTitle={docTitle}
+        shareState={shareState}
+        versionsHref={`/${slug}/edit`}
+        editHref={`/${slug}/edit`}
+        canEdit={canEdit}
+      />
+      <main className="min-h-0 flex-1">
+        {/* `key` on the hash: changing an iframe's `src` hash alone does not
+            re-navigate it, so a hashchange remounts the frame rather than
+            silently doing nothing. */}
+        <ReportFrame key={hash} slug={slug} hash={hash} title={docTitle} />
+      </main>
+    </div>
+  );
+}

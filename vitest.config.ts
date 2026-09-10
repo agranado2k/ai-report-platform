@@ -56,6 +56,9 @@ export default defineConfig({
       "apps/app/app/components/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",
       "apps/view/app/edit/**/*.test.ts",
+      // `apps/view/app/view` is the owner view (ADR-0089): the chrome page's
+      // pure helpers, its SSR-render smoke tests and its route-loader test.
+      "apps/view/app/view/**/*.test.ts",
       // The browser tier's own node-tier guards (ADR-0079): properties of the
       // harness FILES — e.g. "the harness fixture carries every scroll-relevant
       // declaration the real report carries" — which need no browser and belong

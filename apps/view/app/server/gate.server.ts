@@ -104,6 +104,17 @@ export const EDIT_COOKIE = "arp_edit";
 // (ADR-0056 already notes the 24h is re-minted on every dashboard click).
 export const EDIT_OWNER_COOKIE = "arp_edit_oa";
 
+// The owner view's own capability pair (ADR-0089 §4) — `arp_edit`'s exact
+// posture, one surface over. Scoped `Path=/${slug}/view`, and the narrowness
+// matters MORE here than it does for /edit: `/${slug}` is the request the
+// route's sandboxed iframe makes, so a capability at that Path would be
+// handed to the untrusted report's own navigation. It is also why the Edit
+// action is a plain link rather than a second cookie under `/${slug}/edit` —
+// with no capability and no `oa` at that Path, the edit gate FUNNELS through
+// the app's one mint, which re-checks `canWrite` live (ADR-0089 §4b).
+export const OWNER_VIEW_COOKIE = "arp_view";
+export const OWNER_VIEW_OWNER_COOKIE = "arp_view_oa";
+
 /** Parse a named cookie's value out of a raw `Cookie` request header. */
 function readCookieValue(cookieHeader: string | null, cookieName: string): string | undefined {
   if (!cookieHeader) return undefined;
@@ -275,7 +286,7 @@ export function degradeTargetFor(
     : { to: `/${slug}`, ownerFallback: false };
 }
 
-export type Purpose = "view" | "edit";
+export type Purpose = "view" | "edit" | "ownerView";
 
 export interface GateDeps {
   readonly reports: ReportRepository;
@@ -365,9 +376,42 @@ export type EditDecision =
     }
   | TerminalArms;
 
-/** Either purpose's answer. Kept for the few places that are purpose-agnostic;
+/** How much the owner view's holder may do (ADR-0089 §3). Not a role — it is
+ *  what THIS request proved, and it selects whether the chrome offers Edit. */
+export type OwnerViewCapability =
+  /** A validated Edit token: the app ran `canWrite` at mint time. Full chrome. */
+  | "write"
+  /** No capability, but a VERIFIED `owner:true` fallback. Read-only chrome, no
+   *  Edit action. This is ADR-0063's `oa=` degrade, improved: an owner whose
+   *  edit round-trip never happened used to land on the bare `/<slug>` with no
+   *  chrome at all. Same token, same check, same access — now with a title bar. */
+  | "ownerRead";
+
+/** What `purpose: "ownerView"` can decide (ADR-0089). Shaped like
+ *  `EditDecision` — same capability, same degrade vocabulary — and differing
+ *  in exactly one place: it carries `capability` instead of the edit token,
+ *  because this route has no cross-origin data plane and therefore
+ *  deliberately puts NO token in its loader payload (ADR-0089 §6).
+ *
+ *  Like `EditDecision` it has no `interstitial` arm: a mid-scan report
+ *  degrades to the public viewer, which owns that state machine. */
+export type OwnerViewDecision =
+  | {
+      readonly kind: "serve";
+      readonly report: Report;
+      readonly version: ReportVersion;
+      readonly capability: OwnerViewCapability;
+      /** Where the route must send a visitor it cannot render for, carrying
+       *  the owner `?access=` fallback when one is in play. */
+      readonly degradeTo: string;
+      /** Whether `degradeTo` carries an owner fallback — selects the log event. */
+      readonly ownerFallback: boolean;
+    }
+  | TerminalArms;
+
+/** Any purpose's answer. Kept for the few places that are purpose-agnostic;
  *  prefer the specific one — that is the whole point of the split. */
-export type Decision = ViewDecision | EditDecision;
+export type Decision = ViewDecision | EditDecision | OwnerViewDecision;
 
 /** The one viewer gate: decide what the origin should do for `rawSlug` under
  *  `purpose`, given the request's query/cookie capabilities. Pure over `deps`
@@ -387,6 +431,12 @@ export async function decideServe(
 export async function decideServe(
   request: Request,
   rawSlug: string,
+  purpose: "ownerView",
+  deps: GateDeps,
+): Promise<OwnerViewDecision>;
+export async function decideServe(
+  request: Request,
+  rawSlug: string,
   purpose: Purpose,
   deps: GateDeps,
 ): Promise<Decision> {
@@ -395,9 +445,14 @@ export async function decideServe(
   if (!slug.ok) return { kind: "error", status: 404, message: "Not found" };
   const url = new URL(request.url);
 
-  return purpose === "edit"
-    ? decideEdit(request, url, slug.value, deps)
-    : decideView(request, url, slug.value, deps);
+  switch (purpose) {
+    case "edit":
+      return decideEdit(request, url, slug.value, deps);
+    case "ownerView":
+      return decideOwnerView(request, url, slug.value, deps);
+    default:
+      return decideView(request, url, slug.value, deps);
+  }
 }
 
 // --- purpose: "view" — the public route's decision chain (ADR-0038 + 0056) ---
@@ -546,6 +601,110 @@ async function decideEdit(
   };
 }
 
+// --- purpose: "ownerView" — the owner view's decision chain (ADR-0089) ---
+//
+// The owner view frames the CANONICAL /<slug> under first-party chrome. Its
+// capability is the SAME Edit token /edit uses — a valid one proves the app
+// ran `canWrite` at mint time — so like /edit this purpose never consults
+// `report.acl`: a report anyone could read at /<slug> still needs a capability
+// to get CHROME around it.
+//
+// It differs from decideEdit in exactly two places, and both are ADR-0089
+// decisions rather than conveniences:
+//
+//   1. The 303 sets THREE cookies, not two. `arp_view` + `arp_view_oa` under
+//      Path=/<slug>/view, and — from the VERIFIED `oa` — `arp_unlock` under
+//      Path=/<slug>, because that is the cookie the sandboxed iframe's own
+//      navigation to /<slug> carries. Without it a private report's frame
+//      would bounce to the unlock wall INSIDE the iframe. Nothing is minted
+//      here (the view origin never mints, ADR-0056's keystone): this is the
+//      same redemption `decideView`'s `grant` branch already performs on the
+//      same token, one hop earlier and without the address-bar round-trip.
+//
+//   2. An ABSENT capability backed by a verified `oa` SERVES, read-only,
+//      instead of redirecting to the bare viewer. The rejection-vs-absence
+//      routing itself (ADR-0063 Phase 5-G) is inherited unchanged: a
+//      *rejected* token still funnels to the mint, because a rejection says
+//      the round-trip broke and the mint is what repairs it.
+async function decideOwnerView(
+  request: Request,
+  url: URL,
+  slug: Slug,
+  deps: GateDeps,
+): Promise<OwnerViewDecision> {
+  const cap = readCapability(url, request.headers.get("cookie"), slug, OWNER_VIEW_SURFACE, deps);
+  const { oa } = cap;
+
+  if (cap.kind === "handoff") {
+    return {
+      kind: "setCookieAndRedirect",
+      cookies: [
+        surfaceCookie(OWNER_VIEW_COOKIE, slug, OWNER_VIEW_SURFACE.segment, cap.token, cap.maxAge),
+        ...(oa
+          ? [
+              surfaceCookie(
+                OWNER_VIEW_OWNER_COOKIE,
+                slug,
+                OWNER_VIEW_SURFACE.segment,
+                encodeURIComponent(oa),
+                cap.maxAge,
+              ),
+              // Max-Age is the `oa` token's OWN remaining life, not the edit
+              // token's. Capping it at the edit capability's ~15 min would
+              // start bouncing the FRAME to the unlock wall mid-session — the
+              // one place the user cannot see a URL to explain it.
+              unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps)),
+            ]
+          : []),
+      ],
+      to: `/${slug}/view`,
+    };
+  }
+
+  let capability: OwnerViewCapability = "write";
+  if (cap.kind === "refused") {
+    const canFunnel = Boolean(deps.secret && deps.appOrigin);
+    if (canFunnel && (cap.cause === "rejected" || !oa)) {
+      // The funnel, not a degrade — the happy path for a writer whose token
+      // needs re-minting, and the door an anonymous visitor is shown (the app
+      // bounces them to sign-in). Decided BEFORE the report is looked up, so
+      // a nonexistent report answers identically: no existence leak.
+      return { kind: "redirect", to: `${deps.appOrigin}/reports/${slug}/open` };
+    }
+    if (!oa) return degradedEdit(slug, undefined, "edit-token-denied", deps);
+    capability = "ownerRead";
+  }
+
+  // Never render the chrome without a configured app origin — its header
+  // profile (editViewHeaders) requires one for connect-src (fail closed).
+  if (!deps.appOrigin) return degradedEdit(slug, oa, "app-origin-unset", deps);
+
+  // Any non-"serve" outcome or a lookup failure degrades to the public viewer,
+  // which owns the ADR-0038 §2 state machine. Deliberately no ?v=: the owner
+  // view frames the live version, exactly as the editor opens it.
+  const outcome = await resolveViewableReport(slug, deps.reports);
+  if (!outcome.ok) return degradedEdit(slug, oa, "lookup-failed", deps);
+  if (outcome.value.kind !== "serve") return degradedEdit(slug, oa, "no-servable-version", deps);
+  return {
+    kind: "serve",
+    report: outcome.value.report,
+    version: outcome.value.version,
+    capability,
+    degradeTo: degradeLocation(slug, oa),
+    ownerFallback: oa !== undefined,
+  };
+}
+
+/** The `oa` token's own remaining life, for the unlock cookie the framed
+ *  `/<slug>` navigation needs. The token reaching here has already been
+ *  verified by `acceptOwnerFallback`, so the re-read cannot fail — but it is
+ *  written to fail CLOSED (`0`, which expires the cookie immediately) rather
+ *  than assert, because that is the safe direction for a capability. */
+function ownerAccessMaxAge(oa: string, slug: Slug, deps: GateDeps): number {
+  const claims = deps.secret ? readAccessToken(oa, slug, deps.secret, deps.nowSeconds) : null;
+  return claims ? Math.max(0, claims.exp - deps.nowSeconds) : 0;
+}
+
 /** A generous ceiling on an accepted `oa=`. A real owner Access token is a
  *  couple of hundred bytes; anything past this is someone trying to park bulk
  *  in the cookie jar (the value is echoed into `Set-Cookie` verbatim). Checked
@@ -586,7 +745,10 @@ function acceptOwnerFallback(
 /** Read the owner fallback back out of its cookie, undoing the percent-encoding
  *  `ownerFallbackCookie` applied. A malformed encoding is treated as absent
  *  rather than thrown — a corrupt cookie must never 500 the route. */
-function readOwnerFallbackCookie(cookieHeader: string | null, cookieName: string): string | undefined {
+function readOwnerFallbackCookie(
+  cookieHeader: string | null,
+  cookieName: string,
+): string | undefined {
   const raw = readCookieValue(cookieHeader, cookieName);
   if (!raw) return undefined;
   try {
@@ -612,6 +774,12 @@ const EDIT_SURFACE: Surface = {
   segment: "edit",
   capabilityCookie: EDIT_COOKIE,
   ownerCookie: EDIT_OWNER_COOKIE,
+};
+
+const OWNER_VIEW_SURFACE: Surface = {
+  segment: "view",
+  capabilityCookie: OWNER_VIEW_COOKIE,
+  ownerCookie: OWNER_VIEW_OWNER_COOKIE,
 };
 
 /** What the request proved about its holder, before any report is looked up.
@@ -688,14 +856,28 @@ function readCapability(
   return { kind: "held", token: cookieToken, claims, oa };
 }
 
-/** Degrade an /edit request to the viewer — through the owner `?access=` flow
- *  when a fallback is in hand — and ALWAYS leave a log line saying why. */
+/** Degrade an AUTHENTICATED request (`/edit` or, since ADR-0089, `/<slug>/view`)
+ *  to the public viewer — through the owner `?access=` flow when a fallback is
+ *  in hand — and ALWAYS leave a log line saying why.
+ *
+ *  Returns the shared `redirect` arm rather than an `EditDecision`, which is
+ *  both narrower and true: this function has never produced anything else, and
+ *  the narrower type is what lets the ownerView purpose reuse it instead of
+ *  growing a second copy of the same degrade.
+ *
+ *  NOTE the event names stay `edit-degraded-to-view` /
+ *  `owner-edit-degraded-to-view` even when the degrade came from the owner
+ *  view. That is deliberate: they are what incident queries look for (ADR-0063
+ *  Phase 5-E introduced them for exactly that), the degrade CLASS is identical
+ *  — an authenticated surface fell back to the public viewer, possibly
+ *  stranding an owner — and the `reason` field already distinguishes the
+ *  cause. Renaming them would silently break the queries that exist. */
 function degradedEdit(
   slug: string,
   oa: string | undefined,
   reason: EditDegradeReason,
   deps: GateDeps,
-): EditDecision {
+): { readonly kind: "redirect"; readonly to: string } {
   (deps.warn ?? console.warn)(editDegradeLine(slug, oa !== undefined, reason));
   return { kind: "redirect", to: degradeLocation(slug, oa) };
 }

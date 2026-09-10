@@ -41,6 +41,10 @@ import {
   type EditDecision,
   editUnopenableLine,
   type GateDeps,
+  OWNER_VIEW_COOKIE,
+  OWNER_VIEW_OWNER_COOKIE,
+  type OwnerViewDecision,
+  UNLOCK_COOKIE,
   type ViewDecision,
 } from "./gate.server";
 
@@ -1196,5 +1200,269 @@ describe("editUnopenableLine", () => {
   it("never carries the token itself", () => {
     const line = editUnopenableLine(SLUG, "document-unparsable", true);
     expect(line).not.toMatch(/access=|oa=|owner\./);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purpose: "ownerView" — the owner view's decision matrix (ADR-0089).
+//
+// The owner view (`GET /<slug>/view`) frames the CANONICAL `/<slug>` under
+// first-party chrome. Its capability is the SAME Edit token /edit uses — a
+// valid one proves the app ran `canWrite` at mint time — so like /edit this
+// purpose never consults `report.acl`.
+//
+// What is genuinely new, and what these tests exist to pin, is the COOKIE
+// SCOPING (ADR-0089 §4). `arp_view`/`arp_view_oa` sit at `Path=/<slug>/view`
+// and NEVER at `Path=/<slug>`, because `/<slug>` is the request the sandboxed
+// iframe makes: a write capability riding that request would hand the report's
+// own navigation the owner's credential. `arp_unlock` at `Path=/<slug>` is the
+// one cookie the frame is MEANT to carry, redeemed from the VERIFIED `oa`.
+// ---------------------------------------------------------------------------
+async function decideOwnerView(
+  report: Report | undefined,
+  opts: {
+    path?: string;
+    cookie?: string;
+    secret?: string | undefined;
+    appOrigin?: string | undefined;
+    reports?: ReportRepository;
+    now?: number;
+    warn?: (line: string) => void;
+  } = {},
+): Promise<OwnerViewDecision> {
+  const deps = makeDeps({
+    reports: opts.reports ?? (await repoWith(report)),
+    secret: "secret" in opts ? opts.secret : SECRET,
+    appOrigin: "appOrigin" in opts ? opts.appOrigin : APP_ORIGIN,
+    nowSeconds: opts.now ?? NOW,
+    ...(opts.warn ? { warn: opts.warn } : {}),
+  });
+  return decideServe(request(opts.path ?? `/${SLUG}/view`, opts.cookie), SLUG, "ownerView", deps);
+}
+
+describe("decideServe — purpose: ownerView — the `?et=` hand-off and its cookies", () => {
+  it("redeems a valid `et=` into the arp_view cookie and 303s to the clean URL", async () => {
+    const et = editToken();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+
+  it("also persists the VERIFIED `oa` and the unlock cookie the framed /<slug> needs", async () => {
+    const et = editToken();
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        // Path=/<slug> — the ONE cookie the sandboxed frame's navigation
+        // carries. Max-Age is the `oa` token's own remaining life (24h), NOT
+        // the edit token's: capping it at ~15 min would start bouncing the
+        // FRAME to the unlock wall mid-session, where the user cannot see why.
+        `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+
+  it("never scopes a capability cookie to /<slug> — that is the framed request", async () => {
+    const et = editToken();
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}`,
+    });
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+
+    for (const cookie of decision.cookies) {
+      // The unlock cookie is the deliberate exception: it is a READ capability
+      // and the frame is supposed to carry it.
+      if (cookie.startsWith(`${UNLOCK_COOKIE}=`)) continue;
+      expect(cookie).toContain(`Path=/${SLUG}/view;`);
+    }
+    // And no capability is written under the EDIT path — §4(b): that absence
+    // is what makes the Edit action FUNNEL through the app's one mint (a live
+    // canWrite re-check) instead of degrading to the read-only viewer.
+    expect(decision.cookies.some((c) => c.includes(`Path=/${SLUG}/edit`))).toBe(false);
+  });
+
+  it("ignores an UNVERIFIABLE `oa` — no owner cookie, no unlock cookie", async () => {
+    const et = editToken();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      // A non-owner access token: right slug, right signature, `owner` absent.
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(accessToken())}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+});
+
+describe("decideServe — purpose: ownerView — serving", () => {
+  it("serves with capability `write` on a valid arp_view cookie", async () => {
+    const report = buildReport({ verdict: "clean", acl: PRIVATE });
+    const decision = await decideOwnerView(report, {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}`,
+    });
+
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("write");
+    expect(decision.report.slug).toBe(SLUG);
+    expect(decision.ownerFallback).toBe(false);
+  });
+
+  it("serves an owner whose capability is ABSENT but whose `oa` verifies — read-only chrome", async () => {
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}`,
+    });
+
+    // The improvement on ADR-0063's degrade: an owner whose edit round-trip
+    // never happened lands on the owner view in read-only chrome rather than
+    // on the bare `/<slug>?access=…` with no chrome at all. Same token, same
+    // check, same access — now with a title bar and no Edit action.
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("ownerRead");
+    expect(decision.ownerFallback).toBe(true);
+  });
+
+  it("does NOT consult the Acl — a public report needs the same capability", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PUBLIC }));
+    // No capability at all: the owner view is authenticated even for a report
+    // anyone could read at /<slug>. The chrome is the owner's, not the public's.
+    expect(decision).toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open`,
+    });
+  });
+});
+
+describe("decideServe — purpose: ownerView — denial routes nowhere that leaks", () => {
+  it("funnels an anonymous request to the app's one mint", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }));
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+
+  it("gives a NONEXISTENT report the identical answer — no existence leak", async () => {
+    const anonymous = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }));
+    const nonexistent = await decideOwnerView(undefined);
+    expect(nonexistent).toEqual(anonymous);
+  });
+
+  it("funnels a REJECTED capability even when a verified `oa` is in hand", async () => {
+    // ADR-0063 Phase 5-G's rejection-vs-absence rule, inherited not re-decided:
+    // a token that was PRESENTED and failed says the round-trip broke, and the
+    // mint is what repairs it. Degrading here would strand a still-entitled
+    // owner in read-only for the fallback's remaining 24h.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken(900, NOW - 5000)}; ${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(ownerAccess())}`,
+    });
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+
+  it("rejects an invalid `?et=` outright rather than falling back to a good cookie", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=not-a-token`,
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}`,
+    });
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+
+  it("refuses an edit token minted for ANOTHER slug", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken(900, NOW, OTHER_SLUG)}`,
+    });
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+
+  it("falls back to the bare viewer when there is no funnel and no fallback", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      secret: undefined,
+    });
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+  });
+});
+
+describe("decideServe — purpose: ownerView — post-capability degrades", () => {
+  const withCapability = { cookie: `${OWNER_VIEW_COOKIE}=${editToken()}` };
+
+  it.each([
+    ["deleted", buildReport({ verdict: "clean", deleted: true, acl: PRIVATE })],
+    ["flagged", buildReport({ verdict: "flagged", acl: PRIVATE })],
+    ["mid-scan", buildReport({ acl: PRIVATE })],
+  ])("degrades a %s report to the public viewer, which owns that state machine", async (_l, r) => {
+    const warn = vi.fn();
+    const decision = await decideOwnerView(r, { ...withCapability, warn });
+
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "no-servable-version",
+    });
+  });
+
+  it("degrades a lookup failure and names it", async () => {
+    const warn = vi.fn();
+    const decision = await decideOwnerView(undefined, {
+      ...withCapability,
+      reports: failingRepo,
+      warn,
+    });
+
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string).reason).toBe("lookup-failed");
+  });
+
+  it("degrades when APP_ORIGIN is unset — the chrome's header profile requires it", async () => {
+    const warn = vi.fn();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      ...withCapability,
+      appOrigin: undefined,
+      warn,
+    });
+
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string).reason).toBe("app-origin-unset");
+  });
+
+  it("routes an OWNER's degrade through the `?access=` flow, not the unlock wall", async () => {
+    const oa = ownerAccess();
+    const warn = vi.fn();
+    const decision = await decideOwnerView(buildReport({ verdict: "flagged", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}; ${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}`,
+      warn,
+    });
+
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string).event).toBe("owner-edit-degraded-to-view");
+  });
+
+  it("404s an invalid slug before anything else", async () => {
+    const deps = makeDeps();
+    await expect(decideServe(request("/nope/view"), "nope", "ownerView", deps)).resolves.toEqual({
+      kind: "error",
+      status: 404,
+      message: "Not found",
+    });
   });
 });
