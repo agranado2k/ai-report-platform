@@ -61,7 +61,7 @@ export const VIEW_CSP_ALLOWLIST = {
   fontSrc: ["https://fonts.gstatic.com"],
   /** The two immutably-versioned CDNs the artifact ecosystem standardizes on. */
   scriptSrc: ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/"],
-} as const satisfies Record<string, readonly string[]>;
+} as const satisfies Record<"styleSrc" | "fontSrc" | "scriptSrc", readonly string[]>;
 
 /** Append allowlisted hosts to a directive's own base source list. */
 const withAllowlist = (directive: string, hosts: readonly string[]): string =>
