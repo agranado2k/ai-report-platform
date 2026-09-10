@@ -83,6 +83,17 @@ The service-worker registration block stays in force on the viewer origin, for b
 
 ## More information
 
+> **Amended 2026-09-10 by [ADR-0088](0088-viewer-csp-artifact-parity-allowlist.md).** Two
+> statements in this section are no longer accurate, and are corrected there rather than
+> rewritten here. The bullets below say the two viewer profiles share `font-src` and
+> `frame-ancestors` byte for byte "via one internal `CSP_SHARED` table", and that
+> "everything else … `font-src`, `frame-ancestors 'none'` … is IDENTICAL to the public
+> profile". Both were true as of this ADR's Phase 3 and should be read that way. Since
+> ADR-0088 the PUBLIC profile appends the Viewer CSP allowlist to `style-src`/`font-src`
+> and serves `frame-ancestors 'self'`, so those three directives now differ and the edit
+> profile is the narrower of the two. **No decision in this ADR changes**: the edit profile
+> itself is untouched, carries no allowlist, and keeps `frame-ancestors 'none'`.
+
 - Implementation: the edit-route CSP profile and its e2e header assertions live alongside the existing ADR-013 `secureHeaders()` helper (as a second, route-selected profile, not a fork); the edit-token codec extends the ADR-0056 `packages/domain/src/signed-token.ts` shared primitive with an `edit` claims shape (slug, purpose, exp) parallel to `AccessClaims`.
 - **Edit-token codec — implemented (Phase 2, `packages/domain/src/edit-token.ts`)**: `EditClaims { slug, exp, sub, scope: "edit" }`, built on the shared `signed-token.ts` primitive, mirroring `access-token.ts`'s structure exactly (`mintEditToken`/`readEditToken`/`verifyEditToken`). Single-report via `slug`; short-lived via `exp` (suggested 15–30 min TTL — shorter than the owner `Access token`'s 24h, since edit is a higher-privilege capability than read; the exact constant is deferred to the mint site); carries the acting user via `sub` (required, non-empty — an edit token with no bound subject isn't a valid capability); single-purpose via the `scope: "edit"` literal discriminant, which is the security boundary that prevents token confusion — `parseEditClaims` is strict enough that a validly-signed `Access token` (even an `owner: true` one, sharing the same HMAC secret) cannot narrow into `EditClaims`, because `AccessClaims` has neither `sub` nor `scope`. Verified by a dedicated cross-parse-rejection test (`edit-token.test.ts`) that mints a real access token via `mintAccessToken` and asserts `readEditToken` rejects it. The view origin verifies signature + scope only (never holds Clerk creds); `canWrite` re-check on save and the `/edit` route wiring are still pending (next phase), along with the app-side mint-into-the-open-flow.
 - **Edit-route CSP profile — implemented (Phase 3, `packages/headers/src/view-headers.ts`)**: `editViewHeaders({ appOrigin, reportToUrl? }): Headers`, a second, route-selected profile alongside the existing `viewHeaders()` (the public profile's byte-for-byte output is unchanged — pinned by a regression test). `appOrigin` is REQUIRED (the app-origin API the edit token authenticates against). Both profiles share their unrelated directives (`default-src`, `img-src`, `font-src`, `frame-ancestors`, `base-uri`, `form-action`, `object-src`, `worker-src`, `report-to`) via one internal `CSP_SHARED` table, so they can't silently drift on the directives that are supposed to stay identical. Every relaxation vs the public profile, and its rationale:
