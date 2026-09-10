@@ -139,6 +139,12 @@ export default function OwnerView() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden" data-testid="owner-view">
+      {/* Two props, one value, on purpose: version history lives in the
+          editor's own side panel, so Versions is a deep-link INTO the editor
+          rather than a second destination. They stay two props because they
+          are two user intents that can diverge — the day version history gets
+          a surface of its own, only this line changes — and collapsing them to
+          one prop would have to be un-collapsed to do it. */}
       <OwnerViewTopBar
         docTitle={docTitle}
         shareState={shareState}
