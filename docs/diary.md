@@ -6084,3 +6084,25 @@ intercepted the click meant for the fullscreen button.
 iframe `src`), and the iframe attribute set is settled:
 `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" allow="fullscreen"`.
 Spike code deleted; the PRD follows via `/to-prd`.
+
+### 2026-09-09 — ADR-0088: artifact-parity allowlist on the viewer CSP (#360)
+
+The public viewer's enforcing CSP (ADR-013) blocked the two things an
+agent-authored HTML artifact routinely reaches for — a Google Fonts `<link>` and
+a pinned-CDN `<script>` — so every such report degraded to a fallback serif with
+a dead chart, silently, with nothing surfaced to its author. **ADR-0088** (amends
+ADR-013) adds the **Viewer CSP allowlist**: one named constant
+(`VIEW_CSP_ALLOWLIST`, `packages/headers`) carrying `fonts.googleapis.com`
+(`style-src`), `fonts.gstatic.com` (`font-src`) and `cdnjs.cloudflare.com` +
+`cdn.jsdelivr.net/npm/` (`script-src`), plus `frame-ancestors` `'none'` → `'self'`
+so the viewer origin may frame its own reports.
+
+It is a **loading** allowlist only, and that is the whole safety argument:
+`connect-src 'self'` is untouched and is what keeps exfiltration blocked, as are
+`img-src` (a wildcard image source is itself an exfil channel — the explicit
+rejected alternative), `form-action`, `worker-src`, `object-src`, `base-uri`, the
+second `sandbox` CSP header (opaque origin, `allow-same-origin` still withheld),
+the strict report-only shadow policy, and the ADR-0063 `/edit` profile. Also
+rejected: fonts-only, and a separate frameable alias path. Unit tests and the live
+`security-headers` gate both assert against the exported constant, never a
+restated string. Glossary + ADR index updated in the same change.

@@ -1886,7 +1886,7 @@ POST /api/v1/reports
       </div>
       <div class="layer" data-layer="Layer 4">
         <h4>Strict CSP + sandbox header</h4>
-        <p>Two CSPs: enforcing (<code>connect-src 'self'</code>, <code>frame-ancestors 'none'</code>) + a second header with the <code>sandbox</code> directive.</p>
+        <p>Two CSPs: enforcing (<code>connect-src 'self'</code>, <code>frame-ancestors 'self'</code>) + a second header with the <code>sandbox</code> directive. Since ADR-0088 the enforcing policy also carries the Viewer CSP allowlist &mdash; Google Fonts on <code>style-src</code>/<code>font-src</code> and two pinned CDNs on <code>script-src</code>, for artifact parity. Every outbound directive stays pinned to the viewer origin.</p>
       </div>
       <div class="layer" data-layer="Layer 5">
         <h4>Process &amp; side-channel isolation</h4>
