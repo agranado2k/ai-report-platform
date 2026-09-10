@@ -497,57 +497,29 @@ async function decideEdit(
   slug: Slug,
   deps: GateDeps,
 ): Promise<EditDecision> {
-  const cookieHeader = request.headers.get("cookie");
-  const queryToken = url.searchParams.get("et") ?? undefined;
-  // The fallback owner access token `ownerOpenLocation` mints alongside `et=`
-  // for actual owners. It arrives ONCE, on the query — and the 303 below
-  // strips the query. So it is read from the query OR from the cookie the 303
-  // persisted it into: without that, every degrade on the post-303 request was
-  // blind to the fact that it was stranding an OWNER (the 2026-08-06 lockout).
-  // A fresh query `oa=` always supersedes a cookie-carried one. Both are
-  // VERIFIED before they count as a fallback (acceptOwnerFallback) — see there.
-  const oa = acceptOwnerFallback(
-    url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader),
-    slug,
-    deps,
-  );
-  const cookieToken = readCookieValue(cookieHeader, EDIT_COOKIE);
+  // The `?et=` / arp_edit-cookie / verified-`oa` seam, shared with the
+  // ownerView purpose (readCapability). The `oa` fallback `ownerOpenLocation`
+  // mints alongside `et=` for actual owners arrives ONCE, on the query — and
+  // the 303 below strips the query — so it is read from the query OR from the
+  // cookie the 303 persisted it into. Without that, every degrade on the
+  // post-303 request was blind to the fact that it was stranding an OWNER
+  // (the 2026-08-06 lockout).
+  const cap = readCapability(url, request.headers.get("cookie"), slug, EDIT_SURFACE, deps);
+  const { oa } = cap;
 
-  // Fail closed (denied) when `secret` is unset — same posture as the view
-  // path's resolveAccessDecision. The query token takes precedence when both
-  // are present — a fresh mint always wins over whatever cookie is already
-  // sitting there. NOTE (deliberate, preserved asymmetry vs "view"): an
-  // INVALID query token is denied outright — it does NOT fall back to a
-  // still-valid cookie the way the view path's resolveAccessDecision falls
-  // back to the unlock cookie. That is the pre-extraction behavior of both
-  // loaders, kept intact behind the purpose parameter.
-  if (deps.secret && queryToken) {
-    const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
-    // A token was PRESENTED and did not verify — a rejection, not an absence.
-    if (!claims) return deniedEdit(slug, oa, "rejected", deps);
-    const maxAge = Math.max(0, claims.exp - deps.nowSeconds);
+  if (cap.kind === "refused") return deniedEdit(slug, oa, cap.cause, deps);
+  if (cap.kind === "handoff") {
     return {
       kind: "setCookieAndRedirect",
       // Mint the arp_edit cookie — plus the owner fallback, so it SURVIVES the
       // clean-URL bounce — and 303. Drops both tokens out of the address
       // bar/history/referer, exactly like the view path's grant.
       cookies: [
-        editCookie(slug, queryToken, maxAge),
-        ...(oa ? [ownerFallbackCookie(slug, oa, maxAge)] : []),
+        editCookie(slug, cap.token, cap.maxAge),
+        ...(oa ? [ownerFallbackCookie(slug, oa, cap.maxAge)] : []),
       ],
       to: `/${slug}/edit`,
     };
-  }
-  const claims =
-    deps.secret && cookieToken
-      ? readEditToken(cookieToken, slug, deps.secret, deps.nowSeconds)
-      : null;
-  if (!claims || !cookieToken) {
-    // A cookie that WAS present and failed to verify (expired, tampered,
-    // minted under a rotated secret) is a rejection; no cookie at all — or no
-    // secret with which to judge one — is an absence. The distinction decides
-    // whether `deniedEdit` funnels or degrades; see there.
-    return deniedEdit(slug, oa, cookieToken && deps.secret ? "rejected" : "absent", deps);
   }
 
   // A valid, already-redeemed arp_edit cookie. Never render the editor without
@@ -568,7 +540,7 @@ async function decideEdit(
     kind: "serve",
     report: outcome.value.report,
     version: outcome.value.version,
-    edit: { token: cookieToken, claims },
+    edit: { token: cap.token, claims: cap.claims },
     degradeTo: degradeLocation(slug, oa),
     ownerFallback: oa !== undefined,
   };
@@ -613,15 +585,107 @@ function acceptOwnerFallback(
 
 /** Read the owner fallback back out of its cookie, undoing the percent-encoding
  *  `ownerFallbackCookie` applied. A malformed encoding is treated as absent
- *  rather than thrown — a corrupt cookie must never 500 the edit route. */
-function readOwnerFallbackCookie(cookieHeader: string | null): string | undefined {
-  const raw = readCookieValue(cookieHeader, EDIT_OWNER_COOKIE);
+ *  rather than thrown — a corrupt cookie must never 500 the route. */
+function readOwnerFallbackCookie(cookieHeader: string | null, cookieName: string): string | undefined {
+  const raw = readCookieValue(cookieHeader, cookieName);
   if (!raw) return undefined;
   try {
     return decodeURIComponent(raw) || undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * An AUTHENTICATED surface under a report — the URL segment it lives on and
+ * the two cookies scoped to it. Named as one thing so a surface cannot
+ * half-exist: adding a route without adding its cookie pair (or, worse,
+ * borrowing another surface's) is the mistake this record makes unavailable.
+ */
+interface Surface {
+  readonly segment: string;
+  readonly capabilityCookie: string;
+  readonly ownerCookie: string;
+}
+
+const EDIT_SURFACE: Surface = {
+  segment: "edit",
+  capabilityCookie: EDIT_COOKIE,
+  ownerCookie: EDIT_OWNER_COOKIE,
+};
+
+/** What the request proved about its holder, before any report is looked up.
+ *  Extracted so the two authenticated purposes share ONE reading of the
+ *  `?et=` / cookie / `?oa=` seam and differ only in what they DO about it. */
+type Capability =
+  /** A fresh, valid `?et=` — redeem it into cookies and bounce to a clean URL. */
+  | {
+      readonly kind: "handoff";
+      readonly token: string;
+      readonly maxAge: number;
+      readonly oa: string | undefined;
+    }
+  /** A valid, already-redeemed capability cookie. */
+  | {
+      readonly kind: "held";
+      readonly token: string;
+      readonly claims: EditClaims;
+      readonly oa: string | undefined;
+    }
+  /** No usable capability. `cause` decides funnel-vs-degrade (see `deniedEdit`). */
+  | {
+      readonly kind: "refused";
+      readonly cause: EditDenialCause;
+      readonly oa: string | undefined;
+    };
+
+/**
+ * Read this request's capability for `surface`. Pure over `deps`; looks at
+ * nothing but the URL and the `Cookie` header.
+ *
+ * Every asymmetry here is deliberate and pre-existing (see `decideEdit`'s
+ * comments): the query token takes precedence over the cookie; an INVALID
+ * query token is refused outright rather than falling back to a still-valid
+ * cookie (unlike the view path's unlock cookie); a fresh query `oa=`
+ * supersedes a cookie-carried one; and everything fails CLOSED on an unset
+ * secret, because an HMAC accepts an empty key.
+ */
+function readCapability(
+  url: URL,
+  cookieHeader: string | null,
+  slug: Slug,
+  surface: Surface,
+  deps: GateDeps,
+): Capability {
+  const oa = acceptOwnerFallback(
+    url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader, surface.ownerCookie),
+    slug,
+    deps,
+  );
+  const queryToken = url.searchParams.get("et") ?? undefined;
+  if (deps.secret && queryToken) {
+    const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
+    // A token was PRESENTED and did not verify — a rejection, not an absence.
+    if (!claims) return { kind: "refused", cause: "rejected", oa };
+    return {
+      kind: "handoff",
+      token: queryToken,
+      maxAge: Math.max(0, claims.exp - deps.nowSeconds),
+      oa,
+    };
+  }
+  const cookieToken = readCookieValue(cookieHeader, surface.capabilityCookie);
+  const claims =
+    deps.secret && cookieToken
+      ? readEditToken(cookieToken, slug, deps.secret, deps.nowSeconds)
+      : null;
+  // A cookie that WAS present and failed to verify (expired, tampered, minted
+  // under a rotated secret) is a rejection; no cookie at all — or no secret
+  // with which to judge one — is an absence.
+  if (!claims || !cookieToken) {
+    return { kind: "refused", cause: cookieToken && deps.secret ? "rejected" : "absent", oa };
+  }
+  return { kind: "held", token: cookieToken, claims, oa };
 }
 
 /** Degrade an /edit request to the viewer — through the owner `?access=` flow
