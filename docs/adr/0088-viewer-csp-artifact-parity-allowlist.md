@@ -82,6 +82,17 @@ and `default-src`, `img-src`, `connect-src`, `base-uri`, `form-action`, `object-
 the stack (COOP, CORP, `Origin-Agent-Cluster`, Referrer-Policy, Permissions-Policy,
 `X-Content-Type-Options`, HSTS, Cache-Control, Report-To) are unchanged.
 
+**Scope: the whole `viewHeaders()` profile, not only the report body.** The relaxation
+reaches every response that profile serves — the report itself, the 404/410/451/500/503
+error pages, the 302/303 redirects that set the `arp_unlock`/`arp_edit` cookies, the
+"Scanning…" interstitial, `/health`, and the `/edit` route's *non-report* responses (its
+404, its degrade-redirect and its `?et=` hand-off), which are built with `viewHeaders()`
+deliberately. That is acceptable because those bodies are the platform's own static
+strings: they reference no external resources, so the allowlist grants them nothing they
+use, and `frame-ancestors 'self'` admits only the view origin itself as an embedder. The
+ADR-0063 `editViewHeaders()` profile — the one that will serve the editor *document* — is
+untouched, carries no allowlist, and keeps `frame-ancestors 'none'`.
+
 **The four hosts are one named constant** — the **Viewer CSP allowlist**
 (`VIEW_CSP_ALLOWLIST` in `packages/headers`), keyed by the directive each host belongs to
 and exported so the unit tests and the live `security-headers` CI gate assert against the
@@ -142,6 +153,23 @@ origin and is also refused. What it buys is that the viewer origin may build
 report-in-a-frame surfaces of its own. `'none'` was never a decision about self-framing;
 it was the strictest available default at a time when nothing framed anything.
 
+#### Evidence
+
+CI cannot prove this negatively — a green header assertion says the string is served, not
+that a browser enforces it — so it was checked by hand. **Manual browser check (operator,
+2026-09-10, Chromium 148):**
+
+- A sandboxed report (opaque origin) that iframes *another* report on the view origin is
+  **blocked**, with `Framing violates frame-ancestors 'self'`. Independently of the CSP,
+  that iframe navigation carries no `SameSite=Lax` unlock cookie, so a passphrase-gated
+  report is refused a second time on its own merits.
+- A first-party page on the view origin **does** frame the report, and its navigation does
+  carry the cookie — i.e. the property this ADR is buying actually exists.
+
+The browser-tier regression test that locks both halves in (ADR-0079, `pnpm test:browser`)
+lands with the owner view ticket #361; this note is the interim record, not a substitute
+for it.
+
 ### Rejected alternatives
 
 - **(1) Do nothing.** Rejected: it makes the platform's core artifact worse than the
@@ -174,7 +202,10 @@ it was the strictest available default at a time when nothing framed anything.
 ## More information
 
 - Amends **ADR-013** (viewer security header stack). ADR-013 stays Accepted; this record
-  is the amendment, and the spec's ADR-013 entry is synced at its next revision.
+  is the amendment, and the spec's Layer 4 entry (`docs/spec.html`) is synced in this same
+  change, so the contract and the shipped header agree. **ADR-0063** carries a dated
+  amendment note pointing here, since the two viewer profiles no longer share `style-src`,
+  `font-src` or `frame-ancestors`.
 - Related: **ADR-002/ADR-0038** (viewer on its own origin — the isolation this relies on),
   **ADR-012** (the layered model: origin isolation + sandbox is the primary containment),
   **ADR-0063** (the `/edit` profile, explicitly out of scope and unchanged here).
