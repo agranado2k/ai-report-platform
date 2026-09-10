@@ -1345,6 +1345,32 @@ describe("decideServe — purpose: ownerView — serving", () => {
     expect(decision.ownerFallback).toBe(true);
   });
 
+  it("enters `ownerRead` from an `oa=` on the QUERY too, not only from the cookie", async () => {
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
+    });
+
+    // ADR-0089 §3's `ownerRead` row reads "`arp_view_oa` cookie OR `oa=`
+    // query", and the QUERY half is the one that fires first in production:
+    // #363 sends an owner here as `?et=…&oa=…`, so a request whose `et=` is
+    // missing entirely — a re-followed link, a bookmark, an `/open` that could
+    // not mint — arrives with the fallback on the query and NOTHING in the
+    // cookie jar. Every other `ownerRead` test here arrives post-303, with
+    // `arp_view_oa` already set, so the regression this one catches is
+    // `readCapability` losing its `searchParams.get("oa")` half (or the
+    // ownerView purpose reading the cookie directly instead of going through
+    // it): those tests would all still pass while a real owner silently
+    // funnelled back to the mint instead of getting read-only chrome.
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("ownerRead");
+    expect(decision.ownerFallback).toBe(true);
+    expect(decision.cookies).toEqual([
+      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+  });
+
   it("the read-only serve carries the unlock cookie the framed /<slug> needs", async () => {
     const oa = ownerAccess();
     const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
@@ -1448,11 +1474,49 @@ describe("decideServe — purpose: ownerView — denial routes nowhere that leak
     expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
   });
 
-  it("falls back to the bare viewer when there is no funnel and no fallback", async () => {
+  // ADR-0089 §3's last redirect row — "no funnel available (no secret / no
+  // `appOrigin`), no `oa` → the bare `/{slug}`" — has TWO halves, exactly as
+  // `deniedEdit`'s does, because the funnel is guarded on BOTH deps and each
+  // guard prevents a different failure. Both halves are checked BEFORE the
+  // report is looked up, so neither can reach the later post-capability
+  // `app-origin-unset` degrade, and both must leave a log line: a degrade with
+  // no signal is the exact shape of the 2026-08-06 owner lockout.
+  it("with NO secret and no fallback → the bare viewer, warned (a funnel could only loop)", async () => {
+    // Drop the `deps.secret` half of the guard and this request funnels to a
+    // mint whose tokens this origin can never validate — /view → /open →
+    // /view, forever, which is the PR #185 incident class.
+    const warn = vi.fn();
     const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
       secret: undefined,
+      warn,
     });
     expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
+  });
+
+  it("with NO appOrigin and no fallback → the bare viewer, warned (nowhere to funnel)", async () => {
+    // The half nothing exercised before: the only `appOrigin: undefined` case
+    // in this file's ownerView block carries a capability, so it lands on the
+    // LATER `app-origin-unset` degrade and never on this branch at all. Drop
+    // the `deps.appOrigin` half of the guard and the owner is sent to the
+    // literal `Location: undefined/reports/<slug>/open` — a redirect the
+    // browser resolves against the VIEW origin, i.e. a 404 on a path that
+    // starts with the string "undefined".
+    const warn = vi.fn();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      appOrigin: undefined,
+      warn,
+    });
+    expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
+      event: "edit-degraded-to-view",
+      slug: SLUG,
+      reason: "edit-token-denied",
+    });
   });
 });
 
