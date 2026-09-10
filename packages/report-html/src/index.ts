@@ -13,6 +13,10 @@ export { DIFF_DEL_CLASS, DIFF_INS_CLASS } from "./diff-schema.js";
 // path can record the answer instead of the user discovering it (ADR-0080).
 export type { Editability } from "./editability.js";
 export { probeEditability } from "./editability.js";
+// The editor's RETENTION question, the orthogonal twin of the one above: not
+// "can it open these bytes" but "would it keep them" (ADR-0089).
+export type { Fidelity, FidelityVerdict, NormalizedNode } from "./fidelity-probe.js";
+export { normalizeBody, probeFidelity } from "./fidelity-probe.js";
 export type { HtmlFallbackDiff } from "./html-fallback.js";
 export {
   diffHtmlFallback,

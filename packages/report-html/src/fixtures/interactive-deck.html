@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Q3 Platform Review — deck</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" />
+    <style>
+      :root { --ink: #1f2430; --accent: #7b68ee; }
+      body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
+      .slide { display: flex; flex-direction: column; justify-content: center; min-height: 100vh; padding: 4rem; }
+      .slide[hidden] { display: none !important; }
+      .deck-nav { position: fixed; bottom: 1rem; right: 1rem; }
+    </style>
+  </head>
+  <body>
+    <main class="deck" id="deck">
+      <section class="slide slide--title" id="s1">
+        <h1>Q3 Platform Review</h1>
+        <p>Interactive deck — use the arrow keys to advance.</p>
+      </section>
+
+      <section class="slide slide--diagram" id="s2" hidden>
+        <h2>The upload pipeline</h2>
+        <svg viewBox="0 0 320 80" role="img" aria-label="Upload pipeline: intake, scan, publish" width="320" height="80">
+          <title>Upload pipeline</title>
+          <rect x="4" y="20" width="88" height="40" rx="8" fill="#eef0ff" stroke="#7b68ee" />
+          <text x="48" y="45" text-anchor="middle" font-size="12">intake</text>
+          <path d="M96 40 L120 40" stroke="#7b68ee" stroke-width="2" />
+          <rect x="124" y="20" width="88" height="40" rx="8" fill="#eef0ff" stroke="#7b68ee" />
+          <text x="168" y="45" text-anchor="middle" font-size="12">scan</text>
+          <path d="M216 40 L240 40" stroke="#7b68ee" stroke-width="2" />
+          <rect x="244" y="20" width="72" height="40" rx="8" fill="#eef0ff" stroke="#7b68ee" />
+          <text x="280" y="45" text-anchor="middle" font-size="12">publish</text>
+        </svg>
+        <p>Every stage is observable &amp; independently retryable.</p>
+      </section>
+
+      <section class="slide slide--close" id="s3" hidden>
+        <h2>What changes next quarter</h2>
+        <ul>
+          <li>Owner view ships behind the viewer origin</li>
+          <li>Fidelity is recorded at upload</li>
+        </ul>
+      </section>
+
+      <nav class="deck-nav" aria-label="Deck navigation">
+        <button type="button" data-step="-1">Previous</button>
+        <button type="button" data-step="1">Next</button>
+      </nav>
+    </main>
+
+    <script>
+      (function () {
+        var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+        var index = 0;
+        function show(next) {
+          index = Math.max(0, Math.min(slides.length - 1, next));
+          slides.forEach(function (slide, i) {
+            slide.hidden = i !== index;
+          });
+        }
+        document.addEventListener("keydown", function (event) {
+          if (event.key === "ArrowRight") show(index + 1);
+          if (event.key === "ArrowLeft") show(index - 1);
+        });
+        document.querySelectorAll("[data-step]").forEach(function (button) {
+          button.addEventListener("click", function () {
+            show(index + Number(button.getAttribute("data-step")));
+          });
+        });
+        show(0);
+      })();
+    </script>
+  </body>
+</html>
