@@ -342,8 +342,9 @@ where the mode admits them, the frame simply works.
 This is **not** blocking: until #363 flips owner-open, nothing routes anyone here by
 default. The recorded door is a grantee-safe read capability minted by the app — a
 scope-bound, mode-independent read token that is explicitly **not** `owner: true` — which
-is a decision for its own ticket, not a thing to improvise inside this route. It is named
-here so #363 does not discover it as a surprise.
+is a decision for its own ticket, not a thing to improvise inside this route. That ticket
+is **#376**, and it should be decided before or alongside #363, which is the change that
+makes this reachable. It is named here so #363 does not discover it as a surprise.
 
 ### 9. What this ADR does not decide
 
