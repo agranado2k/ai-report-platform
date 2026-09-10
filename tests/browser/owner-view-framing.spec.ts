@@ -29,6 +29,19 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
+// Same rule, same reach, for the OTHER half of the contract under test. The
+// sandbox token set is the record of a measurement (ADR-0089 §2), and
+// `apps/view/app/view/frame.ts` is a dependency-free pure module, so this tier
+// can import the shipped constants instead of retyping them. That is what
+// makes this spec a REGRESSION test: put `allow-same-origin` back into
+// `REPORT_FRAME_SANDBOX` and both tiers go red together. Retyped, only the
+// node tier would notice, and the browser tier would keep proving the opaque
+// origin of a frame the product no longer builds.
+import {
+  REPORT_FRAME_ALLOW,
+  REPORT_FRAME_SANDBOX,
+  reportFrameSrc,
+} from "../../apps/view/app/view/frame";
 // Reached by path, the way `harness/build.mts` reaches into `apps/view`: this
 // tier is not a workspace package and has no dependency on `arp-headers`.
 // What matters is that these are the SHIPPED builders — importing them by any
@@ -37,6 +50,32 @@ import { editViewHeaders, viewHeaders } from "../../packages/headers/src/view-he
 
 const SLUG = "abcde12345";
 const OTHER_SLUG = "zzzzzzzzzz";
+/**
+ * A report served with NO security headers at all, framed by a chrome page
+ * served the same way — so the `sandbox` ATTRIBUTE is the only containment in
+ * play.
+ *
+ * This pair exists because the production pair cannot answer the question.
+ * `viewHeaders()` sends a second, top-level `sandbox` CSP (ADR-013, untouched
+ * by ADR-0088) that drops the report into an opaque origin on its own, and a
+ * browser applies the STRICTEST of the two sandboxes. So over the real headers
+ * the opaque-origin assertions below stay green even if
+ * `REPORT_FRAME_SANDBOX` grew `allow-same-origin` — they would be proving the
+ * header, silently, and reporting it as proof of the attribute.
+ *
+ * ADR-0089 §2 and §5 claim TWO independent mechanisms. Two independent
+ * mechanisms have to be measured independently, or one of them is only
+ * believed. This pair measures the attribute; the production pair above it
+ * measures both together, which is what actually ships.
+ */
+const ATTR_ONLY_SLUG = "attronly12";
+// The one restatement this file allows itself, and the exception is argued
+// rather than assumed: the cookie NAME lives in a `.server` module whose import
+// graph (the gate, the container, Drizzle) has no business being pulled into a
+// Playwright process. Restating a ten-character literal is cheap and its drift
+// is loud — the cookie assertions below fail outright if the shipped name
+// changes. The sandbox tokens above are the opposite trade: importable for
+// free, and their drift would be SILENT, which is why they are imported.
 const UNLOCK = "arp_unlock";
 
 /** Every request the server saw, so a test can ask what the BROWSER did —
@@ -71,16 +110,17 @@ function reportHtml(label: string): string {
 </body></html>`;
 }
 
-/** The chrome page — a first-party view-origin document that frames the
- *  report exactly the way `ReportFrame` does. Kept in sync with
- *  `apps/view/app/view/frame.ts` by the node-tier assertions there; what this
- *  page adds is a real browser enforcing it. */
-function chromeHtml(): string {
+/** The chrome page — a first-party view-origin document that frames the report
+ *  exactly the way `ReportFrame` does, because it frames it with the SAME
+ *  constants `ReportFrame` applies. Not "kept in sync with"
+ *  `apps/view/app/view/frame.ts`: sourced from it. What this page adds over the
+ *  node tier is a real browser enforcing what those constants mean. */
+function chromeHtml(slug: string): string {
   return `<!doctype html><html><head><title>Owner view</title></head><body>
 <header>chrome</header>
-<iframe id="report" title="report" src="/${SLUG}"
-  sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
-  allow="fullscreen"></iframe>
+<iframe id="report" title="report" src="${reportFrameSrc(slug, "")}"
+  sandbox="${REPORT_FRAME_SANDBOX}"
+  allow="${REPORT_FRAME_ALLOW}"></iframe>
 </body></html>`;
 }
 
@@ -92,6 +132,20 @@ test.beforeAll(async () => {
       cookie: req.headers.cookie,
       dest: req.headers["sec-fetch-dest"] as string | undefined,
     });
+
+    // The attribute-only pair, served BARE — no CSP, no sandbox header, nothing
+    // but a content type. Anything the browser enforces on it came from the
+    // iframe attribute, because there is nothing else it could have come from.
+    if (path === `/${ATTR_ONLY_SLUG}/view` || path === `/${ATTR_ONLY_SLUG}`) {
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("cache-control", "no-store");
+      res.end(
+        path === `/${ATTR_ONLY_SLUG}/view`
+          ? chromeHtml(ATTR_ONLY_SLUG)
+          : reportHtml("attribute-only report"),
+      );
+      return;
+    }
 
     // The REAL header builders, not restatements of them.
     const headers =
@@ -113,7 +167,7 @@ test.beforeAll(async () => {
         "set-cookie",
         `${UNLOCK}=unlock-token; Path=/${SLUG}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
       );
-      res.end(chromeHtml());
+      res.end(chromeHtml(SLUG));
       return;
     }
     if (path === `/${SLUG}`) {
@@ -200,6 +254,22 @@ test.describe("@owner-view-framing the framing contract, both ways", () => {
     const nestedRequest = seen.find((r) => r.path === `/${OTHER_SLUG}`);
     expect(nestedRequest, "the blocked frame still issued its request").toBeTruthy();
     expect(nestedRequest?.cookie ?? "").not.toContain(UNLOCK);
+  });
+
+  test("the sandbox ATTRIBUTE contains the report on its own, with no CSP behind it", async ({
+    page,
+  }) => {
+    // The attribute half of ADR-0089's "two independent mechanisms", isolated.
+    // Over the real header stack this assertion is answered by the top-level
+    // `sandbox` CSP before the attribute is even consulted, so it is made here
+    // against a bare-served pair where the attribute is the only thing there
+    // is. Add `allow-same-origin` to `REPORT_FRAME_SANDBOX` and THIS is the
+    // test that goes red — the ones above it would not, and that gap is the
+    // reason this one exists.
+    await page.goto(`${origin}/${ATTR_ONLY_SLUG}/view`);
+    await expect(page.frameLocator("#report").locator("#probe")).toHaveText(
+      "cookie:threw parent:threw",
+    );
   });
 
   test("the chrome page and the report it frames are UNIFORMLY origin-keyed", async ({ page }) => {
