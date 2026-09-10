@@ -64,6 +64,10 @@ describe("db schema", () => {
       "unsplittable",
       "unparsable",
     ]);
+    // ADR-0089 — the orthogonal RETENTION verdict. Two values, and UNKNOWN is
+    // again the column's NULLability rather than a third value: a version
+    // nobody probed must not read as `lossless`.
+    expect(schema.versionFidelityEnum.enumValues).toEqual(["lossless", "lossy"]);
   });
 
   it("maps domain columns to snake_case", () => {
@@ -84,6 +88,10 @@ describe("db schema", () => {
     // migration that never looked at its bytes.
     expect(schema.reportVersions.editability.notNull).toBe(false);
     expect(schema.reportVersions.editability.hasDefault).toBe(false);
+    // ADR-0089 inherits that policy verbatim: no migration can read R2, so no
+    // migration can honestly call an existing row lossless.
+    expect(schema.reportVersions.fidelity.notNull).toBe(false);
+    expect(schema.reportVersions.fidelity.hasDefault).toBe(false);
   });
 
   it("applies ON DELETE CASCADE only on the three documented FKs", () => {

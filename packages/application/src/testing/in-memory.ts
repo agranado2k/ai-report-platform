@@ -55,6 +55,8 @@ import type {
   EmailMessage,
   EmailSender,
   EventOutbox,
+  FidelityProbe,
+  FidelityVerdict,
   FolderListQuery,
   FolderPage,
   FolderRepository,
@@ -313,6 +315,7 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
         // ADR-0080 — the LIVE version's verdict, mirroring the adapter's 1:1
         // left join on `reports.live_version_id`: null when nothing is live.
         editability: r.versions.find((v) => v.id === r.liveVersionId)?.editability ?? null,
+        fidelity: r.versions.find((v) => v.id === r.liveVersionId)?.fidelity ?? null,
       });
     }
     return ok({ items: summaries, hasMore });
@@ -366,6 +369,7 @@ export class InMemoryReportRepository implements ReportRepository, TxSnapshottab
       sizeBytes: v.sizeBytes,
       origin: v.origin,
       editability: v.editability,
+      fidelity: v.fidelity,
     }));
     return ok(keysetPage(summaries, q));
   }
@@ -809,6 +813,32 @@ export class FakeEditabilityProbe implements EditabilityProbe {
   }
 
   probe(entryDocument: Uint8Array, hasSourceDoc: boolean): VersionEditability {
+    this.probed.push({ html: new TextDecoder().decode(entryDocument), hasSourceDoc });
+    return this.verdict;
+  }
+}
+
+/** A scripted {@link FidelityProbe} (ADR-0089). Records every call so a test can
+ *  assert WHETHER it was consulted at all — the gate ("only when editability is
+ *  `editable`") is a property of the caller, and an unconsulted probe is how you
+ *  see it holding. Defaults to `lossless` with nothing lost.
+ *
+ *  Deliberately NOT the real `probeFidelity`, for the ADR-024 reason its sibling
+ *  is not: the real predicate is covered by
+ *  `packages/report-html/src/fidelity-probe.test.ts` and the adapter's own test. */
+export class FakeFidelityProbe implements FidelityProbe {
+  private verdict: FidelityVerdict | null = {
+    fidelity: "lossless",
+    lostElements: [],
+    lostAttributes: [],
+  };
+  readonly probed: { html: string; hasSourceDoc: boolean }[] = [];
+
+  setVerdict(verdict: FidelityVerdict | null): void {
+    this.verdict = verdict;
+  }
+
+  probe(entryDocument: Uint8Array, hasSourceDoc: boolean): FidelityVerdict | null {
     this.probed.push({ html: new TextDecoder().decode(entryDocument), hasSourceDoc });
     return this.verdict;
   }

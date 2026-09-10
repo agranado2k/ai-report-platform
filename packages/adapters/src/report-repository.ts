@@ -39,6 +39,7 @@ import {
   type Slug,
   userId,
   type VersionEditability,
+  type VersionFidelity,
   type VersionId,
   type VersionManifest,
   type VersionOrigin,
@@ -83,6 +84,7 @@ function versionToRow(reportRowId: string, v: ReportVersion): typeof reportVersi
     scanStatus: v.scanStatus,
     origin: v.origin,
     editability: v.editability,
+    fidelity: v.fidelity,
   };
 }
 
@@ -97,6 +99,7 @@ function rowToVersion(row: VersionRow): ReportVersion {
     sizeBytes: row.sizeBytes,
     origin: row.origin as VersionOrigin,
     editability: (row.editability ?? null) as VersionEditability | null,
+    fidelity: (row.fidelity ?? null) as VersionFidelity | null,
   };
 }
 
@@ -112,6 +115,7 @@ function rowToVersionSummary(row: VersionRow): ReportVersionSummary {
     sizeBytes: row.sizeBytes,
     origin: row.origin as VersionOrigin,
     editability: (row.editability ?? null) as VersionEditability | null,
+    fidelity: (row.fidelity ?? null) as VersionFidelity | null,
   };
 }
 
@@ -283,6 +287,11 @@ export class DrizzleReportRepository implements ReportRepository {
           // the user a silent redirect. NULL for an unpublished report (no live
           // version) and for every version written before ADR-0080.
           editability: reportVersions.editability,
+          // ADR-0089 — the LIVE version's recorded Fidelity, riding the SAME
+          // 1:1 join, so it costs no extra round-trip. NULL for an unpublished
+          // report, for every version written before ADR-0089, and for every
+          // version the probe had no round trip to run on.
+          fidelity: reportVersions.fidelity,
         })
         .from(reports)
         // acls is 1:1 with reports (PK report_id), so this join never fans out.
@@ -311,6 +320,7 @@ export class DrizzleReportRepository implements ReportRepository {
           hasOrgWrite: r.hasOrgWrite === true,
           allowedEmailCount: Number(r.allowedEmailCount ?? 0),
           editability: (r.editability ?? null) as VersionEditability | null,
+          fidelity: (r.fidelity ?? null) as VersionFidelity | null,
         })),
         hasMore,
       });

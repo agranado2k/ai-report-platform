@@ -108,6 +108,52 @@ describe("createReport", () => {
     });
     expect(report.versions[0]?.editability).toBe("unsplittable");
   });
+
+  it("leaves fidelity UNKNOWN (null) when the caller did not probe (ADR-0089)", () => {
+    // Same rule as editability, and for the same reason: `null` means "nobody
+    // asked". Defaulting to `lossless` would assert, for every pre-ADR-0089
+    // row, precisely the claim the field exists to stop assuming.
+    expect(newReport().versions[0]?.fidelity).toBeNull();
+  });
+
+  it("records an explicit fidelity verdict on the first version", () => {
+    const { report } = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      editability: "editable",
+      fidelity: "lossy",
+    });
+    expect(report.versions[0]?.fidelity).toBe("lossy");
+  });
+
+  it("carries editability and fidelity independently — the orthogonal pair (ADR-0089)", () => {
+    // `editable` + `lossy` is the whole point of a second field: it is the
+    // case a fourth editability value could not represent.
+    const { report } = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      editability: "editable",
+      fidelity: "lossy",
+    });
+    expect(report.versions[0]?.editability).toBe("editable");
+    expect(report.versions[0]?.fidelity).toBe("lossy");
+  });
 });
 
 describe("addVersion", () => {
@@ -174,6 +220,50 @@ describe("addVersion", () => {
       expect(result.value.report.versions[0]?.editability).toBe("editable");
       expect(result.value.report.versions[1]?.editability).toBe("unsplittable");
     }
+  });
+
+  it("records fidelity per version — a re-upload's verdict never rewrites v1's", () => {
+    // A re-upload that adds a script must not retro-label the lossless version
+    // that preceded it, and a re-upload that removes one must not be reported
+    // as still lossy. It is a fact about ONE set of bytes (ADR-0089).
+    const r = createReport({
+      id: reportId("r1"),
+      orgId: orgId("o1"),
+      folderId: folderId("f1"),
+      slug: slug(),
+      title: "Q3 metrics",
+      versionId: versionId("v1"),
+      contentHash: "hash-1",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      fidelity: "lossless",
+    }).report;
+    const result = addVersion(r, {
+      versionId: versionId("v2"),
+      contentHash: "hash-2",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+      fidelity: "lossy",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.report.versions[0]?.fidelity).toBe("lossless");
+      expect(result.value.report.versions[1]?.fidelity).toBe("lossy");
+    }
+  });
+
+  it("leaves an added version's fidelity UNKNOWN (null) when not probed", () => {
+    const result = addVersion(newReport(), {
+      versionId: versionId("v2"),
+      contentHash: "hash-2",
+      uploadedBy: userId("u1"),
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 11,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.report.versions[1]?.fidelity).toBeNull();
   });
 
   it("leaves an added version's editability UNKNOWN (null) when not probed", () => {

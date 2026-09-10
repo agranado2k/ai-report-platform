@@ -458,6 +458,96 @@ describe("uploadReport — Editability (ADR-0080)", () => {
   });
 });
 
+describe("uploadReport — Fidelity (ADR-0089)", () => {
+  it("records the probed verdict on the new version", async () => {
+    const { deps, reports, fidelity } = makeDeps();
+    fidelity.setVerdict({ fidelity: "lossy", lostElements: ["script"], lostAttributes: [] });
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.fidelity).toBe("lossy");
+  });
+
+  it("probes the ENTRY DOCUMENT's bytes, verbatim", async () => {
+    const { deps, fidelity } = makeDeps();
+    await uploadReport(deps, cmd());
+    expect(fidelity.probed).toEqual([{ html: "<h1>ok</h1>", hasSourceDoc: false }]);
+  });
+
+  it("does NOT consult the fidelity probe when the document cannot be opened", async () => {
+    // The gate, at its seam. There is no round trip to run on bytes the editor
+    // cannot split or parse, so there is no honest verdict — and asking anyway
+    // would spend a full parse to manufacture one (ADR-0089 §2).
+    const { deps, reports, editability, fidelity } = makeDeps();
+    editability.setVerdict("unsplittable");
+    await uploadReport(deps, cmd());
+    expect(fidelity.probed).toEqual([]);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.fidelity).toBeNull();
+  });
+
+  it("tells the probe a _source.json sidecar will be written (editor saves)", async () => {
+    // This is how edit-saves are covered for free: saveEditedVersion is a
+    // wrapper over THIS use case, not a second pipeline, and the sidecar makes
+    // the verdict lossless by construction (ADR-0062 §4).
+    const { deps, fidelity } = makeDeps();
+    await uploadReport(deps, cmd({ sourceDoc: { type: "doc", content: [] } }));
+    expect(fidelity.probed[0]?.hasSourceDoc).toBe(true);
+  });
+
+  it("records UNKNOWN when the probe has no answer", async () => {
+    const { deps, reports, fidelity } = makeDeps();
+    fidelity.setVerdict(null);
+    await uploadReport(deps, cmd());
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.fidelity).toBeNull();
+  });
+
+  it("records a fresh verdict per re-upload, leaving the prior version's alone", async () => {
+    const { deps, reports, fidelity } = makeDeps();
+    fidelity.setVerdict({ fidelity: "lossless", lostElements: [], lostAttributes: [] });
+    await uploadReport(deps, cmd());
+    fidelity.setVerdict({ fidelity: "lossy", lostElements: ["svg"], lostAttributes: [] });
+    const again = await uploadReport(deps, cmd({ updateSlug: "slug000001" }));
+    expect(again.ok).toBe(true);
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions.map((v) => v.fidelity)).toEqual(["lossless", "lossy"]);
+  });
+
+  it("ACCEPTS a lossy upload — view-only content is a state, not a rejection", async () => {
+    const { deps, blobs, fidelity } = makeDeps();
+    fidelity.setVerdict({
+      fidelity: "lossy",
+      lostElements: ["script", "svg"],
+      lostAttributes: ["hidden"],
+    });
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.result.version).toBe(1);
+    // …and the bytes are stored regardless (ADR-0038 untouched).
+    const blob = await blobs.readObject(reportId("r1"), versionId("v1"), "index.html");
+    expect(blob.ok && blob.value?.path).toBe("index.html");
+  });
+
+  it("leaves fidelity UNKNOWN when the bundle has no entry-document bytes to probe", async () => {
+    const { deps, reports, bundles, fidelity } = makeDeps();
+    bundles.setResult(
+      ok({
+        files: [
+          { path: "other.html", contentType: "text/html", bytes: new TextEncoder().encode("x") },
+        ],
+        entryDocument: "index.html",
+        contentHash: "hash-default",
+        sizeBytes: 1,
+      }),
+    );
+    await uploadReport(deps, cmd());
+    const found = await reports.findBySlug(sv("slug000001"));
+    expect(found.ok && found.value?.versions[0]?.fidelity).toBeNull();
+    expect(fidelity.probed).toEqual([]);
+  });
+});
+
 describe("uploadReport — Editability on an idempotent replay (ADR-0080)", () => {
   it("replays the recorded verdict rather than re-probing", async () => {
     const { deps, editability } = makeDeps();

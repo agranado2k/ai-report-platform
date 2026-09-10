@@ -24,6 +24,7 @@ import {
   type ScanStatus,
   type UserId,
   type VersionEditability,
+  type VersionFidelity,
   type VersionId,
   type VersionManifest,
   type VersionOrigin,
@@ -35,6 +36,7 @@ import type {
   BundleProcessor,
   EditabilityProbe,
   EventOutbox,
+  FidelityProbe,
   FolderRepository,
   Hasher,
   IdempotencyStore,
@@ -59,6 +61,9 @@ export interface UploadReportDeps extends CanWriteDeps {
   /** The editor's own open-time precondition (ADR-0080), run at write time so
    *  "views fine, won't edit" is a recorded state rather than a surprise. */
   readonly editability: EditabilityProbe;
+  /** What a save through the editor would COST this version (ADR-0089) — the
+   *  orthogonal twin, run at the same moment through the same seam. */
+  readonly fidelity: FidelityProbe;
   readonly idempotency: IdempotencyStore;
   readonly outbox: EventOutbox;
   /** Audit log (ADR-0070) — one `report.uploaded` row per fresh upload/re-upload. */
@@ -155,6 +160,15 @@ export async function uploadReport(
   // state knowable before a user discovers it as a silent redirect.
   const editability = probeEditability(deps, bundle, cmd.sourceDoc !== undefined);
 
+  // 2d. Fidelity (ADR-0089). The orthogonal question: not whether the editor
+  // can OPEN these bytes but whether it would KEEP them. Probed ONLY when the
+  // answer to the first question is `editable` — on bytes the editor cannot
+  // split or parse there is no round trip to run, so there is no honest
+  // verdict and UNKNOWN is the only truthful answer. Never a rejection either:
+  // publishing view-only content is legitimate.
+  const fidelity =
+    editability === "editable" ? probeFidelity(deps, bundle, cmd.sourceDoc !== undefined) : null;
+
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
   //
   // SECURITY/CORRECTNESS (PR #151 review, Fix 3): `bundle.contentHash` alone
@@ -208,8 +222,8 @@ export async function uploadReport(
 
   // 5. Resolve create vs re-upload, run the domain transition.
   const emission = await (cmd.updateSlug
-    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle, cmd.origin, editability)
-    : create(deps, cmd, bundle, editability));
+    ? reUpload(deps, cmd.updateSlug, cmd.actor, bundle, cmd.origin, editability, fidelity)
+    : create(deps, cmd, bundle, editability, fidelity));
   if (!emission.ok) return emission;
   const { report, events } = emission.value;
   const newVersion = report.versions[report.versions.length - 1];
@@ -354,11 +368,32 @@ function probeEditability(
   return deps.editability.probe(entry.bytes, hasSourceDoc);
 }
 
+/**
+ * The fidelity twin (ADR-0089). Same UNKNOWN rule for the same reason: with no
+ * entry-document bytes there is nothing to round-trip, and guessing `lossless`
+ * would be the false assurance the field exists to remove.
+ *
+ * Only the VERDICT is persisted. The probe also reports WHAT the round trip
+ * would drop, which is what the Edit confirm dialog and the upload warnings
+ * will name (PRD #356); those are separate tickets, so the lost items stay on
+ * the port's contract rather than in this column.
+ */
+function probeFidelity(
+  deps: Pick<UploadReportDeps, "fidelity">,
+  bundle: ProcessedBundle,
+  hasSourceDoc: boolean,
+): VersionFidelity | null {
+  const entry = bundle.files.find((f) => f.path === bundle.entryDocument);
+  if (!entry) return null;
+  return deps.fidelity.probe(entry.bytes, hasSourceDoc)?.fidelity ?? null;
+}
+
 function create(
   deps: UploadReportDeps,
   cmd: UploadCommand,
   bundle: ProcessedBundle,
   editability: VersionEditability | null,
+  fidelity: VersionFidelity | null,
 ) {
   return Promise.resolve(
     ok(
@@ -375,6 +410,7 @@ function create(
         sizeBytes: bundle.sizeBytes,
         origin: cmd.origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
         editability, // ADR-0080 — null when nothing could be probed
+        fidelity, // ADR-0089 — null when unprobed OR not `editable`
       }),
     ),
   );
@@ -387,6 +423,7 @@ async function reUpload(
   bundle: ProcessedBundle,
   origin: VersionOrigin | undefined,
   editability: VersionEditability | null,
+  fidelity: VersionFidelity | null,
 ) {
   const slugR = makeSlug(updateSlug);
   if (!slugR.ok) return slugR;
@@ -411,6 +448,7 @@ async function reUpload(
     sizeBytes: bundle.sizeBytes,
     origin: origin ?? "upload", // ADR-0065 — 'editor' for an edit-save
     editability, // ADR-0080 — this version's own verdict, never v1's
+    fidelity, // ADR-0089 — likewise per version
   });
 }
 

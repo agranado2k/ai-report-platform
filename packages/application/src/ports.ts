@@ -28,6 +28,7 @@ import type {
   TerminalScanStatus,
   UserId,
   VersionEditability,
+  VersionFidelity,
   VersionId,
   VersionOrigin,
 } from "arp-domain";
@@ -86,6 +87,11 @@ export interface ReportSummary {
    *  WHY editing is unavailable instead of handing the user a silent redirect —
    *  which is the whole user-visible point of recording the verdict. */
   readonly editability: VersionEditability | null;
+  /** The LIVE version's Fidelity (ADR-0089) — whether the editor would KEEP its
+   *  bytes, as opposed to merely open them. `null` when there is no live version
+   *  yet, or it was never probed. Rides the SAME 1:1 left join as `editability`,
+   *  so it costs nothing extra. Advisory: a `lossy` report is still editable. */
+  readonly fidelity: VersionFidelity | null;
 }
 
 /** Cursor pagination params (ADR-0053): keyset on the entity's UUIDv7 id, DESC
@@ -147,6 +153,10 @@ export interface ReportVersionSummary {
   /** The editor's recorded open-time verdict on this version's bytes
    *  (ADR-0080); `null` = never probed. */
   readonly editability: VersionEditability | null;
+  /** Whether the editor would KEEP this version's bytes (ADR-0089); `null` =
+   *  never probed. Per version, so version history shows which save changed
+   *  the answer. */
+  readonly fidelity: VersionFidelity | null;
 }
 export type VersionPage = CursorPage<ReportVersionSummary>;
 
@@ -506,6 +516,41 @@ export interface EditabilityProbe {
    *   leg cannot stop it (ADR-0062 §4)
    */
   probe(entryDocument: Uint8Array, hasSourceDoc: boolean): VersionEditability;
+}
+
+// ── Fidelity probe (ADR-0089) ─────────────────────────────────────────────
+/**
+ * What a save through the editor would COST this version — the orthogonal twin
+ * of `EditabilityProbe`, run at the same moment through the same seam.
+ *
+ * A port for exactly the reason `EditabilityProbe` is one: the real
+ * implementation is `arp-report-html`'s `probeFidelity`, which round-trips the
+ * body through ProseMirror + linkedom, and this package stays free of that
+ * dependency (ADR-024).
+ *
+ * Total by contract: it answers or says UNKNOWN, it never throws, and it never
+ * rejects an upload. Publishing view-only content is legitimate.
+ */
+export interface FidelityVerdict {
+  readonly fidelity: VersionFidelity;
+  /** Element names the round trip drops, deduplicated and sorted — the shape an
+   *  affordance can name. Empty when `lossless`. */
+  readonly lostElements: readonly string[];
+  /** Attribute names the round trip drops, deduplicated and sorted. */
+  readonly lostAttributes: readonly string[];
+}
+
+export interface FidelityProbe {
+  /**
+   * @param entryDocument the entry document's bytes, exactly as they will be stored
+   * @param hasSourceDoc whether a `_source.json` sidecar will accompany this
+   *   version — its body was PRODUCED by the serialiser, so the round trip is
+   *   the identity by construction and the answer is `lossless` unparsed
+   *   (ADR-0062 §4)
+   * @returns the verdict, or `null` for UNKNOWN — bytes with no round trip to
+   *   run, which must never be read as `lossless`
+   */
+  probe(entryDocument: Uint8Array, hasSourceDoc: boolean): FidelityVerdict | null;
 }
 
 // ── Idempotency (ADR-0039) ────────────────────────────────────────────────

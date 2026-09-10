@@ -13,6 +13,7 @@ export * from "./comment-repository";
 export * from "./editability-probe";
 export * from "./email-sender";
 export * from "./event-outbox";
+export * from "./fidelity-probe";
 export * from "./folder-repository";
 export * from "./folder-share-store";
 export * from "./grant-store";
