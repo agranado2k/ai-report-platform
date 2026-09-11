@@ -15,8 +15,10 @@
 //     checked INSTEAD of the share-mode ACL, exactly as before)
 //   • the ADR-0063 edit auth seam: the arp_edit cookie + resolveEditAccess,
 //     incl. the Phase 5-E `oa=` owner-access degrade hand-off
-//   • both query-token → Set-Cookie → 303-clean-URL dances (the token never
-//     stays in the address bar / history / referer)
+//   • every query-token → Set-Cookie → 303-clean-URL dance (the token never
+//     stays in the address bar / history / referer) — the view route's
+//     `?access=`, both authenticated routes' `?et=`, and the owner view's
+//     `?oa=`-only entry (ADR-0089 §4)
 //
 // The routes consume the returned Decision and ONLY apply it (build headers,
 // stream the blob / render the editor data) — no access/serve rule lives in a
@@ -150,18 +152,52 @@ interface Surface {
   readonly segment: string;
   readonly capabilityCookie: string;
   readonly ownerCookie: string;
+  /** The two `event` names this surface's degrades log under — the plain one
+   *  and the one that says an owner fallback was in hand. They live on the
+   *  Surface for the same reason the cookie pair does: a surface that could
+   *  half-exist is the mistake this record forbids, and borrowing ANOTHER
+   *  surface's event names is exactly that mistake in the observability
+   *  dimension. It is also what the owner view did until the operator
+   *  overruled it (see `degradeLine`). */
+  readonly degradeEvents: DegradeEvents;
+}
+
+/** A surface's degrade event-name pair. `owner` fires when the degrade carried
+ *  a VERIFIED owner fallback, i.e. when the visitor was walked through the
+ *  `?access=` flow rather than dropped on the bare viewer — the distinction
+ *  the 2026-08-06 lockout was invisible for. */
+interface DegradeEvents {
+  readonly plain: string;
+  readonly owner: string;
 }
 
 const EDIT_SURFACE: Surface = {
   segment: "edit",
   capabilityCookie: EDIT_COOKIE,
   ownerCookie: EDIT_OWNER_COOKIE,
+  // UNCHANGED, and deliberately so: these are the names ADR-0063 Phase 5-E
+  // minted and the ones the incident queries written after the two owner
+  // lockouts key on. Giving the owner view its own pair is precisely what
+  // lets these two stay put.
+  degradeEvents: { plain: "edit-degraded-to-view", owner: "owner-edit-degraded-to-view" },
 };
 
 const OWNER_VIEW_SURFACE: Surface = {
   segment: "view",
   capabilityCookie: OWNER_VIEW_COOKIE,
   ownerCookie: OWNER_VIEW_OWNER_COOKIE,
+  // The owner view's OWN pair (operator decision, 2026-09-10 — this file
+  // previously argued for reusing /edit's; see `degradeLine` for why that
+  // argument lost). The scheme differs from /edit's in one place: the owner
+  // marker sits BEHIND the surface token rather than in front of it, because
+  // a surface already named "owner view" prefixed with `owner-` reads
+  // `owner-owner-view-…`. Moving it behind also buys a property /edit's pair
+  // does not have — the single prefix `owner-view-` selects the whole surface
+  // in a log query.
+  degradeEvents: {
+    plain: "owner-view-degraded-to-view",
+    owner: "owner-view-owner-degraded-to-view",
+  },
 };
 
 /**
@@ -247,7 +283,8 @@ function degradeLocation(slug: string, oa: string | undefined): string {
  *  indistinguishable from four other causes precisely because nothing logged
  *  a reason.
  *
- *  The first five degrade to the viewer (`editDegradeLine`). The three
+ *  The first five degrade to the viewer (`degradeLine`, under the event names
+ *  of whichever surface degraded). The three
  *  `document-*` reasons no longer do: they fire AFTER the capability is proven,
  *  so `/edit` renders its own explanatory page and logs `editUnopenableLine`.
  *  They share this enum because they share the `reason` vocabulary — one
@@ -276,22 +313,63 @@ export type EditDegradeReason =
    *  exists so that if it ever DOES fire it is named rather than silent. */
   | "gate-decision-unusable";
 
-/** The ONE structured log line for an /edit degrade — built here so the gate
- *  and the route (whose own post-gate failures degrade the same way) emit the
- *  identical shape. `owner-edit-degraded-to-view` is kept as the event name
- *  for the owner case: it is the signal ADR-0063 Phase 5-E introduced so "the
- *  secret-misalignment class of incident is visible in logs rather than only
- *  inferable from user reports", and it is what incident queries look for. */
+/**
+ * The ONE structured log line for a degrade off an authenticated surface —
+ * built here so the gate and the route (whose own post-gate failures degrade
+ * the same way) emit the identical shape.
+ *
+ * The event NAME comes off the `Surface`, and each surface has its own pair.
+ * This file used to argue the opposite — that the owner view should log under
+ * `/edit`'s names because "the degrade CLASS is identical" and renaming would
+ * break existing queries. **The operator overruled that (2026-09-10).** The
+ * class is identical; the SURFACE is not, and the surface is what an incident
+ * responder needs first. `/edit` failing is an editor problem. `/<slug>/view`
+ * failing is a FRAMING problem — and once #363 flips owner-open, it is the
+ * problem EVERY owner meets, on a path where the user cannot see a URL to
+ * explain it. Merged names make a framing regression indistinguishable from an
+ * editor regression in exactly the logs that exist to tell them apart, which
+ * is the failure mode ADR-0063 Phase 5-E's signal was created to prevent, one
+ * surface over. `/edit`'s two names are untouched, so no query that exists
+ * today loses its subject; the new surface simply stops answering to them.
+ *
+ * The `reason` vocabulary is deliberately NOT re-cut per surface: "why the
+ * authenticated render failed" is one taxonomy, and ADR-0063's open question
+ * (which reason actually fires in production) stays answerable across both.
+ */
+function degradeLine(
+  surface: Surface,
+  slug: string,
+  ownerFallback: boolean,
+  reason: EditDegradeReason,
+): string {
+  const { plain, owner } = surface.degradeEvents;
+  return JSON.stringify({ event: ownerFallback ? owner : plain, slug, reason });
+}
+
+/** `/edit`'s degrade line — `edit-degraded-to-view` /
+ *  `owner-edit-degraded-to-view`, the ADR-0063 Phase 5-E names. Exported for
+ *  `$slug_.edit.tsx`, whose own post-gate failures degrade identically. */
 export function editDegradeLine(
   slug: string,
   ownerFallback: boolean,
   reason: EditDegradeReason,
 ): string {
-  return JSON.stringify({
-    event: ownerFallback ? "owner-edit-degraded-to-view" : "edit-degraded-to-view",
-    slug,
-    reason,
-  });
+  return degradeLine(EDIT_SURFACE, slug, ownerFallback, reason);
+}
+
+/** The owner view's degrade line — `owner-view-degraded-to-view` /
+ *  `owner-view-owner-degraded-to-view`. A SIBLING of `editDegradeLine` rather
+ *  than a second implementation: both are one call into `degradeLine`, so the
+ *  shape of the line (and the fact that the token never appears in it) cannot
+ *  drift between the two surfaces. Exported for `$slug_.view.tsx`, which must
+ *  call THIS one and not `editDegradeLine` — its `gate-decision-unusable`
+ *  branch is an owner-view degrade. */
+export function ownerViewDegradeLine(
+  slug: string,
+  ownerFallback: boolean,
+  reason: EditDegradeReason,
+): string {
+  return degradeLine(OWNER_VIEW_SURFACE, slug, ownerFallback, reason);
 }
 
 /** The line for a document failure, which no longer degrades to the view at
@@ -647,7 +725,7 @@ async function decideEdit(
   // A valid, already-redeemed arp_edit cookie. Never render the editor without
   // a configured app origin — editViewHeaders REQUIRES it for connect-src, and
   // there would be nowhere for Save to POST to anyway (fail closed).
-  if (!deps.appOrigin) return degradedEdit(slug, oa, "app-origin-unset", deps);
+  if (!deps.appOrigin) return degraded(EDIT_SURFACE, slug, oa, "app-origin-unset", deps);
 
   // Any non-"serve" outcome (not found / deleted / flagged / still scanning)
   // or a lookup failure degrades to the public viewer, which already renders
@@ -656,8 +734,9 @@ async function decideEdit(
   // "render the editor" on top of the one state with a document to edit.
   // Deliberately NO ?v= here — the editor always opens the live version.
   const outcome = await resolveViewableReport(slug, deps.reports);
-  if (!outcome.ok) return degradedEdit(slug, oa, "lookup-failed", deps);
-  if (outcome.value.kind !== "serve") return degradedEdit(slug, oa, "no-servable-version", deps);
+  if (!outcome.ok) return degraded(EDIT_SURFACE, slug, oa, "lookup-failed", deps);
+  if (outcome.value.kind !== "serve")
+    return degraded(EDIT_SURFACE, slug, oa, "no-servable-version", deps);
   return {
     kind: "serve",
     report: outcome.value.report,
@@ -676,8 +755,9 @@ async function decideEdit(
 // `report.acl`: a report anyone could read at /<slug> still needs a capability
 // to get CHROME around it.
 //
-// It differs from decideEdit in exactly two places, and both are ADR-0089
-// decisions rather than conveniences:
+// It differs from decideEdit in exactly three places, and all three are
+// ADR-0089 decisions (or operator decisions on top of it) rather than
+// conveniences:
 //
 //   1. The 303 sets THREE cookies, not two. `arp_view` + `arp_view_oa` under
 //      Path=/<slug>/view, and — from the VERIFIED `oa` — `arp_unlock` under
@@ -697,6 +777,19 @@ async function decideEdit(
 //      inherited by CALLING `funnelTarget`, which is the ONE implementation
 //      of that rule and carries its full rationale. Only what this purpose
 //      does with a NON-funnelled denial differs from /edit.
+//
+//   3. A verified `oa` on the QUERY is redeemed and 303'd even with no `et=`
+//      beside it (operator decision, 2026-09-10). /edit has no equivalent: it
+//      has nothing to serve an `oa`-only visitor, so its `oa` only ever
+//      steers a degrade. Here the `oa` IS the capability for the read-only
+//      chrome, so it gets the same clean-URL hand-off `et=` gets rather than
+//      being served from the address bar. See the arm itself for why its
+//      position between (1) and the serve is load-bearing.
+//
+// It also no longer borrows /edit's degrade EVENT NAMES: every degrade below
+// logs `owner-view-degraded-to-view` / `owner-view-owner-degraded-to-view`
+// (`degradeLine`, operator decision 2026-09-10). The `reason` vocabulary is
+// shared with /edit, unchanged.
 async function decideOwnerView(
   request: Request,
   url: URL,
@@ -739,20 +832,57 @@ async function decideOwnerView(
     // No funnel and no fallback: the bare public viewer, warned. With a
     // verified `oa` this is instead ADR-0089 §3's `ownerRead` row — the same
     // token and check as the `?access=` degrade it replaces, now under chrome.
-    if (!oa) return degradedEdit(slug, undefined, "edit-token-denied", deps);
+    if (!oa) return degraded(OWNER_VIEW_SURFACE, slug, undefined, "edit-token-denied", deps);
     capability = "ownerRead";
+  }
+
+  // A verified `oa` that arrived on the QUERY is redeemed and bounced, exactly
+  // like `?et=` (operator decision, 2026-09-10 — this row used to serve 200).
+  // ADR-0089 §4 claims the hand-off drops tokens out of the address bar, the
+  // history and the referer; a `?oa=`-only entry that served left a 24h
+  // `owner: true` token in all three, and in the referer of every outbound
+  // link the chrome renders, for as long as the tab stayed open.
+  //
+  // WHERE this sits is the whole of its safety, in three directions:
+  //   • AFTER the `handoff` arm, so `?et=…&oa=…` keeps its own three-cookie
+  //     303 (whose first two cookies are scoped to the EDIT token's ~15 min)
+  //     rather than being intercepted by this one.
+  //   • AFTER the rejection-vs-absence routing, so a REJECTED capability still
+  //     funnels to the mint even holding a verified `oa` — ADR-0063 Phase 5-G,
+  //     the rule this file inherits by call rather than by copy.
+  //   • Only for a QUERY `oa`. One already in the cookie jar has been through
+  //     this hop; redeeming it again would 303 the very request the 303
+  //     produces, forever, and the `ownerRead` serve arm below would become
+  //     unreachable.
+  //
+  // Both Max-Ages are the `oa` token's OWN remaining life. There is no edit
+  // token anywhere on this path — that is what "`?oa=`-only" means — so the
+  // edit capability's ~15 min does not exist here to borrow, and borrowing it
+  // would expire the fallback ~23h early and bounce the FRAME to the unlock
+  // wall mid-session, in the one place the user cannot see a URL.
+  if (oa && cap.oaFromQuery) {
+    const maxAge = ownerAccessMaxAge(oa, slug, deps);
+    return {
+      kind: "setCookieAndRedirect",
+      cookies: [
+        ownerFallbackCookie(OWNER_VIEW_SURFACE, slug, oa, maxAge),
+        unlockCookie(slug, oa, maxAge),
+      ],
+      to: `/${slug}/view`,
+    };
   }
 
   // Never render the chrome without a configured app origin — its header
   // profile (editViewHeaders) requires one for connect-src (fail closed).
-  if (!deps.appOrigin) return degradedEdit(slug, oa, "app-origin-unset", deps);
+  if (!deps.appOrigin) return degraded(OWNER_VIEW_SURFACE, slug, oa, "app-origin-unset", deps);
 
   // Any non-"serve" outcome or a lookup failure degrades to the public viewer,
   // which owns the ADR-0038 §2 state machine. Deliberately no ?v=: the owner
   // view frames the live version, exactly as the editor opens it.
   const outcome = await resolveViewableReport(slug, deps.reports);
-  if (!outcome.ok) return degradedEdit(slug, oa, "lookup-failed", deps);
-  if (outcome.value.kind !== "serve") return degradedEdit(slug, oa, "no-servable-version", deps);
+  if (!outcome.ok) return degraded(OWNER_VIEW_SURFACE, slug, oa, "lookup-failed", deps);
+  if (outcome.value.kind !== "serve")
+    return degraded(OWNER_VIEW_SURFACE, slug, oa, "no-servable-version", deps);
   return {
     kind: "serve",
     report: outcome.value.report,
@@ -793,7 +923,8 @@ const MAX_OWNER_FALLBACK_LENGTH = 1024;
  *
  * `oa` used to be taken straight off the query/cookie: written verbatim into a
  * `Set-Cookie`, and used as `ownerFallback: oa !== undefined` — the flag that
- * selects the `owner-edit-degraded-to-view` event. So anyone holding a valid
+ * selects a degrade's OWNER event name (`owner-edit-degraded-to-view` on
+ * /edit, `owner-view-owner-degraded-to-view` on the owner view). So anyone holding a valid
  * `et=` (notably a write-grantee, for whom `ownerOpenLocation` deliberately
  * never mints an `oa`, open-report.server.ts) could append `&oa=anything` and
  * forge the exact incident signal this seam exists to produce — and plant
@@ -838,28 +969,32 @@ function readOwnerFallbackCookie(
 /** What the request proved about its holder, before any report is looked up.
  *  Extracted so the two authenticated purposes share ONE reading of the
  *  `?et=` / cookie / `?oa=` seam and differ only in what they DO about it. */
-type Capability =
+type Capability = OwnerFallbackRead &
   /** A fresh, valid `?et=` — redeem it into cookies and bounce to a clean URL. */
-  | {
-      readonly kind: "handoff";
-      readonly token: string;
-      readonly maxAge: number;
-      readonly oa: string | undefined;
-    }
-  /** A valid, already-redeemed capability cookie. */
-  | {
-      readonly kind: "held";
-      readonly token: string;
-      readonly claims: EditClaims;
-      readonly oa: string | undefined;
-    }
-  /** No usable capability. `cause` decides funnel-vs-degrade — the rule is
-   *  `funnelTarget`, which both authenticated purposes call. */
-  | {
-      readonly kind: "refused";
-      readonly cause: EditDenialCause;
-      readonly oa: string | undefined;
-    };
+  (
+    | { readonly kind: "handoff"; readonly token: string; readonly maxAge: number }
+    /** A valid, already-redeemed capability cookie. */
+    | { readonly kind: "held"; readonly token: string; readonly claims: EditClaims }
+    /** No usable capability. `cause` decides funnel-vs-degrade — the rule is
+     *  `funnelTarget`, which both authenticated purposes call. */
+    | { readonly kind: "refused"; readonly cause: EditDenialCause }
+  );
+
+/** The owner-fallback half of a `Capability`, which every arm reads identically
+ *  and therefore states once rather than three times.
+ *
+ *  `fromQuery` is not bookkeeping — it is the difference between a token that
+ *  has been redeemed and one that has not. A fallback on the QUERY is still in
+ *  the address bar, the history and the referer, so the owner view redeems it
+ *  into cookies and 303s to the clean URL (ADR-0089 §4, operator decision
+ *  2026-09-10), exactly as it does for `?et=`. A fallback already carried by
+ *  the COOKIE has been through that hop; 303ing on it would loop forever. The
+ *  two used to collapse into one `oa` here, which is why the query-only entry
+ *  quietly served 200 with the token showing. */
+interface OwnerFallbackRead {
+  readonly oa: string | undefined;
+  readonly oaFromQuery: boolean;
+}
 
 /**
  * Read this request's capability for `surface`. Pure over `deps`; looks at
@@ -879,21 +1014,30 @@ function readCapability(
   surface: Surface,
   deps: GateDeps,
 ): Capability {
+  const queryOa = url.searchParams.get("oa") ?? undefined;
   const oa = acceptOwnerFallback(
-    url.searchParams.get("oa") ?? readOwnerFallbackCookie(cookieHeader, surface.ownerCookie),
+    queryOa ?? readOwnerFallbackCookie(cookieHeader, surface.ownerCookie),
     slug,
     deps,
   );
+  // A query `oa` SUPERSEDES the cookie one (above), so a verified `oa` came
+  // off the query exactly when the query carried one at all. An unverifiable
+  // query `oa` leaves `oa` undefined and `fromQuery` false — it buys no
+  // cookie and no bounce, which is the pre-existing behavior kept intact.
+  const fallback: OwnerFallbackRead = {
+    oa,
+    oaFromQuery: oa !== undefined && queryOa !== undefined,
+  };
   const queryToken = url.searchParams.get("et") ?? undefined;
   if (deps.secret && queryToken) {
     const claims = readEditToken(queryToken, slug, deps.secret, deps.nowSeconds);
     // A token was PRESENTED and did not verify — a rejection, not an absence.
-    if (!claims) return { kind: "refused", cause: "rejected", oa };
+    if (!claims) return { kind: "refused", cause: "rejected", ...fallback };
     return {
       kind: "handoff",
       token: queryToken,
       maxAge: Math.max(0, claims.exp - deps.nowSeconds),
-      oa,
+      ...fallback,
     };
   }
   const cookieToken = readCookieValue(cookieHeader, surface.capabilityCookie);
@@ -905,9 +1049,13 @@ function readCapability(
   // under a rotated secret) is a rejection; no cookie at all — or no secret
   // with which to judge one — is an absence.
   if (!claims || !cookieToken) {
-    return { kind: "refused", cause: cookieToken && deps.secret ? "rejected" : "absent", oa };
+    return {
+      kind: "refused",
+      cause: cookieToken && deps.secret ? "rejected" : "absent",
+      ...fallback,
+    };
   }
-  return { kind: "held", token: cookieToken, claims, oa };
+  return { kind: "held", token: cookieToken, claims, ...fallback };
 }
 
 /** Degrade an AUTHENTICATED request (`/edit` or, since ADR-0089, `/<slug>/view`)
@@ -919,20 +1067,19 @@ function readCapability(
  *  the narrower type is what lets the ownerView purpose reuse it instead of
  *  growing a second copy of the same degrade.
  *
- *  NOTE the event names stay `edit-degraded-to-view` /
- *  `owner-edit-degraded-to-view` even when the degrade came from the owner
- *  view. That is deliberate: they are what incident queries look for (ADR-0063
- *  Phase 5-E introduced them for exactly that), the degrade CLASS is identical
- *  — an authenticated surface fell back to the public viewer, possibly
- *  stranding an owner — and the `reason` field already distinguishes the
- *  cause. Renaming them would silently break the queries that exist. */
-function degradedEdit(
+ *  `surface` selects ONLY the event-name pair (`degradeLine`). It is a
+ *  parameter rather than two functions on purpose: the log-and-redirect
+ *  sequence is the part a second copy would get subtly wrong — the
+ *  2026-08-06 lockout was a degrade that redirected without logging — so
+ *  there is exactly one of it, and what varies is data on the `Surface`. */
+function degraded(
+  surface: Surface,
   slug: string,
   oa: string | undefined,
   reason: EditDegradeReason,
   deps: GateDeps,
 ): { readonly kind: "redirect"; readonly to: string } {
-  (deps.warn ?? console.warn)(editDegradeLine(slug, oa !== undefined, reason));
+  (deps.warn ?? console.warn)(degradeLine(surface, slug, oa !== undefined, reason));
   return { kind: "redirect", to: degradeLocation(slug, oa) };
 }
 
@@ -1023,5 +1170,5 @@ function deniedEdit(
   // structured signal — the secret-misalignment class of incident is then
   // visible in logs rather than only inferable from user reports. Never logs
   // the token.
-  return degradedEdit(slug, oa, "edit-token-denied", deps);
+  return degraded(EDIT_SURFACE, slug, oa, "edit-token-denied", deps);
 }

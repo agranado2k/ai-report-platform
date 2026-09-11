@@ -39,11 +39,13 @@ import {
   decideServe,
   degradeTargetFor,
   type EditDecision,
+  editDegradeLine,
   editUnopenableLine,
   type GateDeps,
   OWNER_VIEW_COOKIE,
   OWNER_VIEW_OWNER_COOKIE,
   type OwnerViewDecision,
+  ownerViewDegradeLine,
   UNLOCK_COOKIE,
   type ViewDecision,
 } from "./gate.server";
@@ -1204,6 +1206,69 @@ describe("editUnopenableLine", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The degrade log lines — ONE PAIR PER AUTHENTICATED SURFACE.
+//
+// Both surfaces degrade to the public viewer for the same reasons, and until
+// the operator ruled otherwise the owner view borrowed /edit's event names on
+// the argument that the degrade CLASS is identical. It is not identical in the
+// one way an incident query cares about: which surface the owner was actually
+// on. `/edit` failing is an editor problem; `/<slug>/view` failing is a
+// FRAMING problem, and a dashboard that has flipped owner-open to the owner
+// view (#363) sends every owner down the second one. Merged names make that
+// regression indistinguishable from an editor regression in the logs.
+//
+// The naming scheme differs from /edit's in exactly one way, and deliberately:
+// /edit marks the owner case with an `owner-` PREFIX (`edit-…` /
+// `owner-edit-…`) because its surface token carries no "owner". Prefixing a
+// surface already named "owner view" would give `owner-owner-view-…`, so the
+// marker moves BEHIND the surface token. The dividend is that one prefix,
+// `owner-view-`, selects the whole surface in a log query — which is the
+// property /edit's pair does not have.
+// ---------------------------------------------------------------------------
+describe("degrade log lines", () => {
+  it("names the owner view's own surface, with the owner marker behind it", () => {
+    expect(JSON.parse(ownerViewDegradeLine(SLUG, true, "no-servable-version"))).toEqual({
+      event: "owner-view-owner-degraded-to-view",
+      slug: SLUG,
+      reason: "no-servable-version",
+    });
+    expect(JSON.parse(ownerViewDegradeLine(SLUG, false, "no-servable-version"))).toEqual({
+      event: "owner-view-degraded-to-view",
+      slug: SLUG,
+      reason: "no-servable-version",
+    });
+  });
+
+  it("leaves /edit's pair exactly as ADR-0063 Phase 5-E minted it", () => {
+    // UNCHANGED is the requirement, not an observation: these two names are
+    // what the incident queries written after the 2026-08-06 owner lockout
+    // key on. The owner view got its own pair so that /edit would not have to
+    // give up its own.
+    expect(JSON.parse(editDegradeLine(SLUG, true, "edit-token-denied")).event).toBe(
+      "owner-edit-degraded-to-view",
+    );
+    expect(JSON.parse(editDegradeLine(SLUG, false, "edit-token-denied")).event).toBe(
+      "edit-degraded-to-view",
+    );
+  });
+
+  it("shares the `reason` vocabulary — one taxonomy of why, two surfaces", () => {
+    // The reasons are NOT re-cut per surface: "why the authenticated render
+    // failed" is one question, and the ADR-0063 open question (which reason
+    // fires in production) stays answerable across both.
+    const reason = "app-origin-unset" as const;
+    expect(JSON.parse(ownerViewDegradeLine(SLUG, false, reason)).reason).toBe(
+      JSON.parse(editDegradeLine(SLUG, false, reason)).reason,
+    );
+  });
+
+  it("never carries the token itself, on either surface", () => {
+    expect(ownerViewDegradeLine(SLUG, true, "lookup-failed")).not.toMatch(/access=|oa=/);
+    expect(editDegradeLine(SLUG, true, "lookup-failed")).not.toMatch(/access=|oa=/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // purpose: "ownerView" — the owner view's decision matrix (ADR-0089).
 //
 // The owner view (`GET /<slug>/view`) frames the CANONICAL `/<slug>` under
@@ -1313,6 +1378,113 @@ describe("decideServe — purpose: ownerView — the `?et=` hand-off and its coo
       to: `/${SLUG}/view`,
     });
   });
+
+  // -------------------------------------------------------------------------
+  // ADR-0089 §3, the `?oa=`-ONLY row (operator decision, 2026-09-10).
+  //
+  // An `oa` on the QUERY with no `et=` is what a re-followed link, a bookmark,
+  // or an `/open` that could not mint produces. It used to SERVE 200 — which
+  // left a 24h `owner: true` token sitting in the address bar, the history and
+  // the referer of every outbound link the chrome renders, for the whole
+  // session. §4's stated property is that the hand-off drops tokens out of all
+  // three, and a row that serves instead of redeeming does not have it. So
+  // this entry now redeems exactly like `?et=`: cookies, then 303 to the clean
+  // URL. The `ownerRead` SERVE arm is unchanged and still reached — one hop
+  // later, off the cookie the 303 just set.
+  // -------------------------------------------------------------------------
+  it("redeems a query-only `oa=` into cookies and 303s, rather than serving 200", async () => {
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        // The fallback, at the surface's own Path — never `/${SLUG}`, which is
+        // the framed request (§4a), and never `/${SLUG}/edit`, which is what
+        // makes the Edit action funnel through the app's live canWrite
+        // re-check (§4b).
+        `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${SLUG}/view; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+        // The frame's read capability. BOTH Max-Ages are the `oa` token's own
+        // remaining life: there is no edit token anywhere on this path, so the
+        // ~15-minute figure the `?et=` hand-off uses for the first cookie does
+        // not exist here and inventing it would expire the fallback 23 hours
+        // early — straight back to the unlock wall, inside the iframe.
+        `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+
+  it("serves `ownerRead` when that 303's own cookies come back — no redirect loop", async () => {
+    // The other half of the rule, and the one that makes it safe: only a
+    // QUERY-borne `oa` is redeemed. Replay the cookies the 303 above set and
+    // the request must SERVE. Collapsing query and cookie into one `oa` — the
+    // shape `readCapability` had — would 303 this request too, forever.
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}`,
+    });
+
+    expect(decision.kind).toBe("serve");
+    if (decision.kind !== "serve") return;
+    expect(decision.capability).toBe("ownerRead");
+    // …still re-issuing the frame's unlock cookie on the serve (§4c), which is
+    // the only thing standing between read-only chrome and an unlock wall
+    // inside the iframe.
+    expect(decision.cookies).toEqual([
+      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    ]);
+  });
+
+  it("redeems a query `oa=` even when a capability cookie is already held", async () => {
+    // ONE rule — "a verified `oa` on the query is redeemed and bounced" —
+    // rather than an `ownerRead` special case. This request would otherwise
+    // serve `write` chrome with the owner token still in the address bar,
+    // which is the same leak the row above closes, and an arm-specific rule is
+    // what rots when the matrix grows a row (ADR-0089's Consequences).
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${SLUG}/view; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+        `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+
+  it("leaves an UNVERIFIABLE query `oa=` exactly where it was — no cookie, no 303", async () => {
+    // `acceptOwnerFallback` is the gate on this whole row: a forged or
+    // non-owner `oa` must not buy a `Set-Cookie`, and must not buy the 303
+    // either. With nothing verified this is an ordinary anonymous request, so
+    // it funnels — the answer a nonexistent report also gets.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?oa=${encodeURIComponent(accessToken())}`,
+    });
+
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+
+  it("still funnels a REJECTED capability, even with a verified `oa` on the query", async () => {
+    // The redemption is inserted AFTER the rejection-vs-absence routing, not
+    // before it. ADR-0063 Phase 5-G: a token that was presented and failed
+    // says the round-trip broke, and the mint — which re-issues `oa` on its
+    // way back — is what repairs it. 303ing here would swap a rule two
+    // production incidents paid for for a cosmetic one about the address bar.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?oa=${encodeURIComponent(ownerAccess())}`,
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken(900, NOW - 5000)}`,
+    });
+
+    expect(decision).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
 });
 
 describe("decideServe — purpose: ownerView — serving", () => {
@@ -1343,32 +1515,6 @@ describe("decideServe — purpose: ownerView — serving", () => {
     if (decision.kind !== "serve") return;
     expect(decision.capability).toBe("ownerRead");
     expect(decision.ownerFallback).toBe(true);
-  });
-
-  it("enters `ownerRead` from an `oa=` on the QUERY too, not only from the cookie", async () => {
-    const oa = ownerAccess();
-    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
-      path: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
-    });
-
-    // ADR-0089 §3's `ownerRead` row reads "`arp_view_oa` cookie OR `oa=`
-    // query", and the QUERY half is the one that fires first in production:
-    // #363 sends an owner here as `?et=…&oa=…`, so a request whose `et=` is
-    // missing entirely — a re-followed link, a bookmark, an `/open` that could
-    // not mint — arrives with the fallback on the query and NOTHING in the
-    // cookie jar. Every other `ownerRead` test here arrives post-303, with
-    // `arp_view_oa` already set, so the regression this one catches is
-    // `readCapability` losing its `searchParams.get("oa")` half (or the
-    // ownerView purpose reading the cookie directly instead of going through
-    // it): those tests would all still pass while a real owner silently
-    // funnelled back to the mint instead of getting read-only chrome.
-    expect(decision.kind).toBe("serve");
-    if (decision.kind !== "serve") return;
-    expect(decision.capability).toBe("ownerRead");
-    expect(decision.ownerFallback).toBe(true);
-    expect(decision.cookies).toEqual([
-      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
-    ]);
   });
 
   it("the read-only serve carries the unlock cookie the framed /<slug> needs", async () => {
@@ -1492,7 +1638,7 @@ describe("decideServe — purpose: ownerView — denial routes nowhere that leak
     });
     expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
-      event: "edit-degraded-to-view",
+      event: "owner-view-degraded-to-view",
       slug: SLUG,
       reason: "edit-token-denied",
     });
@@ -1513,7 +1659,7 @@ describe("decideServe — purpose: ownerView — denial routes nowhere that leak
     });
     expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
-      event: "edit-degraded-to-view",
+      event: "owner-view-degraded-to-view",
       slug: SLUG,
       reason: "edit-token-denied",
     });
@@ -1533,7 +1679,7 @@ describe("decideServe — purpose: ownerView — post-capability degrades", () =
 
     expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}` });
     expect(JSON.parse(warn.mock.calls[0]?.[0] as string)).toEqual({
-      event: "edit-degraded-to-view",
+      event: "owner-view-degraded-to-view",
       slug: SLUG,
       reason: "no-servable-version",
     });
@@ -1572,7 +1718,9 @@ describe("decideServe — purpose: ownerView — post-capability degrades", () =
     });
 
     expect(decision).toEqual({ kind: "redirect", to: `/${SLUG}?access=${encodeURIComponent(oa)}` });
-    expect(JSON.parse(warn.mock.calls[0]?.[0] as string).event).toBe("owner-edit-degraded-to-view");
+    expect(JSON.parse(warn.mock.calls[0]?.[0] as string).event).toBe(
+      "owner-view-owner-degraded-to-view",
+    );
   });
 
   it("404s an invalid slug before anything else", async () => {

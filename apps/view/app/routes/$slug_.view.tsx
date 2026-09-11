@@ -22,7 +22,7 @@ import { useLoaderData } from "@remix-run/react";
 import { describeReportSharing } from "arp-domain";
 import { editViewHeaders } from "arp-headers/view";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
-import { decideServe, editDegradeLine } from "../server/gate.server";
+import { decideServe, ownerViewDegradeLine } from "../server/gate.server";
 import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
 import { OwnerViewChrome } from "../view/components/OwnerViewChrome";
 
@@ -52,7 +52,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // Decision. Degrade exactly the way the gate would — through the gate's
     // own target, which carries the owner `?access=` fallback when one is in
     // play — and leave a line, rather than stranding an owner silently.
-    console.warn(editDegradeLine(slug, decision.ownerFallback, "gate-decision-unusable"));
+    console.warn(ownerViewDegradeLine(slug, decision.ownerFallback, "gate-decision-unusable"));
     return viewerRedirectResponse(decision.degradeTo, 302);
   }
 
