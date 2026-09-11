@@ -124,7 +124,13 @@ Every token is there for a reason, and the absences matter more than the presenc
 - **The `src` carries no token.** The framed navigation is same-site, so it carries the
   path-scoped `arp_unlock` cookie on its own (spike Q1). §4 is what makes sure that cookie
   is there.
-- **The chrome forwards its own URL hash into the `src`**, so `/<slug>/view#3` lands on
+- **The chrome forwards its own URL hash into the `src`**, VERBATIM and exactly ONCE, at
+  load. Verbatim because everything after the first `#` is the fragment by the URL grammar,
+  so it can move where in the document the frame lands but never which document — stripping
+  characters out of it bought nothing and broke every report whose own anchors are
+  path-shaped. Once because a `hashchange` listener plus a keyed remount would reload the
+  framed report on every hash change, discarding its state to honour a navigation the report
+  itself may have caused. So `/<slug>/view#3` lands on
   slide 3, and **focuses the iframe on load**, so arrow keys reach the deck without a
   click.
 
@@ -141,7 +147,8 @@ export type OwnerViewDecision =
       readonly kind: "serve";
       readonly report: Report;
       readonly version: ReportVersion;
-      /** "write" → the Edit action is offered. "ownerRead" → read-only chrome. */
+      /** "write" → Versions and Edit are offered. "ownerRead" → read-only
+       *  chrome, neither action (both navigate to `/<slug>/edit`). */
       readonly capability: OwnerViewCapability;
       readonly degradeTo: string;
       readonly ownerFallback: boolean;
@@ -158,7 +165,7 @@ decision matrix:
 | --- | --- | --- |
 | canWrite (owner or grantee) | valid `et=` on the query | `setCookieAndRedirect` → §4 |
 | canWrite | valid `arp_view` cookie | `serve`, `capability: "write"` |
-| owner, capability **absent**, verified `oa` | `arp_view_oa` cookie or `oa=` query | `serve`, `capability: "ownerRead"` — read-only chrome, **no Edit action**, **+ `arp_unlock`** (§4c) |
+| owner, capability **absent**, verified `oa` | `arp_view_oa` cookie or `oa=` query | `serve`, `capability: "ownerRead"` — read-only chrome, **no actions**, **+ `arp_unlock`** (§4c) |
 | anyone, capability **rejected** (expired/tampered/rotated secret) | — | `redirect` → `{appOrigin}/reports/{slug}/open` (the funnel) |
 | anonymous / unauthorised | nothing | `redirect` → the same funnel, which bounces them to the app home → sign-in |
 | no funnel available (no secret / no `appOrigin`), no `oa` | — | `redirect` → the bare `/{slug}` |
