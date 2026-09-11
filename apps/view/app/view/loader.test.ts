@@ -6,7 +6,12 @@
 //
 // They live under `app/view/` rather than `app/routes/` on purpose: any file
 // in the Remix flat-routes directory becomes a ROUTE.
-import { FixedClock, InMemoryGrantStore, InMemoryReportRepository } from "arp-application/testing";
+import {
+  FixedClock,
+  InMemoryGrantStore,
+  InMemoryOrgWriteGrantStore,
+  InMemoryReportRepository,
+} from "arp-application/testing";
 import {
   type Acl,
   applyScanResult,
@@ -30,6 +35,7 @@ const NOW = 1_700_000_000;
 
 const state = vi.hoisted(() => ({
   reports: null as unknown as InMemoryReportRepository,
+  orgWriteGrants: null as unknown as InMemoryOrgWriteGrantStore,
   appOrigin: undefined as string | undefined,
   secret: undefined as string | undefined,
   // The seam for the loader's DEFENSIVE `!appOrigin` branch. The gate never
@@ -55,6 +61,11 @@ vi.mock("../server/container.server", () => ({
   viewerDeps: () => ({
     reports: state.reports,
     grants: new InMemoryGrantStore(new FixedClock(NOW * 1000)),
+    // The owner view reads this to tell "the org can READ it" from "the org
+    // can EDIT it" (ADR-0078) — `Acl` mode `org` alone cannot. Empty by
+    // default, so a report in `org` mode reads as "Org"; the test that cares
+    // grants a row first.
+    orgWriteGrants: state.orgWriteGrants,
     blobs: { readObject: async () => ({ ok: true as const, value: null }) },
   }),
 }));
@@ -102,6 +113,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   state.forcedDecision = null;
   state.reports = new InMemoryReportRepository();
+  state.orgWriteGrants = new InMemoryOrgWriteGrantStore();
   state.appOrigin = APP_ORIGIN;
   state.secret = SECRET;
   await state.reports.save(buildReport());
@@ -164,6 +176,7 @@ describe("GET /<slug>/view — denial", () => {
 
   it("answers a NONEXISTENT report identically", async () => {
     state.reports = new InMemoryReportRepository();
+    state.orgWriteGrants = new InMemoryOrgWriteGrantStore();
     const res = await get(`/${SLUG}/view`);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${APP_ORIGIN}/reports/${SLUG}/open`);
@@ -221,6 +234,46 @@ describe("GET /<slug>/view — the loader payload", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
+  it("distinguishes an org report the org can READ from one it can EDIT", async () => {
+    // The reason the owner view needs the org write grant at all, and the
+    // reason `Acl` mode alone was not enough: `org` answers "who can see it?"
+    // but not "who can change it?", and only one of those is worth an owner's
+    // alarm. Same copy the dashboard's badge renders, from the same domain
+    // function (ADR-0078) — the two surfaces cannot disagree.
+    await state.reports.save(buildReport({ mode: "org" }));
+
+    const readOnly = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
+    expect(JSON.parse(await readOnly.text()).shareState).toBe("Org");
+
+    await state.orgWriteGrants.grant(
+      reportId("00000000-0000-4000-8000-0000000000a1"),
+      orgId("00000000-0000-4000-8000-000000000001"),
+      userId("00000000-0000-4000-8000-000000000002"),
+    );
+
+    const orgEdit = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
+    expect(JSON.parse(await orgEdit.text()).shareState).toBe("Org + edit");
+  });
+
+  it("renders a share state even when the org-write lookup fails", async () => {
+    // A badge that cannot be computed must not cost an owner their report. It
+    // degrades to the read-only claim, which UNDERSTATES a grant rather than
+    // inventing one, and leaves a line so the failure is visible in the logs.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await state.reports.save(buildReport({ mode: "org" }));
+    state.orgWriteGrants.find = async () => ({
+      ok: false as const,
+      error: { kind: "storage" as const, message: "boom" },
+    });
+
+    const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(await res.text()).shareState).toBe("Org");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("owner-view-org-write-lookup-failed");
+    warn.mockRestore();
   });
 
   it("carries the report title, its slug and its share state", async () => {

@@ -25,6 +25,7 @@ import {
   ACL_WRITE_SCOPE,
   type AclMode,
   advancedSharingDiscardWarning,
+  describeReportSharing,
   type ReportSharingState,
   reportSharingState,
   type UserId,
@@ -57,67 +58,36 @@ export interface ReportBadge {
 /**
  * The row's sharing badge (ADR-0078 §12).
  *
+ * Label and title come from `describeReportSharing` — the domain's single copy
+ * table, shared with the owner view's chrome. Two tables saying "how is this
+ * shared?" in two vocabularies is how one of them gets a correction the other
+ * never receives; the badge's remaining job is the part that is genuinely this
+ * surface's own.
+ *
  * Unlike the folder sidebar's, this badge is never in an "unknown" state: the
  * two facts it needs ride the listing projection, so every row can make a claim
- * it can actually support. The advanced modes get their OWN labels rather than
- * being folded into "shared" — a password-protected report and an org-visible
- * one are not the same thing, and a control that displayed them identically
- * would be the first step towards overwriting one with the other.
+ * it can actually support.
  */
 export function reportSharingBadge(input: {
   readonly aclMode: AclMode;
   readonly hasOrgWrite: boolean;
 }): ReportBadge {
-  const state = reportSharingState(input.aclMode, input.hasOrgWrite);
-  if (state === "org_edit") {
-    return {
-      label: "Org + edit",
-      tone: "warning",
-      title: "Everyone in your org can view AND edit this report. Only you can delete it.",
-    };
-  }
-  if (state === "org_view") {
-    return {
-      label: "Org",
-      tone: "warning",
-      title: "Everyone in your org can view this report. Only you can edit or delete it.",
-    };
-  }
-  if (state === "private") {
-    return { label: "Private", tone: "neutral", title: "Only you can open this report." };
-  }
-  // No sharing state — an advanced mode, or the API-only combination of an org
-  // write grant without org read. Both must read as themselves.
-  switch (input.aclMode) {
-    case "public":
-      return {
-        label: "Public",
-        tone: "danger",
-        title: "Anyone with the link can open this report, inside or outside your org.",
-      };
-    case "password":
-      return {
-        label: "Password",
-        tone: "brand",
-        title: "Anyone with the link AND the password can open this report.",
-      };
-    case "allowlist":
-      return {
-        label: "Allowlist",
-        tone: "brand",
-        title: "Only the specific people you invited can open this report.",
-      };
-    default:
-      // `private`/`org` already returned above unless an org-write row exists
-      // without org read. Saying "Private" here would be the exact lie
-      // `reportSharingState` returns null to prevent.
-      return {
-        label: "Edit only",
-        tone: "danger",
-        title:
-          "Everyone in your org can edit this report but cannot open it — set its sharing to fix that.",
-      };
-  }
+  const { label, title } = describeReportSharing(input.aclMode, input.hasOrgWrite);
+  return { label, title, tone: badgeTone(input.aclMode, input.hasOrgWrite) };
+}
+
+/** The dashboard's palette, which the domain has no opinion about — `warning`,
+ *  `danger` and `brand` are `arp-ui` vocabulary, not sharing vocabulary. The
+ *  cases mirror `describeReportSharing`'s so the two cannot disagree about
+ *  WHICH row they are describing, only about how loud it should look. */
+function badgeTone(mode: AclMode, hasOrgWrite: boolean): BadgeTone {
+  const state = reportSharingState(mode, hasOrgWrite);
+  if (state === "org_edit" || state === "org_view") return "warning";
+  if (state === "private") return "neutral";
+  if (mode === "password" || mode === "allowlist") return "brand";
+  // `public`, and the API-only org write grant without org read: the two rows
+  // whose reach the owner most likely did not intend.
+  return "danger";
 }
 
 export interface ReportSharingManagement {
