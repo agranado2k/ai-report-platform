@@ -75,5 +75,17 @@ export default defineConfig({
       grep: /@owner-view-framing/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // ADR-0089 §2: the owner view's mounted chrome — the hash is adopted
+      // ONCE at load and never re-read. Back over `file://` like the rest of
+      // the tier, because this is about React's behaviour rather than about an
+      // origin: it needs no cookies and no `frame-ancestors`, only a real
+      // browser to mount in and dispatch a `hashchange` at. Its own project
+      // (its own tag) because it shares neither the report fixtures the editor
+      // projects grep for nor the framing project's loopback server.
+      name: "owner-view-chrome",
+      grep: /@owner-view-chrome/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
   ],
 });

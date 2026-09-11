@@ -19,18 +19,16 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { describeReportSharing } from "arp-domain";
 import { editViewHeaders } from "arp-headers/view";
-import { useEffect, useState } from "react";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { decideServe, editDegradeLine } from "../server/gate.server";
 import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
-import { OwnerViewTopBar } from "../view/components/OwnerViewTopBar";
-import { ReportFrame } from "../view/components/ReportFrame";
-import { shareStateLabel } from "../view/share-state";
+import { OwnerViewChrome } from "../view/components/OwnerViewChrome";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const { secret, appOrigin } = viewerAccessConfig();
-  const { reports, grants } = viewerDeps();
+  const { reports, grants, orgWriteGrants } = viewerDeps();
   const slug = params.slug ?? "";
 
   const decision = await decideServe(request, slug, "ownerView", {
@@ -79,6 +77,28 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // what enforces that; this loader only applies what it decided.
   for (const cookie of decision.cookies) headers.append("set-cookie", cookie);
 
+  // The share state the chrome shows is the ADR-0078 `Report sharing description`
+  // — the SAME copy the dashboard's badge renders, from the same domain
+  // function, so the two surfaces cannot answer "how is this shared?"
+  // differently. It needs the org write grant as well as the `Acl` mode,
+  // because `org` alone cannot tell "the org can read it" from "the org can
+  // edit it", and only one of those is worth an owner's alarm.
+  //
+  // A failed lookup degrades to `false` rather than throwing: that renders
+  // `org` as "Org", which UNDERSTATES the grant but never invents one, and an
+  // owner who came here to read their report should not be shown a 500
+  // because a badge could not be computed.
+  const orgWrite = await orgWriteGrants.find(decision.report.id);
+  if (!orgWrite.ok) {
+    console.warn(
+      JSON.stringify({ event: "owner-view-org-write-lookup-failed", slug: decision.report.slug }),
+    );
+  }
+  const sharing = describeReportSharing(
+    decision.report.acl.mode,
+    orgWrite.ok && orgWrite.value !== null,
+  );
+
   // SECURITY (ADR-0089 §6): nothing capability-bearing goes into this payload.
   // The sharpest contrast with `/edit`, which deliberately hydrates its edit
   // token so client JS can Bearer it at the app-origin API — the owner view
@@ -89,7 +109,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     {
       slug: decision.report.slug,
       docTitle: decision.report.title,
-      shareState: shareStateLabel(decision.report.acl.mode),
+      shareState: sharing.label,
       canEdit: decision.capability === "write",
     },
     { headers },
@@ -97,41 +117,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export default function OwnerView() {
-  const { slug, docTitle, shareState, canEdit } = useLoaderData<typeof loader>();
-
-  // The hash is a client-only fact — the server never receives a fragment —
-  // so it starts empty and is adopted on mount, and again on every
-  // `hashchange`, so pasting `#7` into the address bar moves the framed deck
-  // instead of doing nothing.
-  const [hash, setHash] = useState("");
-  useEffect(() => {
-    const sync = () => setHash(window.location.hash);
-    sync();
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, []);
-
-  return (
-    <div className="flex h-dvh flex-col overflow-hidden" data-testid="owner-view">
-      {/* Two props, one value, on purpose: version history lives in the
-          editor's own side panel, so Versions is a deep-link INTO the editor
-          rather than a second destination. They stay two props because they
-          are two user intents that can diverge — the day version history gets
-          a surface of its own, only this line changes — and collapsing them to
-          one prop would have to be un-collapsed to do it. */}
-      <OwnerViewTopBar
-        docTitle={docTitle}
-        shareState={shareState}
-        versionsHref={`/${slug}/edit`}
-        editHref={`/${slug}/edit`}
-        canEdit={canEdit}
-      />
-      <main className="min-h-0 flex-1">
-        {/* `key` on the hash: changing an iframe's `src` hash alone does not
-            re-navigate it, so a hashchange remounts the frame rather than
-            silently doing nothing. */}
-        <ReportFrame key={hash} slug={slug} hash={hash} title={docTitle} />
-      </main>
-    </div>
-  );
+  // Thin on purpose: everything the client does lives in `OwnerViewChrome`, so
+  // the browser tier can mount it without a Remix router. This function exists
+  // only to hand the loader's data across that seam.
+  return <OwnerViewChrome {...useLoaderData<typeof loader>()} />;
 }
