@@ -52,14 +52,25 @@ export function OwnerViewTopBar({
       {/* Anchors wearing the button look (`buttonClass`) rather than
           `<Button>`: both actions are plain navigations, and a real link is
           what makes them middle-clickable, focusable and screen-reader
-          correct. */}
-      <a href={versionsHref} className={buttonClass("secondary", "sm")}>
-        Versions
-      </a>
+          correct.
+
+          BOTH are gated on `canEdit`, not just Edit. Versions is a deep-link
+          into the editor's own side panel, so it lands on `/<slug>/edit` —
+          which, holding no capability under that Path, funnels through the
+          app's one mint and re-checks `canWrite` live (ADR-0089 §4b). For a
+          holder on the owner-read degrade that round-trip ends where it
+          started, so offering the action is offering a dead end. The degrade
+          keeps what it can honour: the report, its title and its share
+          state. */}
       {canEdit ? (
-        <a href={editHref} className={buttonClass("primary", "sm")}>
-          Edit
-        </a>
+        <>
+          <a href={versionsHref} className={buttonClass("secondary", "sm")}>
+            Versions
+          </a>
+          <a href={editHref} className={buttonClass("primary", "sm")}>
+            Edit
+          </a>
+        </>
       ) : null}
     </ChromeBar>
   );

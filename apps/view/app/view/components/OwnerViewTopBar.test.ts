@@ -49,17 +49,24 @@ describe("OwnerViewTopBar", () => {
     expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit</);
   });
 
-  it("withholds Edit on the owner-read degrade, but keeps the rest of the chrome", () => {
+  it("withholds BOTH actions on the owner-read degrade, but keeps the chrome", () => {
     // The visitor proved ownership with a verified `oa` fallback and holds no
-    // edit capability, so the action that would fail is not offered — they
-    // still get the report and the chrome around it, which is the whole
-    // improvement over ADR-0063's bare-viewer degrade.
+    // edit capability. Neither action is offered, and Versions is withheld for
+    // the SAME reason Edit is: it navigates to `/<slug>/edit`, which — holding
+    // no capability under that Path — funnels through the app's mint and
+    // re-checks `canWrite` live. Offering it to a holder who has just been
+    // told they cannot edit is an invitation to a round-trip that ends where
+    // they started.
+    //
+    // What survives is the point of the degrade: the report, the title, and
+    // the share state — chrome around a working report, which is the whole
+    // improvement over ADR-0063's bare-viewer fallback.
     const html = render({ canEdit: false });
     expect(html).not.toContain(">Edit<");
-    // The Versions link survives with its own destination intact — the degrade
-    // withholds one action, it does not collapse the bar onto one href.
-    expect(html).toMatch(/href="\/abcde12345\/edit\?panel=versions"[^>]*>Versions</);
+    expect(html).not.toContain(">Versions<");
+    expect(html).not.toContain("/abcde12345/edit");
     expect(html).toContain("Q3 roadmap review");
+    expect(html).toContain("Private");
   });
 
   it("renders an author-controlled title as text, never as markup", () => {
