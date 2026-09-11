@@ -63,6 +63,18 @@ describe("reportFrameSrc — the frame points at the CANONICAL url, with no toke
     expect(reportFrameSrc("abcde12345", "#")).toBe("/abcde12345");
   });
 
+  it("forwards a structured fragment VERBATIM — `#section/2` is a destination", () => {
+    // A fragment is forwarded exactly as it arrived. It used to be stripped of
+    // `/`, `?` and `\\` on the theory that those could redirect the frame; they
+    // cannot — everything after the `#` is the fragment, so it can change
+    // WHERE IN the document the frame lands but never WHICH document. The
+    // stripping bought nothing and silently broke every report whose own
+    // anchors are path-shaped, which is most generated decks and docs.
+    expect(reportFrameSrc("abcde12345", "#section/2")).toBe("/abcde12345#section/2");
+    expect(reportFrameSrc("abcde12345", "#a?b")).toBe("/abcde12345#a?b");
+    expect(reportFrameSrc("abcde12345", "#a#b")).toBe("/abcde12345#a#b");
+  });
+
   it("cannot be talked out of the report by a crafted hash", () => {
     // The hash is attacker-influenceable (it is whatever is in the address
     // bar) and it is concatenated into an iframe src, so the property that

@@ -50,13 +50,24 @@ export const REPORT_FRAME_ALLOW = "fullscreen";
  * Q1) — and a token here would land a capability in the report's own
  * `document.referrer` and in browser history.
  *
- * The hash is attacker-influenceable (it is whatever sits in the address bar)
- * and it is concatenated into an iframe `src`, so it is **sanitized to a
- * fragment**: everything that could change WHICH document is framed — a `?`,
- * a `/`, a `\`, a `#` of its own — is stripped, and an empty fragment is
- * dropped entirely rather than emitted as a bare `#`.
+ * The hash is attacker-influenceable — it is whatever sits in the address bar
+ * — and it is concatenated into an iframe `src`, so the question is what it
+ * could do. The answer is: change where in the document the frame lands, and
+ * nothing else. **Everything after the first `#` is the fragment**, by the URL
+ * grammar itself, so a `/`, a `?`, a `\` or a second `#` inside it cannot move
+ * the path, cannot add a query, and cannot reach another origin. It is
+ * therefore forwarded **verbatim**, and the only thing dropped is an EMPTY
+ * fragment, which is not a destination and would emit a bare trailing `#`.
+ *
+ * This used to strip `?`, `/`, `\` and `#`. That bought nothing the grammar
+ * did not already guarantee, and it silently mangled legitimate anchors: a
+ * report whose own headings are path-shaped (`#section/2`) — which is most
+ * generated decks and docs — had its deep links quietly stop working, with no
+ * error anywhere. `frame.test.ts` pins the real property by RESOLVING the
+ * result the way a browser would and asserting the origin, path and query are
+ * untouched, which is the guarantee that actually matters.
  */
 export function reportFrameSrc(slug: string, hash: string): string {
-  const fragment = hash.replace(/^#/, "").replace(/[?#/\\]/g, "");
+  const fragment = hash.replace(/^#/, "");
   return fragment ? `/${slug}#${fragment}` : `/${slug}`;
 }
