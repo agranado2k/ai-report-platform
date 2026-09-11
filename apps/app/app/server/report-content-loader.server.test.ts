@@ -161,6 +161,75 @@ describe("loadReportContent", () => {
     expect(result.value.source).toBeUndefined();
   });
 
+  it("carries THIS version's recorded Fidelity, not the report's live one (ADR-0090)", async () => {
+    // A content read addresses ONE set of bytes, so the verdict it returns must
+    // be that version's. Answering with the live version's would misreport
+    // exactly the case version history exists to show: the save that changed
+    // the answer. The two versions are given DIFFERENT verdicts so the
+    // assertion can tell them apart.
+    const h = makeAppTestHarness();
+    h.fidelity.setVerdict({ fidelity: "lossless", lostElements: [], lostAttributes: [] });
+    const created = await seedVersion(h, V1_HTML, "hash-v1", undefined, undefined);
+    const reportSlug = slug(created);
+    h.fidelity.setVerdict({ fidelity: "lossy", lostElements: ["script"], lostAttributes: [] });
+    await seedVersion(h, V2_HTML, "hash-v2", reportSlug, undefined);
+
+    const found = await h.reports.findBySlug(reportSlug);
+    if (!found.ok || !found.value) throw new Error("seed report missing");
+    const v1 = found.value.versions.find((v) => v.versionNo === 1);
+    const v2 = found.value.versions.find((v) => v.versionNo === 2);
+    if (!v1 || !v2) throw new Error("seed versions missing");
+    let report = applyScanResult(found.value, v1.id, "clean").report;
+    report = applyScanResult(report, v2.id, "clean").report;
+    await h.reports.save(report);
+
+    const live = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {});
+    const pinned = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {
+      versionId: v1.id,
+    });
+
+    expect(live.ok && live.value.versionNo).toBe(2);
+    expect(live.ok && live.value.fidelity).toBe("lossy");
+    expect(pinned.ok && pinned.value.versionNo).toBe(1);
+    expect(pinned.ok && pinned.value.fidelity).toBe("lossless");
+  });
+
+  it("carries THIS version's recorded Editability beside its Fidelity (ADR-0080)", async () => {
+    // The content read used to answer "would a save keep these bytes?" without
+    // "can the editor open them at all?" — so a consumer could not tell an
+    // un-openable version from an openable, never-probed one. Both verdicts are
+    // now read off the SAME version being served, so a pinned read answers for
+    // those bytes, not for the report's live version.
+    const h = makeAppTestHarness();
+    h.editability.setVerdict("editable");
+    h.fidelity.setVerdict({ fidelity: "lossless", lostElements: [], lostAttributes: [] });
+    const created = await seedVersion(h, V1_HTML, "hash-v1", undefined, undefined);
+    const reportSlug = slug(created);
+    h.editability.setVerdict("unparsable");
+    await seedVersion(h, V2_HTML, "hash-v2", reportSlug, undefined);
+
+    const found = await h.reports.findBySlug(reportSlug);
+    if (!found.ok || !found.value) throw new Error("seed report missing");
+    const v1 = found.value.versions.find((v) => v.versionNo === 1);
+    const v2 = found.value.versions.find((v) => v.versionNo === 2);
+    if (!v1 || !v2) throw new Error("seed versions missing");
+    let report = applyScanResult(found.value, v1.id, "clean").report;
+    report = applyScanResult(report, v2.id, "clean").report;
+    await h.reports.save(report);
+
+    const live = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {});
+    const pinned = await loadReportContent(depsOf(h), { orgId: ORG, userId: OWNER }, reportSlug, {
+      versionId: v1.id,
+    });
+
+    expect(live.ok && live.value.editability).toBe("unparsable");
+    expect(pinned.ok && pinned.value.editability).toBe("editable");
+    // The un-openable version has no round trip to run, so fidelity stays
+    // UNKNOWN — the pair the content read previously could not express.
+    expect(live.ok && live.value.fidelity).toBeNull();
+    expect(pinned.ok && pinned.value.fidelity).toBe("lossless");
+  });
+
   it("returns a SPECIFIC (non-live) version's HTML when ?version= is given", async () => {
     const { h, slug: reportSlug, v1 } = await twoVersionLiveReport({ withSidecars: false });
 

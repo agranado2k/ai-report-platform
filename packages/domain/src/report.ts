@@ -11,7 +11,12 @@ import type { ReportVersion, VersionManifest } from "./report-version";
 import type { Result } from "./result";
 import { err, ok } from "./result";
 import type { Slug } from "./slug";
-import type { TerminalScanStatus, VersionEditability, VersionOrigin } from "./value-objects";
+import type {
+  TerminalScanStatus,
+  VersionEditability,
+  VersionFidelity,
+  VersionOrigin,
+} from "./value-objects";
 
 export interface Report {
   readonly id: ReportId;
@@ -55,6 +60,9 @@ export interface CreateReportParams {
   /** The editor's open-time verdict on these bytes (ADR-0080). Omitted ⇒ `null`
    *  (UNKNOWN) — the domain never invents a verdict it did not run. */
   readonly editability?: VersionEditability | null;
+  /** Whether the editor would KEEP these bytes (ADR-0090). Omitted ⇒ `null`
+   *  (UNKNOWN), for the same reason: `lossless` is a claim, not a default. */
+  readonly fidelity?: VersionFidelity | null;
 }
 
 /** Create a new Report with its first ReportVersion (version 1, pending scan). */
@@ -69,6 +77,7 @@ export function createReport(p: CreateReportParams): Emission {
     sizeBytes: p.sizeBytes,
     origin: p.origin ?? "upload",
     editability: p.editability ?? null,
+    fidelity: p.fidelity ?? null,
   };
   const report: Report = {
     id: p.id,
@@ -104,6 +113,9 @@ export interface AddVersionParams {
    *  (UNKNOWN). Recorded per version — a re-upload never rewrites its
    *  predecessor's verdict. */
   readonly editability?: VersionEditability | null;
+  /** Whether the editor would KEEP these bytes (ADR-0090). Omitted ⇒ `null`
+   *  (UNKNOWN). Per version for the same reason as `editability`. */
+  readonly fidelity?: VersionFidelity | null;
 }
 
 /**
@@ -125,6 +137,7 @@ export function addVersion(report: Report, p: AddVersionParams): Result<Emission
     sizeBytes: p.sizeBytes,
     origin: p.origin ?? "upload",
     editability: p.editability ?? null,
+    fidelity: p.fidelity ?? null,
   };
   const updated: Report = { ...report, versions: [...report.versions, version] };
   const event: ReportVersionUploaded = {

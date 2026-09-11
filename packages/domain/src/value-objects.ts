@@ -54,3 +54,22 @@ export type VersionOrigin = (typeof VERSION_ORIGINS)[number];
  */
 export const VERSION_EDITABILITY = ["editable", "unsplittable", "unparsable"] as const;
 export type VersionEditability = (typeof VERSION_EDITABILITY)[number];
+
+/**
+ * Whether the editor would KEEP a version's bytes (ADR-0090) — the orthogonal
+ * twin of `VersionEditability`, which says only whether it can OPEN them.
+ *
+ * `lossless` — a parse-then-serialise round trip through the Report HTML
+ * schema loses no element and no attribute. `lossy` — it drops at least one:
+ * the inline `<script>` and `<svg>` of a slide deck are the motivating case,
+ * and that deck is `editable` + `lossy`, which is exactly why this is a
+ * separate field and not a fourth editability value.
+ *
+ * `null` — modelled at the field, not in this enumeration — means UNKNOWN:
+ * nobody ran the probe. That is every version written before ADR-0090, plus
+ * every version whose editability is not `editable` (no round trip to run, so
+ * no honest verdict). Unknown is never read as `lossless`, and nothing gates
+ * on this: a lossy version stays fully editable.
+ */
+export const VERSION_FIDELITY = ["lossless", "lossy"] as const;
+export type VersionFidelity = (typeof VERSION_FIDELITY)[number];

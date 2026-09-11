@@ -162,6 +162,13 @@
       "when": 1786113546936,
       "tag": "0022_reprobe_stale_unsplittable",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789060021683,
+      "tag": "0023_report_versions_fidelity",
+      "breakpoints": true
     }
   ]
 }

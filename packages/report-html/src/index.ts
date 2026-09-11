@@ -13,6 +13,14 @@ export { DIFF_DEL_CLASS, DIFF_INS_CLASS } from "./diff-schema.js";
 // path can record the answer instead of the user discovering it (ADR-0080).
 export type { Editability } from "./editability.js";
 export { probeEditability } from "./editability.js";
+// The editor's RETENTION question, the orthogonal twin of the one above: not
+// "can it open these bytes" but "would it keep them" (ADR-0090).
+// `normalizeBody` / `NormalizedNode` are deliberately NOT re-exported: they are
+// the probe's internal machinery, no package outside this one consumes them, and
+// the `probeEditability` line above sets the precedent of exposing only the probe
+// and its verdict type. The probe's own tests import them from the module path.
+export type { Fidelity, FidelityVerdict } from "./fidelity-probe.js";
+export { probeFidelity } from "./fidelity-probe.js";
 export type { HtmlFallbackDiff } from "./html-fallback.js";
 export {
   diffHtmlFallback,

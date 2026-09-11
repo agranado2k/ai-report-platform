@@ -34,6 +34,7 @@ import type {
   DiffWire,
   FolderWire,
   ListEnvelope,
+  ReportContentWire,
   ReportDetailWire,
   ReportSharingWire,
   ReportWire,
@@ -70,6 +71,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
       editability: "unsplittable",
+      fidelity: null,
       mode: "prod",
     };
     expect(
@@ -81,6 +83,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
           isPublished: true,
           folderId: folderId(F1),
           editability: "unsplittable",
+          fidelity: null,
         },
         CTX,
       ),
@@ -98,11 +101,50 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
         isPublished: true,
         folderId: folderId(F1),
         editability: null,
+        fidelity: null,
       },
       CTX,
     );
     expect("editability" in body).toBe(true);
     expect(body.editability).toBeNull();
+  });
+
+  it("reportBody emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
+    // ADR-0090 inherits the rule: "nobody probed this" must stay
+    // distinguishable from "lossless". Omitting the key would collapse them.
+    const body = reportBody(
+      {
+        id: reportId(R1),
+        slug: "aaaaaaaaaa" as Report["slug"],
+        title: "T",
+        isPublished: true,
+        folderId: folderId(F1),
+        editability: "editable",
+        fidelity: null,
+      },
+      CTX,
+    );
+    expect("fidelity" in body).toBe(true);
+    expect(body.fidelity).toBeNull();
+  });
+
+  it("reportBody carries editability and fidelity independently", () => {
+    // `editable` + `lossy` — the pair a fourth editability value could not
+    // express, and the reason ADR-0090 adds a field instead of a value.
+    const body = reportBody(
+      {
+        id: reportId(R1),
+        slug: "aaaaaaaaaa" as Report["slug"],
+        title: "T",
+        isPublished: true,
+        folderId: folderId(F1),
+        editability: "editable",
+        fidelity: "lossy",
+      },
+      CTX,
+    );
+    expect(body.editability).toBe("editable");
+    expect(body.fidelity).toBe("lossy");
   });
 
   it("commentBody ALWAYS emits `author` and `edited_at` (null-filled, never omitted)", () => {
@@ -146,6 +188,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       sizeBytes: 4096,
       origin: "upload",
       editability: "editable",
+      fidelity: null,
     };
     const expected: VersionWire = {
       object: "version",
@@ -158,6 +201,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       size_bytes: 4096,
       origin: "upload",
       editability: "editable",
+      fidelity: null,
       mode: "prod",
     };
     expect(versionBody(summary, CTX)).toEqual(expected);
@@ -223,6 +267,7 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       is_published: true,
       folder_id: folderIdToWire(folderId(F1)),
       editability: null,
+      fidelity: null,
       mode: "prod",
       owner: userIdToWire(userId(U1)),
       acl: { mode: "allowlist", allowed_emails: ["a@example.com"], access_ttl_seconds: 604_800 },
@@ -258,5 +303,36 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       grantWriteToHttp(ok(grant), { appOrigin: "https://app.example.test", slug: "abcde12345" })
         .body,
     ).toEqual(withEntry);
+  });
+});
+
+describe("ReportContentWire — the content read carries the same verdict pair", () => {
+  it("declares both editability and fidelity as required, nullable keys", () => {
+    // The content read is the third surface for the pair, and the catalog is
+    // where drift between it and the encoder gets caught at compile time. Both
+    // keys are REQUIRED (nullable) rather than optional: `source` is the one
+    // key this resource may omit, because its absence is itself the answer
+    // ("no sidecar"). Omitting a verdict instead would collapse UNKNOWN into a
+    // positive answer — un-openable would read as openable, lossy-unknown as
+    // lossless.
+    const unknown: ReportContentWire = {
+      object: "report_content",
+      slug: "abcde12345",
+      version_id: versionIdToWire(versionId(V1)),
+      version_no: 1,
+      content_type: "text/html",
+      html: "<x>",
+      editability: null,
+      fidelity: null,
+      mode: "prod",
+    };
+    expect("editability" in unknown).toBe(true);
+    expect("fidelity" in unknown).toBe(true);
+    expect(Object.hasOwn(unknown, "source")).toBe(false);
+
+    expectTypeOf<ReportContentWire["editability"]>().toEqualTypeOf<
+      "editable" | "unsplittable" | "unparsable" | null
+    >();
+    expectTypeOf<ReportContentWire["fidelity"]>().toEqualTypeOf<"lossless" | "lossy" | null>();
   });
 });

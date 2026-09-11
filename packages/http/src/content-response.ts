@@ -8,7 +8,7 @@
 // ADR-0062 §4 `_source.json` ProseMirror doc) is included ONLY when the loader
 // resolved one; the key is OMITTED otherwise, never emitted as `null`, so a
 // caller can tell "no sidecar" from "an empty doc".
-import type { AppError, Result, VersionId } from "arp-domain";
+import type { AppError, Result, VersionEditability, VersionFidelity, VersionId } from "arp-domain";
 import { versionIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import type { WireContext } from "./resource";
@@ -21,6 +21,10 @@ export interface ReportContentOutcome {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's Editability (ADR-0080); `null` = never probed. */
+  readonly editability: VersionEditability | null;
+  /** THIS version's Fidelity (ADR-0090); `null` = never probed. */
+  readonly fidelity: VersionFidelity | null;
 }
 
 export function reportContentToHttp(
@@ -28,7 +32,8 @@ export function reportContentToHttp(
   ctx: WireContext,
 ): HttpResponse {
   if (!result.ok) return errorToHttp(result.error);
-  const { slug, versionId, versionNo, contentType, html, source } = result.value;
+  const { slug, versionId, versionNo, contentType, html, source, editability, fidelity } =
+    result.value;
   const body: ReportContentWire = {
     object: "report_content" as const,
     slug,
@@ -37,6 +42,14 @@ export function reportContentToHttp(
     content_type: contentType,
     html,
     ...(source !== undefined ? { source } : {}),
+    // ADR-0080 — the open-time verdict, beside the retention one below. The
+    // content read carried fidelity without it, so a consumer could learn that
+    // a save would be lossy but not that the editor cannot open the document.
+    editability,
+    // ADR-0090 — emitted as `null` when never probed, never omitted: unlike
+    // `source`, whose absence is itself the answer, a missing key here would
+    // collapse UNKNOWN into `lossless`.
+    fidelity,
     mode: ctx.mode,
   };
   return { status: 200, contentType: "application/json", body };
