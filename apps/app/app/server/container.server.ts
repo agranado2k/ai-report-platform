@@ -30,6 +30,7 @@ import {
   PgBossScanWorkQueue,
   R2BlobStore,
   ReportHtmlEditabilityProbe,
+  ReportHtmlFidelityProbe,
   ResendEmailSender,
   Sha256Hasher,
   SystemClock,
@@ -231,6 +232,7 @@ export function deps(): UploadReportDeps {
     // document at write time, so an un-editable upload is a recorded state
     // rather than a silent redirect the user discovers later.
     editability: new ReportHtmlEditabilityProbe(),
+    fidelity: new ReportHtmlFidelityProbe(),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
     audit: auditLogger(),

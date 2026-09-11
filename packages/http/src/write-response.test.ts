@@ -64,6 +64,7 @@ const reportResource = (title: string, folder = F1) => ({
   is_published: true,
   folder_id: folderIdToWire(folderId(folder)),
   editability: null,
+  fidelity: null,
   mode: "prod",
   owner: userIdToWire(userId(U1)),
   acl: { mode: "public" },
@@ -489,6 +490,7 @@ describe("Editability on the report resource (ADR-0080)", () => {
     id: string,
     no: number,
     editability: Report["versions"][number]["editability"],
+    fidelity: Report["versions"][number]["fidelity"] = null,
   ) =>
     ({
       id: versionId(id),
@@ -500,6 +502,7 @@ describe("Editability on the report resource (ADR-0080)", () => {
       sizeBytes: 1,
       origin: "upload" as const,
       editability,
+      fidelity,
     }) satisfies Report["versions"][number];
 
   it("reports the LIVE version's verdict, not the newest version's", () => {
@@ -542,5 +545,68 @@ describe("Editability on the report resource (ADR-0080)", () => {
     const body = getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) })
       .body as { editability: unknown };
     expect(body.editability).toBeNull();
+  });
+});
+
+describe("Fidelity on the report resource (ADR-0090)", () => {
+  const V2 = "00000000-0000-7000-8000-0000000000c2";
+  const version = (
+    id: string,
+    no: number,
+    editability: Report["versions"][number]["editability"],
+    fidelity: Report["versions"][number]["fidelity"] = null,
+  ) =>
+    ({
+      id: versionId(id),
+      versionNo: no,
+      contentHash: `h${no}`,
+      uploadedBy: userId(U1),
+      scanStatus: "clean" as const,
+      manifest: { entryDocument: "index.html", files: ["index.html"] },
+      sizeBytes: 1,
+      origin: "upload" as const,
+      editability,
+      fidelity,
+    }) satisfies Report["versions"][number];
+
+  const bodyOf = (r: Report) =>
+    getReportToHttp(ok({ report: r, sharing: null }), CTX, { userId: userId(U1) }).body as {
+      editability: unknown;
+      fidelity: unknown;
+    };
+
+  it("reports the LIVE version's verdict, not the newest version's", () => {
+    // Re-uploading a script-driven deck must not retro-label the lossless
+    // version visitors are still being served.
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, "editable", "lossless"), version(V2, 2, "editable", "lossy")],
+    };
+    expect(bodyOf(r).fidelity).toBe("lossless");
+  });
+
+  it("carries editability and fidelity independently — `editable` and `lossy` at once", () => {
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, "editable", "lossy")],
+    };
+    const body = bodyOf(r);
+    expect(body.editability).toBe("editable");
+    expect(body.fidelity).toBe("lossy");
+  });
+
+  it("is null for an unpublished report — nothing is live to lose", () => {
+    expect(bodyOf({ ...report("T"), liveVersionId: null, versions: [] }).fidelity).toBeNull();
+  });
+
+  it("is null when the live version predates the probe (UNKNOWN, not lossless)", () => {
+    const r: Report = {
+      ...report("T"),
+      liveVersionId: versionId(V1),
+      versions: [version(V1, 1, "editable", null)],
+    };
+    expect(bodyOf(r).fidelity).toBeNull();
   });
 });

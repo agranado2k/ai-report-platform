@@ -69,6 +69,16 @@ export const versionEditabilityEnum = pgEnum("version_editability", [
   "unparsable",
 ]);
 
+// ADR-0090 — whether the editor would KEEP a version's bytes, the orthogonal
+// twin of `version_editability`: `lossless` = a parse-then-serialise round trip
+// through the Report HTML schema loses no element and no attribute; `lossy` =
+// it drops at least one (a deck's inline <script>/<svg> are the motivating
+// case). NOT a fourth editability value — `editable` + `lossy` is the state
+// that matters and one enum cannot hold two bits. UNKNOWN is the column's NULL.
+// Brand-new enum type created in the same migration as its column, so the #127
+// drizzle-kit ADD-VALUE one-transaction gotcha does not apply.
+export const versionFidelityEnum = pgEnum("version_fidelity", ["lossless", "lossy"]);
+
 // timestamptz at millisecond precision (db-design.md → Conventions).
 const tstz = (name: string) => timestamp(name, { withTimezone: true, precision: 3 });
 const createdAt = () => tstz("created_at").notNull().defaultNow();
@@ -278,6 +288,13 @@ export const reportVersions = pgTable(
     // read R2. Metadata ABOUT the stored bytes; the viewer still streams them
     // verbatim (ADR-0038) whatever this says.
     editability: versionEditabilityEnum("editability"),
+    // Whether the editor would KEEP these bytes (ADR-0090). Nullable with NO
+    // default, inheriting ADR-0080's backfill policy verbatim: NULL means
+    // "never probed" — every row written before ADR-0090, plus every row whose
+    // editability is not `editable`, because there was no round trip to run.
+    // Written once and never rewritten (`upsertVersions` refreshes only
+    // `scan_status` on conflict). Advisory: nothing gates on it.
+    fidelity: versionFidelityEnum("fidelity"),
   },
   (t) => [
     index("report_versions_report_id_idx").on(t.reportId),

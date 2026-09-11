@@ -130,6 +130,7 @@ describe("versionNoForPin", () => {
       size_bytes: 10,
       origin: "upload",
       editability: null,
+      fidelity: null,
       mode: "prod",
     },
     {
@@ -143,6 +144,7 @@ describe("versionNoForPin", () => {
       size_bytes: 12,
       origin: "editor",
       editability: null,
+      fidelity: null,
       mode: "prod",
     },
   ];

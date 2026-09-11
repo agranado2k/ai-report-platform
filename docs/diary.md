@@ -6106,3 +6106,41 @@ the strict report-only shadow policy, and the ADR-0063 `/edit` profile. Also
 rejected: fonts-only, and a separate frameable alias path. Unit tests and the live
 `security-headers` gate both assert against the exported constant, never a
 restated string. Glossary + ADR index updated in the same change.
+
+### 2026-09-10 — ADR-0090: Fidelity, the second verdict on a ReportVersion's bytes
+
+`editable` was never the reassurance it read as. The `Report HTML schema` is a
+constrained document vocabulary, not an HTML superset, so the PRD #356 slide deck
+— inline `<script>`, inline `<svg>`, `<section class="slide">` toggled with
+`hidden` — opens in the editor cleanly and would be republished with its
+interactivity deleted. Nothing in the system could say so.
+
+**ADR-0090** (amends ADR-0080) adds **Fidelity**: a nullable per-ReportVersion
+`version_fidelity` enum (`lossless` / `lossy`, migration `0023`), recorded at write
+time beside Editability. Deliberately a second field rather than a fourth
+editability value — `editable` + `lossy` is the case that matters and one enum
+cannot hold two bits. It inherits ADR-0080's whole shape: the probe CALLS the
+editor's own `parseBody`/`serializeBody` rather than re-deriving the schema's drop
+rules, the application layer reaches it through a `FidelityProbe` port (ADR-024),
+`null` means never probed, and there is no backfill because no migration can read
+R2.
+
+Two findings worth keeping. First, the comparison had to run over a canonical tree
+(`normalizeBody`) rather than HTML strings — and merging adjacent text nodes is
+what makes entity normalisation work at all, since the parser splits text at an
+entity boundary (`a &amp; b` is three nodes, `a & b` is one). Second, measurement
+forced the deciding comparison rule — loss by **name presence, not occurrence
+count** — and its accepted cost. That rule is the contract, so it is stated once,
+in **ADR-0090 §1**, and not restated here: the diary records that measurement drove
+it, the ADR records what it is.
+
+Probed only when Editability is `editable`; a ReportVersion with a `_source.json`
+sidecar is `lossless` by construction (ADR-0062 §4) without parsing, which is what
+keeps the verdict from lying about editor-origin saves. Surfaced beside
+`editability` on the ReportVersion projection, the report resource and the HTTP
+report/versions/content reads, always as an explicit `null` rather than an omitted
+key. Nothing gates on it and no upload is rejected for being lossy: **Fidelity is
+read by things that explain, never by things that decide.** The consumers that act
+on it — the Edit confirm dialog and the upload warnings — are separate tickets, so
+the recorded fact lands and is reviewable before anything is built on it. Glossary
+term and ADR index updated in the same change.
