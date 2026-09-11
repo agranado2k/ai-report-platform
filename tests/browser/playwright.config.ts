@@ -64,5 +64,28 @@ export default defineConfig({
       grep: /@comments-panel/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // ADR-0089 §7: the owner view's framing contract — the one thing in this
+      // tier that is served over HTTP rather than `file://`, because neither
+      // `frame-ancestors` nor a cookie means anything without a real origin.
+      // The spec binds its own ephemeral loopback server and kills it in
+      // `afterAll`, so the tier stays hermetic in the sense ADR-0079 cared
+      // about: no deployment, no credentials, no database, no network.
+      name: "owner-view-framing",
+      grep: /@owner-view-framing/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
+    {
+      // ADR-0089 §2: the owner view's mounted chrome — the hash is adopted
+      // ONCE at load and never re-read. Back over `file://` like the rest of
+      // the tier, because this is about React's behaviour rather than about an
+      // origin: it needs no cookies and no `frame-ancestors`, only a real
+      // browser to mount in and dispatch a `hashchange` at. Its own project
+      // (its own tag) because it shares neither the report fixtures the editor
+      // projects grep for nor the framing project's loopback server.
+      name: "owner-view-chrome",
+      grep: /@owner-view-chrome/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
   ],
 });

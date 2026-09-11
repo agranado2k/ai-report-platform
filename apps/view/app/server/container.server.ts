@@ -1,10 +1,17 @@
 // Composition root for the viewer origin (server-only). The viewer is I/O-light:
-// a single slug→report lookup (Drizzle/Neon) + one R2 read per request. So it
-// wires only the two ports it needs — NOT the full upload deps. Boundary layer
-// (ADR-0020): the only place apps/view assembles concrete adapters. Env via
-// defineEnv() (arp-env, ADR-0043). One DbContext + deps set per warm lambda.
-import { DbContext, DrizzleGrantStore, DrizzleReportRepository, R2BlobStore } from "arp-adapters";
-import type { BlobStore, GrantStore, ReportRepository } from "arp-application";
+// a single slug→report lookup (Drizzle/Neon) + one R2 read per request, plus the
+// owner view's org-write-grant lookup. So it wires only the three ports it needs
+// — NOT the full upload deps. Boundary layer (ADR-0020): the only place
+// apps/view assembles concrete adapters. Env via defineEnv() (arp-env,
+// ADR-0043). One DbContext + deps set per warm lambda.
+import {
+  DbContext,
+  DrizzleGrantStore,
+  DrizzleOrgWriteGrantStore,
+  DrizzleReportRepository,
+  R2BlobStore,
+} from "arp-adapters";
+import type { BlobStore, GrantStore, OrgWriteGrantStore, ReportRepository } from "arp-application";
 import { defineEnv } from "arp-env";
 
 export interface ViewerDeps {
@@ -12,6 +19,11 @@ export interface ViewerDeps {
   readonly blobs: BlobStore;
   /** Allowlist revocation-C — the per-request live-grant check (ADR-0056). */
   readonly grants: GrantStore;
+  /** The `Report sharing state`'s second fact (ADR-0078 §3), read — never written
+   *  — here: the owner view's chrome composes the `Acl` mode WITH the org write
+   *  grant so it can say "Org + edit" where the mode alone would say "Org".
+   *  Describing reach off the mode on its own is the lie ADR-0078 §12 names. */
+  readonly orgWriteGrants: OrgWriteGrantStore;
 }
 
 let _ctx: DbContext | undefined;
@@ -47,6 +59,7 @@ export function viewerDeps(): ViewerDeps {
       keyPrefix: env.R2_KEY_PREFIX,
     }),
     grants: new DrizzleGrantStore(context()),
+    orgWriteGrants: new DrizzleOrgWriteGrantStore(context()),
   };
   return _deps;
 }

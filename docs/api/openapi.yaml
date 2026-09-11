@@ -1378,6 +1378,99 @@ paths:
         '404':
           description: The slug does not have a valid shape.
 
+  /{slug}/view:
+    get:
+      operationId: ownerView
+      tags: [Viewer]
+      summary: The owner view — first-party chrome over the byte-for-byte report (ADR-0089)
+      description: >
+        The viewer origin's SECOND authenticated first-party route
+        (`apps/view/app/routes/$slug_.view.tsx`): a thin chrome strip — report
+        title, share state, a way to reach versions, an Edit action — above the
+        canonical `GET /{slug}` itself, embedded in a sandboxed iframe with no
+        `allow-same-origin`, so the framed report runs in an opaque origin.
+        `GET /{slug}` is UNCHANGED by this route; that byte-for-byte contract
+        (ADR-0038) is the property the whole design exists to preserve, which is
+        why the chrome lives on a second URL instead of being injected into the
+        report. Reached via `GET /reports/{slug}/open` on the app origin, the
+        same one edit-token mint `/{slug}/edit` uses.
+
+
+        Capability, not role: it is the SAME edit token, so like `/{slug}/edit`
+        this route NEVER consults the report's ACL — a report anyone could read
+        at `GET /{slug}` still needs a capability to get chrome around it. A
+        holder with a valid token gets full chrome (`write`); an owner with no
+        capability but a VERIFIED owner-access token gets read-only chrome and
+        no Edit action (`ownerRead`). Every unauthorised outcome — anonymous,
+        rejected token, nonexistent report — is the same redirect to the app's
+        mint, decided before the report is looked up, so a private report is
+        indistinguishable from one that does not exist.
+
+
+        Headers are ADR-0063's authenticated profile, reused unchanged
+        (`editViewHeaders`): `Origin-Agent-Cluster: ?1` so the chrome and the
+        report it frames are uniformly origin-keyed, `frame-src 'self'` to
+        permit the frame from this side (ADR-0088's `frame-ancestors 'self'` on
+        the report's own response is the other half), `frame-ancestors 'none'`
+        so the chrome is itself unframeable, no top-level `sandbox` CSP (that
+        header is for untrusted report bytes, not our own UI), `no-store` and
+        `X-Robots-Tag: noindex, nofollow`. The rendered payload carries NO
+        capability of any kind — this route has no cross-origin data plane, so
+        its capability stays entirely in HttpOnly cookies (ADR-0089 §6).
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          description: The report's permanent capability-URL slug (nanoid(10)).
+        - name: et
+          in: query
+          required: false
+          schema: { type: string }
+          description: >
+            A freshly-minted edit token from `GET /reports/{slug}/open`
+            (app origin). Present only on the initial hand-off; redeemed
+            into the `arp_view` cookie and dropped from the URL immediately.
+        - name: oa
+          in: query
+          required: false
+          schema: { type: string }
+          description: >
+            The owner-access token minted alongside `et` for an OWNER (never
+            for a write-grantee, for whom an `owner:true` claim would be a
+            privilege escalation). Verified before it counts: valid HMAC, this
+            slug, unexpired, `owner === true`. It backs the read-only
+            `ownerRead` degrade, and is redeemed into the `arp_unlock` cookie
+            the sandboxed frame's own navigation to `GET /{slug}` carries.
+      responses:
+        '200':
+          description: >
+            The chrome is rendered around the framed report. Carries
+            `Set-Cookie: arp_unlock` (Path=/{slug}, the owner-access token's own
+            remaining life) whenever a verified `oa` is in hand, because that is
+            the only cookie the framed navigation carries — without it the frame
+            would land on the unlock wall for a non-public report (ADR-0089 §4c).
+          content:
+            text/html:
+              schema: { type: string }
+        '302':
+          description: >
+            No usable capability. Either the funnel to the app's one edit-token
+            mint (`GET /reports/{slug}/open`, which re-checks entitlement live
+            and bounces anonymous visitors to sign-in), or — when no funnel is
+            configured, or the report has no servable version — a degrade to the
+            public viewer at `GET /{slug}`, carrying `?access=` when an owner
+            fallback is in hand.
+        '303':
+          description: >
+            A valid `?et=` hand-off was redeemed; redirects to the clean
+            `/{slug}/view` URL. Sets up to THREE cookies — `arp_view` and
+            `arp_view_oa` scoped to `Path=/{slug}/view` (NEVER `/{slug}`, which
+            is the request the sandboxed iframe makes), and `arp_unlock` scoped
+            to `Path=/{slug}` from a verified `oa`.
+        '404':
+          description: The slug does not have a valid shape.
+
 components:
   securitySchemes:
     apiKey:

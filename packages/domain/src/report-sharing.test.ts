@@ -3,6 +3,7 @@ import type { UserId } from "./brand";
 import {
   ADVANCED_ACL_MODES,
   advancedSharingDiscardWarning,
+  describeReportSharing,
   isAdvancedAclMode,
   makeReportSharingState,
   REPORT_SHARING_STATES,
@@ -10,6 +11,7 @@ import {
   sharingCandidacy,
   sharingStateTarget,
 } from "./report-sharing";
+import { ACL_MODES } from "./value-objects";
 
 const owner = "11111111-1111-1111-1111-111111111111" as UserId;
 const colleague = "22222222-2222-2222-2222-222222222222" as UserId;
@@ -238,5 +240,100 @@ describe("sharingCandidacy — the bulk-apply rule (ADR-0078 §5)", () => {
         kind: "candidate",
       });
     }
+  });
+});
+
+describe("describeReportSharing — the ONE thing every surface says about reach", () => {
+  // The failure mode this block exists to catch is not a crash: it is a MAPPING
+  // that still type-checks. Swap `private` and `public` and every other test in
+  // the repo stays green while an owner is told their private report is
+  // readable by anyone with the link — an owner who then shares that link, or
+  // declines to lock down a report that was never locked down. Nothing
+  // downstream would notice, because this copy authorizes nothing: the `Acl`
+  // and the gate decide access, this only NARRATES it.
+  //
+  // So every combination is spelled out individually rather than looped over
+  // the implementation's own table: a test that derived its expectations from
+  // the mapping would agree with any mapping, including a swapped one.
+
+  it("says Private for a report only its owner can open", () => {
+    expect(describeReportSharing("private", false)).toEqual({
+      label: "Private",
+      title: "Only you can open this report.",
+    });
+  });
+
+  it("says Org for org read without the write grant, and keeps delete with the owner", () => {
+    expect(describeReportSharing("org", false)).toEqual({
+      label: "Org",
+      title: "Everyone in your org can view this report. Only you can edit or delete it.",
+    });
+  });
+
+  it("says Org + edit once the org write grant is there", () => {
+    expect(describeReportSharing("org", true)).toEqual({
+      label: "Org + edit",
+      title: "Everyone in your org can view AND edit this report. Only you can delete it.",
+    });
+  });
+
+  it("says Public for the mode with real blast radius", () => {
+    // `private`/`public` is the pair worth naming: opposite in consequence, and
+    // a transposition between them costs an owner a leak rather than a
+    // confusing word.
+    expect(describeReportSharing("public", false)).toEqual({
+      label: "Public",
+      title: "Anyone with the link can open this report, inside or outside your org.",
+    });
+  });
+
+  it("says Password for a passphrase-gated report", () => {
+    expect(describeReportSharing("password", false)).toEqual({
+      label: "Password",
+      title: "Anyone with the link AND the password can open this report.",
+    });
+  });
+
+  it("says Allowlist for a report shared by invitation", () => {
+    expect(describeReportSharing("allowlist", false)).toEqual({
+      label: "Allowlist",
+      title: "Only the specific people you invited can open this report.",
+    });
+  });
+
+  it("refuses to call an org-EDITABLE report Private (the API-only combination)", () => {
+    // The exact lie `reportSharingState` returns null to prevent: a report the
+    // whole org can edit, badged as nobody's but yours.
+    expect(describeReportSharing("private", true)).toEqual({
+      label: "Edit only",
+      title:
+        "Everyone in your org can edit this report but cannot open it — set its sharing to fix that.",
+    });
+  });
+
+  it("keeps an advanced mode's own name even when an org write grant exists", () => {
+    // An advanced mode is in NO sharing state either way, and it is the mode
+    // the owner chose deliberately (§4). Letting a grant rename it would hide
+    // the password / roster / public link the label is there to surface.
+    expect(describeReportSharing("public", true).label).toBe("Public");
+    expect(describeReportSharing("password", true).label).toBe("Password");
+    expect(describeReportSharing("allowlist", true).label).toBe("Allowlist");
+  });
+
+  it("is TOTAL over AclMode on both org-write branches, with a distinct label each", () => {
+    // Totality is driven from the domain's own enumeration, so a sixth mode
+    // added to `ACL_MODES` fails HERE rather than going blank in production.
+    for (const hasOrgWrite of [false, true]) {
+      for (const mode of ACL_MODES) {
+        const d = describeReportSharing(mode, hasOrgWrite);
+        expect(d.label).not.toBe("");
+        expect(d.title).not.toBe("");
+      }
+    }
+    // Distinct within a branch, because two modes sharing one label is the same
+    // lie as a swapped one: the reader cannot tell which report they are
+    // looking at.
+    const labels = ACL_MODES.map((m) => describeReportSharing(m, false).label);
+    expect(new Set(labels).size).toBe(ACL_MODES.length);
   });
 });

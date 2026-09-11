@@ -46,6 +46,44 @@ Documented in the spec / ADRs as part of the intended event catalog, but nothing
 | `CspViolationReported` | Abuse & Moderation (`/csp-report` ingest) | CspReportRepository · (weekly review aggregation) | Inbound browser CSP-violation report. |
 | `CollaboratorGranted` | — (never emitted) | — | **Retired (ADR-0060).** The folder-collaborator design it belonged to was never built; per-report write grants shipped (PR #150) **deliberately without a replacement event** — grants are matched at check time and confer no view access, so there is no cross-context consumer. Removed from the conformance-pinned event list in the same PR. |
 
+## Viewer-origin operational log events
+
+Not domain events, and deliberately kept apart from the catalog above: these are **structured `console.warn` lines** emitted by the viewer origin's one gate (`apps/view/app/server/gate.server.ts`) and the two authenticated routes that consume its `Decision`. They never touch the outbox, have no subscribers, and carry no aggregate id — Vercel captures them to the function logs, which is the whole delivery mechanism. They are registered here because they are a **contract with the incident queries written against them** (ADR-0063 Phase 5-E/5-G, after two production owner lockouts): renaming one silently blinds a query, which is the failure mode that made the 2026-08-06 lockout invisible for as long as it was.
+
+Every line is `{ event, slug, reason }` (plus `ownerFallback` on `edit-document-unopenable`). **The token is never logged** — only the boolean fact that an owner fallback was in hand.
+
+### The degrade pairs — one per authenticated surface
+
+An authenticated surface *degrades* when it cannot render and falls back to the public viewer, which owns the ADR-0038 §2 state machine. Each surface has two names: the plain one, and the one that says the degrade carried a **verified** owner fallback (`acceptOwnerFallback`: valid HMAC, this slug, unexpired, `owner === true`) and therefore went through the `/{slug}?access=<oa>` flow rather than dropping the visitor on a bare `/{slug}` that, for a private report, walks its own owner to the unlock wall.
+
+| Event | Surface | Fires when | Notes |
+|---|---|---|---|
+| `edit-degraded-to-view` | `GET /<slug>/edit` (ADR-0063) | any degrade off the editor with **no** owner fallback in hand | The Phase 5-G signal. Every degrade off `/edit` emits exactly one line — the Phase 5-E version fired only inside `if (oa)`, so the incident that motivated it produced a `302` with zero log lines. Also emitted by `$slug_.edit.tsx` for its own post-gate `gate-decision-unusable` narrowing. |
+| `owner-edit-degraded-to-view` | `GET /<slug>/edit` | the same, with a verified owner fallback | The original Phase 5-E signal, and the one incident queries for the secret-misalignment class key on. **Unchanged**, deliberately: giving the owner view its own pair below is precisely what let these two stay put. |
+| `owner-view-degraded-to-view` | `GET /<slug>/view` (ADR-0089) | any degrade off the owner view with **no** owner fallback in hand | New 2026-09-10 (operator decision). The owner view previously logged under `/edit`'s two names on the argument that the degrade *class* is identical. The class is; the **surface** is not, and the surface is what an incident responder needs first — `/edit` failing is an editor problem, `/<slug>/view` failing is a *framing* problem, and once #363 flips owner-open it is the problem every owner meets, on a path where the user cannot see a URL to explain it. |
+| `owner-view-owner-degraded-to-view` | `GET /<slug>/view` | the same, with a verified owner fallback | Note the scheme: `/edit` marks the owner case with an `owner-` **prefix**, but a surface already named *owner view* prefixed that way reads `owner-owner-view-…`, so the marker moves **behind** the surface token. The dividend is a property `/edit`'s pair does not have — the single prefix `owner-view-` selects the whole surface in a log query. Emitted by the gate, and by `$slug_.view.tsx` for its own `gate-decision-unusable` narrowing. |
+
+### The document-failure line
+
+| Event | Surface | Fires when | Notes |
+|---|---|---|---|
+| `edit-document-unopenable` | `GET /<slug>/edit` | the capability is already proven and the live version's document cannot be opened in the editor (`document-unreadable` / `document-unsplittable` / `document-unparsable`) | A **distinct** event because it no longer degrades to the view at all: `/edit` answers `409` with its own explanatory page (`apps/view/app/edit/unopenable.ts`). `*-degraded-to-view` naming an outcome that never reaches the view is exactly the drift this event was split off to remove, and the two are operationally different — a degrade is the incident class (an owner silently stranded), this is a handled outcome the user was told about. Carries an extra `ownerFallback` boolean recording whether the page could offer a *working* read-only link. |
+
+### The shared `reason` vocabulary
+
+One taxonomy of "why the authenticated render failed", across **both** surfaces and both outcomes — deliberately not re-cut per surface, so ADR-0063's open question (which reason actually fires in production) stays answerable across all of them. `DocumentDegradeReason` (`apps/view/app/edit/load-document.ts`) is `Extract`ed from it, so the two cannot drift.
+
+| `reason` | Meaning |
+|---|---|
+| `edit-token-denied` | No / invalid / expired capability (query token or cookie), and no funnel to the app's mint was available. |
+| `app-origin-unset` | `APP_ORIGIN` is unset on the view deployment — env at fault, not the report. Both authenticated routes fail closed: their header profile needs it for `connect-src`. |
+| `no-servable-version` | The report has no clean live version (missing / mid-scan / flagged / deleted). |
+| `lookup-failed` | The report lookup itself failed (infra). |
+| `gate-decision-unusable` | The route could not use the `Decision` it was handed — unreachable by construction; it exists so that if it ever fires it is named rather than silent. Emitted route-side, never by the gate. |
+| `document-unreadable` · `document-unsplittable` · `document-unparsable` | The three `edit-document-unopenable` reasons: the blob read, the shell/body split, and the ProseMirror parse. Never degrade to the view. |
+
+---
+
 ## Renames from earlier drafts
 
 This catalog reconciles the spec (rev 7) and the DDD docs. For traceability:

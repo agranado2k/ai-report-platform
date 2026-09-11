@@ -80,6 +80,84 @@ export function reportSharingState(mode: AclMode, hasOrgWrite: boolean): ReportS
   return null;
 }
 
+/** How a report's reach reads to a human: the short label a pill or badge shows,
+ *  and the whole claim as a sentence. Two fields because the label always
+ *  shares a truncating row — the nuance ("only you can delete it") has to live
+ *  somewhere that is not cut off. Copy only: this authorizes nothing. */
+export interface ReportSharingDescription {
+  readonly label: string;
+  readonly title: string;
+}
+
+/**
+ * The ONE place a report's reach becomes words (ADR-0078 §12).
+ *
+ * It lives in the domain rather than in either surface because BOTH the
+ * dashboard row and the owner view's chrome answer the same question — "how is
+ * this shared?" — about the same two facts, and they were answering it with two
+ * different copy tables. A viewer that called a `public` report "Anyone with
+ * the link" while the dashboard called it "Public" is not a style difference:
+ * it is two vocabularies for one concept, which is exactly what the glossary
+ * (ADR-0036) exists to prevent, and it is how one of them gets a correction the
+ * other never receives.
+ *
+ * Six labels, not three, and the advanced modes keep their OWN names (§12): a
+ * password-protected report and an org-visible one are not the same thing, and
+ * folding them into a generic "shared" is the first step towards overwriting
+ * one with the other (§4).
+ *
+ * `tone`/color is deliberately NOT here — that is a surface's own design
+ * vocabulary, and the domain has no opinion about which palette slot a badge
+ * uses.
+ */
+export function describeReportSharing(
+  mode: AclMode,
+  hasOrgWrite: boolean,
+): ReportSharingDescription {
+  switch (reportSharingState(mode, hasOrgWrite)) {
+    case "org_edit":
+      return {
+        label: "Org + edit",
+        title: "Everyone in your org can view AND edit this report. Only you can delete it.",
+      };
+    case "org_view":
+      return {
+        label: "Org",
+        title: "Everyone in your org can view this report. Only you can edit or delete it.",
+      };
+    case "private":
+      return { label: "Private", title: "Only you can open this report." };
+  }
+  // No sharing state — an advanced mode, or the API-only combination of an org
+  // write grant without org read. Both must read as themselves.
+  switch (mode) {
+    case "public":
+      return {
+        label: "Public",
+        title: "Anyone with the link can open this report, inside or outside your org.",
+      };
+    case "password":
+      return {
+        label: "Password",
+        title: "Anyone with the link AND the password can open this report.",
+      };
+    case "allowlist":
+      return {
+        label: "Allowlist",
+        title: "Only the specific people you invited can open this report.",
+      };
+    default:
+      // `private`/`org` already returned above unless an org-write row exists
+      // without org read. Saying "Private" here would be the exact lie
+      // `reportSharingState` returns null to prevent.
+      return {
+        label: "Edit only",
+        title:
+          "Everyone in your org can edit this report but cannot open it — set its sharing to fix that.",
+      };
+  }
+}
+
 /** The `Acl` modes that carry deliberate owner intent the three-state control
  *  must never silently discard (ADR-0078 §4): a password, a curated allowlist,
  *  or a link deliberately published to the world. Switching a report out of one
