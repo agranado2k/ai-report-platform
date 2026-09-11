@@ -34,6 +34,7 @@ import type {
   DiffWire,
   FolderWire,
   ListEnvelope,
+  ReportContentWire,
   ReportDetailWire,
   ReportSharingWire,
   ReportWire,
@@ -302,5 +303,36 @@ describe("wire catalog ⇄ emitted shape (runtime truths)", () => {
       grantWriteToHttp(ok(grant), { appOrigin: "https://app.example.test", slug: "abcde12345" })
         .body,
     ).toEqual(withEntry);
+  });
+});
+
+describe("ReportContentWire — the content read carries the same verdict pair", () => {
+  it("declares both editability and fidelity as required, nullable keys", () => {
+    // The content read is the third surface for the pair, and the catalog is
+    // where drift between it and the encoder gets caught at compile time. Both
+    // keys are REQUIRED (nullable) rather than optional: `source` is the one
+    // key this resource may omit, because its absence is itself the answer
+    // ("no sidecar"). Omitting a verdict instead would collapse UNKNOWN into a
+    // positive answer — un-openable would read as openable, lossy-unknown as
+    // lossless.
+    const unknown: ReportContentWire = {
+      object: "report_content",
+      slug: "abcde12345",
+      version_id: versionIdToWire(versionId(V1)),
+      version_no: 1,
+      content_type: "text/html",
+      html: "<x>",
+      editability: null,
+      fidelity: null,
+      mode: "prod",
+    };
+    expect("editability" in unknown).toBe(true);
+    expect("fidelity" in unknown).toBe(true);
+    expect(Object.hasOwn(unknown, "source")).toBe(false);
+
+    expectTypeOf<ReportContentWire["editability"]>().toEqualTypeOf<
+      "editable" | "unsplittable" | "unparsable" | null
+    >();
+    expectTypeOf<ReportContentWire["fidelity"]>().toEqualTypeOf<"lossless" | "lossy" | null>();
   });
 });
