@@ -14,6 +14,7 @@ describe("reportContentToHttp", () => {
         versionNo: 3,
         contentType: "text/html; charset=utf-8",
         html: "<html><body><p>hi</p></body></html>",
+        editability: "editable",
         fidelity: "lossy",
       }),
       CTX,
@@ -28,6 +29,7 @@ describe("reportContentToHttp", () => {
       version_no: 3,
       content_type: "text/html; charset=utf-8",
       html: "<html><body><p>hi</p></body></html>",
+      editability: "editable",
       fidelity: "lossy",
       mode: "prod",
     });
@@ -41,6 +43,7 @@ describe("reportContentToHttp", () => {
         versionNo: 1,
         contentType: "text/html",
         html: "<x>",
+        editability: null,
         fidelity: null,
       }),
       CTX,
@@ -57,6 +60,7 @@ describe("reportContentToHttp", () => {
         versionNo: 1,
         contentType: "text/html",
         html: "<x>",
+        editability: null,
         fidelity: null,
         source: doc,
       }),
@@ -72,6 +76,72 @@ describe("reportContentToHttp", () => {
   });
 });
 
+describe("reportContentToHttp — Editability beside Fidelity", () => {
+  it("carries the served version's editability next to its fidelity", () => {
+    // The content read is the one surface that carried the retention verdict
+    // ("would edits keep this?") without the open-time one ("can it be opened
+    // at all?"). A consumer of THIS resource could see that a save would be
+    // lossy but not that the editor cannot open the document in the first
+    // place — the strictly more basic fact. Report, version and content reads
+    // now carry the same pair.
+    const http = reportContentToHttp(
+      ok({
+        slug: "abc123XYZ0",
+        versionId: V,
+        versionNo: 3,
+        contentType: "text/html",
+        html: "<x>",
+        editability: "editable",
+        fidelity: "lossy",
+      }),
+      CTX,
+    );
+    const body = http.body as { editability?: unknown; fidelity?: unknown };
+    expect(body.editability).toBe("editable");
+    expect(body.fidelity).toBe("lossy");
+  });
+
+  it("emits `editability: null` for the UNKNOWN state, never omits it", () => {
+    // Same rule as fidelity, for the same reason: a missing key would collapse
+    // "never probed" into a positive verdict.
+    const http = reportContentToHttp(
+      ok({
+        slug: "s",
+        versionId: V,
+        versionNo: 1,
+        contentType: "text/html",
+        html: "<x>",
+        editability: null,
+        fidelity: null,
+      }),
+      CTX,
+    );
+    expect(Object.hasOwn(http.body as object, "editability")).toBe(true);
+    expect((http.body as { editability?: unknown }).editability).toBeNull();
+  });
+
+  it("carries `unparsable` — the case fidelity alone cannot express", () => {
+    // editability `unparsable` + fidelity `null` is exactly the state the
+    // content read previously rendered as a bare `fidelity: null`, which is
+    // indistinguishable from "editable but never probed".
+    const http = reportContentToHttp(
+      ok({
+        slug: "s",
+        versionId: V,
+        versionNo: 1,
+        contentType: "text/html",
+        html: "<x>",
+        editability: "unparsable",
+        fidelity: null,
+      }),
+      CTX,
+    );
+    const body = http.body as { editability?: unknown; fidelity?: unknown };
+    expect(body.editability).toBe("unparsable");
+    expect(body.fidelity).toBeNull();
+  });
+});
+
 describe("reportContentToHttp — Fidelity (ADR-0090)", () => {
   it("emits `fidelity: null` for the UNKNOWN state, never omits it", () => {
     // `source` is the ONE key this resource drops, because its absence is
@@ -84,6 +154,7 @@ describe("reportContentToHttp — Fidelity (ADR-0090)", () => {
         versionNo: 1,
         contentType: "text/html",
         html: "<x>",
+        editability: null,
         fidelity: null,
       }),
       CTX,

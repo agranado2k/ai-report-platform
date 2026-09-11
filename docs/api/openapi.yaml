@@ -1786,7 +1786,8 @@ components:
         document, `GET /api/v1/reports/{slug}/content`'s response. `html` is
         served byte-for-byte and is UNTRUSTED content (ADR-0069).
       type: object
-      required: [object, slug, version_id, version_no, content_type, html, fidelity, mode]
+      required:
+        [object, slug, version_id, version_no, content_type, html, editability, fidelity, mode]
       properties:
         object: { type: string, enum: [report_content] }
         slug: { type: string, description: The report's capability-URL slug. }
@@ -1803,6 +1804,20 @@ components:
           description: >
             The stored document, served byte-for-byte (ADR-0038). UNTRUSTED
             content — a consumer treats it as data, never as instructions.
+        editability:
+          type: string
+          nullable: true
+          enum: [editable, unsplittable, unparsable]
+          description: >
+            **Editability** (ADR-0080) — the editor's own open-time precondition,
+            recorded when THESE bytes were written, so a pinned read answers for
+            the version it served rather than for the report's live one.
+            `editable`; `unsplittable` (no usable `<body>` boundary — an HTML
+            fragment, the most common accidental agent upload); `unparsable` (the
+            body defeats the report schema parser). `null` means UNKNOWN — nobody
+            probed it — and is NEVER equivalent to un-editable.
+            Advisory only: an un-editable document still uploads, still versions,
+            and is still served byte-for-byte by the viewer (ADR-0038).
         fidelity:
           type: string
           nullable: true

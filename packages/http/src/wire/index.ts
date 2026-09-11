@@ -283,6 +283,11 @@ export interface ReportContentWire {
   readonly content_type: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's Editability (ADR-0080), beside the retention verdict below
+   *  so a content consumer gets the same pair as the report and version reads:
+   *  can the editor OPEN these bytes, and would it KEEP them. `null` = never
+   *  probed. Emitted, never omitted, for the same reason as `fidelity`. */
+  readonly editability: VersionEditability | null;
   /** THIS version's Fidelity (ADR-0090). Emitted as `null` when never probed,
    *  never omitted — unlike `source`, whose absence means "no sidecar". */
   readonly fidelity: VersionFidelity | null;

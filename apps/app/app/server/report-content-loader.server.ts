@@ -28,6 +28,7 @@ import {
   ok,
   type Result,
   type Slug,
+  type VersionEditability,
   type VersionFidelity,
   type VersionId,
   validationError,
@@ -52,6 +53,8 @@ export interface LoadedReportContent {
   readonly contentType: string;
   readonly html: string;
   readonly source?: unknown;
+  /** THIS version's recorded Editability (ADR-0080); `null` = never probed. */
+  readonly editability: VersionEditability | null;
   /** THIS version's recorded Fidelity (ADR-0090); `null` = never probed. */
   readonly fidelity: VersionFidelity | null;
 }
@@ -120,8 +123,10 @@ export async function loadReportContent(
     contentType: htmlR.value.contentType,
     html,
     ...(source !== undefined ? { source } : {}),
-    // ADR-0090 — read straight off the version being served, so a content read
-    // answers for THOSE bytes rather than for the report's live version.
+    // ADR-0080/ADR-0090 — both verdicts read straight off the version being
+    // served, so a content read answers for THOSE bytes rather than for the
+    // report's live version.
+    editability: version.editability,
     fidelity: version.fidelity,
   });
 }
