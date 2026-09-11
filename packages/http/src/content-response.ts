@@ -8,13 +8,7 @@
 // ADR-0062 §4 `_source.json` ProseMirror doc) is included ONLY when the loader
 // resolved one; the key is OMITTED otherwise, never emitted as `null`, so a
 // caller can tell "no sidecar" from "an empty doc".
-import type {
-  AppError,
-  Result,
-  VersionEditability,
-  VersionFidelity,
-  VersionId,
-} from "arp-domain";
+import type { AppError, Result, VersionEditability, VersionFidelity, VersionId } from "arp-domain";
 import { versionIdToWire } from "arp-domain";
 import { errorToHttp, type HttpResponse } from "./problem";
 import type { WireContext } from "./resource";
