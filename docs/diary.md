@@ -6128,12 +6128,11 @@ R2.
 Two findings worth keeping. First, the comparison had to run over a canonical tree
 (`normalizeBody`) rather than HTML strings — and merging adjacent text nodes is
 what makes entity normalisation work at all, since the parser splits text at an
-entity boundary (`a &amp; b` is three nodes, `a & b` is one). Second, loss is
-measured by **name presence, not occurrence count**: measurement showed the
-generated-report fixture round-trips 45 `style` attributes in and 41 out, so
-counting would have marked the entire existing corpus `lossy` and left the field
-as uninformative as the byte equality the ADR rejects. That tradeoff is recorded
-in the ADR rather than hidden in the probe.
+entity boundary (`a &amp; b` is three nodes, `a & b` is one). Second, measurement
+forced the deciding comparison rule — loss by **name presence, not occurrence
+count** — and its accepted cost. That rule is the contract, so it is stated once,
+in **ADR-0090 §1**, and not restated here: the diary records that measurement drove
+it, the ADR records what it is.
 
 Probed only when Editability is `editable`; a ReportVersion with a `_source.json`
 sidecar is `lossless` by construction (ADR-0062 §4) without parsing, which is what

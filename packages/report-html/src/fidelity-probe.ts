@@ -178,12 +178,10 @@ export function probeFidelity(html: string, hasSourceDoc = false): FidelityVerdi
  * PRESENCE, not occurrence count. A name is lost when the round trip leaves
  * NONE of it behind.
  *
- * The generated-report fixture round-trips 45 `style` attributes in and 41
- * out, because the schema normalises a few away per element. Counting
- * occurrences would therefore mark the entire existing corpus `lossy` and
- * leave the field as uninformative as the byte equality ADR-0090 rejects. The
- * accepted cost is stated in that record: a partial loss of a name that
- * survives elsewhere is deliberately not reported.
+ * This implements the deciding rule; it does not define it. The rule, the
+ * measurement that forced it, and its accepted cost live in **ADR-0090 §1**,
+ * which is the binding record — read it there rather than trusting a
+ * paraphrase here.
  */
 function missing(before: Set<string>, after: Set<string>): string[] {
   return [...before].filter((name) => !after.has(name)).sort();

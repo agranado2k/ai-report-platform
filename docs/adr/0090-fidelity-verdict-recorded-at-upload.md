@@ -48,7 +48,17 @@ Chosen: **option 1**.
 
 `packages/report-html/src/fidelity-probe.ts` exports `probeFidelity`, which takes the uploaded HTML and whether the ReportVersion carries an editor source sidecar, and returns a verdict plus the lost items. It **calls** `splitShell`, `parseBody` and the editor's serialiser — the same functions the `/edit` loader and the save path call — and compares the serialised body to the uploaded body. It re-derives no schema condition, exactly as `probeEditability` re-derives no loader condition. The two probes sit side by side in the same package for the same reason: the predicate lives once, where the editor's code is reachable.
 
-The comparison runs through a **normaliser** that removes the differences a round trip is *entitled* to make: insignificant whitespace, attribute order, entity encoding, and self-closing forms. What survives normalisation is real content loss. The probe reports it as **lost items** — element names and attribute names, deduplicated — which is what an affordance can put in a sentence.
+The comparison runs through a **normaliser** that removes the differences a round trip is *entitled* to make: insignificant whitespace, attribute order, entity encoding, and self-closing forms. The probe reports what it finds as **lost items** — element names and attribute names, deduplicated — which is what an affordance can put in a sentence.
+
+#### The deciding rule: loss is NAME PRESENCE, not occurrence count
+
+This is the load-bearing judgement of the whole record, and it belongs here rather than in the code that implements it.
+
+A tag or attribute counts as **lost when the round trip leaves none of it behind** — the name was present before and is absent after. It is *not* lost when some occurrences disappear and at least one survives, and it is not lost when an attribute keeps its name but changes its value.
+
+Measurement forced this. The existing `ai-readiness-report.html` fixture round-trips **45 `style` attributes in and 41 out**, and `anchors-and-links.html` goes **3 `target` → 2**, because the schema normalises a few away per element. Counting occurrences would therefore mark the **entire existing corpus** `lossy`, leaving the field exactly as uninformative as the byte equality this ADR rejects (option 4 below).
+
+**The accepted cost**, stated plainly so a future reader does not have to rediscover it: a partial loss is not reported. Concretely — a round trip that deletes an `<a href="javascript:…">x</a>` outright still reports `lossless` when any other `<a>` survives the document; with that anchor as the document's only `<a>`, the same input reports `lossy` with `lostElements: ["a"]`. Attribute *values* are likewise invisible to the verdict. This is tolerable only because **Fidelity is advisory, never authorization** (§5): nothing gates on it, so a false `lossless` costs a missing warning, never a security decision. A consumer that needs to know *where* or *how much* was lost needs a different mechanism, not a stricter reading of this one.
 
 ### 2. Two orthogonal gates, in a fixed order
 
