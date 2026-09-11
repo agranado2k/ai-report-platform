@@ -265,7 +265,7 @@ describe("GET /<slug>/view — the loader payload", () => {
     await state.reports.save(buildReport({ mode: "org" }));
     state.orgWriteGrants.find = async () => ({
       ok: false as const,
-      error: { kind: "storage" as const, message: "boom" },
+      error: { kind: "Unexpected" as const, message: "org write lookup exploded" },
     });
 
     const res = await get(`/${SLUG}/view`, `arp_view=${editToken()}`);
@@ -318,7 +318,7 @@ describe("GET /<slug>/view — the loader's defensive `!appOrigin` narrowing", (
     // The owner-specific event name is what makes this visible in an incident
     // query rather than only inferable from user reports.
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain("owner-edit-degraded-to-view");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("owner-view-owner-degraded-to-view");
     expect(String(warn.mock.calls[0]?.[0])).toContain("gate-decision-unusable");
 
     warn.mockRestore();
