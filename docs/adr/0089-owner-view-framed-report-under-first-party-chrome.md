@@ -165,7 +165,8 @@ decision matrix:
 | --- | --- | --- |
 | canWrite (owner or grantee) | valid `et=` on the query | `setCookieAndRedirect` → §4 |
 | canWrite | valid `arp_view` cookie | `serve`, `capability: "write"` |
-| owner, capability **absent**, verified `oa` | `arp_view_oa` cookie or `oa=` query | `serve`, `capability: "ownerRead"` — read-only chrome, **no actions**, **+ `arp_unlock`** (§4c) |
+| owner, capability **absent**, verified `oa` on the **query** | `oa=` | `setCookieAndRedirect` → §4, the second hand-off shape |
+| owner, capability **absent**, verified `oa` on the **cookie** | `arp_view_oa` | `serve`, `capability: "ownerRead"` — read-only chrome, **no actions**, **+ `arp_unlock`** (§4c) |
 | anyone, capability **rejected** (expired/tampered/rotated secret) | — | `redirect` → `{appOrigin}/reports/{slug}/open` (the funnel) |
 | anonymous / unauthorised | nothing | `redirect` → the same funnel, which bounces them to the app home → sign-in |
 | no funnel available (no secret / no `appOrigin`), no `oa` | — | `redirect` → the bare `/{slug}` |
@@ -203,8 +204,11 @@ appear in that list; a capability cookie there would be §4(a)'s exact violation
 
 ### 4. The cookie hand-off — the interface #363 builds against
 
-`GET /<slug>/view?et=<edit token>[&oa=<owner access token>]` answers **303** to the clean
-`/<slug>/view`, dropping both tokens out of the address bar, history and referer. It sets:
+**No token is ever served on.** Every shape that arrives carrying one answers **303** to
+the clean `/<slug>/view` first, so the token leaves the address bar, the history and the
+referer before anything renders. There are two such shapes.
+
+**The full hand-off**, `GET /<slug>/view?et=<edit token>[&oa=<owner access token>]`, sets:
 
 | Cookie | Path | Max-Age | Purpose |
 | --- | --- | --- | --- |
@@ -212,9 +216,24 @@ appear in that list; a capability cookie there would be §4(a)'s exact violation
 | `arp_view_oa` | `/<slug>/view` | same | the verified owner fallback, surviving the query strip |
 | `arp_unlock` | `/<slug>` | the **`oa` token's** remaining life | **so the framed `GET /<slug>` serves** |
 
-All three are `HttpOnly; Secure; SameSite=Lax`, and `arp_view_oa` is percent-encoded so
+**The `oa`-only hand-off**, `GET /<slug>/view?oa=<owner access token>` with no `et=`, is
+the owner-fallback entry — the shape ADR-0063's degrade produces. It sets `arp_view_oa`
+(`Path=/<slug>/view`) and `arp_unlock` (`Path=/<slug>`), **both** at the `oa` token's own
+remaining life since there is no edit token here to bound them, and 303s to the same clean
+URL. It then serves `ownerRead` on the following hop, from the cookie.
+
+That second shape used to `serve` **200** directly, leaving a 24h `owner:true` token
+sitting in the address bar and the history of the one surface whose whole job is to be
+looked at — and, through the referer, reachable by anything the page links to. The
+property this section opens with was stated and then not held on the one path that had no
+`et=` to trigger it. Only a QUERY-borne `oa` is redeemed this way; a cookie-borne one is
+already where it belongs and serves, which is also what stops the two from looping.
+
+All of these are `HttpOnly; Secure; SameSite=Lax`, and `arp_view_oa` is percent-encoded so
 its value can never split the `Set-Cookie` header — the `arp_edit`/`arp_edit_oa` posture,
-unchanged. The last two are set only when an `oa` was presented **and verified**.
+unchanged. Every `oa`-derived cookie is set only when the `oa` was presented **and
+verified**; and the rejection-vs-absence routing still runs first, so a *rejected*
+capability funnels to the mint even when a verified `oa` is in hand (Phase 5-G).
 
 Three decisions are embedded here and each was a real fork in the road.
 
