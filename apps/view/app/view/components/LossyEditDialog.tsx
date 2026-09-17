@@ -20,14 +20,19 @@
 // does: `showModal()` needs a ref, and arp-ui's <Dialog> is a plain function
 // component that forwards none. `DialogTitle` / `DialogFooter` ARE imported,
 // so the header line and the action row cannot drift.
-import { Button, buttonClass, cx, DialogFooter, DialogTitle } from "arp-ui";
+import { Button, buttonClass, DialogFooter, DialogTitle } from "arp-ui";
 import { useRef } from "react";
 import type { LossyWarning } from "../lossy-warning";
 
 const DIALOG_CLASS =
   "m-auto w-[480px] max-w-[calc(100vw-2rem)] rounded-card border border-border bg-surface p-6 text-fg shadow-lg backdrop:bg-[rgb(20_24_40/0.45)]";
 
-/** Render a deduplicated name list as prose: `script`, `svg` and `onclick`. */
+/** Render a name list as prose: `script`, `svg` and `onclick`.
+ *
+ *  PRECONDITION: `names` is already deduplicated — `probeFidelity` collects
+ *  element and attribute names as a deduplicated set (ADR-0090 §1), which is
+ *  what makes `key={name}` safe here. This component does not re-dedupe, so a
+ *  probe that ever started emitting repeats would collide these keys. */
 function NameList({ names }: { names: readonly string[] }) {
   return (
     <>
@@ -87,7 +92,7 @@ export function LossyEditDialog({
         ref={dialogRef}
         aria-labelledby="lossy-edit-title"
         aria-describedby="lossy-edit-desc"
-        className={cx(DIALOG_CLASS)}
+        className={DIALOG_CLASS}
       >
         <DialogTitle id="lossy-edit-title">Editing would drop part of this report</DialogTitle>
         <p id="lossy-edit-desc" className="mt-3 text-sm text-muted">
