@@ -1,0 +1,258 @@
+// What the viewer's CSP will refuse to load — asked at write time (ticket #365).
+//
+// The load-bearing property these tests pin is that the scan reads the ONE
+// Viewer CSP allowlist (ADR-0088) rather than a copy of its hosts: every
+// assertion about an allowed host derives from `VIEW_CSP_ALLOWLIST` itself, so
+// widening the allowlist widens the scanner in the same commit, and narrowing
+// it narrows the scanner — neither can drift without this file failing.
+
+import { VIEW_CSP_ALLOWLIST } from "arp-headers/view";
+import { describe, expect, it, vi } from "vitest";
+import { scanBlockedResources } from "./resource-scan.js";
+
+const doc = (body: string, head = "") =>
+  `<!doctype html><html><head>${head}</head><body>${body}</body></html>`;
+
+const urls = (html: string) => scanBlockedResources(html).map((r) => r.url);
+
+describe("scanBlockedResources", () => {
+  describe("the allowlist is the single source of truth (ADR-0088)", () => {
+    it("clears every script-src host on the allowlist", () => {
+      for (const host of VIEW_CSP_ALLOWLIST.scriptSrc) {
+        expect(urls(doc(`<script src="${host}/lib@1.2.3/dist/lib.min.js"></script>`))).toEqual([]);
+      }
+    });
+
+    it("clears every style-src host on the allowlist", () => {
+      for (const host of VIEW_CSP_ALLOWLIST.styleSrc) {
+        expect(urls(doc("", `<link rel="stylesheet" href="${host}/css2?family=Inter">`))).toEqual(
+          [],
+        );
+      }
+    });
+
+    it("clears every font-src host on the allowlist, reached through @font-face", () => {
+      for (const host of VIEW_CSP_ALLOWLIST.fontSrc) {
+        const style = `<style>@font-face{font-family:X;src:url(${host}/s/inter/v1/a.woff2) format('woff2');}</style>`;
+        expect(urls(doc("", style))).toEqual([]);
+      }
+    });
+
+    it("reports the directive's own allowed hosts on a blocked resource, not a copy", () => {
+      const [blocked] = scanBlockedResources(doc('<script src="https://unpkg.com/x.js"></script>'));
+      expect(blocked).toEqual({
+        url: "https://unpkg.com/x.js",
+        directive: "script-src",
+        allowed: VIEW_CSP_ALLOWLIST.scriptSrc,
+      });
+    });
+  });
+
+  describe("what counts as blocked", () => {
+    it("blocks a script from a host that is not on the allowlist", () => {
+      expect(urls(doc('<script src="https://evil.test/a.js"></script>'))).toEqual([
+        "https://evil.test/a.js",
+      ]);
+    });
+
+    it("honours the allowlist's PATH prefix — jsdelivr /npm/ is allowed, /gh/ is not", () => {
+      expect(urls(doc('<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.js"></script>'))) //
+        .toEqual([]);
+      expect(urls(doc('<script src="https://cdn.jsdelivr.net/gh/u/r/x.js"></script>'))).toEqual([
+        "https://cdn.jsdelivr.net/gh/u/r/x.js",
+      ]);
+    });
+
+    it("is directive-aware: a script CDN is not an image source", () => {
+      // `img-src 'self' data: blob:` is pinned (ADR-0088) — a wildcard image
+      // source is an exfiltration channel, so no allowlist host applies here.
+      const [blocked] = scanBlockedResources(
+        doc('<img src="https://cdnjs.cloudflare.com/logo.png">'),
+      );
+      expect(blocked).toEqual({
+        url: "https://cdnjs.cloudflare.com/logo.png",
+        directive: "img-src",
+        allowed: [],
+      });
+    });
+
+    it("blocks an iframe from any external host — frame-src falls back to default-src 'self'", () => {
+      expect(scanBlockedResources(doc('<iframe src="https://example.test/x"></iframe>'))).toEqual([
+        { url: "https://example.test/x", directive: "frame-src", allowed: [] },
+      ]);
+    });
+
+    it("blocks an external stylesheet link", () => {
+      expect(
+        scanBlockedResources(doc("", '<link rel="stylesheet" href="https://unpkg.com/a.css">')),
+      ).toEqual([
+        {
+          url: "https://unpkg.com/a.css",
+          directive: "style-src",
+          allowed: VIEW_CSP_ALLOWLIST.styleSrc,
+        },
+      ]);
+    });
+
+    it("blocks an @import in a <style> block", () => {
+      const style = '<style>@import url("https://evil.test/theme.css");</style>';
+      expect(scanBlockedResources(doc("", style))).toEqual([
+        {
+          url: "https://evil.test/theme.css",
+          directive: "style-src",
+          allowed: VIEW_CSP_ALLOWLIST.styleSrc,
+        },
+      ]);
+    });
+
+    it("blocks the QUOTED @import form, which carries no url()", () => {
+      const style = `<style>@import "https://evil.test/theme.css";</style>`;
+      expect(urls(doc("", style))).toEqual(["https://evil.test/theme.css"]);
+    });
+
+    it("attributes EVERY @font-face block, including identical repeats, to font-src", () => {
+      // A string-needle removal only takes out the first occurrence, which
+      // would leave the duplicate behind to be miscounted as an image source.
+      const block = "@font-face{font-family:X;src:url(https://evil.test/x.woff2);}";
+      expect(scanBlockedResources(doc("", `<style>${block}${block}</style>`))).toEqual([
+        {
+          url: "https://evil.test/x.woff2",
+          directive: "font-src",
+          allowed: VIEW_CSP_ALLOWLIST.fontSrc,
+        },
+      ]);
+    });
+
+    it("blocks a non-allowlisted @font-face source as font-src", () => {
+      const style = "<style>@font-face{font-family:X;src:url(https://evil.test/x.woff2);}</style>";
+      expect(scanBlockedResources(doc("", style))).toEqual([
+        {
+          url: "https://evil.test/x.woff2",
+          directive: "font-src",
+          allowed: VIEW_CSP_ALLOWLIST.fontSrc,
+        },
+      ]);
+    });
+
+    it("blocks a url() outside @font-face as img-src", () => {
+      const style = "<style>.hero{background:url(https://cdn.test/bg.png) no-repeat;}</style>";
+      expect(scanBlockedResources(doc("", style))).toEqual([
+        { url: "https://cdn.test/bg.png", directive: "img-src", allowed: [] },
+      ]);
+    });
+
+    it("blocks a url() in a style ATTRIBUTE", () => {
+      expect(urls(doc(`<div style="background:url('https://cdn.test/a.png')"></div>`))).toEqual([
+        "https://cdn.test/a.png",
+      ]);
+    });
+
+    it("blocks every candidate in an img srcset", () => {
+      expect(
+        urls(doc('<img srcset="https://cdn.test/a.png 1x, https://cdn.test/b.png 2x" alt="">')),
+      ).toEqual(["https://cdn.test/a.png", "https://cdn.test/b.png"]);
+    });
+
+    it("treats a protocol-relative URL as https", () => {
+      expect(urls(doc('<script src="//cdnjs.cloudflare.com/a.js"></script>'))).toEqual([]);
+      expect(urls(doc('<script src="//evil.test/a.js"></script>'))).toEqual(["//evil.test/a.js"]);
+    });
+
+    it("matches the host case-insensitively but reports the URL as written", () => {
+      expect(urls(doc('<script src="HTTPS://CDNJS.CLOUDFLARE.COM/a.js"></script>'))).toEqual([]);
+    });
+
+    it("reports one warning per distinct URL, in document order", () => {
+      const html = doc(
+        '<script src="https://evil.test/a.js"></script>' +
+          '<script src="https://evil.test/a.js"></script>' +
+          '<script src="https://evil.test/b.js"></script>',
+      );
+      expect(urls(html)).toEqual(["https://evil.test/a.js", "https://evil.test/b.js"]);
+    });
+  });
+
+  describe("what is deliberately NOT a warning", () => {
+    it("says nothing about a self-contained document", () => {
+      const html = doc(
+        "<h1>Report</h1><p>All inline.</p>",
+        "<style>body{font-family:system-ui}</style><script>console.log(1)</script>",
+      );
+      expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("says nothing about data: URIs", () => {
+      const html = doc(
+        '<img src="data:image/png;base64,iVBORw0KGgo=" alt="">',
+        "<style>@font-face{src:url(data:font/woff2;base64,AAAA)}</style>",
+      );
+      expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("says nothing about same-document references", () => {
+      const html = doc(
+        '<a href="#summary">jump</a><svg><rect fill="url(#grad)"/></svg><img src="" alt="">',
+        '<link rel="stylesheet" href="?v=2">',
+      );
+      expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("says nothing about relative or host-relative references", () => {
+      const html = doc(
+        '<img src="./logo.png" alt=""><script src="/assets/app.js"></script>',
+        '<link rel="stylesheet" href="theme.css">',
+      );
+      expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("says nothing about non-fetching schemes", () => {
+      const html = doc(
+        '<a href="mailto:a@b.test">mail</a><a href="tel:+1">call</a>' +
+          '<img src="blob:https://view.test/abc" alt="">',
+      );
+      expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("ignores link rels that load nothing", () => {
+      const head =
+        '<link rel="preconnect" href="https://evil.test">' +
+        '<link rel="dns-prefetch" href="https://evil.test">' +
+        '<link rel="canonical" href="https://evil.test/x">';
+      expect(scanBlockedResources(doc("", head))).toEqual([]);
+    });
+  });
+
+  describe("it is a scan, never a fetch (ADR-0069)", () => {
+    it("never touches the network for a document full of external references", () => {
+      const fetchSpy = vi.fn();
+      const original = globalThis.fetch;
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+      try {
+        scanBlockedResources(
+          doc(
+            '<script src="https://evil.test/a.js"></script><img src="https://evil.test/b.png" alt="">',
+            '<link rel="stylesheet" href="https://evil.test/c.css">',
+          ),
+        );
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("stays linear on a large hostile stylesheet instead of backtracking", () => {
+      // The scan runs over an UNTRUSTED document, so its cost has to be linear
+      // in the input: an unterminated `url(` repeated across a big stylesheet
+      // is the shape that makes a naive scan quadratic.
+      const hostile = `<style>${"url(".repeat(20000)}${"a".repeat(20000)}</style>`;
+      const started = Date.now();
+      expect(() => scanBlockedResources(doc("", hostile))).not.toThrow();
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+
+    it("answers for malformed, hostile-looking bytes instead of throwing", () => {
+      expect(() => scanBlockedResources("<<>><html><body><script src=")).not.toThrow();
+      expect(() => scanBlockedResources("")).not.toThrow();
+    });
+  });
+});

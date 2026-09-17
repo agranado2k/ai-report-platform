@@ -992,3 +992,41 @@ export interface ApiKeyStore {
    */
   revokeAllForUser(actingUserId: UserId): Promise<Result<number, AppError>>;
 }
+
+// ── External-resource scan (#365) ─────────────────────────────────────────
+/**
+ * What the PUBLIC VIEWER will refuse to load out of an uploaded document.
+ *
+ * A report is served byte-for-byte (ADR-0038) under the enforcing CSP of
+ * ADR-0088, whose **Viewer CSP allowlist** is a small named set of hosts. A
+ * document reaching past it renders degraded and, until this port existed,
+ * nothing told its author — who by then no longer holds the document.
+ *
+ * A port for the same reason `EditabilityProbe` and `FidelityProbe` are ports:
+ * answering needs an HTML parser, and this package is dependency-locked to
+ * `arp-domain` (ADR-0024). The real implementation is `arp-report-html`'s
+ * `scanBlockedResources`, which reads `VIEW_CSP_ALLOWLIST` itself rather than a
+ * copy of its hosts.
+ *
+ * SYNCHRONOUS ON PURPOSE (ADR-0069): the uploaded document is untrusted
+ * content, and a scan that cannot await cannot fetch. Nothing on this seam
+ * dereferences a URL — it reads text and compares strings.
+ */
+export interface BlockedExternalResource {
+  /** The URL exactly as the document writes it. */
+  readonly url: string;
+  /** The CSP directive governing the reference — `script-src`, `img-src`, … */
+  readonly directive: string;
+  /** The hosts that directive permits; empty when it permits no external host. */
+  readonly allowed: readonly string[];
+}
+
+export interface ResourceScanner {
+  /**
+   * @param entryDocument the entry document's bytes, exactly as they will be stored
+   * @returns every external reference the viewer's CSP will block; empty when
+   *   the document is self-contained. Total by contract — it answers or it
+   *   returns nothing, and it never rejects an upload.
+   */
+  scan(entryDocument: Uint8Array): readonly BlockedExternalResource[];
+}

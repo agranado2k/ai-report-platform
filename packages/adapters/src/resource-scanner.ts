@@ -1,0 +1,34 @@
+// ReportHtmlResourceScanner — the ResourceScanner port (#365), backed by the
+// scan that reads the Viewer CSP allowlist itself.
+//
+// The third of the write-time questions, beside ReportHtmlEditabilityProbe
+// (ADR-0080, "can the editor open these bytes?") and ReportHtmlFidelityProbe
+// (ADR-0090, "would it keep them?"). This one asks what the VIEWER will do:
+// which of the document's external references the ADR-0088 CSP will refuse to
+// load. It exists as a port for the reason its two siblings do — answering
+// needs an HTML parser, and `arp-application` is dependency-locked (ADR-024).
+//
+// It delegates to `arp-report-html`'s `scanBlockedResources`, which reads
+// `VIEW_CSP_ALLOWLIST` — the same object `viewHeaders()` builds the policy
+// from — rather than a second list of hosts that would drift the first time
+// the real one was widened.
+//
+// SECURITY (ADR-0069): the uploaded document is UNTRUSTED CONTENT. Nothing on
+// this path dereferences what it finds — no HEAD request, no DNS lookup, no
+// reachability check. The method is synchronous so that it cannot.
+//
+// It never rejects an upload. A report that reaches past the allowlist still
+// stores, still versions, and is still served byte-for-byte; naming the
+// reference only lets its author fix it while they still hold the document.
+
+import type { BlockedExternalResource, ResourceScanner } from "arp-application";
+import { scanBlockedResources } from "arp-report-html";
+
+export class ReportHtmlResourceScanner implements ResourceScanner {
+  scan(entryDocument: Uint8Array): readonly BlockedExternalResource[] {
+    // UTF-8 with `fatal: false` (the default): malformed bytes become U+FFFD
+    // rather than throwing, so the scan stays total. The stored bytes are
+    // untouched either way — this decode is local to answering the question.
+    return scanBlockedResources(new TextDecoder().decode(entryDocument));
+  }
+}

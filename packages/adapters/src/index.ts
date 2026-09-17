@@ -27,6 +27,7 @@ export * from "./pg-boss-scan-queue";
 export * from "./plan-limiter";
 export * from "./r2-blob-store";
 export * from "./report-repository";
+export * from "./resource-scanner";
 export * from "./scan-queue";
 export * from "./scanners/clean-stub-scanner";
 export * from "./services/api-key";

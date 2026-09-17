@@ -12,6 +12,7 @@ import {
   FakeFidelityProbe,
   FakeHasher,
   FakePlanLimiter,
+  FakeResourceScanner,
   InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
@@ -38,6 +39,9 @@ export interface AppTestHarness {
   /** Whether the editor would KEEP the bytes (ADR-0090) — scripted, so a test can
    *  make an upload lossy without hand-crafting a slide deck. */
   readonly fidelity: FakeFidelityProbe;
+  /** What the VIEWER will refuse to load (#365) — scripted, so a test can make an
+   *  upload reach past the ADR-0088 allowlist without hand-crafting a document. */
+  readonly resources: FakeResourceScanner;
   readonly idempotency: InMemoryIdempotencyStore;
   readonly outbox: InMemoryEventOutbox;
   /** Audit log (ADR-0070) — every mutating action's audit_log row. */
@@ -62,6 +66,7 @@ export type AppTestHarnessOverrides = Partial<
     | "bundles"
     | "editability"
     | "fidelity"
+    | "resources"
     | "idempotency"
     | "outbox"
     | "audit"
@@ -87,6 +92,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const bundles = overrides.bundles ?? new FakeBundleProcessor();
   const editability = overrides.editability ?? new FakeEditabilityProbe();
   const fidelity = overrides.fidelity ?? new FakeFidelityProbe();
+  const resources = overrides.resources ?? new FakeResourceScanner();
   const idempotency = overrides.idempotency ?? new InMemoryIdempotencyStore();
   const outbox = overrides.outbox ?? new InMemoryEventOutbox();
   const audit = overrides.audit ?? new InMemoryAuditLogger();
@@ -107,6 +113,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     bundles,
     editability,
     fidelity,
+    resources,
     idempotency,
     outbox,
     audit,
@@ -128,6 +135,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
     bundles,
     editability,
     fidelity,
+    resources,
     idempotency,
     outbox,
     audit,

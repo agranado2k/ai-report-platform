@@ -45,6 +45,7 @@ import type {
   AuthorIdentity,
   BlobFile,
   BlobStore,
+  BlockedExternalResource,
   BundleProcessor,
   ClerkOrgProvisioner,
   Clock,
@@ -84,6 +85,7 @@ import type {
   ReportSummary,
   ReportVersionSummary,
   ReportViewer,
+  ResourceScanner,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
@@ -841,6 +843,29 @@ export class FakeFidelityProbe implements FidelityProbe {
   probe(entryDocument: Uint8Array, hasSourceDoc: boolean): FidelityVerdict | null {
     this.probed.push({ html: new TextDecoder().decode(entryDocument), hasSourceDoc });
     return this.verdict;
+  }
+}
+
+/** A scripted {@link ResourceScanner} (#365). Records every document it was
+ *  handed, so a test can assert WHETHER it was consulted — "no entry document,
+ *  no scan" is a property of the caller, and an unconsulted scanner is how you
+ *  see it holding. Defaults to a self-contained document: nothing blocked.
+ *
+ *  Deliberately NOT the real `scanBlockedResources`, for the ADR-024 reason its
+ *  two siblings are not: the real predicate — and its reading of the ADR-0088
+ *  allowlist — is covered by `packages/report-html/src/resource-scan.test.ts`
+ *  and the adapter's own test. */
+export class FakeResourceScanner implements ResourceScanner {
+  private blocked: readonly BlockedExternalResource[] = [];
+  readonly scanned: string[] = [];
+
+  setBlocked(blocked: readonly BlockedExternalResource[]): void {
+    this.blocked = blocked;
+  }
+
+  scan(entryDocument: Uint8Array): readonly BlockedExternalResource[] {
+    this.scanned.push(new TextDecoder().decode(entryDocument));
+    return this.blocked;
   }
 }
 
