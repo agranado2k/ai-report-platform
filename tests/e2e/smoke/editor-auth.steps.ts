@@ -80,21 +80,51 @@ When("I open that report", async ({ page }) => {
   response = await page.request.get(`/reports/${slug}/open`, { maxRedirects: 0 });
 });
 
+// #363: the mint now takes a DESTINATION, and the unqualified `/open` above no
+// longer means "the editor". `?to=edit` is what the owner view's own Edit link
+// and the dashboard's Edit action carry — and it is the reason the editor did
+// not become structurally unreachable when the default flipped, so it needs
+// end-to-end coverage of its own rather than being assumed.
+When("I open that report for editing", async ({ page }) => {
+  response = await page.request.get(`/reports/${slug}/open?to=edit`, { maxRedirects: 0 });
+});
+
 Then("I am not redirected to sign-in", async () => {
   const location = response.headers().location ?? "";
   expect(location).not.toContain("/sign-in");
 });
 
-Then("I am redirected to an edit-shaped location for that report", async () => {
+/** Shared by both destination assertions: /open always answers a redirect that
+ *  threads the minted edit token, whichever surface it points at. */
+function redirectLocation(): string {
   const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
   const location = response.headers().location ?? "";
   expect(
     REDIRECT_CODES.has(response.status()),
     `expected a redirect; got status ${response.status()}, location "${location}"`,
   ).toBe(true);
-  // ownerOpenLocation (open-report.server.ts) mints a scope:"edit" token and
-  // redirects to `${viewOrigin}/${slug}/edit?et=<token>` for any canWrite
-  // user — owner or write-grantee, no distinction since Phase 5.
+  return location;
+}
+
+// THE #363 FLIP, pinned end-to-end. Opening your own report from the dashboard
+// lands on the OWNER VIEW — first-party chrome above the byte-for-byte report —
+// not in the editor. The capability threading is deliberately asserted to be
+// unchanged (#363 AC1: "exactly as before"): the same `et=` edit token, and for
+// an owner the same `oa=` fallback. Only the destination moved.
+Then("I am redirected to the owner view for that report", async () => {
+  const location = redirectLocation();
+  expect(location).toContain(`/${slug}/view`);
+  expect(location).not.toContain(`/${slug}/edit`);
+  expect(location).toContain("et=");
+  expect(location).toContain("oa=");
+});
+
+Then("I am redirected to an edit-shaped location for that report", async () => {
+  const location = redirectLocation();
+  // ownerOpenLocation (open-report.server.ts) mints a scope:"edit" token and,
+  // for `destination: "editor"` (`?to=edit`), redirects to
+  // `${viewOrigin}/${slug}/edit?et=<token>` for any canWrite user — owner or
+  // write-grantee, no distinction since Phase 5.
   expect(location).toContain(`/${slug}/edit`);
   expect(location).toContain("et=");
 });

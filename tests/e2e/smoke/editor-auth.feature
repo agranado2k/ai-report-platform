@@ -18,8 +18,10 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
   #
   # (1) The authenticated, canWrite-gated half of the hand-off on the APP
   # side — a signed-in owner is not bounced to /sign-in, and /open's redirect
-  # Location is edit-shaped (points at "<slug>/edit" and carries a minted
-  # "et=" edit-token query param).
+  # Location carries a minted "et=" edit-token query param. Since #363 the
+  # surface that Location POINTS AT depends on the requested destination: the
+  # unqualified call is owner-view-shaped ("<slug>/view"), and "?to=edit" is
+  # edit-shaped ("<slug>/edit"). See (5).
   #
   # (2) RETRIMMED AGAIN (deployed-preview cross-origin editor render, closing
   # the gap that let the owner-lockout regression ship): the VIEW side of the
@@ -74,10 +76,24 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
   # via @clerk/clerk-js, which needs the publishable key to initialize). Absent
   # any of the three, playwright.config.ts grep-excludes @browser entirely — it
   # never runs half-configured (see the `chromium` project's grepInvert there).
+  # (5) THE DESTINATION SPLIT (#363). Opening your own report no longer means
+  # "open the editor": the unqualified `/reports/:slug/open` now lands on the
+  # OWNER VIEW, and the editor is reached by the same one mint carrying
+  # `?to=edit`. Both halves are asserted here, and they are asserted together
+  # on purpose — the flip created a loop (the owner view's Edit link funnels
+  # back through the mint, which would have answered with the owner view again),
+  # so "the default moved" and "the editor is still reachable" are one property
+  # with two sides. Everything below the destination assertion is unchanged: the
+  # cross-origin token round-trip and the second hop still exercise the EDITOR,
+  # which is where both production incidents (#188, the ADR-0080 owner lockout)
+  # happened and where this feature's regression value lives.
   Scenario: Opening the report authenticates its owner and hands off toward the unified editor
     Given a report I own exists
     And that report has been scanned clean
     When I open that report
+    Then I am not redirected to sign-in
+    And I am redirected to the owner view for that report
+    When I open that report for editing
     Then I am not redirected to sign-in
     And I am redirected to an edit-shaped location for that report
     And the view edit route accepts the edit token instead of falling back to the public viewer
@@ -87,7 +103,7 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
     Given a report I own that the editor cannot open exists
     And that report has been scanned clean
     Then the report reads back as un-editable over the API
-    When I open that report
+    When I open that report for editing
     Then I am redirected to an edit-shaped location for that report
     And the view edit route accepts the edit token instead of falling back to the public viewer
     And the view edit route degrades to a read-only view instead of failing
