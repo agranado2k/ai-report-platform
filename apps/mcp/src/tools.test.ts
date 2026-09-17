@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES, REPORT_SHARING_STATES } from "arp-domain";
+import { VIEW_CSP_ALLOWLIST } from "arp-headers/view";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -636,5 +637,91 @@ describe("Editability is legible to an agent (ADR-0080)", () => {
     ]) {
       if (d.includes("editability")) expect(d).toMatch(/null|unknown/i);
     }
+  });
+});
+
+describe("reports_upload authoring guidance (#365)", () => {
+  const writeDescriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  const uploadHtmlParam = () =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description ?? "";
+
+  // The MCP tool and the HTTP endpoint return the SAME list — the tool is a
+  // thin client over /api/v1 (ADR-003), so the warnings it hands an agent are
+  // the API's own, unfiltered and unreworded.
+  it("hands the API's warnings[] back to the agent verbatim", async () => {
+    const warnings = [
+      { code: "external-resource-blocked", detail: "https://unpkg.com/x.js will be blocked" },
+      { code: "editor-lossy", detail: "would drop elements: script" },
+    ];
+    const { client } = recordingClient({
+      ok: true,
+      data: { object: "report", slug: "abc12345", version: 1, warnings },
+    });
+    const res = await collectTools(registerWriteTools, client)
+      .get("reports_upload")
+      ?.handler({ html: "<html><body><p>x</p></body></html>" });
+    expect(res?.isError).toBeUndefined();
+    expect((res?.structuredContent as { warnings?: unknown })?.warnings).toEqual(warnings);
+  });
+
+  // The response half: an agent that just published something the viewer will
+  // render degraded must learn it from the response it already reads, while it
+  // still holds the document — not from a human opening the report later.
+  it("names warnings[] and both of its codes", () => {
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).toMatch(/warnings/);
+    expect(d).toMatch(/external-resource-blocked/);
+    expect(d).toMatch(/editor-lossy/);
+  });
+
+  it("says a warning is never a rejection", () => {
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).toMatch(/not an error|never an error|still (uploads|publishes|succeeds)/i);
+  });
+
+  // The authoring half. Nothing is injected around a report at serve time
+  // (ADR-0038), so every rule below is one the GENERATOR has to follow — and
+  // the tool description is the only guidance that reaches every MCP client.
+  it("names the viewer CSP allowlist by name, with EVERY host actually on it", () => {
+    // Derived from the ADR-0088 constant, not restated: widening the real
+    // allowlist fails here until the guidance an agent reads catches up.
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/viewer CSP allowlist/i);
+    for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+      expect(guidance).toContain(host);
+    }
+  });
+
+  it("tells the author to ship their own [hidden] rule", () => {
+    // The motivating bug of PRD #356: an artifact that toggles `hidden` renders
+    // every slide at once here, because no host reset is injected.
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important\s*\}/);
+  });
+
+  it("says no host reset or stylesheet is injected around the report", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/no .*reset|nothing is injected|no host (css|stylesheet|reset)/i);
+  });
+
+  it("tells the author how to get fonts: data: URIs or Google Fonts", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/data:/);
+    expect(guidance).toMatch(/Google Fonts/i);
+  });
+
+  it("rules out host-relative assets — the upload is ONE document", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/relative/i);
+    expect(guidance).toMatch(/self-contained|one document|single document/i);
   });
 });

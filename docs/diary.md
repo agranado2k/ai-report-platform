@@ -6192,3 +6192,33 @@ read by things that explain, never by things that decide.** The consumers that a
 on it — the Edit confirm dialog and the upload warnings — are separate tickets, so
 the recorded fact lands and is reviewable before anything is built on it. Glossary
 term and ADR index updated in the same change.
+
+### 2026-09-17 — Upload warnings: telling the author before they let go of the document (#365)
+
+The upload response — HTTP and the MCP `reports_upload` tool — now carries
+`warnings[]`, each `{ code, detail }`, with two codes: `external-resource-blocked`
+(one per external URL the viewer's CSP will refuse to load) and `editor-lossy`
+(this ReportVersion's recorded Fidelity is `lossy`, with the lost items named).
+This is the consumer ADR-0090 deliberately deferred, now that the recorded facts
+exist. Warnings never change the status code and never reject: an upload with
+nothing to say returns `[]`, never an absent field, so a client can tell a clean
+upload from a server that does not compute warnings.
+
+Two things worth keeping. First, the scan is **directive-aware**, which turned out
+to matter more than expected: a host is not allowed or blocked in the abstract but
+per CSP directive, so `cdnjs.cloudflare.com` clears as a script and is blocked as
+an image — `img-src` stays pinned to the view origin precisely because a wildcard
+image source is an exfiltration channel (ADR-0088). A host-only check would have
+cleared the image and taught agents the wrong rule. Second, the scan reads
+`VIEW_CSP_ALLOWLIST` itself rather than a copy, and the tests derive their
+expectations from that same object, so widening the allowlist widens the scanner
+and fails the MCP guidance test until the text an agent reads catches up.
+
+Shaped as the third write-time question beside the two probes: a synchronous
+`ResourceScanner` port (ADR-0024), implemented in `packages/adapters` over
+`arp-report-html`'s `scanBlockedResources`. Synchronous on purpose — the uploaded
+document is untrusted content and a scan that cannot await cannot fetch (ADR-0069).
+The `reports_upload` description gained the self-contained authoring rules the
+allowlist implies (ship your own `[hidden]{display:none!important}`; inline fonts
+or use Google Fonts; no host-relative assets; no host reset is injected). Glossary
+term **Upload warning** and `docs/api/openapi.yaml` updated in the same change.

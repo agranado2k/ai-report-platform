@@ -6,7 +6,14 @@ import { uploadResultToHttp } from "./upload-response";
 const OPTS = { viewBaseUrl: "https://view.example", mode: "prod" as const };
 
 const outcome = (over: Partial<UploadOutcome["result"]> = {}): UploadOutcome => ({
-  result: { slug: "abcde12345", version: 1, scanStatus: "clean", editability: "editable", ...over },
+  result: {
+    slug: "abcde12345",
+    version: 1,
+    scanStatus: "clean",
+    editability: "editable",
+    warnings: [],
+    ...over,
+  },
   replayed: false,
 });
 
@@ -24,6 +31,7 @@ describe("uploadResultToHttp — success", () => {
       version: 1,
       scan_status: "clean",
       editability: "editable",
+      warnings: [],
       mode: "prod",
     });
     expect(res.headers?.Location).toBe("https://view.example/abcde12345");
@@ -43,6 +51,45 @@ describe("uploadResultToHttp — success", () => {
     const body = res.body as Record<string, unknown>;
     expect("editability" in body).toBe(true);
     expect(body.editability).toBeNull();
+  });
+
+  it("carries the upload's warnings on the wire, code + detail (#365)", () => {
+    // What the author needs to know while they still hold the document: what
+    // the viewer will refuse to load (ADR-0088) and what a save would cost
+    // (ADR-0090). Same list the MCP reports_upload tool hands its agent.
+    const res = uploadResultToHttp(
+      ok(
+        outcome({
+          warnings: [
+            { code: "external-resource-blocked", detail: "https://unpkg.com/x.js will be blocked" },
+            { code: "editor-lossy", detail: "would drop elements: script" },
+          ],
+        }),
+      ),
+      OPTS,
+    );
+    expect(res.status).toBe(201);
+    expect((res.body as { warnings?: unknown }).warnings).toEqual([
+      { code: "external-resource-blocked", detail: "https://unpkg.com/x.js will be blocked" },
+      { code: "editor-lossy", detail: "would drop elements: script" },
+    ]);
+  });
+
+  it("emits warnings: [] (never omitted) when there is nothing to warn about", () => {
+    // Absent-vs-empty is the difference between "this upload is clean" and
+    // "this server does not compute warnings"; a client must be able to tell.
+    const body = uploadResultToHttp(ok(outcome()), OPTS).body as Record<string, unknown>;
+    expect("warnings" in body).toBe(true);
+    expect(body.warnings).toEqual([]);
+  });
+
+  it("keeps 201 and the Location header when it warns — a warning is never a rejection", () => {
+    const res = uploadResultToHttp(
+      ok(outcome({ warnings: [{ code: "editor-lossy", detail: "lossy" }] })),
+      OPTS,
+    );
+    expect(res.status).toBe(201);
+    expect(res.headers?.Location).toBe("https://view.example/abcde12345");
   });
 
   it("returns the report_ External Id when the upload created a report (ADR-0052)", () => {

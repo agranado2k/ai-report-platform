@@ -31,6 +31,7 @@ import {
   R2BlobStore,
   ReportHtmlEditabilityProbe,
   ReportHtmlFidelityProbe,
+  ReportHtmlResourceScanner,
   ResendEmailSender,
   Sha256Hasher,
   SystemClock,
@@ -233,6 +234,10 @@ export function deps(): UploadReportDeps {
     // rather than a silent redirect the user discovers later.
     editability: new ReportHtmlEditabilityProbe(),
     fidelity: new ReportHtmlFidelityProbe(),
+    // #365 — what the VIEWER will refuse to load out of this document, read
+    // off the ADR-0088 allowlist. A scan of the bytes; it never fetches what
+    // it finds (ADR-0069).
+    resources: new ReportHtmlResourceScanner(),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
     audit: auditLogger(),
