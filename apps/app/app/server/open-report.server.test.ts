@@ -19,13 +19,20 @@ import {
   orgId,
   readAccessToken,
   readEditToken,
+  readGranteeReadToken,
   reportId,
   type Slug,
   userId,
+  verifyAccessToken,
   versionId,
 } from "arp-domain";
 import { describe, expect, it } from "vitest";
-import { EDIT_TTL_SECONDS, OWNER_TTL_SECONDS, ownerOpenLocation } from "./open-report.server";
+import {
+  EDIT_TTL_SECONDS,
+  GRANTEE_READ_TTL_SECONDS,
+  OWNER_TTL_SECONDS,
+  ownerOpenLocation,
+} from "./open-report.server";
 
 const ORG = orgId("00000000-0000-7000-8000-0000000000a1");
 const OTHER_ORG = orgId("00000000-0000-7000-8000-0000000000b1");
@@ -141,7 +148,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
 
     expect(location.startsWith(`${VIEW}/ffffffffff/edit?et=`)).toBe(true);
     expect(location).not.toContain("&oa="); // review #146: a grantee NEVER gets an owner:true token
-    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const token = decodeURIComponent(location.split("?et=")[1]?.split("&gr=")[0] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
     const claims = readEditToken(token, "ffffffffff", SECRET, nowSeconds);
     expect(claims).toMatchObject({
@@ -179,7 +186,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
 
     expect(location.startsWith(`${VIEW}/gggggggggg/edit?et=`)).toBe(true);
     expect(location).not.toContain("&oa=");
-    const token = decodeURIComponent(location.split("?et=")[1] ?? "");
+    const token = decodeURIComponent(location.split("?et=")[1]?.split("&gr=")[0] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
     expect(readEditToken(token, "gggggggggg", SECRET, nowSeconds)).toMatchObject({
       slug: "gggggggggg",
@@ -312,5 +319,119 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
     expect(
       readEditToken(token, "eeeeeeeeee", SECRET, nowSeconds + EDIT_TTL_SECONDS + 1),
     ).toBeNull();
+  });
+});
+
+// --- The Grantee read token mint (ADR-0091) ----------------------------------
+//
+// `/open` is the ONE mint (ADR-0059 §4) and it already knows whether the actor
+// owns the report, so the grantee's read capability is decided by the SAME
+// `isOwner` ternary that decides the owner's `oa=`. That structure — one
+// boolean, two mutually exclusive outcomes — is the no-escalation guarantee;
+// these tests pin both halves of it.
+describe("ownerOpenLocation — the Grantee read token (ADR-0091)", () => {
+  async function granteeOpen(slugStr: string) {
+    const { reports, report } = await seededReports(slugStr);
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    identities.seedUser(GRANTEE, "grantee@x.com");
+    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
+    const { deps, logged } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: GRANTEE },
+      rawHandle: slugStr,
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+    return { location, logged };
+  }
+
+  it("GRANTEE: gets a `gr=` grantee read token and NO `oa=` — the two are mutually exclusive", async () => {
+    const { location } = await granteeOpen("gggggggggg");
+    expect(location).toContain("&gr=");
+    expect(location).not.toContain("&oa=");
+
+    const gr = decodeURIComponent(location.split("&gr=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    expect(readGranteeReadToken(gr, "gggggggggg", SECRET, nowSeconds)).toEqual({
+      slug: "gggggggggg",
+      sub: GRANTEE,
+      scope: "granteeRead",
+      exp: nowSeconds + GRANTEE_READ_TTL_SECONDS,
+    });
+  });
+
+  it("the grantee's token is NOT an owner token — the review-#146 escalation, pinned at the mint", async () => {
+    // The point of ADR-0091: the grantee gets a real read capability without
+    // anyone ever minting `owner: true` for a non-owner. Checked here at the
+    // mint rather than only at the redeemer, because the redeemer is one
+    // refactor away from a second caller.
+    const { location } = await granteeOpen("hhhhhhhhhh");
+    const gr = decodeURIComponent(location.split("&gr=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    expect(verifyAccessToken(gr, "hhhhhhhhhh", SECRET, nowSeconds)).toBe(false);
+    expect(readGranteeReadToken(gr, "hhhhhhhhhh", SECRET, nowSeconds)).not.toHaveProperty("owner");
+  });
+
+  it("the grantee read token lives EDIT_TTL_SECONDS, not the owner's 24h (ADR-0091 §4)", async () => {
+    // Ownership cannot be revoked; a write grant can. So the grantee's read
+    // capability expires with their edit capability and the session repairs
+    // through this very mint, which re-runs the LIVE canWrite check.
+    expect(GRANTEE_READ_TTL_SECONDS).toBe(EDIT_TTL_SECONDS);
+    const { location } = await granteeOpen("iiiiiiiiii");
+    const gr = decodeURIComponent(location.split("&gr=")[1] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    expect(
+      readGranteeReadToken(gr, "iiiiiiiiii", SECRET, nowSeconds + EDIT_TTL_SECONDS),
+    ).toBeNull();
+  });
+
+  it("audits the grantee mint distinguishably — granteeReadMinted true, ownerFallbackMinted false", async () => {
+    const { logged } = await granteeOpen("jjjjjjjjjj");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      fields: { ownerFallbackMinted: false, granteeReadMinted: true, userId: GRANTEE },
+    });
+  });
+
+  it("OWNER: gets `oa=` and NEVER `gr=` — the other half of the exclusivity", async () => {
+    const { reports } = await seededReports("kkkkkkkkkk");
+    const { deps, logged } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "kkkkkkkkkk",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+    expect(location).toContain("&oa=");
+    expect(location).not.toContain("&gr=");
+    expect(logged[0]).toMatchObject({
+      fields: { ownerFallbackMinted: true, granteeReadMinted: false },
+    });
+  });
+
+  it("no secret configured: neither token is minted — the fail-closed fall-through is unchanged", async () => {
+    const { reports, report } = await seededReports("llllllllll");
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    identities.seedUser(GRANTEE, "grantee@x.com");
+    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
+    const { deps } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: GRANTEE },
+      rawHandle: "llllllllll",
+      viewOrigin: VIEW,
+      secret: undefined,
+    });
+    expect(location).toBe(`${VIEW}/llllllllll`);
+    expect(location).not.toContain("gr=");
   });
 });

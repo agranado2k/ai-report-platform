@@ -74,14 +74,22 @@ describe("edit token (ADR-0063)", () => {
     expect(readEditToken(plainAccessToken, SLUG, SECRET, NOW + 60)).toBeNull();
   });
 
-  it("the reverse is safe — an edit token reads as a plain NON-owner access claim (no owner escalation)", () => {
-    // Edit implies read, so an edit token IS readable on the access path — but it must
-    // confer only ordinary, ACL-gated read: NO `owner` bypass, and the edit-only fields
-    // (`sub`/`scope`) dropped. Locks in the OTHER half of the no-confusion guarantee.
+  it("the reverse direction is now CLOSED — an edit token does not read as an access claim at all (ADR-0091)", () => {
+    // CHANGED by ADR-0091 §1. This used to assert that an edit token narrowed
+    // into `{slug, exp}` — an ordinary, ACL-gated, NON-owner read claim. That
+    // was never an escalation (no `owner`, no `mode`, so `resolveAccessDecision`
+    // answers `unlock`), but it was safe by EFFECT rather than by construction,
+    // and ADR-0091 adds a third token to this family that would have inherited
+    // the same looseness. `parseAccessClaims` now rejects ANY payload carrying a
+    // `scope`, so the no-confusion guarantee is structural in both directions.
+    //
+    // Behaviour-preserving in production: nothing ever feeds an edit token to
+    // the access path. The three `readAccessToken` call sites are
+    // `resolveAccessDecision` (the `?access=` query and the `arp_unlock`
+    // cookie, both only ever written from a verified Access token) and the
+    // gate's two `oa` reads.
     const editToken = mintEditToken(SLUG, SUB, 900, SECRET, NOW);
-    const asAccess = readAccessToken(editToken, SLUG, SECRET, NOW + 60);
-    expect(asAccess).toEqual({ slug: SLUG, exp: NOW + 900 }); // no owner, no sub, no scope
-    expect(asAccess?.owner).toBeUndefined();
+    expect(readAccessToken(editToken, SLUG, SECRET, NOW + 60)).toBeNull();
   });
 
   it('rejects scope:"read" (tampered/downgraded scope)', () => {

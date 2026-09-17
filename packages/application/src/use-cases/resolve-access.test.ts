@@ -1,4 +1,10 @@
-import { type Acl, mintAccessToken, reportId, verifyAccessToken } from "arp-domain";
+import {
+  type Acl,
+  mintAccessToken,
+  mintGranteeReadToken,
+  reportId,
+  verifyAccessToken,
+} from "arp-domain";
 import { describe, expect, it } from "vitest";
 import { FixedClock, InMemoryGrantStore } from "../testing/in-memory";
 import { type AccessDecision, resolveAccessDecision } from "./resolve-access";
@@ -189,5 +195,76 @@ describe("resolveAccessDecision (ADR-0056)", () => {
     await grants.grant(RID, "a@b.com", (NOW + 3600) * 1000);
     const token = mintAccessToken(SLUG, 3600, SECRET, NOW, { mode: "allowlist" }); // no email
     expect(await decide(ALLOW, { cookie: token }, { grants })).toEqual({ kind: "unlock" });
+  });
+});
+
+// --- The Grantee read token (ADR-0091) ---------------------------------------
+//
+// A write-grantee (canWrite non-owner, ADR-0060) is deliberately never minted an
+// `owner: true` Access token — that is the ADR-0063 review-#146 escalation. This
+// is the read capability they carry instead, so the owner view's sandboxed frame
+// renders the report rather than the unlock wall (ADR-0089 §8, now resolved).
+describe("resolveAccessDecision — the Grantee read token (ADR-0091)", () => {
+  const PRIVATE: Acl = { mode: "private" };
+  const ORG: Acl = { mode: "org" };
+  const SUB = "00000000-0000-7000-8000-0000000000c1";
+  const gr = (opts: { slug?: string; ttl?: number; secret?: string } = {}) =>
+    mintGranteeReadToken(opts.slug ?? SLUG, SUB, opts.ttl ?? 900, opts.secret ?? SECRET, NOW);
+
+  it.each([
+    ["private", PRIVATE],
+    ["password", PW],
+    ["org", ORG],
+    ["allowlist", ALLOW],
+  ])("serves a %s report off a cookie-borne grantee read token — the capability is MODE-INDEPENDENT", async (_label, acl) => {
+    // Mode-independence IS the capability (ADR-0091 §6): a share mode gates
+    // readers the owner did not choose, and a write-grantee is one they did —
+    // they can already read every byte through the editor. Note `allowlist`
+    // needs no live `report_grants` row here: that check belongs to the
+    // allowlist Access token, and this token is not one.
+    expect(await decide(acl, { cookie: gr() })).toEqual({ kind: "serve" });
+  });
+
+  it("a query-borne grantee read token → grant, so the 303 sets the unlock cookie and strips the token", async () => {
+    const token = gr();
+    expect(await decide(PRIVATE, { query: token })).toEqual({
+      kind: "grant",
+      token,
+      maxAgeSeconds: 900,
+    });
+  });
+
+  it("NEVER confers owner access — it is not an owner token and cannot be read as one", async () => {
+    // The escalation guard, from the consuming side. The owner branch keys on
+    // `claims.owner === true`; these claims have no `owner` field at all, and
+    // `parseAccessClaims` rejects the whole payload for carrying a `scope`.
+    expect(verifyAccessToken(gr(), SLUG, SECRET, NOW + 60)).toBe(false);
+  });
+
+  it("rejects one minted for a different slug — single-report binding", async () => {
+    expect(await decide(PRIVATE, { cookie: gr({ slug: "zzzzzzzzzz" }) })).toEqual({
+      kind: "unlock",
+    });
+  });
+
+  it("rejects an expired one — this is the whole revocation bound (ADR-0091 §4)", async () => {
+    // A grantee's capability is bounded at the Edit token's own 15 min rather
+    // than the owner token's 24h: ownership cannot be revoked, a write grant
+    // can. When it lapses the session repairs through `/open`'s LIVE canWrite
+    // re-check, which is where a revoked grant actually stops working.
+    expect(await decide(PRIVATE, { cookie: gr({ ttl: 900 }) }, { now: NOW + 901 })).toEqual({
+      kind: "unlock",
+    });
+  });
+
+  it("rejects one signed with a different secret, and fails closed on an unset secret", async () => {
+    expect(await decide(PRIVATE, { cookie: gr({ secret: "wrong-secret" }) })).toEqual({
+      kind: "unlock",
+    });
+    expect(await decide(PRIVATE, { cookie: gr() }, { secret: "" })).toEqual({ kind: "unlock" });
+  });
+
+  it("leaves the public path untouched — a public report still serves with no token at all", async () => {
+    expect(await decide({ mode: "public" }, {})).toEqual({ kind: "serve" });
   });
 });

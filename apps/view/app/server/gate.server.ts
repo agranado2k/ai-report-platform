@@ -47,6 +47,7 @@ import {
   type ReportVersion,
   readAccessToken,
   readEditToken,
+  readGranteeReadToken,
   type Slug,
 } from "arp-domain";
 import { parseVersionQuery } from "./version-query";
@@ -117,6 +118,27 @@ export const EDIT_OWNER_COOKIE = "arp_edit_oa";
 export const OWNER_VIEW_COOKIE = "arp_view";
 export const OWNER_VIEW_OWNER_COOKIE = "arp_view_oa";
 
+// The `arp_view_gr` cookie — the WRITE-GRANTEE's counterpart to `arp_view_oa`
+// (ADR-0091). A canWrite NON-owner is deliberately never minted an `owner:true`
+// `oa` (review #146), so before ADR-0091 they reached this surface with full
+// chrome and a framed `GET /<slug>` carrying nothing: chrome around the unlock
+// wall, the limitation ADR-0089 §8 recorded. `ownerOpenLocation` now mints them
+// a `Grantee read token` on the query as `gr=`; this cookie is where it lives
+// after the 303 strips that query, for exactly the reason `arp_view_oa` exists
+// — the 2026-08-06 lockout was a fallback that died at its first hop.
+//
+// Same posture as the owner cookie in every respect: `Path=/<slug>/view` so it
+// is NEVER sent on the framed `GET /<slug>` nor on `/<slug>/edit` (which must
+// keep funnelling to the app's live `canWrite` re-check, ADR-0089 §4b),
+// HttpOnly + Secure + SameSite=Lax, percent-encoded through the one shared
+// builder, and Max-Age tied to the carried token's own remaining life.
+//
+// The exposure it adds is materially SMALLER than `arp_view_oa`'s: the token
+// inside it carries no `owner` claim (the field does not exist in its shape),
+// bypasses nothing but the report's own read mode for the one report it names,
+// and lives 15 minutes rather than 24 hours.
+export const OWNER_VIEW_GRANTEE_COOKIE = "arp_view_gr";
+
 /** Parse a named cookie's value out of a raw `Cookie` request header. */
 function readCookieValue(cookieHeader: string | null, cookieName: string): string | undefined {
   if (!cookieHeader) return undefined;
@@ -152,6 +174,18 @@ interface Surface {
   readonly segment: string;
   readonly capabilityCookie: string;
   readonly ownerCookie: string;
+  /** Where this surface keeps a `Grantee read token` (ADR-0091), or `undefined`
+   *  when the surface has no use for one.
+   *
+   *  This is NOT the half-existence the doc above forbids. A surface must not
+   *  half-exist — a route without its capability cookie pair — but the grantee
+   *  READ capability is not part of that pair: it unlocks the FRAMED
+   *  `GET /<slug>`, and only the owner view frames anything. `/edit` reads its
+   *  document server-side from the blob store, makes no framed request, and so
+   *  has nothing for an unlock cookie to unlock. Giving it one would mean
+   *  minting and storing a capability with no consumer, which is worse than the
+   *  asymmetry: an unread cookie is an unaudited one. */
+  readonly granteeCookie?: string;
   /** The two `event` names this surface's degrades log under — the plain one
    *  and the one that says an owner fallback was in hand. They live on the
    *  Surface for the same reason the cookie pair does: a surface that could
@@ -186,6 +220,9 @@ const OWNER_VIEW_SURFACE: Surface = {
   segment: "view",
   capabilityCookie: OWNER_VIEW_COOKIE,
   ownerCookie: OWNER_VIEW_OWNER_COOKIE,
+  // The only surface that frames the canonical report, and therefore the only
+  // one with a framed request to unlock (ADR-0091).
+  granteeCookie: OWNER_VIEW_GRANTEE_COOKIE,
   // The owner view's OWN pair (operator decision, 2026-09-10 — this file
   // previously argued for reusing /edit's; see `degradeLine` for why that
   // argument lost). The scheme differs from /edit's in one place: the owner
@@ -253,13 +290,37 @@ function ownerFallbackCookie(
   oa: string,
   maxAgeSeconds: number,
 ): string {
-  return surfaceCookie(
-    surface.ownerCookie,
-    slug,
-    surface.segment,
-    encodeURIComponent(oa),
-    maxAgeSeconds,
-  );
+  return encodedSurfaceCookie(surface.ownerCookie, surface, slug, oa, maxAgeSeconds);
+}
+
+/** A surface's grantee-read cookie (ADR-0091) — `ownerFallbackCookie`'s sibling,
+ *  routed through the SAME single encode for the same reason. Only called for a
+ *  surface that declares a `granteeCookie`; the caller has already narrowed
+ *  that, so the name is passed in rather than re-derived here. */
+function granteeReadCookie(
+  surface: Surface,
+  cookieName: string,
+  slug: string,
+  gr: string,
+  maxAgeSeconds: number,
+): string {
+  return encodedSurfaceCookie(cookieName, surface, slug, gr, maxAgeSeconds);
+}
+
+/** The ONE percent-encode for every token-bearing surface cookie. Both fallback
+ *  builders above delegate here, and `readOwnerFallbackCookie` is the one place
+ *  that undoes it. An encode restated per caller is an encode one caller can
+ *  forget, at which point a token containing a `;`, `,` or space splits the
+ *  `Set-Cookie` header. Values arrive DECODED (`searchParams.get` decodes, and
+ *  so does the cookie read), so this is the only encode. */
+function encodedSurfaceCookie(
+  name: string,
+  surface: Surface,
+  slug: string,
+  value: string,
+  maxAgeSeconds: number,
+): string {
+  return surfaceCookie(name, slug, surface.segment, encodeURIComponent(value), maxAgeSeconds);
 }
 
 /**
@@ -797,7 +858,7 @@ async function decideOwnerView(
   deps: GateDeps,
 ): Promise<OwnerViewDecision> {
   const cap = readCapability(url, request.headers.get("cookie"), slug, OWNER_VIEW_SURFACE, deps);
-  const { oa } = cap;
+  const { oa, gr } = cap;
 
   if (cap.kind === "handoff") {
     return {
@@ -812,6 +873,30 @@ async function decideOwnerView(
               // start bouncing the FRAME to the unlock wall mid-session — the
               // one place the user cannot see a URL to explain it.
               unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps)),
+            ]
+          : []),
+        // The WRITE-GRANTEE's equivalent pair (ADR-0091 §3). Mutually exclusive
+        // with the `oa` pair above in practice, because `ownerOpenLocation`
+        // mints exactly one of `oa=` / `gr=` off one `isOwner` boolean — but
+        // written as an independent spread rather than an `else`, so that if
+        // both ever did arrive the result is two verified read capabilities
+        // rather than a silently dropped one.
+        //
+        // Unlike the owner's, this Max-Age IS the grantee's whole 15 minutes,
+        // which is also the edit capability's: ADR-0091 §4's point is that the
+        // grantee's session expires all at once and repairs through the app's
+        // one mint, where a revoked grant is actually caught. The mid-session
+        // bounce §4c worried about is bounded by the chrome expiring with it.
+        ...(gr
+          ? [
+              granteeReadCookie(
+                OWNER_VIEW_SURFACE,
+                OWNER_VIEW_GRANTEE_COOKIE,
+                slug,
+                gr,
+                cap.maxAge,
+              ),
+              granteeUnlockCookie(gr, slug, deps),
             ]
           : []),
       ],
@@ -889,14 +974,24 @@ async function decideOwnerView(
     version: outcome.value.version,
     capability,
     // The frame's read capability, re-issued on EVERY serve that holds a
-    // verified `oa` rather than only on the 303. On the `write` arm that is a
-    // refresh (the hand-off set it already); on `ownerRead` it is the whole
-    // point — that arm is reached with no hand-off behind it, so nothing else
-    // would ever put `arp_unlock` on the browser and §3's "same token, same
-    // check, same access" would be false for every non-public report.
+    // verified read fallback rather than only on the 303. On the `write` arm
+    // that is a refresh (the hand-off set it already); on `ownerRead` it is the
+    // whole point — that arm is reached with no hand-off behind it, so nothing
+    // else would ever put `arp_unlock` on the browser and §3's "same token,
+    // same check, same access" would be false for every non-public report.
     // Deliberately one rule over both arms: an arm-specific cookie is what
     // rots when the matrix grows a fourth row.
-    cookies: oa ? [unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps))] : [],
+    //
+    // ADR-0091 adds the grantee's token to the same rule rather than a branch
+    // beside it. The two are mutually exclusive upstream (one `isOwner`
+    // boolean at the one mint), and `oa` is listed first so that if both ever
+    // arrived the OWNER's longer-lived capability wins the single `arp_unlock`
+    // slot — never two `Set-Cookie`s racing for the same name and Path.
+    cookies: oa
+      ? [unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps))]
+      : gr
+        ? [granteeUnlockCookie(gr, slug, deps)]
+        : [],
     degradeTo: degradeLocation(slug, oa),
     ownerFallback: oa !== undefined,
   };
@@ -950,6 +1045,55 @@ function acceptOwnerFallback(
   return claims?.owner === true ? raw : undefined;
 }
 
+/**
+ * VERIFY a `Grantee read token` before it counts as one (ADR-0091 §3).
+ *
+ * `acceptOwnerFallback`'s sibling, arm for arm and deliberately so: the same
+ * length cap applied BEFORE the HMAC (the value is echoed into a `Set-Cookie`
+ * verbatim, so an oversized string must never even be hashed), the same
+ * fail-closed on an unset secret (Node's HMAC accepts an empty key), the same
+ * slug binding and expiry. Two checks that must behave identically should read
+ * identically.
+ *
+ * The one difference is which codec judges it, and that difference IS the
+ * no-escalation boundary: `readGranteeReadToken` requires
+ * `scope: "granteeRead"`, so an `owner:true` Access token presented as `gr=`
+ * is rejected here rather than quietly honored — and, symmetrically, a
+ * Grantee read token presented as `oa=` is rejected by `acceptOwnerFallback`,
+ * because `parseAccessClaims` refuses any payload carrying a `scope`.
+ *
+ * The view origin VERIFIES; it never mints (ADR-0056's keystone). Everything
+ * this function can return was minted by the app at its one mint, for a
+ * principal it had just re-checked `canWrite` for.
+ */
+function acceptGranteeRead(
+  raw: string | undefined,
+  slug: Slug,
+  deps: GateDeps,
+): string | undefined {
+  if (!raw || raw.length > MAX_OWNER_FALLBACK_LENGTH || !deps.secret) return undefined;
+  return readGranteeReadToken(raw, slug, deps.secret, deps.nowSeconds) ? raw : undefined;
+}
+
+/** The `gr` token's own remaining life, for the unlock cookie the framed
+ *  `/<slug>` navigation needs. `ownerAccessMaxAge`'s sibling, and fails CLOSED
+ *  (`0`, expiring the cookie immediately) for the same reason: the token has
+ *  already been verified by `acceptGranteeRead` so the re-read cannot fail, but
+ *  a capability should never be widened by an assertion. */
+function granteeReadMaxAge(gr: string, slug: Slug, deps: GateDeps): number {
+  const claims = deps.secret ? readGranteeReadToken(gr, slug, deps.secret, deps.nowSeconds) : null;
+  return claims ? Math.max(0, claims.exp - deps.nowSeconds) : 0;
+}
+
+/** The `arp_unlock` cookie a verified `gr` redeems into — the ONE cookie the
+ *  sandboxed frame's navigation carries (ADR-0091 §3). Built here rather than
+ *  inline at the two call sites (the 303 and the serve arm) so the two cannot
+ *  drift on `Max-Age`, which is the field that decides whether the frame
+ *  survives the session. */
+function granteeUnlockCookie(gr: string, slug: Slug, deps: GateDeps): string {
+  return unlockCookie(slug, gr, granteeReadMaxAge(gr, slug, deps));
+}
+
 /** Read the owner fallback back out of its cookie, undoing the percent-encoding
  *  `ownerFallbackCookie` applied. A malformed encoding is treated as absent
  *  rather than thrown — a corrupt cookie must never 500 the route. */
@@ -994,6 +1138,18 @@ type Capability = OwnerFallbackRead &
 interface OwnerFallbackRead {
   readonly oa: string | undefined;
   readonly oaFromQuery: boolean;
+  /** The VERIFIED `Grantee read token` this request carries, if any (ADR-0091).
+   *
+   *  Note what it deliberately does NOT have: a `fromQuery` companion. `oa`
+   *  needs one because a QUERY-borne owner fallback can arrive with no `et=`
+   *  beside it (that is the shape ADR-0063's degrade produces) and must then be
+   *  redeemed and bounced on its own. Nothing produces a bare `?gr=`: the app
+   *  mints it only alongside `et=`, so it is always redeemed by the `handoff`
+   *  arm. A hand-crafted `?gr=`-only request therefore falls through to the
+   *  ordinary no-capability path and FUNNELS to the app's one mint, which is
+   *  the correct answer — `gr` is a read capability, never a substitute for the
+   *  owner view's own (ADR-0091 §7). */
+  readonly gr: string | undefined;
 }
 
 /**
@@ -1024,9 +1180,25 @@ function readCapability(
   // off the query exactly when the query carried one at all. An unverifiable
   // query `oa` leaves `oa` undefined and `fromQuery` false — it buys no
   // cookie and no bounce, which is the pre-existing behavior kept intact.
+  // The grantee read capability, read the same way and with the same
+  // precedence: a query `gr=` supersedes a cookie-carried one, and an
+  // unverifiable one leaves `gr` undefined rather than falling back. Surfaces
+  // with no `granteeCookie` (i.e. `/edit`, which frames nothing) never see one
+  // even if a query carries it — there is nothing on that surface for it to
+  // unlock, so accepting it would be storing a capability with no consumer.
+  const gr = surface.granteeCookie
+    ? acceptGranteeRead(
+        url.searchParams.get("gr") ??
+          undefined ??
+          readOwnerFallbackCookie(cookieHeader, surface.granteeCookie),
+        slug,
+        deps,
+      )
+    : undefined;
   const fallback: OwnerFallbackRead = {
     oa,
     oaFromQuery: oa !== undefined && queryOa !== undefined,
+    gr,
   };
   const queryToken = url.searchParams.get("et") ?? undefined;
   if (deps.secret && queryToken) {
