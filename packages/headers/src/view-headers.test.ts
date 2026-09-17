@@ -1,9 +1,9 @@
 // SPECIFICATION tests for the viewer origin's security headers (ADR-013),
 // plus the second, edit-route-only CSP profile added by ADR-0063 Phase 3
-// (`editViewHeaders`). These pin the CURRENT header values exactly; a failing
+// (`authenticatedViewHeaders`). These pin the CURRENT header values exactly; a failing
 // test here means a header changed, which is a decision to make deliberately,
 // not a surprise. SECURITY-SENSITIVE — assertions written before the
-// `editViewHeaders` implementation (TDD).
+// `authenticatedViewHeaders` implementation (TDD).
 //
 // PROMOTED from characterization to specification (ADR-0062 Amendment 3): the
 // sandbox CSP's four granted tokens were written in a single commit (c04de5c,
@@ -23,7 +23,7 @@
 // negative assertions are what keep the next investigation from "fixing" it
 // the wrong way.
 import { describe, expect, it } from "vitest";
-import { editViewHeaders, VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
+import { authenticatedViewHeaders, VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
 
 // ADR-0088 (amends ADR-013): the enforcing view CSP is built from the ONE
 // exported `Viewer CSP allowlist` constant, and these tests assert against
@@ -169,7 +169,7 @@ describe("viewHeaders", () => {
 
     it("does NOT leak the allowlist into the edit-route profile (ADR-0063, out of scope)", () => {
       const editCsp =
-        editViewHeaders({ appOrigin: "https://app.example.com" }).get("Content-Security-Policy") ??
+        authenticatedViewHeaders({ appOrigin: "https://app.example.com" }).get("Content-Security-Policy") ??
         "";
       for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
         expect(editCsp).not.toContain(host);
@@ -337,9 +337,9 @@ const EDIT_REPORT_ONLY_CSP = [
   "report-to csp-endpoint",
 ].join("; ");
 
-describe("editViewHeaders", () => {
+describe("authenticatedViewHeaders", () => {
   it("pins a single enforcing CSP — no separate sandbox CSP header", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Content-Security-Policy")).toBe(EDIT_ENFORCING_CSP);
     // Two Content-Security-Policy values would be joined with ", " by
     // Headers.get() (WHATWG Fetch) — assert there's exactly one.
@@ -348,12 +348,12 @@ describe("editViewHeaders", () => {
   });
 
   it("pins the report-only shadow CSP (stricter: no 'unsafe-inline' on style-src)", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Content-Security-Policy-Report-Only")).toBe(EDIT_REPORT_ONLY_CSP);
   });
 
   it("widens connect-src to 'self' plus the exact app origin — never '*'", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     const csp = h.get("Content-Security-Policy") ?? "";
     expect(csp).toContain(`connect-src 'self' ${APP_ORIGIN}`);
     expect(csp).not.toContain("connect-src *");
@@ -361,7 +361,7 @@ describe("editViewHeaders", () => {
   });
 
   it("normalizes a trailing slash off the passed appOrigin", () => {
-    const h = editViewHeaders({ appOrigin: `${APP_ORIGIN}/` });
+    const h = authenticatedViewHeaders({ appOrigin: `${APP_ORIGIN}/` });
     expect(h.get("Content-Security-Policy")).toContain(`connect-src 'self' ${APP_ORIGIN};`);
   });
 
@@ -372,7 +372,7 @@ describe("editViewHeaders", () => {
     // property regardless of which path a given payload takes.
     const cspFor = (appOrigin: string): string => {
       try {
-        return editViewHeaders({ appOrigin }).get("Content-Security-Policy") ?? "";
+        return authenticatedViewHeaders({ appOrigin }).get("Content-Security-Policy") ?? "";
       } catch {
         return ""; // rejected outright — also safe
       }
@@ -388,48 +388,48 @@ describe("editViewHeaders", () => {
       expect(csp).not.toContain("evil");
     }
     // A parseable junk-in-path origin is reduced to its clean origin token:
-    const h = editViewHeaders({ appOrigin: "https://app.centaurspec.com/x?a=1#f" });
+    const h = authenticatedViewHeaders({ appOrigin: "https://app.centaurspec.com/x?a=1#f" });
     expect(h.get("Content-Security-Policy")).toContain(
       "connect-src 'self' https://app.centaurspec.com;",
     );
   });
 
   it("SECURITY: rejects non-http(s) schemes, embedded credentials, and non-local http", () => {
-    expect(() => editViewHeaders({ appOrigin: "javascript:alert(1)" })).toThrow();
-    expect(() => editViewHeaders({ appOrigin: "data:text/html,x" })).toThrow();
-    expect(() => editViewHeaders({ appOrigin: "https://user:pass@app.centaurspec.com" })).toThrow();
-    expect(() => editViewHeaders({ appOrigin: "http://app.centaurspec.com" })).toThrow(); // prod must be https
-    expect(() => editViewHeaders({ appOrigin: "not a url" })).toThrow();
+    expect(() => authenticatedViewHeaders({ appOrigin: "javascript:alert(1)" })).toThrow();
+    expect(() => authenticatedViewHeaders({ appOrigin: "data:text/html,x" })).toThrow();
+    expect(() => authenticatedViewHeaders({ appOrigin: "https://user:pass@app.centaurspec.com" })).toThrow();
+    expect(() => authenticatedViewHeaders({ appOrigin: "http://app.centaurspec.com" })).toThrow(); // prod must be https
+    expect(() => authenticatedViewHeaders({ appOrigin: "not a url" })).toThrow();
     // http IS allowed for localhost dev:
-    expect(() => editViewHeaders({ appOrigin: "http://localhost:3000" })).not.toThrow();
+    expect(() => authenticatedViewHeaders({ appOrigin: "http://localhost:3000" })).not.toThrow();
   });
 
   it("scopes script-src to 'self' only — first-party editor bundle, no 'unsafe-inline'", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Content-Security-Policy")).toContain("script-src 'self';");
   });
 
   it("allows a same-origin srcdoc iframe for the report editor (frame-src 'self')", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Content-Security-Policy")).toContain("frame-src 'self';");
   });
 
   it("keeps frame-ancestors, base-uri, and object-src as strict as the public profile", () => {
-    const csp = editViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
+    const csp = authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("object-src 'none'");
   });
 
   it("pins COOP same-origin, CORP same-site, and Origin-Agent-Cluster (same as the public profile)", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
     expect(h.get("Cross-Origin-Resource-Policy")).toBe("same-site");
     expect(h.get("Origin-Agent-Cluster")).toBe("?1");
   });
 
   it("pins Referrer-Policy, Permissions-Policy, X-Content-Type-Options, HSTS", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
     expect(h.get("Referrer-Policy")).toBe("no-referrer");
     expect(h.get("Permissions-Policy")).toBe(
       "camera=(), microphone=(), geolocation=(), usb=(), payment=(), accelerometer=(), " +
@@ -440,18 +440,18 @@ describe("editViewHeaders", () => {
   });
 
   it("sets Cache-Control: no-store — the edit route is authenticated + per-user", () => {
-    expect(editViewHeaders({ appOrigin: APP_ORIGIN }).get("Cache-Control")).toBe("no-store");
+    expect(authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Cache-Control")).toBe("no-store");
   });
 
   it("defaults the Report-To endpoint the same way as the public profile", () => {
-    const h = editViewHeaders({ appOrigin: APP_ORIGIN, reportToUrl: undefined });
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN, reportToUrl: undefined });
     const reportTo = JSON.parse(h.get("Report-To") ?? "{}");
     expect(reportTo.group).toBe("csp-endpoint");
     expect(reportTo.endpoints[0].url.endsWith("/csp-report")).toBe(true);
   });
 
   it("threads an explicit reportToUrl straight into the Report-To header", () => {
-    const h = editViewHeaders({
+    const h = authenticatedViewHeaders({
       appOrigin: APP_ORIGIN,
       reportToUrl: "https://view.example.com/csp-report",
     });
@@ -460,7 +460,7 @@ describe("editViewHeaders", () => {
   });
 });
 
-describe("editViewHeaders vs viewHeaders — the two profiles differ only in the intended ways", () => {
+describe("authenticatedViewHeaders vs viewHeaders — the two profiles differ only in the intended ways", () => {
   function directiveMap(csp: string): Record<string, string> {
     return Object.fromEntries(
       csp.split("; ").map((directive) => {
@@ -472,7 +472,7 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
 
   it("the public profile carries a sandbox CSP header value; the edit profile does not", () => {
     const publicCsp = viewHeaders().get("Content-Security-Policy") ?? "";
-    const editCsp = editViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
+    const editCsp = authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
     expect(publicCsp).toContain("sandbox allow-forms");
     expect(editCsp).not.toContain("sandbox");
   });
@@ -487,7 +487,7 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
     const publicEnforcing =
       (viewHeaders().get("Content-Security-Policy") ?? "").split(", ")[0] ?? "";
     const editEnforcing =
-      editViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
+      authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
 
     const publicDirectives = directiveMap(publicEnforcing);
     const editDirectives = directiveMap(editEnforcing);
@@ -536,5 +536,31 @@ describe("editViewHeaders vs viewHeaders — the two profiles differ only in the
     // by that one explicit origin — never a wildcard.
     expect(publicDirectives["connect-src"]).toBe("'self'");
     expect(editDirectives["connect-src"]).toBe(`'self' ${APP_ORIGIN}`);
+  });
+});
+
+describe("authenticatedViewHeaders — byte-identical snapshot", () => {
+  it("emits byte-identical headers for the renamed builder", () => {
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
+    // Pin the exact header bytes to ensure the rename is purely cosmetic.
+    // If this snapshot changes, the rename changed behavior — not allowed.
+    const headerSnapshot = Array.from(h.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, value]) => `${name}: ${value}`)
+      .join("\n");
+
+    expect(headerSnapshot).toMatchInlineSnapshot(`
+"cache-control: no-store
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://app.example.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; report-to csp-endpoint
+content-security-policy-report-only: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://app.example.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; report-to csp-endpoint
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-site
+origin-agent-cluster: ?1
+permissions-policy: camera=(), microphone=(), geolocation=(), usb=(), payment=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=(), serial=(), bluetooth=(), interest-cohort=()
+referrer-policy: no-referrer
+report-to: {"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"https://app.localhost/csp-report"}]}
+strict-transport-security: max-age=63072000; includeSubDomains; preload
+x-content-type-options: nosniff"
+    `);
   });
 });

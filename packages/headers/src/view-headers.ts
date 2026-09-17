@@ -1,8 +1,8 @@
 import { HSTS, PERMISSIONS_POLICY, reportToHeader, resolveReportToUrl } from "./permissions-policy";
-import type { EditViewHeadersOptions, SecureHeadersOptions } from "./types";
+import type { AuthenticatedViewHeadersOptions, SecureHeadersOptions } from "./types";
 
 // The shared BASE source lists for the viewer-origin CSP profiles (the
-// public `viewHeaders()` and the edit-route `editViewHeaders()`, ADR-0063
+// public `viewHeaders()` and the edit-route `authenticatedViewHeaders()`, ADR-0063
 // Phase 3) — extracted so the two profiles can't silently drift apart on the
 // directives that are supposed to stay identical. Each profile still
 // assembles its OWN `script-src`/`style-src`/`connect-src` (and, for the edit
@@ -123,15 +123,15 @@ function normalizeOrigin(origin: string): string {
   try {
     url = new URL(origin);
   } catch {
-    throw new Error(`editViewHeaders: appOrigin is not a valid URL: ${JSON.stringify(origin)}`);
+    throw new Error(`authenticatedViewHeaders: appOrigin is not a valid URL: ${JSON.stringify(origin)}`);
   }
   if (url.username || url.password) {
-    throw new Error("editViewHeaders: appOrigin must not carry credentials");
+    throw new Error("authenticatedViewHeaders: appOrigin must not carry credentials");
   }
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocal)) {
     throw new Error(
-      `editViewHeaders: appOrigin must be https (http allowed only for localhost), got ${JSON.stringify(origin)}`,
+      `authenticatedViewHeaders: appOrigin must be https (http allowed only for localhost), got ${JSON.stringify(origin)}`,
     );
   }
   return url.origin; // clean scheme://host[:port] — no path/query/fragment/`;`/whitespace
@@ -147,7 +147,7 @@ function normalizeOrigin(origin: string): string {
  * the whole top-level document. That's the entire isolation model for the
  * public route, and it is untouched by this profile.
  *
- * `editViewHeaders()` (`GET /<slug>/edit`, authenticated, built below): the
+ * `authenticatedViewHeaders()` (`GET /<slug>/edit`, authenticated, built below): the
  * top-level document is instead the TRUSTED first-party editor app (Remix/
  * React) — it must NOT be sandboxed, because it needs same-origin DOM/
  * storage access and to call the app-origin API. This is the single biggest
@@ -291,7 +291,7 @@ export function viewHeaders(opts: SecureHeadersOptions = {}): Headers {
  * against `viewHeaders()`'s public profile. Not wired to any route yet
  * (Phase 4) — this is the pure header builder only.
  */
-export function editViewHeaders(opts: EditViewHeadersOptions): Headers {
+export function authenticatedViewHeaders(opts: AuthenticatedViewHeadersOptions): Headers {
   const h = new Headers();
   // Single `Content-Security-Policy` value (`.set`, not `.append`) — unlike
   // `viewHeaders()`, there is deliberately no second, `sandbox`-directive
