@@ -33,6 +33,25 @@ const failingBlobs = {
   readObject: async () => ({ ok: false as const, error: { kind: "storage" } }),
 } as unknown as BlobStore;
 
+/** Collect the structured log lines instead of letting them reach stderr. The
+ *  `warn` seam exists so the two failure branches are observable; injecting it
+ *  is what makes that observability a tested claim rather than a hope — an
+ *  operator greps these event names, so a silent rename should fail here. */
+function captureWarnings() {
+  const lines: string[] = [];
+  return {
+    lines,
+    warn: (line: string) => lines.push(line),
+    /** The single line this branch is expected to have logged, parsed. Throws
+     *  rather than returning undefined, so a branch that logged NOTHING fails
+     *  here instead of silently passing a `toMatchObject` against undefined. */
+    only(): unknown {
+      if (lines.length !== 1) throw new Error(`expected exactly 1 log line, got ${lines.length}`);
+      return JSON.parse(lines[0] as string);
+    },
+  };
+}
+
 const args = (over: Partial<Parameters<typeof loadLossyWarning>[0]> = {}) => ({
   blobs: blobsReturning(LOSSY_DECK),
   reportId: REPORT,
@@ -85,16 +104,26 @@ describe("loadLossyWarning (ADR-0090 §1 amendment, #364)", () => {
     // the NAMES. Withholding the dialog because a blob read failed would turn
     // an infrastructure hiccup into a silent lossy save, which is the exact
     // outcome this whole ticket exists to prevent.
-    const warning = await loadLossyWarning(args({ blobs: failingBlobs }));
+    const log = captureWarnings();
+    const warning = await loadLossyWarning(args({ blobs: failingBlobs, warn: log.warn }));
     expect(warning).not.toBeNull();
     expect(warning?.lostElements).toEqual([]);
     expect(warning?.lostAttributes).toEqual([]);
+    // The failure is silent to the user by design, so it must not be silent to
+    // the operator: one structured line, keyed on slug like every other
+    // view-origin event.
+    expect(log.only()).toMatchObject({
+      event: "owner-view-lossy-items-unreadable",
+      slug: "abcde12345",
+    });
   });
 
   it("still warns when the document is absent from the blob store", async () => {
-    const warning = await loadLossyWarning(args({ blobs: blobsReturning(null) }));
+    const log = captureWarnings();
+    const warning = await loadLossyWarning(args({ blobs: blobsReturning(null), warn: log.warn }));
     expect(warning).not.toBeNull();
     expect(warning?.lostElements).toEqual([]);
+    expect(log.only()).toMatchObject({ event: "owner-view-lossy-items-unreadable" });
   });
 
   it("still warns when the fresh probe disagrees with the recorded verdict", async () => {
@@ -115,6 +144,12 @@ describe("loadLossyWarning (ADR-0090 §1 amendment, #364)", () => {
       },
     } as unknown as BlobStore;
 
-    await expect(loadLossyWarning(args({ blobs: exploding }))).resolves.not.toBeNull();
+    const log = captureWarnings();
+    await expect(
+      loadLossyWarning(args({ blobs: exploding, warn: log.warn })),
+    ).resolves.not.toBeNull();
+    // A thrown read is a DIFFERENT event from a read that merely came back
+    // empty — the two failure branches must stay distinguishable in the logs.
+    expect(log.only()).toMatchObject({ event: "owner-view-lossy-items-failed" });
   });
 });
