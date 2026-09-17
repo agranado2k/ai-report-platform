@@ -236,11 +236,19 @@ export function deps(): UploadReportDeps {
     fidelity: new ReportHtmlFidelityProbe(),
     // #365 — what the VIEWER will refuse to load out of this document, read
     // off the ADR-0088 allowlist. A scan of the bytes; it never fetches what
-    // it finds (ADR-0069). It is given this deployment's view origin — the
-    // same `VIEW_ORIGIN` that `view_url` is built from — because every fetch
-    // directive in that policy carries `'self'`, so an absolute URL an author
-    // wrote against the view origin loads and must not be warned about. Unset
-    // on previews/dev, where the scan falls back to proving less.
+    // it finds (ADR-0069). It is given the CONFIGURED view origin, because
+    // every fetch directive in that policy carries `'self'`, so an absolute
+    // URL an author wrote against the view origin loads and must not be
+    // warned about.
+    //
+    // Note this is `env.VIEW_ORIGIN` and not `viewOrigin(request)`: `deps()`
+    // is a process-wide singleton and has no request to fall back to. The two
+    // agree wherever `VIEW_ORIGIN` is set (prod). On previews and dev, where
+    // Terraform leaves it unset, `view_url` falls back to the request origin
+    // while the scan gets `undefined` and proves less — so a preview can still
+    // warn about an absolute self URL that prod would clear. Deliberate: the
+    // alternative is guessing an origin and clearing a resource the viewer
+    // really does refuse.
     resources: new ReportHtmlResourceScanner(env.VIEW_ORIGIN),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),

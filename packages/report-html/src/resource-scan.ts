@@ -69,8 +69,9 @@ const ALLOWED_BY_DIRECTIVE = {
  *  nothing — warning about them would be noise the author cannot act on. */
 const LOADING_LINK_RELS: Record<string, BlockedDirective> = {
   stylesheet: "style-src",
+  // `rel="shortcut icon"` needs no entry of its own: `rel` is split on
+  // whitespace, so it arrives here as the two tokens `shortcut` and `icon`.
   icon: "img-src",
-  "shortcut icon": "img-src",
   "apple-touch-icon": "img-src",
 };
 
@@ -339,15 +340,6 @@ function cssReferences(css: string): readonly { url: string; directive: BlockedD
 }
 
 /**
- * Whether a reference leaves the view origin at all.
- *
- * Only an absolute URL with a host can: a relative path, a fragment (`#grad`,
- * which is also how SVG references its own gradients) and a bare query all
- * resolve to the viewer's own origin, which `'self'` already permits. `data:`
- * and the other inert schemes fetch nothing. None of them can be blocked, so
- * none of them is a warning.
- */
-/**
  * An absolute URL as a user agent resolves it before matching it against CSP:
  * `.` and `..` segments collapsed (including their `%2e` spellings, which a
  * URL parser treats as dot segments too), default port dropped, fragment
@@ -388,6 +380,15 @@ function originOf(url: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Whether a reference leaves the view origin at all.
+ *
+ * Only an absolute URL with a host can: a relative path, a fragment (`#grad`,
+ * which is also how SVG references its own gradients) and a bare query all
+ * resolve to the viewer's own origin, which `'self'` already permits. `data:`
+ * and the other inert schemes fetch nothing. None of them can be blocked, so
+ * none of them is a warning.
+ */
 function isExternal(url: string): boolean {
   if (url.startsWith("#") || url.startsWith("?")) return false;
   if (INERT_SCHEME.test(url)) return false;
@@ -413,6 +414,9 @@ function isAllowed(url: string, allowed: readonly string[]): boolean {
   return allowed.some((entry) => {
     const source = entry.toLowerCase();
     if (source.endsWith("/")) return lower.startsWith(source);
-    return lower === source || lower.startsWith(`${source}/`) || lower.startsWith(`${source}?`);
+    // A resolved URL always carries a pathname, so a bare-origin entry is
+    // matched by its trailing slash alone — `https://fonts.googleapis.com`
+    // resolves to `…/` before it gets here.
+    return lower.startsWith(`${source}/`);
   });
 }
