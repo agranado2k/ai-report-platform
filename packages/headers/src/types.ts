@@ -8,8 +8,10 @@ export type SecureHeadersOptions = {
 };
 
 /**
- * Options for `authenticatedViewHeaders` (ADR-0063 Phase 3) — the viewer origin's
- * second, authenticated CSP profile for `GET /<slug>/edit`.
+ * Options for `authenticatedViewHeaders` (ADR-0063 Phase 3) — the viewer
+ * origin's second, authenticated CSP profile. It serves every authenticated
+ * first-party route on that origin: `GET /<slug>/edit` (the editor, ADR-0063)
+ * and `GET /<slug>/view` (the owner view, ADR-0089).
  */
 export type AuthenticatedViewHeadersOptions = SecureHeadersOptions & {
   /**

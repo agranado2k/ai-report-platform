@@ -149,7 +149,9 @@ function normalizeOrigin(origin: string): string {
  * the whole top-level document. That's the entire isolation model for the
  * public route, and it is untouched by this profile.
  *
- * `authenticatedViewHeaders()` (`GET /<slug>/edit`, authenticated, built below): the
+ * `authenticatedViewHeaders()` (the authenticated first-party routes —
+ * `GET /<slug>/edit` per ADR-0063 and `GET /<slug>/view` per ADR-0089 — built
+ * below): the
  * top-level document is instead the TRUSTED first-party editor app (Remix/
  * React) — it must NOT be sandboxed, because it needs same-origin DOM/
  * storage access and to call the app-origin API. This is the single biggest
@@ -287,11 +289,13 @@ export function viewHeaders(opts: SecureHeadersOptions = {}): Headers {
 }
 
 /**
- * Security headers for the viewer origin's SECOND, authenticated CSP
- * profile (ADR-0063 Phase 3): `GET /<slug>/edit`. See the doc comment above
- * `editCspDirectives` for the full relaxation-by-relaxation rationale
- * against `viewHeaders()`'s public profile. Not wired to any route yet
- * (Phase 4) — this is the pure header builder only.
+ * Security headers for the viewer origin's SECOND, authenticated CSP profile
+ * (ADR-0063 Phase 3). It serves every authenticated first-party route on that
+ * origin — `GET /<slug>/edit` (the editor, ADR-0063 Phase 4) and
+ * `GET /<slug>/view` (the owner view, ADR-0089) — which is what the name says
+ * and `editViewHeaders` no longer did (#375). See the doc comment above
+ * `editCspDirectives` for the full relaxation-by-relaxation rationale against
+ * `viewHeaders()`'s public profile.
  */
 export function authenticatedViewHeaders(opts: AuthenticatedViewHeadersOptions): Headers {
   const h = new Headers();

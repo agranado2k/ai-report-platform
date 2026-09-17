@@ -303,8 +303,9 @@ describe("viewHeaders", () => {
 // app (not the untrusted report), so it must NOT be sandboxed — the
 // untrusted report is isolated inside the editor's own sandboxed `srcDoc`
 // iframe instead (its own restrictive `<meta>` CSP, apps/app/app/editor/
-// iframe-document.ts). No route wires this profile yet (Phase 4) — these
-// tests exercise the pure header builder in isolation.
+// iframe-document.ts). Two routes now wire this profile — `/<slug>/edit`
+// (ADR-0063 Phase 4) and `/<slug>/view` (the owner view, ADR-0089) — but
+// these tests exercise the pure header builder in isolation.
 const APP_ORIGIN = "https://app.example.com";
 
 const EDIT_ENFORCING_CSP = [
