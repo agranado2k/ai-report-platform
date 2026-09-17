@@ -61,12 +61,20 @@ export function OwnerViewChrome({
       <OwnerViewTopBar
         docTitle={docTitle}
         shareState={shareState}
-        // Two props, one value today: version history lives in the editor's own
-        // side panel, so Versions is a deep-link INTO the editor rather than a
-        // second destination. They stay two props because they are two user
-        // intents that can diverge — the day versions gets a surface of its
-        // own, only this line changes.
-        versionsHref={`/${slug}/edit`}
+        // Two props, two values (#377). Version history lives in the editor's
+        // own side panel, so Versions is a deep-link INTO the editor rather
+        // than a second destination — and `?panel=versions` is what makes it
+        // actually arrive there. Without the param this landed the owner in
+        // the editor with the panel CLOSED on the comments tab: one click
+        // short of what they asked for, with nothing to say why.
+        //
+        // The param is a hint the editor reads once at mount
+        // (`../../edit/panel.ts`), not a capability. It changes no gate and
+        // widens nothing: this href still points at `/<slug>/edit`, which
+        // holds no capability under that Path and funnels through the app's
+        // one mint to re-check `canWrite` live (ADR-0089 §4b), exactly as
+        // before.
+        versionsHref={`/${slug}/edit?panel=versions`}
         editHref={`/${slug}/edit`}
         canEdit={canEdit}
         lossyWarning={lossyWarning}

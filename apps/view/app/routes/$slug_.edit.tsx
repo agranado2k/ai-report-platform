@@ -48,7 +48,7 @@
 // ADR-0063's "4c client" note).
 import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { versionIdToWire } from "arp-domain";
 import {
   type ActiveFormats,
@@ -76,7 +76,7 @@ import { loadEditableDocument } from "../edit/load-document";
 import { buildEditLoaderExtras } from "../edit/loader-data";
 import {
   closePanel,
-  INITIAL_PANEL_STATE,
+  initialPanelState,
   openPanel,
   type PanelState,
   selectPanelTab,
@@ -345,7 +345,24 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
   // The side panel: collapsed by default (document-dominant), with a remembered
   // inner tab. Replaces the old `activeTab: "comments"|"versions"|null` — see
   // ../edit/panel.ts for the pure state helpers.
-  const [panel, setPanel] = useState<PanelState>(INITIAL_PANEL_STATE);
+  // The panel's URL entry point (#377). `?panel=versions` is what makes the
+  // owner view's Versions action (ADR-0089) actually REACH version history,
+  // which lives in this side panel rather than on a surface of its own.
+  //
+  // `useSearchParams` rather than `window.location.search`: the router knows
+  // the URL on the server too, so the first client render matches the server's
+  // and no hydration mismatch is possible.
+  //
+  // Read ONCE, in a lazy initialiser — this is seed state, not synced state.
+  // Passing it as a dependency instead would re-open the panel every time the
+  // query changed for any other reason, and fighting the user's own tab
+  // switches is worse than the gap this closes. It grants nothing: the gate
+  // above already decided this render happens, and an unknown value falls back
+  // to exactly today's default.
+  const [searchParams] = useSearchParams();
+  const [panel, setPanel] = useState<PanelState>(() =>
+    initialPanelState(searchParams.get("panel")),
+  );
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
   // WHERE the selection sits (host viewport coordinates) — drives the
