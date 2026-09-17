@@ -353,17 +353,7 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "it opens); a document with no <body> tag at all is fine and opens normally; " +
         "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
         "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
-        "Re-upload a full <html><body>…</body></html> document if you want it to be editable. " +
-        "The response also carries fidelity: 'lossless' | 'lossy' | null (ADR-0090) — the " +
-        "SECOND, independent question, asked only when editability is 'editable': would the " +
-        "editor KEEP what you published? 'lossy' means it opens but a later editor SAVE would " +
-        "drop content the Report HTML schema does not retain — inline <script>, inline <svg>, " +
-        "unretained attributes — which is the usual verdict for an interactive slide deck or " +
-        "a script-driven dashboard. It is NOT an error and nothing is rejected for it: the " +
-        "document is stored byte-for-byte and still views perfectly at view_url. Treat a lossy " +
-        "report as view-only content: update it by re-uploading the full HTML with " +
-        "update_slug, not by editing it in the editor. null means UNKNOWN because it was " +
-        "never probed, NOT lossless.",
+        "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
       inputSchema: {
         html: z
           .string()

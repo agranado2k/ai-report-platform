@@ -653,12 +653,13 @@ describe("Fidelity is legible to an agent (ADR-0090, #364)", () => {
       }
     )?.description ?? "";
 
-  /** The four tools ADR-0090 §6's consumers read the verdict through. */
+  /** The tools that actually RETURN the verdict — ADR-0090 §6's read
+   *  surfaces. `reports_upload` is deliberately absent: its response carries
+   *  `editability` and no `fidelity` (see the dedicated test below). */
   const FIDELITY_TOOLS = [
     ["reports_get", readDescriptionOf],
     ["reports_list_versions", readDescriptionOf],
     ["reports_get_content", readDescriptionOf],
-    ["reports_upload", writeDescriptionOf],
   ] as const;
 
   it.each(FIDELITY_TOOLS)("%s names `fidelity` and both of its values", (name, describeOf) => {
@@ -681,10 +682,29 @@ describe("Fidelity is legible to an agent (ADR-0090, #364)", () => {
     // ADR-0090 §5: fidelity explains, it never gates. An agent told only
     // "lossy" would reasonably re-upload in a panic; the honest framing is
     // that the report views perfectly and the cost is paid on the next editor
-    // save.
-    const d = writeDescriptionOf("reports_upload");
+    // save. Asserted on `reports_get` — the tool an agent actually learns the
+    // verdict from — rather than on the upload, whose response has no verdict
+    // to frame.
+    const d = readDescriptionOf("reports_get");
     expect(d).toMatch(/still views|views (fine|perfectly|normally)/i);
-    expect(d).toMatch(/save|saved/i);
+    expect(d).toMatch(/sav(e|ed|ing)/i);
+  });
+
+  it("reports_upload does NOT promise a `fidelity` field its response has no room for", () => {
+    // Verified against the wire, not assumed: `UploadResult`
+    // (packages/application/src/use-cases/upload-report.ts),
+    // `uploadResultToHttp` (packages/http/src/upload-response.ts) and
+    // `UploadResult.required` in docs/api/openapi.yaml all carry `editability`
+    // and NO `fidelity`. ADR-0090 §6 assigns the upload-side lossy signal to
+    // the warnings ticket, not to a field here.
+    //
+    // A description that promises a field the response does not carry is worse
+    // than silence: MCP is this product's primary write surface, so every
+    // agent would read for something that is never there. If the field is ever
+    // added to the upload response, this test is the thing that should be
+    // deleted first — deliberately, and with the wire change beside it.
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).not.toMatch(/fidelity/i);
   });
 
   it("keeps fidelity and editability as TWO questions, never collapsing them", () => {
