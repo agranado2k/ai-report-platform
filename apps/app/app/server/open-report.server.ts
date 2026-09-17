@@ -200,19 +200,34 @@ export async function ownerOpenLocation(
   // mint (ADR-0059 §4) and it has already run the canWrite gate above. A second
   // mint seam would be a second place for this owner/non-owner split to be
   // re-decided, which is exactly the mistake ADR-0091 exists to foreclose.
+  const destination = req.destination ?? "ownerView";
   const isOwner = writable.value.ownerId === req.actor.userId;
   const ownerAccessToken = isOwner
     ? mintAccessToken(slug.value, OWNER_TTL_SECONDS, req.secret, nowSeconds, { owner: true })
     : undefined;
-  const granteeReadToken = isOwner
-    ? undefined
-    : mintGranteeReadToken(
-        slug.value,
-        req.actor.userId,
-        GRANTEE_READ_TTL_SECONDS,
-        req.secret,
-        nowSeconds,
-      );
+  // The `isOwner` split is still the ONE ternary ADR-0091 §2 makes the
+  // no-escalation guarantee — the extra condition can only ever WITHHOLD the
+  // grantee's token, never hand an owner a `gr` nor a non-owner an `oa`, so the
+  // mutual exclusivity is untouched.
+  //
+  // Why withhold it on the editor: ADR-0091 §3 scopes `arp_view_gr` to
+  // `Path=/<slug>/view` so a grantee's read capability is never sent on
+  // `/edit`, and `EDIT_SURFACE` accordingly has no grantee cookie — so a `gr`
+  // arriving at the editor is consumed by nothing. Minting one anyway would put
+  // a live 15-minute signed capability into the address bar, the history and
+  // the referer of a surface that cannot use it: pure exposure, no capability,
+  // against ADR-0089 §4's "no token is ever served on" posture. `oa=` is not
+  // withheld, because `/edit` genuinely does consume it (ADR-0063 Phase 5-G).
+  const granteeReadToken =
+    isOwner || destination !== "ownerView"
+      ? undefined
+      : mintGranteeReadToken(
+          slug.value,
+          req.actor.userId,
+          GRANTEE_READ_TTL_SECONDS,
+          req.secret,
+          nowSeconds,
+        );
 
   // Audit the mint — same posture the old owner-token mint had: a
   // privileged, if short-lived and narrowly-scoped, write capability.
@@ -234,7 +249,7 @@ export async function ownerOpenLocation(
     "owner-open: minted edit token",
   );
 
-  const segment = DESTINATION_SEGMENT[req.destination ?? "ownerView"];
+  const segment = DESTINATION_SEGMENT[destination];
   const location = `${req.viewOrigin}/${slug.value}/${segment}?et=${encodeURIComponent(editToken)}`;
   // Exactly one of these is ever appended (see the ternary above).
   //
@@ -248,6 +263,8 @@ export async function ownerOpenLocation(
   // same `arp_unlock` cookie at `Path=/<slug>` that the framed navigation
   // carries, plus a cookie copy at `Path=/<slug>/view` so it survives the
   // clean-URL 303's query strip.
+  // It exists only for the owner-view destination (see the mint above), so no
+  // destination check is needed here.
   if (ownerAccessToken) return `${location}&oa=${encodeURIComponent(ownerAccessToken)}`;
   if (granteeReadToken) return `${location}&gr=${encodeURIComponent(granteeReadToken)}`;
   return location;

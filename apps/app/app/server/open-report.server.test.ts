@@ -488,6 +488,40 @@ describe("ownerOpenLocation — the destination (#363)", () => {
     expect(location).toContain("&gr=");
   });
 
+  it("a GRANTEE heading for the EDITOR carries no `gr=` — nothing on /edit can consume it", async () => {
+    // ADR-0091 §3 scopes `arp_view_gr` to `Path=/<slug>/view` precisely so the
+    // grantee's read capability is NEVER sent on `/edit` — that absence is what
+    // makes the Edit action funnel back through this mint for a live `canWrite`
+    // re-check (ADR-0089 §4b). `EDIT_SURFACE` accordingly has no grantee cookie,
+    // so a `gr=` arriving on the editor URL is read by nothing. Appending it
+    // anyway would put a live 15-minute signed capability into the address bar,
+    // the history and the referer of a surface that cannot use it — exactly the
+    // exposure ADR-0089 §4's "no token is ever served on" posture exists to
+    // avoid. `oa=` is different and stays: `/edit` genuinely consumes it.
+    const { reports, report } = await seededReports("rrrrrrrrrr");
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    identities.seedUser(GRANTEE, "grantee@x.com");
+    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
+    const { deps } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: GRANTEE },
+      rawHandle: "rrrrrrrrrr",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+    });
+    // Still admitted, still gets the edit token — only the unusable read
+    // capability is withheld.
+    expect(location.startsWith(`${VIEW}/rrrrrrrrrr/edit?et=`)).toBe(true);
+    expect(location).not.toContain("&gr=");
+    expect(location).not.toContain("&oa=");
+  });
+
   it('`destination: "editor"` still mints into the EDITOR — this is what keeps Edit reachable', async () => {
     // The owner view's Edit action is a plain link to `/<slug>/edit`, which
     // holds no capability under that Path and therefore FUNNELS through this
