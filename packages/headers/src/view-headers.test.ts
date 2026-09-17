@@ -23,6 +23,7 @@
 // negative assertions are what keep the next investigation from "fixing" it
 // the wrong way.
 import { describe, expect, it } from "vitest";
+import { HSTS, PERMISSIONS_POLICY } from "./permissions-policy";
 import { authenticatedViewHeaders, VIEW_CSP_ALLOWLIST, viewHeaders } from "./view-headers";
 
 // ADR-0088 (amends ADR-013): the enforcing view CSP is built from the ONE
@@ -546,28 +547,47 @@ describe("authenticatedViewHeaders vs viewHeaders — the two profiles differ on
   });
 });
 
-describe("authenticatedViewHeaders — byte-identical snapshot", () => {
-  it("emits byte-identical headers for the renamed builder", () => {
-    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN });
-    // Pin the exact header bytes to ensure the rename is purely cosmetic.
-    // If this snapshot changes, the rename changed behavior — not allowed.
-    const headerSnapshot = Array.from(h.entries())
+// The WHOLE emitted header set for the authenticated profile, pinned in one
+// assertion. Every test above pins one header's value; this one additionally
+// fails when a header is ADDED or REMOVED, which is the failure mode none of
+// them can see — and it is what makes "this rename changed no header" a claim
+// the suite checks rather than one a reader has to take on trust.
+//
+// Two deliberate choices, both learned from the assertions above:
+//   · Composed from `EDIT_ENFORCING_CSP` / `EDIT_REPORT_ONLY_CSP` /
+//     `PERMISSIONS_POLICY` / `HSTS` rather than restating them. ADR-0088's
+//     rule (see this file's header): a restated policy string lets the
+//     constant and its "specification" drift apart in a single commit. Each
+//     of those values is pinned literally exactly once, by the tests above.
+//   · `reportToUrl` is passed EXPLICITLY. `resolveReportToUrl` falls back to
+//     `process.env.APP_ORIGIN`, so an expectation that omits it silently
+//     depends on the ambient environment — `permissions-policy.test.ts`
+//     already warns "don't assert a specific value (CI may or may not set
+//     APP_ORIGIN)". The default-resolution path has its own test above.
+describe("authenticatedViewHeaders — the complete emitted header set", () => {
+  it("emits exactly these headers, and no others", () => {
+    const reportToUrl = "https://view.example.com/csp-report";
+    const h = authenticatedViewHeaders({ appOrigin: APP_ORIGIN, reportToUrl });
+
+    const emitted = Array.from(h.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, value]) => `${name}: ${value}`)
       .join("\n");
 
-    expect(headerSnapshot).toMatchInlineSnapshot(`
-"cache-control: no-store
-content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://app.example.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; report-to csp-endpoint
-content-security-policy-report-only: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://app.example.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; report-to csp-endpoint
-cross-origin-opener-policy: same-origin
-cross-origin-resource-policy: same-site
-origin-agent-cluster: ?1
-permissions-policy: camera=(), microphone=(), geolocation=(), usb=(), payment=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=(), serial=(), bluetooth=(), interest-cohort=()
-referrer-policy: no-referrer
-report-to: {"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"https://app.localhost/csp-report"}]}
-strict-transport-security: max-age=63072000; includeSubDomains; preload
-x-content-type-options: nosniff"
-    `);
+    expect(emitted).toBe(
+      [
+        "cache-control: no-store",
+        `content-security-policy: ${EDIT_ENFORCING_CSP}`,
+        `content-security-policy-report-only: ${EDIT_REPORT_ONLY_CSP}`,
+        "cross-origin-opener-policy: same-origin",
+        "cross-origin-resource-policy: same-site",
+        "origin-agent-cluster: ?1",
+        `permissions-policy: ${PERMISSIONS_POLICY}`,
+        "referrer-policy: no-referrer",
+        `report-to: {"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"${reportToUrl}"}]}`,
+        `strict-transport-security: ${HSTS}`,
+        "x-content-type-options: nosniff",
+      ].join("\n"),
+    );
   });
 });
