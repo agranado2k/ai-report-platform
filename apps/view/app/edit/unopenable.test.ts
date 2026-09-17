@@ -125,9 +125,10 @@ describe("the /edit unopenable-document page", () => {
 
   // The href is now supplied by the caller, so the invariant this file's type
   // documents ("ALWAYS a root-relative path") has to be ENFORCED rather than
-  // assumed. Today's only caller passes `degradeTargetFor`'s output, which is
-  // built from a validated Slug — but a future caller passing anything else
-  // must not be able to turn this anchor into an off-site jump.
+  // assumed. Today's only caller passes the owner-view path built from a
+  // validated Slug (since #363; it used to pass `degradeTargetFor`'s `?access=`
+  // output) — but a future caller passing anything else must not be able to
+  // turn this anchor into an off-site jump.
   it.each([
     ["absolute", "https://evil.example/steal"],
     ["protocol-relative", "//evil.example/steal"],

@@ -1442,14 +1442,38 @@ paths:
             slug, unexpired, `owner === true`. It backs the read-only
             `ownerRead` degrade, and is redeemed into the `arp_unlock` cookie
             the sandboxed frame's own navigation to `GET /{slug}` carries.
+        - name: gr
+          in: query
+          required: false
+          schema: { type: string }
+          description: >
+            The grantee read token minted alongside `et` for a canWrite
+            NON-owner (ADR-0091). Mutually exclusive with `oa` by construction —
+            `/reports/{slug}/open` picks exactly one off a single `isOwner`
+            boolean — and a distinct claim shape
+            (`{slug, exp, sub, scope: "granteeRead"}`) with no `owner` and no
+            `mode` field, so the escalating claim is unrepresentable rather than
+            merely unset. Verified, never minted, on this origin: valid HMAC,
+            this slug, unexpired, `scope === "granteeRead"`, non-empty `sub`.
+            Redeemed into the same `arp_unlock` cookie the framed navigation
+            carries, which is what makes a gated report render inside the frame
+            instead of showing the unlock wall — mode-independently, since a
+            share mode gates readers the owner did not choose and a
+            write-grantee is one they did. Lives 15 minutes, not the owner
+            token's 24h: ownership cannot be revoked, a write grant can.
+            It confers no write anywhere and is not a fallback capability.
       responses:
         '200':
           description: >
             The chrome is rendered around the framed report. Carries
-            `Set-Cookie: arp_unlock` (Path=/{slug}, the owner-access token's own
-            remaining life) whenever a verified `oa` is in hand, because that is
-            the only cookie the framed navigation carries — without it the frame
-            would land on the unlock wall for a non-public report (ADR-0089 §4c).
+            `Set-Cookie: arp_unlock` (Path=/{slug}) whenever a verified `oa` or
+            `gr` is in hand, because that is the only cookie the framed
+            navigation carries — without it the frame would land on the unlock
+            wall for a non-public report (ADR-0089 §4c, ADR-0091 §3). Max-Age is
+            the redeemed token's own remaining life (the owner token's 24h, or
+            the grantee token's 15 minutes). If both are somehow present the
+            owner's wins the single `arp_unlock` slot — never two `Set-Cookie`s
+            racing for the same name and Path.
           content:
             text/html:
               schema: { type: string }
@@ -1464,10 +1488,13 @@ paths:
         '303':
           description: >
             A valid `?et=` hand-off was redeemed; redirects to the clean
-            `/{slug}/view` URL. Sets up to THREE cookies — `arp_view` and
-            `arp_view_oa` scoped to `Path=/{slug}/view` (NEVER `/{slug}`, which
-            is the request the sandboxed iframe makes), and `arp_unlock` scoped
-            to `Path=/{slug}` from a verified `oa`.
+            `/{slug}/view` URL. Sets up to THREE cookies — `arp_view` plus
+            `arp_view_oa` (owner) or `arp_view_gr` (grantee), all scoped to
+            `Path=/{slug}/view` (NEVER `/{slug}`, which is the request the
+            sandboxed iframe makes), and `arp_unlock` scoped to `Path=/{slug}`
+            from a verified `oa` or `gr`. The capability copy at
+            `Path=/{slug}/view` exists because the 303 strips the query, so
+            without it the capability would die at the first hop.
         '404':
           description: The slug does not have a valid shape.
 

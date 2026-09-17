@@ -92,18 +92,27 @@ export interface UnopenableDocumentArgs {
    * couldn't EDIT it and still could not READ it — the 2026-08-06 lockout in
    * its last remaining form.
    *
-   * The route already holds the fix: the `oa` fallback (query or `arp_edit_oa`
-   * cookie) that the gate has ALREADY verified with `acceptOwnerFallback`
-   * (HMAC + this slug + unexpired + `owner === true`), baked into
-   * `decision.degradeTo` as `?access=`. Carrying it here mints NOTHING — the
-   * view origin stays credential-free (ADR-0056: the app authorizes, the viewer
-   * verifies) — and reuses the ONE degrade-target answer rather than growing a
-   * second one, which is exactly the duplication `degradeTargetFor` exists to
-   * prevent.
+   * Phase 5-H broke that cycle by baking the gate's ALREADY-verified `oa`
+   * (query or `arp_edit_oa` cookie) into this href as `?access=`, calling it
+   * "the ONE token this page may carry".
    *
-   * Omitted / not root-relative → the bare `/{slug}`, which is the CORRECT link
-   * for a write-grantee: `ownerOpenLocation` deliberately never mints them an
-   * `oa`, and the unlock page they land on recognises write access.
+   * SINCE #363 IT CARRIES NO TOKEN AT ALL. The link is now the owner view,
+   * `/{slug}/view`, which closes the same cycle by a better route: the owner
+   * view holds no capability under that path either, so following it funnels
+   * through the app's ONE mint (`/reports/{slug}/open`), which re-checks
+   * `canWrite` LIVE and hands back whatever capability the visitor is currently
+   * entitled to — an owner's `oa`, or since ADR-0091 a write-grantee's `gr`.
+   * So the property Phase 5-H bought — the one forward action actually reaches
+   * the content — now holds for BOTH principals, and it holds without this page
+   * emitting a 24h `owner:true` token into an anchor that lands in the history
+   * and the referer of every outbound link. Minting still happens nowhere here:
+   * the view origin stays credential-free (ADR-0056: the app authorizes, the
+   * viewer verifies).
+   *
+   * `degradeTargetFor` is therefore no longer consulted for this href — only
+   * its `ownerFallback` boolean, for the log line.
+   *
+   * Omitted / not root-relative → the bare `/{slug}`.
    */
   readonly readOnlyHref?: string;
 }
