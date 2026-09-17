@@ -26,6 +26,7 @@ import { ReportRow } from "../components/reports/ReportRow";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
 import { editabilityNotice } from "../server/editability-notice.server";
+import { fidelityNotice } from "../server/fidelity-notice.server";
 import {
   applyFolderVisibility,
   cascadeIsPartial,
@@ -230,6 +231,10 @@ export async function loader(args: LoaderFunctionArgs) {
         // or null when there is nothing to say. A conclusion, not the verdict
         // itself: the component renders it, it never re-decides it.
         editabilityNotice: editabilityNotice(r.editability),
+        // ADR-0090 — the SECOND verdict, off the same 1:1 live-version join
+        // (so it costs no extra round-trip): "the editor opens this, but a
+        // save would not keep it." A conclusion, like the line above.
+        fidelityNotice: fidelityNotice(r.fidelity),
         sharing: {
           slug: r.slug,
           title: r.title,
