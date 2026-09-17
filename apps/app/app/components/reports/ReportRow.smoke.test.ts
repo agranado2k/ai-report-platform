@@ -95,9 +95,20 @@ describe("ReportRow", () => {
     // The overlay is `absolute inset-0`; any interactive cell has to sit at
     // z-10 to be clickable at all. A silently-unclickable Edit is exactly the
     // failure this row's existing `relative z-10` cells already guard against.
+    //
+    // Scoped to the anchor's IMMEDIATELY-ENCLOSING div, and deliberately so.
+    // An earlier version sliced from 400 chars before the anchor to the END OF
+    // THE DOCUMENT, which swept in the actions dropdown's own
+    // `absolute right-0 z-10` further down the row — so deleting `z-10` from
+    // the wrapper left this test green, and the only guard against the failure
+    // it names did not work. A window that ends AT the anchor cannot reach
+    // anything rendered after it, and starting at the nearest preceding `<div`
+    // keeps the row's other `relative z-10` cells out of it too.
     const html = render({ isPublished: true });
-    const editAnchor = html.slice(html.indexOf('href="/reports/abc/open?to=edit"') - 400);
-    expect(editAnchor).toContain("z-10");
+    const at = html.indexOf('href="/reports/abc/open?to=edit"');
+    expect(at, "the Edit anchor should be rendered for a published report").toBeGreaterThan(-1);
+    const wrapper = html.slice(html.lastIndexOf("<div", at), at);
+    expect(wrapper).toContain("relative z-10");
   });
 
   it("actions menu is keyboard-reachable (focus-within reveal, not hover-only) and holds the actions", () => {
