@@ -110,4 +110,18 @@ describe("ReportRow", () => {
     expect(html).toContain("View-only");
     expect(html).not.toContain("Not editable");
   });
+
+  it("carries BOTH badges at once when the two verdicts both have something to say", () => {
+    // The previous test shows fidelity alone; this one is the claim that
+    // actually constrains the markup. ADR-0090's premise is that the verdicts
+    // are orthogonal, so the row needs two badge SLOTS — fold them into one
+    // and this is the only test here that fails.
+    const html = render({
+      isPublished: true,
+      editabilityNotice: { label: "Not editable", title: "The editor cannot open this report." },
+      fidelityNotice: VIEW_ONLY,
+    });
+    expect(html).toContain("Not editable");
+    expect(html).toContain("View-only");
+  });
 });
