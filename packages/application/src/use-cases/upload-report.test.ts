@@ -620,6 +620,32 @@ describe("uploadReport — upload warnings (#365)", () => {
     expect(image?.detail).toContain("img-src");
   });
 
+  it("describes a blocked frame by the fallback that governs it, not a frame-src directive", async () => {
+    // The public viewer policy has NO `frame-src` directive (ADR-0088) —
+    // `packages/headers` pins that it is undefined — so frames are governed by
+    // the `default-src 'self'` fallback. Naming `frame-src` in the warning
+    // would tell an agent a directive exists that could be widened to fix
+    // this, and the whole point of the text is that it be true.
+    const { deps, resources } = makeDeps();
+    resources.setBlocked([blocked("https://example.test/x", "frame-src", [])]);
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const detail = r.value.result.warnings[0]?.detail ?? "";
+    expect(detail).toContain("https://example.test/x");
+    expect(detail).toContain("default-src 'self'");
+    expect(detail).not.toContain("frame-src");
+  });
+
+  it("still names the directive when the viewer's policy really has one", async () => {
+    const { deps, resources } = makeDeps();
+    resources.setBlocked([blocked("https://cdn.test/bg.png", "img-src", [])]);
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.result.warnings[0]?.detail).toContain("img-src allows no external host");
+  });
+
   it("scans the ENTRY DOCUMENT's bytes, verbatim", async () => {
     const { deps, resources } = makeDeps();
     await uploadReport(deps, cmd());

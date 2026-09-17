@@ -486,7 +486,12 @@ function blockedResourceDetail({ url, directive, allowed }: BlockedExternalResou
   const permitted =
     allowed.length > 0
       ? `${directive} allows only ${allowed.join(", ")}`
-      : `${directive} allows no external host`;
+      : directive === "frame-src"
+        ? // The public viewer policy declares NO `frame-src` (ADR-0088) — frames
+          // are governed by the `default-src` fallback. Naming a directive the
+          // policy does not have would tell an agent there is one to widen.
+          "frames fall back to default-src 'self', which allows no external host"
+        : `${directive} allows no external host`;
   return (
     `${url} will be blocked by the viewer's Content-Security-Policy: ${permitted}. ` +
     "Inline the asset (a data: URI works) or load it from an allowed host. " +
