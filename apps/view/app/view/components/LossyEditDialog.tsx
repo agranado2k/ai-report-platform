@@ -78,9 +78,19 @@ export function LossyEditDialog({
       >
         Edit
       </a>
-      <dialog ref={dialogRef} aria-labelledby="lossy-edit-title" className={cx(DIALOG_CLASS)}>
+      {/* `aria-describedby` alongside `aria-labelledby`: the title announces
+          THAT something would be dropped, and the paragraph below announces
+          WHAT. Naming the consequence is this dialog's entire job, so a screen
+          reader has to receive it when the dialog opens rather than having to
+          go looking for it. */}
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="lossy-edit-title"
+        aria-describedby="lossy-edit-desc"
+        className={cx(DIALOG_CLASS)}
+      >
         <DialogTitle id="lossy-edit-title">Editing would drop part of this report</DialogTitle>
-        <p className="mt-3 text-sm text-muted">
+        <p id="lossy-edit-desc" className="mt-3 text-sm text-muted">
           The editor can open this report, but it doesn’t keep everything in it.{" "}
           {named ? (
             <>

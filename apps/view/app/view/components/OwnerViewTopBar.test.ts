@@ -109,6 +109,20 @@ describe("OwnerViewTopBar", () => {
       expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit anyway</);
     });
 
+    it("describes the dialog by its consequence, not just its title", () => {
+      // `aria-labelledby` alone announces "Editing would drop part of this
+      // report" and then silence — the sentence naming WHAT would be dropped
+      // is the whole point of the dialog, so a screen reader must get it on
+      // open rather than having to go looking. `aria-describedby` must point
+      // at the paragraph that actually carries the consequence.
+      const html = render({ lossyWarning: warning });
+      const describedBy = html.match(/<dialog[^>]*aria-describedby="([^"]+)"/)?.[1];
+      expect(describedBy).toBeTruthy();
+      expect(html).toContain(`id="${describedBy}"`);
+      // The described element is the consequence paragraph, not the title.
+      expect(html).toMatch(new RegExp(`id="${describedBy}"[^>]*>[^<]*The editor can open this`));
+    });
+
     it("says something true when the probe could not name the items", () => {
       // `loadLossyWarning` returns empty lists when the bytes could not be
       // re-read: the recorded verdict still stands, so the dialog still asks —
