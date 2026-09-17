@@ -268,6 +268,27 @@ function cssReferences(css: string): readonly { url: string; directive: BlockedD
  * none of them is a warning.
  */
 /**
+ * An absolute URL as a user agent resolves it before matching it against CSP:
+ * `.` and `..` segments collapsed (including their `%2e` spellings, which a
+ * URL parser treats as dot segments too), default port dropped, fragment
+ * discarded — CSP never matches on a fragment.
+ *
+ * Falls back to the string as written when it cannot be parsed. That is the
+ * conservative direction: an unresolvable URL fails the prefix test and is
+ * reported, rather than being cleared on a comparison nobody can trust.
+ *
+ * Parsing only, no dereference (ADR-0069).
+ */
+function resolvedForMatch(absolute: string): string {
+  try {
+    const parsed = new URL(absolute);
+    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return absolute;
+  }
+}
+
+/**
  * The origin of an absolute reference, lowercased and port-normalised the way
  * a browser normalises one, or `undefined` when there is no origin to speak of.
  *
@@ -299,12 +320,16 @@ function isExternal(url: string): boolean {
  * matches them: an entry is an origin, optionally with a path prefix
  * (`https://cdn.jsdelivr.net/npm/`), and a path prefix is load-bearing —
  * jsdelivr's `/npm/` is allowlisted and its `/gh/` is not.
+ *
+ * The URL is RESOLVED before the prefix is compared, because that is the order
+ * a user agent works in: `/npm/../gh/x.js` is `/gh/x.js` by the time CSP sees
+ * it, so an allowlist prefix a `..` segment walks out of does not cover it.
  */
 function isAllowed(url: string, allowed: readonly string[]): boolean {
   if (allowed.length === 0) return false;
   // Protocol-relative resolves against the viewer's https origin.
   const absolute = url.startsWith("//") ? `https:${url}` : url;
-  const lower = absolute.toLowerCase();
+  const lower = resolvedForMatch(absolute).toLowerCase();
   return allowed.some((entry) => {
     const source = entry.toLowerCase();
     if (source.endsWith("/")) return lower.startsWith(source);

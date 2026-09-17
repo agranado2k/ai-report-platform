@@ -63,6 +63,29 @@ describe("scanBlockedResources", () => {
       ]);
     });
 
+    it("resolves . and .. the way a browser does BEFORE matching the prefix", () => {
+      // CSP matches the RESOLVED URL, so `/npm/../gh/x.js` is `/gh/x.js` —
+      // outside jsdelivr's allowlisted `/npm/` prefix, and blocked. Matching
+      // the string as written would clear it and lose the warning.
+      const escaped = "https://cdn.jsdelivr.net/npm/../gh/user/repo/x.js";
+      expect(urls(doc(`<script src="${escaped}"></script>`))).toEqual([escaped]);
+    });
+
+    it("resolves the percent-encoded dot segments too", () => {
+      // `%2e%2e` is a dot-dot segment to a URL parser, so it escapes the
+      // prefix exactly as `..` does — and is the form someone probing would
+      // reach for first.
+      const escaped = "https://cdn.jsdelivr.net/npm/%2e%2e/gh/user/repo/x.js";
+      expect(urls(doc(`<script src="${escaped}"></script>`))).toEqual([escaped]);
+    });
+
+    it("clears a path whose dot segments resolve back INSIDE the prefix", () => {
+      // The rule is resolution, not "reject anything containing `..`":
+      // `/npm/pkg/../dist/x.js` is `/npm/dist/x.js`, which the allowlist allows.
+      expect(urls(doc('<script src="https://cdn.jsdelivr.net/npm/pkg/../dist/x.js"></script>'))) //
+        .toEqual([]);
+    });
+
     it("is directive-aware: a script CDN is not an image source", () => {
       // `img-src 'self' data: blob:` is pinned (ADR-0088) — a wildcard image
       // source is an exfiltration channel, so no allowlist host applies here.
