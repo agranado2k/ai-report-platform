@@ -38,6 +38,28 @@ describe("scanBlockedResources", () => {
       }
     });
 
+    it("admits every allowlist key into the directive map, so a new one cannot be ignored", () => {
+      // `ALLOWED_BY_DIRECTIVE` is exhaustive over the DIRECTIVES, which the
+      // type checker enforces — but nothing tied it to the allowlist's own KEY
+      // SET. Adding a fourth entry to `VIEW_CSP_ALLOWLIST` would widen the real
+      // policy and leave the scan still warning about the newly allowed host.
+      const covered = new Set(
+        Object.values(VIEW_CSP_ALLOWLIST)
+          .flat()
+          .map((host) => host.toLowerCase()),
+      );
+      for (const host of covered) {
+        const asScript = urls(doc(`<script src="${host}/x.js"></script>`));
+        const asStyle = urls(doc("", `<link rel="stylesheet" href="${host}/x.css">`));
+        const asFont = urls(doc("", `<style>@font-face{src:url(${host}/x.woff2)}</style>`));
+        // Every allowlisted host must clear under AT LEAST the directive it was
+        // listed for; if a new key were added and never mapped, all three would
+        // report it.
+        expect([asScript, asStyle, asFont].some((r) => r.length === 0)).toBe(true);
+      }
+      expect(Object.keys(VIEW_CSP_ALLOWLIST).sort()).toEqual(["fontSrc", "scriptSrc", "styleSrc"]);
+    });
+
     it("reports the directive's own allowed hosts on a blocked resource, not a copy", () => {
       const [blocked] = scanBlockedResources(doc('<script src="https://unpkg.com/x.js"></script>'));
       expect(blocked).toEqual({
@@ -282,6 +304,50 @@ describe("scanBlockedResources", () => {
           '<img src="blob:https://view.test/abc" alt="">',
       );
       expect(scanBlockedResources(html)).toEqual([]);
+    });
+
+    it("maps a preload to the directive of what it is preloading", () => {
+      // The `as` switch decides the directive for five outcomes and had no
+      // test: deleting any arm kept the suite green.
+      const preload = (as: string) =>
+        urls(doc("", `<link rel="preload" as="${as}" href="https://evil.test/a">`));
+      expect(
+        scanBlockedResources(
+          doc("", '<link rel="preload" as="script" href="https://evil.test/a">'),
+        )[0]?.directive,
+      ).toBe("script-src");
+      expect(
+        scanBlockedResources(
+          doc("", '<link rel="preload" as="style" href="https://evil.test/a">'),
+        )[0]?.directive,
+      ).toBe("style-src");
+      expect(
+        scanBlockedResources(
+          doc("", '<link rel="preload" as="font" href="https://evil.test/a">'),
+        )[0]?.directive,
+      ).toBe("font-src");
+      expect(
+        scanBlockedResources(
+          doc("", '<link rel="preload" as="image" href="https://evil.test/a">'),
+        )[0]?.directive,
+      ).toBe("img-src");
+      // An `as` the scan has no directive for raises nothing rather than
+      // guessing one.
+      expect(preload("fetch")).toEqual([]);
+      expect(preload("")).toEqual([]);
+    });
+
+    it("maps modulepreload to script-src", () => {
+      const html = doc("", '<link rel="modulepreload" as="script" href="https://evil.test/m.js">');
+      expect(scanBlockedResources(html)[0]?.directive).toBe("script-src");
+    });
+
+    it("treats icon rels as image sources, including the two-token shortcut form", () => {
+      const icon = (rel: string) =>
+        scanBlockedResources(doc("", `<link rel="${rel}" href="https://evil.test/i.png">`));
+      for (const rel of ["icon", "shortcut icon", "apple-touch-icon"]) {
+        expect(icon(rel)[0]?.directive).toBe("img-src");
+      }
     });
 
     it("ignores link rels that load nothing", () => {

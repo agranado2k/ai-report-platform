@@ -815,8 +815,37 @@ describe("uploadReport — upload warnings (#365)", () => {
     resources.setBlocked([]); // the scanner would now disagree
     const second = await uploadReport(deps, cmd({ idempotencyKey: "k9" }));
     expect(second.ok && second.value.replayed).toBe(true);
-    expect(first.ok && first.value.result.warnings.length).toBe(1);
-    expect(second.ok && second.value.result.warnings.length).toBe(1);
+    // The VALUE, not just the count — the sibling `editability` replay test
+    // asserts the verdict itself, and a length-only assertion would pass on a
+    // replay that handed back a different warning.
+    expect(first.ok && first.value.result.warnings).toEqual(
+      second.ok ? second.value.result.warnings : null,
+    );
+    expect(second.ok && second.value.result.warnings[0]?.detail).toContain(
+      "https://unpkg.com/x.js",
+    );
+  });
+
+  it("rejects a stored record whose warnings are not a list", async () => {
+    // Present-but-wrong is a different case from absent: a `warnings` key that
+    // is not an array is a corrupt record, not an older one, and replaying it
+    // would hand a caller something that is not an UploadResult.
+    const { deps, idempotency } = makeDeps();
+    const ref = { actingUserId: userId("u1"), route: "POST /api/v1/reports", key: "corrupt-w" };
+    await idempotency.begin(ref, "hash-default:folder:f1");
+    await idempotency.complete(ref, {
+      responseStatus: 201,
+      responseBody: {
+        slug: "slug000001",
+        version: 1,
+        scanStatus: "clean",
+        editability: null,
+        warnings: "external-resource-blocked",
+      },
+    });
+    const r = await uploadReport(deps, cmd({ idempotencyKey: "corrupt-w" }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("Unexpected");
   });
 
   it("reads a record stored BEFORE #365 as an empty list, not as a 500", async () => {
