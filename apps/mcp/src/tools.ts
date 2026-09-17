@@ -134,6 +134,11 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "included only when you are the report's owner. Also returns editability: 'editable' | " +
         "'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the " +
         "editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. " +
+        "Next to it, fidelity: 'lossless' | 'lossy' | null (ADR-0090) — whether the editor " +
+        "would KEEP the live version's content, a SEPARATE question from whether it can open " +
+        "it. 'lossy' means opening it works but saving would drop content the editor's schema " +
+        "does not keep (inline <script>, inline <svg>, some attributes); the report itself " +
+        "still views perfectly. null means UNKNOWN (never probed), NOT lossless. " +
         "Read-only. Use it to confirm a report " +
         "exists / check its title, folder or sharing before an update, move, or delete. A " +
         "missing slug returns not-found; a report outside your org returns forbidden.",
@@ -153,9 +158,14 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list " +
         "({object:'list', data, has_more}), newest-created first; each item has id " +
         "(version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, " +
-        "size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' " +
+        "size_bytes, origin ('upload' | 'editor'), editability ('editable' | 'unsplittable' " +
         "| 'unparsable' | null — whether THAT version's bytes can be opened in the editor, " +
-        "ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.",
+        "ADR-0080; null means UNKNOWN, not un-editable), and fidelity ('lossless' | 'lossy' | " +
+        "null — whether the editor would KEEP that version's content if it saved it, ADR-0090; " +
+        "'lossy' opens fine but a save would drop inline <script>/<svg> and unretained " +
+        "attributes; null means UNKNOWN because it was never probed, NOT lossless). The two " +
+        "are independent: 'editable' + 'lossy' is a real and common combination. " +
+        "Read-only. Page with starting_after.",
       inputSchema: {
         slug: SLUG_INPUT,
         ...cursorInputs("version"),
@@ -178,7 +188,13 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       title: "Read a report's stored content",
       description:
         "Read back a report's stored document — returns { object:'report_content', slug, " +
-        "version_id, version_no, content_type, html }. Defaults to the LIVE version; pass " +
+        "version_id, version_no, content_type, html, editability, fidelity }. editability " +
+        "('editable' | 'unsplittable' | 'unparsable' | null, ADR-0080) is whether the editor " +
+        "can OPEN the version you just read; fidelity ('lossless' | 'lossy' | null, ADR-0090) " +
+        "is whether it would KEEP it — 'lossy' means a save would drop inline <script>/<svg> " +
+        "and unretained attributes, so edit this `html` yourself and re-upload rather than " +
+        "round-tripping it through the editor. For both, null means UNKNOWN because it was " +
+        "never probed — never read null as 'editable' or as 'lossless'. Defaults to the LIVE version; pass " +
         "`version` (a version_… id from reports_list_versions) to read a specific one. Pass " +
         "include_source:true to also get `source`, the lossless ProseMirror doc, when that " +
         "version has one (an externally-uploaded version has none, so `source` is omitted). " +
@@ -337,7 +353,17 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "it opens); a document with no <body> tag at all is fine and opens normally; " +
         "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
         "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
-        "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
+        "Re-upload a full <html><body>…</body></html> document if you want it to be editable. " +
+        "The response also carries fidelity: 'lossless' | 'lossy' | null (ADR-0090) — the " +
+        "SECOND, independent question, asked only when editability is 'editable': would the " +
+        "editor KEEP what you published? 'lossy' means it opens but a later editor SAVE would " +
+        "drop content the Report HTML schema does not retain — inline <script>, inline <svg>, " +
+        "unretained attributes — which is the usual verdict for an interactive slide deck or " +
+        "a script-driven dashboard. It is NOT an error and nothing is rejected for it: the " +
+        "document is stored byte-for-byte and still views perfectly at view_url. Treat a lossy " +
+        "report as view-only content: update it by re-uploading the full HTML with " +
+        "update_slug, not by editing it in the editor. null means UNKNOWN because it was " +
+        "never probed, NOT lossless.",
       inputSchema: {
         html: z
           .string()
