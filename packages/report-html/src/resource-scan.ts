@@ -189,6 +189,24 @@ function linkDirective(rel: string | null, as: string | null): BlockedDirective 
   return undefined;
 }
 
+/**
+ * The value inside a `url(...)`, with its surrounding whitespace and one
+ * matched pair of quotes removed.
+ *
+ * Done in code, not in the pattern, because expressing optional quotes and
+ * optional padding as regex alternatives beside a permissive value class is
+ * what made the old pattern backtrack. Two linear trims cost nothing and
+ * cannot be made ambiguous.
+ */
+function cssUrlValue(raw: string): string {
+  const trimmed = raw.trim();
+  const quote = trimmed[0];
+  if ((quote === '"' || quote === "'") && trimmed.length >= 2 && trimmed.endsWith(quote)) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 /** ASCII whitespace, the only thing that ends a `srcset` URL token. */
 const isSrcsetSpace = (c: string): boolean =>
   c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
@@ -251,12 +269,23 @@ function srcsetUrls(srcset: string | null): readonly string[] {
 const FONT_FACE_RE = /@font-face\s*\{[^}]*\}/gi;
 const IMPORT_STMT_RE = /@import[^;]*;?/gi;
 /**
- * A `url()` reference. The length bound is a BACKTRACKING guard, not a URL
- * limit: without it, `url(` followed by a long unterminated tail makes the
- * engine retry from every position, and this runs over an untrusted document.
- * A 2KB asset URL is well past anything the viewer would load.
+ * A `url()` reference.
+ *
+ * ONE quantifier over a class that excludes the terminator, and the quotes and
+ * surrounding whitespace are stripped in code rather than matched. That shape
+ * is the point. The previous pattern — `url\(\s*["']?([^"')]{1,2048})["']?\s*\)`
+ * — let `\s*` and the value class both match a space, so for a run of
+ * whitespace every way of splitting it between them was a candidate the engine
+ * had to try: catastrophic backtracking, super-quadratic in the length of the
+ * run. A single `style` attribute holding 4,000 spaces after `url(` — a 4 KB
+ * document — cost 13.3 SECONDS of CPU, on the write path, before any plan
+ * limit applies. That is a denial-of-service primitive reachable by anyone who
+ * can upload, which is exactly what this module claims not to be.
+ *
+ * The length bound stays, but it was never the guard it looked like: it caps
+ * how much a match can capture, not how many times the engine retries.
  */
-const URL_RE = /url\(\s*["']?([^"')]{1,2048})["']?\s*\)/gi;
+const URL_RE = /url\(([^)]{0,2048})\)/gi;
 /** `@import "theme.css"` — the quoted form, which carries no `url()`. */
 const BARE_IMPORT_RE = /@import\s+["']([^"']{1,2048})["']/i;
 
@@ -278,7 +307,8 @@ function cssReferences(css: string): readonly { url: string; directive: BlockedD
   const refs: { url: string; directive: BlockedDirective }[] = [];
   const collect = (text: string, directive: BlockedDirective): void => {
     for (const match of text.matchAll(URL_RE)) {
-      if (match[1]) refs.push({ url: match[1].trim(), directive });
+      const url = cssUrlValue(match[1] ?? "");
+      if (url) refs.push({ url, directive });
     }
   };
 

@@ -367,6 +367,25 @@ describe("scanBlockedResources", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
+    it("stays linear when `url(` is followed by whitespace and never closes", () => {
+      // The shape that makes `url\(\s*["']?([^"')]…)` CATASTROPHICALLY
+      // ambiguous: `\s*` and the value class both match a space, so every way
+      // of splitting a whitespace run between them is a candidate the engine
+      // tries. Measured against the previous pattern, one `style` attribute
+      // carrying 4,000 spaces — a 4 KB document — cost 13.3 SECONDS of CPU
+      // (1,200 → 0.5s, 2,400 → 3.6s): super-quadratic, on the write path,
+      // before any plan limit applies.
+      //
+      // Note the difference from the repetition case below: there the next
+      // character after `url(` is `u`, so `\s*` matches empty and the
+      // ambiguity never fires. That test passed throughout and certified a
+      // linearity the scan did not have — which is why this one exists.
+      const hostile = `<div style="background:url(${" ".repeat(4000)}"></div>`;
+      const started = Date.now();
+      expect(() => scanBlockedResources(doc(hostile))).not.toThrow();
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
     it("stays linear on a large hostile stylesheet instead of backtracking", () => {
       // The scan runs over an UNTRUSTED document, so its cost has to be linear
       // in the input: an unterminated `url(` repeated across a big stylesheet
