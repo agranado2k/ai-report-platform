@@ -189,13 +189,63 @@ function linkDirective(rel: string | null, as: string | null): BlockedDirective 
   return undefined;
 }
 
-/** The URL of each candidate in a `srcset`, ignoring the density/width descriptors. */
+/** ASCII whitespace, the only thing that ends a `srcset` URL token. */
+const isSrcsetSpace = (c: string): boolean =>
+  c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
+
+/**
+ * The URL of each candidate in a `srcset`, ignoring the density/width
+ * descriptors — read with the HTML "parse a srcset attribute" grammar rather
+ * than a split on commas.
+ *
+ * The grammar matters because a comma is not a separator everywhere: a
+ * candidate is a URL followed by an optional descriptor, and the URL token
+ * runs to the next ASCII whitespace, so a comma INSIDE a URL belongs to it.
+ * Image CDNs put commas in paths routinely (`/w_400,h_300/a.png`), and
+ * splitting on them reports two references the document never makes while
+ * losing the one it does. What separates candidates is a comma the URL token
+ * ends with, or a comma that terminates a descriptor.
+ *
+ * One left-to-right pass, no backtracking: this reads an untrusted document
+ * (ADR-0069), so its cost stays linear in the attribute's length.
+ */
 function srcsetUrls(srcset: string | null): readonly string[] {
   if (!srcset) return [];
-  return srcset
-    .split(",")
-    .map((candidate) => candidate.trim().split(/\s+/)[0] ?? "")
-    .filter(Boolean);
+  const urls: string[] = [];
+  let i = 0;
+  while (i < srcset.length) {
+    // Between candidates, whitespace and commas are both separators.
+    while (i < srcset.length && (isSrcsetSpace(srcset[i] as string) || srcset[i] === ",")) i++;
+    if (i >= srcset.length) break;
+
+    const start = i;
+    while (i < srcset.length && !isSrcsetSpace(srcset[i] as string)) i++;
+    const token = srcset.slice(start, i);
+
+    // A comma glued to the end of the URL closes the candidate outright, and
+    // the descriptor is empty. (Trailing commas are stripped, not kept.)
+    let end = token.length;
+    while (end > 0 && token[end - 1] === ",") end--;
+    const url = token.slice(0, end);
+    if (url) urls.push(url);
+    if (end < token.length) continue; // it ended with a comma — next candidate
+
+    // Otherwise a descriptor follows, running to the next comma that is not
+    // inside parentheses.
+    let inParens = false;
+    while (i < srcset.length) {
+      const c = srcset[i] as string;
+      i++;
+      if (inParens) {
+        if (c === ")") inParens = false;
+      } else if (c === "(") {
+        inParens = true;
+      } else if (c === ",") {
+        break;
+      }
+    }
+  }
+  return urls;
 }
 
 const FONT_FACE_RE = /@font-face\s*\{[^}]*\}/gi;

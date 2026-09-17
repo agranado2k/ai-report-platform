@@ -176,6 +176,54 @@ describe("scanBlockedResources", () => {
       ).toEqual(["https://cdn.test/a.png", "https://cdn.test/b.png"]);
     });
 
+    describe("srcset follows the HTML candidate grammar, not a split on commas", () => {
+      // A candidate is a URL then an optional descriptor, and the URL token
+      // runs to the next ASCII whitespace — so a comma INSIDE a URL belongs to
+      // it. Splitting on every comma invents references the document never
+      // makes and loses the one it does.
+      it("keeps a candidate URL that itself contains commas", () => {
+        const transform = "https://cdn.test/image/w_400,h_300,c_fill/a.png";
+        expect(urls(doc(`<img srcset="${transform} 2x" alt="">`))).toEqual([transform]);
+      });
+
+      it("separates candidates on the comma that terminates a descriptor", () => {
+        const html = doc(
+          '<img srcset="https://cdn.test/x,1/a.png 1x,https://cdn.test/x,2/b.png 2x" alt="">',
+        );
+        expect(urls(html)).toEqual(["https://cdn.test/x,1/a.png", "https://cdn.test/x,2/b.png"]);
+      });
+
+      it("separates candidates on a comma glued to a URL with no descriptor", () => {
+        const html = doc('<img srcset="https://cdn.test/a.png, https://cdn.test/b.png" alt="">');
+        expect(urls(html)).toEqual(["https://cdn.test/a.png", "https://cdn.test/b.png"]);
+      });
+
+      it("reads a comma-joined pair with no whitespace as the ONE URL a browser fetches", () => {
+        // The notorious corner of the grammar: with no whitespace after the
+        // comma there is no candidate boundary, so the whole string is one URL
+        // token. That single mangled request is what the viewer actually
+        // makes, so it is what the author should be told about.
+        const html = doc('<img srcset="https://cdn.test/a.png,https://cdn.test/b.png" alt="">');
+        expect(urls(html)).toEqual(["https://cdn.test/a.png,https://cdn.test/b.png"]);
+      });
+
+      it("does not split on a comma inside a descriptor's parentheses", () => {
+        const html = doc('<img srcset="https://cdn.test/a.png (min-width:1px,2px) 1x" alt="">');
+        expect(urls(html)).toEqual(["https://cdn.test/a.png"]);
+      });
+
+      it("tolerates empty candidates and runs of separators", () => {
+        const html = doc('<img srcset=" , ,https://cdn.test/a.png 1x , , " alt="">');
+        expect(urls(html)).toEqual(["https://cdn.test/a.png"]);
+      });
+
+      it("reads source[srcset] by the same grammar", () => {
+        const transform = "https://cdn.test/w_1,h_2/a.png";
+        const html = doc(`<picture><source srcset="${transform} 1x"><img src="" alt=""></picture>`);
+        expect(urls(html)).toEqual([transform]);
+      });
+    });
+
     it("treats a protocol-relative URL as https", () => {
       expect(urls(doc('<script src="//cdnjs.cloudflare.com/a.js"></script>'))).toEqual([]);
       expect(urls(doc('<script src="//evil.test/a.js"></script>'))).toEqual(["//evil.test/a.js"]);
