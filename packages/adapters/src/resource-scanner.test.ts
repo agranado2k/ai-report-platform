@@ -49,6 +49,36 @@ describe("ReportHtmlResourceScanner", () => {
   });
 });
 
+describe("the deployment's view origin is 'self'", () => {
+  // Every fetch directive in the ADR-0088 viewer policy begins with `'self'`,
+  // so an author who writes the view origin out in full has written something
+  // that loads. The composition root knows that origin (`VIEW_ORIGIN`, the same
+  // value `view_url` is built from) and hands it to the scanner here, because
+  // `arp-application` is dependency-locked and must not learn about the
+  // deployment's URLs to ask this question (ADR-024).
+  const VIEW = "https://view.centaurspec.com";
+  const selfRef = `<html><body><img src="${VIEW}/logo.png" alt=""></body></html>`;
+
+  it("clears an absolute URL on the configured view origin", () => {
+    expect(new ReportHtmlResourceScanner(VIEW).scan(enc(selfRef))).toEqual([]);
+  });
+
+  it("still names a resource on any other origin", () => {
+    const html = `<html><body><script src="https://unpkg.com/x.js"></script></body></html>`;
+    expect(new ReportHtmlResourceScanner(VIEW).scan(enc(html)).map((r) => r.url)).toEqual([
+      "https://unpkg.com/x.js",
+    ]);
+  });
+
+  it("warns about that same self URL on a deployment with no configured origin", () => {
+    // Previews and dev leave `VIEW_ORIGIN` unset — the scan then reports what
+    // it can prove rather than guessing an origin.
+    expect(new ReportHtmlResourceScanner().scan(enc(selfRef)).map((r) => r.url)).toEqual([
+      `${VIEW}/logo.png`,
+    ]);
+  });
+});
+
 describe("the read path is unchanged by the resource scan (ADR-0038)", () => {
   // The regression pin its two sibling probes carry, for the same reason: the
   // scan is metadata ABOUT the bytes, never a transformation OF them. A

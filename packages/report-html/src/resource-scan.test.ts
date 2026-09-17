@@ -222,6 +222,62 @@ describe("scanBlockedResources", () => {
     });
   });
 
+  describe("the view origin is 'self' (ADR-0088 — every viewer directive carries 'self')", () => {
+    // A report is served FROM the view origin, and every fetch directive in the
+    // ADR-0088 policy starts with `'self'` — so an author who writes the view
+    // origin out in full is referencing a resource that actually loads. The
+    // scan has to be told what that origin is; it cannot infer it from bytes.
+    const VIEW = "https://view.centaurspec.com";
+    const onView = (html: string) =>
+      scanBlockedResources(html, { viewOrigin: VIEW }).map((r) => r.url);
+
+    it("says nothing about an absolute URL written on the view origin", () => {
+      const html = doc(
+        `<img src="${VIEW}/logo.png" alt=""><script src="${VIEW}/app.js"></script>` +
+          `<iframe src="${VIEW}/other" title="o"></iframe>`,
+        `<link rel="stylesheet" href="${VIEW}/theme.css">` +
+          `<style>@font-face{src:url(${VIEW}/inter.woff2)}body{background:url(${VIEW}/bg.png)}</style>`,
+      );
+      expect(onView(html)).toEqual([]);
+    });
+
+    it("compares the ORIGIN, not the host — another scheme or port is not 'self'", () => {
+      const html = doc(
+        '<img src="http://view.centaurspec.com/logo.png" alt="">' +
+          '<img src="https://view.centaurspec.com:8443/logo.png" alt="">',
+      );
+      expect(onView(html)).toEqual([
+        "http://view.centaurspec.com/logo.png",
+        "https://view.centaurspec.com:8443/logo.png",
+      ]);
+    });
+
+    it("treats a protocol-relative reference to the view host as 'self'", () => {
+      expect(onView(doc('<img src="//view.centaurspec.com/logo.png" alt="">'))).toEqual([]);
+    });
+
+    it("still blocks every other origin when the view origin is known", () => {
+      expect(onView(doc('<img src="https://cdn.test/a.png" alt="">'))).toEqual([
+        "https://cdn.test/a.png",
+      ]);
+    });
+
+    it("warns about an absolute self URL when the deployment's view origin is unknown", () => {
+      // Previews and dev leave `VIEW_ORIGIN` unset. The scan then says only
+      // what it can prove: with no origin to compare against, an absolute URL
+      // is external. An extra advisory line beats a wrong clearance.
+      expect(urls(doc(`<img src="${VIEW}/logo.png" alt="">`))).toEqual([`${VIEW}/logo.png`]);
+    });
+
+    it("ignores a view origin it cannot parse rather than throwing", () => {
+      expect(
+        scanBlockedResources(doc('<img src="https://cdn.test/a.png" alt="">'), {
+          viewOrigin: "not a url",
+        }).map((r) => r.url),
+      ).toEqual(["https://cdn.test/a.png"]);
+    });
+  });
+
   describe("it is a scan, never a fetch (ADR-0069)", () => {
     it("never touches the network for a document full of external references", () => {
       const fetchSpy = vi.fn();

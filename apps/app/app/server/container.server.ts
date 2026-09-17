@@ -236,8 +236,12 @@ export function deps(): UploadReportDeps {
     fidelity: new ReportHtmlFidelityProbe(),
     // #365 — what the VIEWER will refuse to load out of this document, read
     // off the ADR-0088 allowlist. A scan of the bytes; it never fetches what
-    // it finds (ADR-0069).
-    resources: new ReportHtmlResourceScanner(),
+    // it finds (ADR-0069). It is given this deployment's view origin — the
+    // same `VIEW_ORIGIN` that `view_url` is built from — because every fetch
+    // directive in that policy carries `'self'`, so an absolute URL an author
+    // wrote against the view origin loads and must not be warned about. Unset
+    // on previews/dev, where the scan falls back to proving less.
+    resources: new ReportHtmlResourceScanner(env.VIEW_ORIGIN),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
     audit: auditLogger(),

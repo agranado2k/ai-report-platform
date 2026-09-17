@@ -25,10 +25,26 @@ import type { BlockedExternalResource, ResourceScanner } from "arp-application";
 import { scanBlockedResources } from "arp-report-html";
 
 export class ReportHtmlResourceScanner implements ResourceScanner {
+  /**
+   * @param viewOrigin the origin reports are served from on this deployment
+   * (`VIEW_ORIGIN` — the same value `view_url` is built from). Every fetch
+   * directive in the ADR-0088 policy begins with `'self'`, so a reference an
+   * author wrote out in full against this origin loads and is not a warning.
+   *
+   * Optional, and deliberately not defaulted: previews and dev leave
+   * `VIEW_ORIGIN` unset, and inventing an origin there would clear resources
+   * the viewer really does refuse. The DEPLOYMENT knows this, not the
+   * application layer — `arp-application` stays dependency-locked (ADR-024)
+   * and never learns the platform's URLs to ask the question.
+   */
+  constructor(private readonly viewOrigin?: string) {}
+
   scan(entryDocument: Uint8Array): readonly BlockedExternalResource[] {
     // UTF-8 with `fatal: false` (the default): malformed bytes become U+FFFD
     // rather than throwing, so the scan stays total. The stored bytes are
     // untouched either way — this decode is local to answering the question.
-    return scanBlockedResources(new TextDecoder().decode(entryDocument));
+    return scanBlockedResources(new TextDecoder().decode(entryDocument), {
+      viewOrigin: this.viewOrigin,
+    });
   }
 }

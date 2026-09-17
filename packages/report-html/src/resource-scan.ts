@@ -78,6 +78,22 @@ const LOADING_LINK_RELS: Record<string, BlockedDirective> = {
  *  never applies: the bytes are already in the document or in the page. */
 const INERT_SCHEME = /^(?:data|blob|about|javascript|mailto|tel):/i;
 
+/** What the scan needs to know about the deployment it is answering for. */
+export interface ScanOptions {
+  /**
+   * The origin the report will be served from (`https://view.<domain>`), when
+   * the deployment knows it. Every fetch directive in the ADR-0088 viewer
+   * policy begins with `'self'`, so a reference written out in full against
+   * this origin genuinely loads and must not be warned about.
+   *
+   * Optional because previews and dev leave `VIEW_ORIGIN` unset. Absent, the
+   * scan says only what it can prove from the bytes: an absolute URL is
+   * external. An advisory line nobody needed beats clearing a resource the
+   * viewer will in fact refuse.
+   */
+  readonly viewOrigin?: string;
+}
+
 /**
  * Report every external reference in `html` that the viewer's CSP will block.
  *
@@ -85,14 +101,21 @@ const INERT_SCHEME = /^(?:data|blob|about|javascript|mailto|tel):/i;
  * answer, never a throw, because the caller is an upload that must not fail for
  * asking a question.
  */
-export function scanBlockedResources(html: string): readonly BlockedExternalResource[] {
+export function scanBlockedResources(
+  html: string,
+  options: ScanOptions = {},
+): readonly BlockedExternalResource[] {
   const found: BlockedExternalResource[] = [];
   const seen = new Set<string>();
+  // Normalised once: an unparseable configured origin matches nothing rather
+  // than throwing on the write path.
+  const selfOrigin = originOf(options.viewOrigin);
 
   const consider = (raw: string | null | undefined, directive: BlockedDirective): void => {
     const url = raw?.trim();
     if (!url) return; // `src=""` is the document itself
     if (!isExternal(url)) return; // relative, same-document, or inert scheme
+    if (selfOrigin !== undefined && originOf(url) === selfOrigin) return; // 'self', written out in full
     if (isAllowed(url, ALLOWED_BY_DIRECTIVE[directive])) return;
     const key = `${directive} ${url}`;
     if (seen.has(key)) return; // one warning per distinct URL
@@ -244,6 +267,26 @@ function cssReferences(css: string): readonly { url: string; directive: BlockedD
  * and the other inert schemes fetch nothing. None of them can be blocked, so
  * none of them is a warning.
  */
+/**
+ * The origin of an absolute reference, lowercased and port-normalised the way
+ * a browser normalises one, or `undefined` when there is no origin to speak of.
+ *
+ * Parsing only — `new URL` resolves no host and opens no socket (ADR-0069).
+ */
+function originOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  // Protocol-relative resolves against the viewer's https origin.
+  const absolute = url.startsWith("//") ? `https:${url}` : url;
+  try {
+    const origin = new URL(absolute).origin;
+    // Opaque-origin schemes (`data:`, `blob:` in some engines) stringify to
+    // "null"; two of those are not the same origin as each other.
+    return origin === "null" ? undefined : origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function isExternal(url: string): boolean {
   if (url.startsWith("#") || url.startsWith("?")) return false;
   if (INERT_SCHEME.test(url)) return false;
