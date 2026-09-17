@@ -604,7 +604,10 @@ describe("decideServe edit — token/cookie decision", () => {
   // /reports/{slug}/open is the ONE edit-token mint, so a visitor with no valid
   // capability is sent there instead of being silently degraded to the
   // read-only viewer.
-  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open`;
+  // #363: the mint's default landing is now the OWNER VIEW, so /edit's
+  // funnel has to ask for the editor by name — otherwise clicking Edit on
+  // the owner view funnels back to the owner view and loops.
+  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`;
 
   it("no token at all → funnel to the app's edit-token mint (/open)", async () => {
     expect(await decideEdit(buildReport({ verdict: "clean" }))).toEqual({
@@ -837,7 +840,7 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     // The funnel is the happy path for a writer whose token simply needs
     // re-minting — not a degrade, so nothing to warn about.
     expect(warn).not.toHaveBeenCalled();
@@ -886,7 +889,7 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
         path: `/${SLUG}/edit?et=garbage`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -985,7 +988,7 @@ describe("decideServe edit — the owner fallback survives the 303 (cookie-carri
         now: NOW + 901,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -1086,7 +1089,7 @@ describe("decideServe edit — an unverified oa= is not an owner fallback", () =
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oaOf())}`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -1905,5 +1908,45 @@ describe("decideServe — purpose: ownerView — the Grantee read token (ADR-009
         cookie: `${UNLOCK_COOKIE}=${granteeRead()}`,
       }),
     ).resolves.toMatchObject({ kind: "serve" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #363 — the funnel is SURFACE-SPECIFIC once owner-open lands on the owner view.
+//
+// Both authenticated surfaces funnel a denied request to the app's ONE mint
+// (`funnelTarget`). Until #363 that mint had one destination, so one target
+// sufficed. Now it has two, and the owner view's Edit action is a plain link to
+// `/<slug>/edit` that deliberately holds no capability under that Path — it is
+// SUPPOSED to funnel, because that hop is the live `canWrite` re-check
+// (ADR-0089 §4b). A funnel that forgot to name the editor would send the user
+// straight back to the owner view: Edit would never open the editor.
+// ---------------------------------------------------------------------------
+describe("decideServe — the funnel names its destination (#363)", () => {
+  it("/edit funnels to the mint ASKING FOR THE EDITOR (`?to=edit`)", async () => {
+    await expect(decideEdit(buildReport({ verdict: "clean", acl: PRIVATE }))).resolves.toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`,
+    });
+  });
+
+  it("/edit funnels to the editor for a REJECTED capability too, not only an absent one", async () => {
+    // The rejection-vs-absence routing (ADR-0063 Phase 5-G) is untouched; what
+    // changes is only where the funnel points. A rejected token still funnels
+    // even with a verified `oa` in hand.
+    await expect(
+      decideEdit(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(ownerAccess())}`,
+      }),
+    ).resolves.toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`,
+    });
+  });
+
+  it("the owner view funnels to the mint's DEFAULT destination — itself, unqualified", async () => {
+    await expect(decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }))).resolves.toEqual(
+      { kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` },
+    );
   });
 });

@@ -188,16 +188,27 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // token. `viewHeaders()` would be wrong here; its top-level `sandbox` CSP
     // is for the untrusted report on `GET /<slug>`, not for this app's own UI.
     //
-    // The page's one forward action — "Open the read-only view" — carries the
-    // gate's OWN degrade target (`degradeTargetFor`), not a bare `/${slug}`.
-    // The bare link was the last hop of the same lockout: for a PRIVATE report
-    // it lands on the public viewer, which redirects to the app's unlock page,
-    // which offers `/reports/{slug}/open`, which comes straight back here — a
-    // cycle that never reaches the content. The target already embeds the
-    // `?access=` owner fallback the gate VERIFIED (acceptOwnerFallback), so
-    // nothing is minted on this credential-free origin; a write-grantee, who
-    // never has one, gets the bare link, which is correct for them (the unlock
-    // page recognises write access).
+    // The page's one forward action — "Open the read-only view" — points at
+    // the OWNER VIEW (#363). It was the gate's degrade target, `/${slug}` plus
+    // the `?access=<verified oa>` Phase 5-H had to bolt on, because the bare
+    // link was the last hop of the 2026-08-06 lockout: for a PRIVATE report it
+    // lands on the public viewer, which redirects to the app's unlock page,
+    // which offers `/reports/{slug}/open`, which came straight back here — a
+    // cycle that never reaches the content.
+    //
+    // With owner-open flipped, `/${slug}/view` closes that cycle better and
+    // carries NO token: it holds no capability under its own Path, so it
+    // funnels to the app's ONE mint, which re-checks `canWrite` LIVE and hands
+    // back a fresh capability (ADR-0089 §4b), landing the visitor on the owner
+    // view with the report rendered in its frame. A write-grantee gets the
+    // same working link rather than the lesser bare one — ADR-0091's Grantee
+    // read token is what makes their frame render instead of an unlock wall.
+    // So this page no longer emits a 24h `owner:true` token into an anchor at
+    // all, which Phase 5-H called "the ONE token this page may carry".
+    //
+    // `degradeTargetFor` is still consulted, for its `ownerFallback` BOOLEAN
+    // only: the log line records whether an owner fallback was in hand, which
+    // is what distinguishes the two outcomes that matter operationally.
     const readOnly = degradeTargetFor(decision, slug);
     console.warn(editUnopenableLine(slug, loaded.reason, readOnly.ownerFallback));
     const unopenableHeaders = editViewHeaders({ appOrigin });
@@ -207,7 +218,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
         reason: loaded.reason,
         slug,
         docTitle: report.title,
-        readOnlyHref: readOnly.to,
+        readOnlyHref: `/${slug}/view`,
       }),
       {
         status: UNOPENABLE_STATUS,

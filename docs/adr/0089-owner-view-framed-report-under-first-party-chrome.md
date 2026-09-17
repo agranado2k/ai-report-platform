@@ -395,6 +395,18 @@ this record left them.
   owner. This record defines the landing surface and its hand-off; the flip is #363's.
   What #363 needs from here: keep appending `&oa=` for owners (§4c depends on it), and
   point at `/<slug>/view?et=…&oa=…`.
+
+  > **Landed 2026-09-17 (#363).** `/open` now defaults to `${viewOrigin}/${slug}/view`,
+  > with `et=` and `oa=` (or, per ADR-0091, a grantee's `gr=`) threaded exactly as this
+  > record specified. One thing the flip had to add that is worth naming here, because it
+  > is a property of §4b rather than of #363: the mint now takes a **destination**, and
+  > `/edit`'s funnel carries `?to=edit`. §4b makes the Edit action a plain link to
+  > `/<slug>/edit` precisely so it arrives with no capability and funnels through the app's
+  > one mint for a live `canWrite` re-check — so once that mint's default became the owner
+  > view, an unqualified funnel would have answered Edit with the owner view the user just
+  > clicked Edit on, and the editor would have been unreachable. The funnel target is
+  > therefore a property of the `Surface`, beside its cookie pair and its degrade event
+  > names.
 - **The lossy-edit confirm dialog** (#364). The Edit action here is a plain navigation.
 - **The fidelity verdict and upload warnings** (#362) — including the `[hidden]` defect
   the spike reproduced. Nothing here reads or routes on `Editability` (ADR-0080 §4 stands).

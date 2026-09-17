@@ -1,7 +1,8 @@
 // Unit tests for the owner-open decision — the ADR-0059 §4 security keystone,
 // extended by ADR-0063 Phase 5: EVERY canWrite user (owner OR write-grantee)
 // is now minted the SAME short-lived, slug-bound `scope:"edit"` token and
-// lands in the unified in-viewer experience (`/edit?et=...`) — there is no
+// lands on the OWNER VIEW (`/view?et=...`, #363; it was `/edit` until the
+// flip) — there is no
 // longer a separate, higher-privilege `owner:true` access token minted from
 // this route. `loadWritableReport` (isOwner OR hasWriteGrant, ADR-0060 §4)
 // is now THE single gate; a user who is neither is bounced to "/" and never
@@ -101,7 +102,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       viewOrigin: VIEW,
       secret: SECRET,
     });
-    expect(location.startsWith(`${VIEW}/aaaaaaaaaa/edit?et=`)).toBe(true);
+    expect(location.startsWith(`${VIEW}/aaaaaaaaaa/view?et=`)).toBe(true); // #363: the owner view is the default landing
     const [etPart, oaPart] = location.split("?et=")[1]?.split("&oa=") ?? [];
     const nowSeconds = Math.floor(NOW / 1000);
     const token = decodeURIComponent(etPart ?? "");
@@ -146,7 +147,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       secret: SECRET,
     });
 
-    expect(location.startsWith(`${VIEW}/ffffffffff/edit?et=`)).toBe(true);
+    expect(location.startsWith(`${VIEW}/ffffffffff/view?et=`)).toBe(true); // #363: the owner view is the default landing
     expect(location).not.toContain("&oa="); // review #146: a grantee NEVER gets an owner:true token
     const token = decodeURIComponent(location.split("?et=")[1]?.split("&gr=")[0] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
@@ -184,7 +185,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       secret: SECRET,
     });
 
-    expect(location.startsWith(`${VIEW}/gggggggggg/edit?et=`)).toBe(true);
+    expect(location.startsWith(`${VIEW}/gggggggggg/view?et=`)).toBe(true); // #363: the owner view is the default landing
     expect(location).not.toContain("&oa=");
     const token = decodeURIComponent(location.split("?et=")[1]?.split("&gr=")[0] ?? "");
     const nowSeconds = Math.floor(NOW / 1000);
@@ -212,7 +213,7 @@ describe("ownerOpenLocation — unified canWrite gate mints an edit token (ADR-0
       viewOrigin: VIEW,
       secret: SECRET,
     });
-    expect(location).not.toContain("/edit?et=");
+    expect(location).not.toContain("?et="); // no capability minted, to EITHER destination
   });
 
   it("KEYSTONE: a same-org non-owner, non-grantee is bounced to the dashboard — no token", async () => {
@@ -433,5 +434,108 @@ describe("ownerOpenLocation — the Grantee read token (ADR-0091)", () => {
     });
     expect(location).toBe(`${VIEW}/llllllllll`);
     expect(location).not.toContain("gr=");
+  });
+});
+
+// --- #363: owner-open lands on the OWNER VIEW -------------------------------
+//
+// ADR-0089 built the owner view; ADR-0089 §9 left the redirect flip to this
+// ticket, and named exactly what it needs from that record: keep appending
+// `&oa=` for owners (§4c depends on it) and point at `/<slug>/view`.
+describe("ownerOpenLocation — the destination (#363)", () => {
+  it("an OWNER lands on the owner view, with `et=` and `oa=` threaded exactly as before", async () => {
+    const { reports } = await seededReports("mmmmmmmmmm");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "mmmmmmmmmm",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+
+    expect(location.startsWith(`${VIEW}/mmmmmmmmmm/view?et=`)).toBe(true);
+    expect(location).toContain("&oa=");
+    // The capability itself is unchanged — only where it is spent.
+    const et = decodeURIComponent(location.split("?et=")[1]?.split("&oa=")[0] ?? "");
+    const nowSeconds = Math.floor(NOW / 1000);
+    expect(readEditToken(et, "mmmmmmmmmm", SECRET, nowSeconds)).toMatchObject({
+      sub: OWNER,
+      scope: "edit",
+      exp: nowSeconds + EDIT_TTL_SECONDS,
+    });
+    const oa = decodeURIComponent(location.split("&oa=")[1] ?? "");
+    expect(readAccessToken(oa, "mmmmmmmmmm", SECRET, nowSeconds)).toMatchObject({ owner: true });
+  });
+
+  it("a GRANTEE lands on the owner view too, with `gr=` — the audience rules of #361 are unchanged", async () => {
+    const { reports, report } = await seededReports("nnnnnnnnnn");
+    const grants = new InMemoryWriteGrantStore();
+    const identities = new InMemoryIdentityStore();
+    identities.seedUser(GRANTEE, "grantee@x.com");
+    await grants.grant(report.id, "grantee@x.com", OWNER, GRANTEE);
+    const { deps } = makeDeps(reports, {
+      grants,
+      orgWriteGrants: new InMemoryOrgWriteGrantStore(),
+      identities,
+    });
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: GRANTEE },
+      rawHandle: "nnnnnnnnnn",
+      viewOrigin: VIEW,
+      secret: SECRET,
+    });
+    expect(location.startsWith(`${VIEW}/nnnnnnnnnn/view?et=`)).toBe(true);
+    expect(location).toContain("&gr=");
+  });
+
+  it('`destination: "editor"` still mints into the EDITOR — this is what keeps Edit reachable', async () => {
+    // The owner view's Edit action is a plain link to `/<slug>/edit`, which
+    // holds no capability under that Path and therefore FUNNELS through this
+    // one mint (ADR-0089 §4b — that hop IS the live canWrite re-check). With
+    // the flip, a funnel that forgot the destination would send the user
+    // straight back to the owner view and Edit would never open the editor.
+    const { reports } = await seededReports("oooooooooo");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "oooooooooo",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+    });
+    expect(location.startsWith(`${VIEW}/oooooooooo/edit?et=`)).toBe(true);
+    expect(location).toContain("&oa=");
+  });
+
+  it("the destination changes nothing about WHO is admitted — a non-canWrite user is still bounced", async () => {
+    const { reports } = await seededReports("pppppppppp");
+    const { deps } = makeDeps(reports);
+    for (const destination of ["ownerView", "editor"] as const) {
+      await expect(
+        ownerOpenLocation(deps, {
+          actor: { orgId: ORG, userId: COLLEAGUE },
+          rawHandle: "pppppppppp",
+          viewOrigin: VIEW,
+          secret: SECRET,
+          destination,
+        }),
+      ).resolves.toBe("/");
+    }
+  });
+
+  it("no secret configured: BOTH destinations fall through to the bare gated viewer, as today", async () => {
+    const { reports } = await seededReports("qqqqqqqqqq");
+    const { deps } = makeDeps(reports);
+    for (const destination of ["ownerView", "editor"] as const) {
+      await expect(
+        ownerOpenLocation(deps, {
+          actor: { orgId: ORG, userId: OWNER },
+          rawHandle: "qqqqqqqqqq",
+          viewOrigin: VIEW,
+          secret: undefined,
+          destination,
+        }),
+      ).resolves.toBe(`${VIEW}/qqqqqqqqqq`);
+    }
   });
 });

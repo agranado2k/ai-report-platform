@@ -186,6 +186,23 @@ interface Surface {
    *  minting and storing a capability with no consumer, which is worse than the
    *  asymmetry: an unread cookie is an unaudited one. */
   readonly granteeCookie?: string;
+  /**
+   * What this surface appends to the funnel target so the app's ONE mint knows
+   * which surface to send the capability back to (#363).
+   *
+   * Before the flip the mint had one destination and every funnel could be the
+   * bare `/reports/{slug}/open`. Now it has two, and the owner view's Edit
+   * action is a plain link to `/<slug>/edit` that is SUPPOSED to arrive with no
+   * capability, because that funnel hop is the live `canWrite` re-check
+   * (ADR-0089 §4b). Without a destination on it, `/open` would answer with the
+   * owner view the user just clicked Edit on — Edit would loop and the editor
+   * would be structurally unreachable.
+   *
+   * Empty for the owner view, which IS the mint's default: naming it would be
+   * a second way to spell the same thing, and two spellings of a redirect
+   * target is how the pair drifts.
+   */
+  readonly funnelQuery: string;
   /** The two `event` names this surface's degrades log under — the plain one
    *  and the one that says an owner fallback was in hand. They live on the
    *  Surface for the same reason the cookie pair does: a surface that could
@@ -214,6 +231,9 @@ const EDIT_SURFACE: Surface = {
   // lockouts key on. Giving the owner view its own pair is precisely what
   // lets these two stay put.
   degradeEvents: { plain: "edit-degraded-to-view", owner: "owner-edit-degraded-to-view" },
+  // The mint's default landing is the owner view since #363, so the editor has
+  // to ask for itself by name — see `Surface.funnelQuery`.
+  funnelQuery: "?to=edit",
 };
 
 const OWNER_VIEW_SURFACE: Surface = {
@@ -235,6 +255,9 @@ const OWNER_VIEW_SURFACE: Surface = {
     plain: "owner-view-degraded-to-view",
     owner: "owner-view-owner-degraded-to-view",
   },
+  // The mint's DEFAULT destination (#363). Deliberately empty rather than an
+  // explicit `?to=view`: one spelling of one target.
+  funnelQuery: "",
 };
 
 /**
@@ -912,7 +935,7 @@ async function decideOwnerView(
     // guard, and owning it in one place is what stops the two purposes forking
     // it. Answered BEFORE the report is looked up, so a nonexistent report
     // answers identically: no existence leak.
-    const funnel = funnelTarget(slug, oa, cap.cause, deps);
+    const funnel = funnelTarget(OWNER_VIEW_SURFACE, slug, oa, cap.cause, deps);
     if (funnel) return { kind: "redirect", to: funnel };
     // No funnel and no fallback: the bare public viewer, warned. With a
     // verified `oa` this is instead ADR-0089 §3's `ownerRead` row — the same
@@ -1176,25 +1199,25 @@ function readCapability(
     slug,
     deps,
   );
-  // A query `oa` SUPERSEDES the cookie one (above), so a verified `oa` came
-  // off the query exactly when the query carried one at all. An unverifiable
-  // query `oa` leaves `oa` undefined and `fromQuery` false — it buys no
-  // cookie and no bounce, which is the pre-existing behavior kept intact.
-  // The grantee read capability, read the same way and with the same
-  // precedence: a query `gr=` supersedes a cookie-carried one, and an
-  // unverifiable one leaves `gr` undefined rather than falling back. Surfaces
-  // with no `granteeCookie` (i.e. `/edit`, which frames nothing) never see one
-  // even if a query carries it — there is nothing on that surface for it to
-  // unlock, so accepting it would be storing a capability with no consumer.
+  // The grantee read capability (ADR-0091), read the same way and with the
+  // same precedence: a query `gr=` supersedes a cookie-carried one, and an
+  // unverifiable one leaves `gr` undefined rather than falling back to
+  // anything. Surfaces with no `granteeCookie` — i.e. `/edit`, which frames
+  // nothing — never see one even if a query carries it: there is no framed
+  // request on that surface for an unlock cookie to unlock, so accepting it
+  // would mean storing a capability with no consumer.
   const gr = surface.granteeCookie
     ? acceptGranteeRead(
-        url.searchParams.get("gr") ??
-          undefined ??
-          readOwnerFallbackCookie(cookieHeader, surface.granteeCookie),
+        url.searchParams.get("gr") ?? readOwnerFallbackCookie(cookieHeader, surface.granteeCookie),
         slug,
         deps,
       )
     : undefined;
+
+  // A query `oa` SUPERSEDES the cookie one (above), so a verified `oa` came
+  // off the query exactly when the query carried one at all. An unverifiable
+  // query `oa` leaves `oa` undefined and `fromQuery` false — it buys no
+  // cookie and no bounce, which is the pre-existing behavior kept intact.
   const fallback: OwnerFallbackRead = {
     oa,
     oaFromQuery: oa !== undefined && queryOa !== undefined,
@@ -1313,14 +1336,21 @@ type EditDenialCause = "rejected" | "absent";
  *  loop to owners: a loud loop the operator can see beats an owner quietly
  *  parked in read-only, which is how the 2026-08-06 incident stayed invisible. */
 function funnelTarget(
+  surface: Surface,
   slug: string,
   oa: string | undefined,
   cause: EditDenialCause,
   deps: GateDeps,
 ): string | undefined {
   const canFunnel = Boolean(deps.secret && deps.appOrigin);
+  // `surface.funnelQuery` names which surface the re-minted capability should
+  // be spent on (#363). It is a property of the SURFACE rather than an argument
+  // at the two call sites for the same reason the cookie pair and the degrade
+  // event names are: a funnel that points at the wrong surface is a loop, and
+  // the way that bug gets written is by adding a surface and forgetting one of
+  // its three data points.
   return canFunnel && (cause === "rejected" || !oa)
-    ? `${deps.appOrigin}/reports/${slug}/open`
+    ? `${deps.appOrigin}/reports/${slug}/open${surface.funnelQuery}`
     : undefined;
 }
 
@@ -1335,7 +1365,7 @@ function deniedEdit(
 ): EditDecision {
   // NOT a degrade — the funnel is the happy path for a writer whose token
   // simply needs re-minting. It re-enters through the mint, so no warning.
-  const funnel = funnelTarget(slug, oa, cause, deps);
+  const funnel = funnelTarget(EDIT_SURFACE, slug, oa, cause, deps);
   if (funnel) return { kind: "redirect", to: funnel };
   // Observability (claude-review #187): when an OWNER's edit-token round-trip
   // is denied and we degrade them to a read-only view (`oa` present), emit a

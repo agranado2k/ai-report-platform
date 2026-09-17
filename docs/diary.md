@@ -6192,3 +6192,69 @@ read by things that explain, never by things that decide.** The consumers that a
 on it — the Edit confirm dialog and the upload warnings — are separate tickets, so
 the recorded fact lands and is reviewable before anything is built on it. Glossary
 term and ADR index updated in the same change.
+
+### 2026-09-17 — Owner-open lands on the owner view, and the grantee gets a key to the frame
+
+Two tickets in one change, because the second is what makes the first's gap
+reachable. **#363** flips where `GET {app}/reports/{slug}/open` sends a canWrite
+user: `${viewOrigin}/${slug}/view` — ADR-0089's owner view — instead of the
+editor. The capability is unchanged; only where it is spent moved. **#376** is
+the ADR-0089 §8 limitation that flip would otherwise have exposed to every
+write-grantee, and it is now **ADR-0091**.
+
+The §8 problem, restated because the shape of it drove the answer: a
+write-grantee reaches the owner view with `capability: "write"` and full chrome,
+but the **framed** `GET /<slug>` is a real same-site navigation gated on its own
+merits, so a private/password/allowlist report showed the unlock wall *inside
+the iframe*. The owner's route through — an `oa` token redeemed into
+`arp_unlock` — is closed to them, because `owner: true` for a non-owner is the
+review-#146 escalation. ADR-0091 adds a third token to the ADR-0056 family:
+`{slug, exp, sub, scope: "granteeRead"}`, with **no `owner` field and no `mode`
+field in the shape at all**, so the escalating claim is unrepresentable rather
+than merely unset. Minted at `/open` by the *same `isOwner` ternary* that
+decides `oa=` — that structure, not a downstream check, is the guarantee — and
+verified, never minted, on the view origin.
+
+Three findings worth keeping.
+
+First, **the cross-parse boundary was one-directional and nobody had noticed.**
+`parseEditClaims` refused an `AccessClaims` payload, but `parseAccessClaims`
+happily narrowed an Edit token to `{slug, exp}`. Harmless in effect (no `owner`,
+no `mode`, so the mode check yields `unlock`) — but true by effect rather than
+by construction, and a third token would have inherited it. `parseAccessClaims`
+now rejects any payload carrying a `scope`. Behaviour-preserving: no mint site
+has ever set one. The test that pinned the old looseness now pins the new rule.
+
+Second, **the revocation question has a tempting wrong answer.** A live
+`canWrite` check on the view origin is genuinely possible — `apps/view` holds a
+Neon `DbContext`, `resolveAccessDecision` already does a live grant probe for
+allowlist, and a verified token's `sub` is a real `UserId`. It was rejected
+(ADR-0091 §5): it makes the credential-free viewer *authorize* rather than
+verify, it needs `IdentityStore.findEmailByUserId` — the user-email mirror — on
+the untrusted-content origin, and it bills `GET /<slug>`, the hottest route.
+Instead the token lives **15 minutes**, the Edit token's own TTL and deliberately
+not the owner's 24h: ownership cannot be revoked, a write grant can. The whole
+grantee session lapses together and repairs through `/open`'s live re-check —
+ADR-0089 §4b's property, inherited rather than re-invented.
+
+Third, **the flip creates a loop that is easy to miss.** ADR-0089 §4b makes the
+owner view's Edit action a plain link to `/<slug>/edit`, arriving with no
+capability *on purpose*, so it funnels through the app's one mint and gets a
+live `canWrite` re-check. Once that mint's default became the owner view, an
+unqualified funnel answered Edit with the owner view the user had just clicked
+Edit on — the editor would have been structurally unreachable. So the mint takes
+a destination, `/edit`'s funnel carries `?to=edit`, and the funnel target is now
+a property of the `Surface` beside its cookie pair and its degrade event names.
+The dashboard row's new Edit action uses the same qualified link.
+
+Also in: the dashboard row splits Open (the stretched overlay, owner view) from
+Edit (`?to=edit`, lifted above the overlay or it would swallow the click); the
+unlock page's "Open this report" follows Open for free, since its link never
+named a destination; and the 409 "can't be opened in the editor" page points its
+read-only link at the owner view. That last one **retires a token**: Phase 5-H
+had to carry a verified 24h `oa` into that href as `?access=` to break a cycle,
+and called it "the ONE token this page may carry" — the owner view closes the
+same cycle by funnelling to the mint, so the page now carries none.
+
+`GET /<slug>` is untouched, byte for byte, and so is `packages/headers`.
+Worktree `owner-open-flip`, branch `feat/owner-open-flip`.

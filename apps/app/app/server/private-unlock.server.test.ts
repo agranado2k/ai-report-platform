@@ -122,4 +122,22 @@ describe("decidePrivateUnlock", () => {
       to: expect.stringMatching(/^\/reports\/[a-zA-Z0-9_-]+\/open$/),
     });
   });
+
+  // #363: "Open this report" follows OPEN, not Edit. It is an unqualified
+  // `/reports/{slug}/open`, so it takes the mint's default destination — the
+  // owner view. That is the right landing for this page in particular: a
+  // visitor who arrived at an unlock wall was trying to LOOK at the report,
+  // and before the flip this link dropped them into the editor's reduction of
+  // it. This assertion is the whole change here — the link itself is byte-for-
+  // byte what it was, and its meaning moved underneath it.
+  it("follows Open, not Edit — no `?to=edit` on the offered link", async () => {
+    const { deps } = await fixture();
+    const decision = await decidePrivateUnlock(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      slug: slug(SLUG),
+    });
+    expect(decision).toEqual({ kind: "offer-owner-open", to: `/reports/${SLUG}/open` });
+    if (decision.kind !== "offer-owner-open") throw new Error("expected the offer");
+    expect(decision.to).not.toContain("to=edit");
+  });
 });

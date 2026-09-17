@@ -3,8 +3,15 @@
 // §4, extended by ADR-0063 Phase 5): `loadWritableReport` (`isOwner OR
 // hasWriteGrant`) is THE gate. EVERY canWrite user — the report's owner OR a
 // write-grantee — is minted the SAME short-lived (15 min), slug-bound,
-// `scope:"edit"` token (packages/domain/src/edit-token.ts) and lands in the
-// SAME unified in-viewer experience (`${viewOrigin}/${slug}/edit?et=...`).
+// `scope:"edit"` token (packages/domain/src/edit-token.ts).
+//
+// WHERE that capability is spent is the `destination` (#363): the OWNER VIEW
+// (`${viewOrigin}/${slug}/view?et=...`, ADR-0089) by DEFAULT, and the editor
+// (`/edit`) only when a caller asks for it by name. Until that flip every
+// canWrite user landed in the editor, because it was the only authenticated
+// viewer surface — which is exactly why an owner clicked Edit when they wanted
+// to LOOK at their own report and got the `Report HTML schema`'s reduction of
+// it (no `<script>`, flattened `<svg>`) rather than the report they published.
 //
 // Phase 5 retired the two-tier design this function used to implement: an
 // owner no longer gets a separate, higher-privilege 24h `owner:true` access
@@ -87,7 +94,49 @@ export interface OwnerOpenRequest {
   /** The access-token secret; undefined when private viewing isn't configured
    *  (previews/dev) — then fall through to the gated viewer. */
   readonly secret: string | undefined;
+  /**
+   * Which authenticated surface to spend the minted capability on (#363).
+   * Defaults to the OWNER VIEW.
+   *
+   * The flip: until #363 every canWrite user landed in the editor, because the
+   * editor was the only authenticated surface there was. ADR-0089 added the
+   * owner view — first-party chrome above the BYTE-FOR-BYTE report — and with
+   * it the thing an owner actually wanted when they clicked their own report:
+   * to LOOK at it. The editor shows them the `Report HTML schema`'s reduction
+   * of their document instead (no `<script>`, flattened `<svg>`), which is the
+   * regression ADR-0089's Context opens with.
+   *
+   * `"editor"` is not a legacy alias — it is load-bearing, and the loop it
+   * closes is easy to miss. The owner view's Edit action is a PLAIN LINK to
+   * `/<slug>/edit`, which holds no capability under that Path and therefore
+   * funnels back through this mint (ADR-0089 §4b: that hop is not a cost, it is
+   * the live `canWrite` re-check, bought back). If the funnel could not name
+   * the editor, this function would send the user to the owner view they just
+   * clicked Edit on, and the editor would be unreachable. So the gate's
+   * `/edit` funnel carries `?to=edit`, and so does the dashboard row's Edit
+   * action.
+   *
+   * It does NOT widen who may open what: the `loadWritableReport` gate above
+   * runs first and identically for both, and both fall through to the same
+   * bare gated viewer when no secret is configured.
+   */
+  readonly destination?: OwnerOpenDestination;
 }
+
+/** Where `/reports/{slug}/open` spends the capability it mints (#363). */
+export type OwnerOpenDestination =
+  /** `${viewOrigin}/${slug}/view` — ADR-0089's owner view. The default. */
+  | "ownerView"
+  /** `${viewOrigin}/${slug}/edit` — the `Unified experience` editor. */
+  | "editor";
+
+/** The URL segment each destination lives on. A lookup rather than a ternary at
+ *  the call site so adding a fourth authenticated surface is a one-line change
+ *  here and a type error everywhere it is not handled. */
+const DESTINATION_SEGMENT: Record<OwnerOpenDestination, string> = {
+  ownerView: "view",
+  editor: "edit",
+};
 
 export async function ownerOpenLocation(
   deps: OwnerOpenDeps,
@@ -185,7 +234,8 @@ export async function ownerOpenLocation(
     "owner-open: minted edit token",
   );
 
-  const location = `${req.viewOrigin}/${slug.value}/edit?et=${encodeURIComponent(editToken)}`;
+  const segment = DESTINATION_SEGMENT[req.destination ?? "ownerView"];
+  const location = `${req.viewOrigin}/${slug.value}/${segment}?et=${encodeURIComponent(editToken)}`;
   // Exactly one of these is ever appended (see the ternary above).
   //
   // `oa=` carries the SAME exposure the pre-Phase-5 owner-view flow already had

@@ -121,7 +121,23 @@ export interface UnopenableDocumentArgs {
 function rootRelativePath(href: string | undefined, slug: string): string {
   return href?.startsWith("/") && !href.startsWith("//") && !href.startsWith("/\\")
     ? href
-    : `/${slug}`;
+    : ownerViewPath(slug);
+}
+
+/**
+ * The fallback destination — this report's OWNER VIEW (#363).
+ *
+ * It was the bare `/{slug}` until owner-open flipped. That bare link is the one
+ * Phase 5-H had to patch with `?access=<verified oa>`, because for a PRIVATE
+ * report it walked the owner to the unlock page and back round. The owner view
+ * closes the same cycle without carrying a token: it holds no capability under
+ * its own Path, so it funnels to the app's ONE mint, which re-checks `canWrite`
+ * LIVE and hands back a fresh one (ADR-0089 §4b). It is also simply the right
+ * surface — this page's action says "open the read-only view", and the owner
+ * view IS the read-only view now.
+ */
+function ownerViewPath(slug: string): string {
+  return `/${slug}/view`;
 }
 
 /** Build the loader payload for the unopenable-document page. Carries no EDIT
