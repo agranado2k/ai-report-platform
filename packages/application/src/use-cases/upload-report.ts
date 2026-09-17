@@ -468,18 +468,85 @@ function scanResources(
  * statement about the whole thing, and reads as the summary it is when it comes
  * last.
  */
+/**
+ * How many blocked resources are named individually.
+ *
+ * A bound, not a preference. The scan is total over an untrusted document, so
+ * a few KB of repeated `<img>` tags produced a warning each: a multi-MB
+ * response, and the same list persisted verbatim into the idempotency record
+ * inside the commit transaction. Fifty named resources is already more than an
+ * author will work through by hand, and the rest are summarised rather than
+ * dropped.
+ */
+const MAX_RESOURCE_WARNINGS = 50;
+
+/**
+ * How much of a URL is quoted back.
+ *
+ * The URL is attacker-controlled text from the uploaded document, and this
+ * text is handed to an agent by `reports_upload`. It is bounded so a document
+ * cannot use the warning list as a channel for a payload of arbitrary size.
+ */
+const MAX_URL_IN_DETAIL = 300;
+
 function assembleWarnings(
   blocked: readonly BlockedExternalResource[],
   fidelity: FidelityVerdict | null,
 ): readonly UploadWarning[] {
-  const warnings: UploadWarning[] = blocked.map((resource) => ({
+  const named = blocked.slice(0, MAX_RESOURCE_WARNINGS);
+  const warnings: UploadWarning[] = named.map((resource) => ({
     code: "external-resource-blocked" as const,
     detail: blockedResourceDetail(resource),
   }));
+  const remaining = blocked.length - named.length;
+  if (remaining > 0) {
+    // Summarised, never silently dropped: a list that just stopped would tell
+    // the author the rest of their document is fine.
+    warnings.push({
+      code: "external-resource-blocked",
+      detail:
+        `…and ${remaining} more external resources will be blocked by the viewer's ` +
+        `Content-Security-Policy. The first ${MAX_RESOURCE_WARNINGS} are named above. ` +
+        "The report still publishes and views — only these resources will not load.",
+    });
+  }
   if (fidelity?.fidelity === "lossy") {
     warnings.push({ code: "editor-lossy", detail: lossyDetail(fidelity) });
   }
   return warnings;
+}
+
+/**
+ * A URL from the uploaded document, made safe to quote back.
+ *
+ * The scan reports the URL exactly as the document writes it — that is its
+ * contract, and the string the author searches for. Presenting it is a
+ * different job. This text travels to an agent through `reports_upload`, so
+ * the bytes an uploader chose are UNTRUSTED CONTENT arriving on an agent's
+ * input (ADR-0069): control characters are collapsed so a `src` cannot forge
+ * line structure in whatever is reading the response, and the length is
+ * bounded so the warning list cannot carry an arbitrary payload. Neither makes
+ * hostile text harmless — nothing here can — but both remove the shapes that
+ * let it pretend to be something other than a URL the document contained.
+ */
+function displayUrl(url: string): string {
+  const overlong = url.length > MAX_URL_IN_DETAIL;
+  // Bound FIRST, then rewrite: the input is attacker-sized, and there is no
+  // reason to walk 50 KB to render 300 characters of it.
+  const bounded = overlong ? url.slice(0, MAX_URL_IN_DETAIL) : url;
+  const flattened = Array.from(bounded, (ch) => (isControlChar(ch) ? " " : ch))
+    .join("")
+    .trim();
+  return overlong ? `${flattened}… (truncated)` : flattened;
+}
+
+/** A C0 control character or DEL — the codes that let text forge line and field
+ *  structure in whatever renders it. Written as a code comparison rather than a
+ *  character class because a control character in a regex is itself a lint
+ *  error (`noControlCharactersInRegex`), and rightly so. */
+function isControlChar(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code < 0x20 || code === 0x7f;
 }
 
 function blockedResourceDetail({ url, directive, allowed }: BlockedExternalResource): string {
@@ -493,7 +560,7 @@ function blockedResourceDetail({ url, directive, allowed }: BlockedExternalResou
           "frames fall back to default-src 'self', which allows no external host"
         : `${directive} allows no external host`;
   return (
-    `${url} will be blocked by the viewer's Content-Security-Policy: ${permitted}. ` +
+    `${displayUrl(url)} will be blocked by the viewer's Content-Security-Policy: ${permitted}. ` +
     "Inline the asset (a data: URI works) or load it from an allowed host. " +
     "The report still publishes and views — only this resource will not load."
   );
