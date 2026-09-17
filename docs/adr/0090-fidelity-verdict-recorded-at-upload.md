@@ -89,6 +89,48 @@ And, inheriting ADR-0080 §4's general rule unchanged: **fidelity is read by thi
 
 `fidelity` joins `editability` everywhere editability already is on the read surfaces this change owns: the ReportVersion projection (so version history shows which save changed the answer), the report resource for the live ReportVersion, and the HTTP API's report read, versions list, and content read. The consumers that *act* on it — the upload response warnings, the MCP tool fields, the dashboard hint and the Edit confirm dialog — are deliberately **not** in this change; they are separate tickets (PRD #356) so that the recorded fact lands, and is reviewable, before anything is built on top of it.
 
+### 7. The lost items are RE-DERIVED at read time, never stored (amendment, ticket #364)
+
+§1 collects `lostElements` / `lostAttributes` and §3 stores **only the verdict** — the
+port returns the lists and `uploadReport` drops them. That was deliberate (§6: land the
+recorded fact first), and it left the first consumer that must *name* what a save would
+cost — the owner view's Edit confirm dialog — one question to answer. This is the answer,
+recorded here because it is the rule every future consumer inherits.
+
+**The recorded verdict decides whether to warn; a fresh probe supplies the names.** The
+owner-view loader re-runs `probeFidelity` over the entry document, through the same blob
+read `apps/view/app/edit/load-document.ts` uses, and **only when the live ReportVersion's
+recorded fidelity is already `lossy`**. So the common path — `lossless`, and every UNKNOWN
+in the pre-0090 corpus — pays nothing at all, and the parse is spent only on a report
+already known to need the sentence.
+
+Everything that can go wrong on the way to the names yields a warning with **empty lists**
+rather than no warning: an unreadable blob, an absent object, a probe returning UNKNOWN, or
+a fresh round trip that now comes back clean. Withholding the dialog because a read failed
+would convert an infrastructure hiccup into a silent lossy save, which is the outcome the
+dialog exists to prevent; the copy is written to say something true with no list. The
+accepted cost is the mirror image of §1's: a ReportVersion recorded `lossy` whose round
+trip is clean under *today's* schema still asks for confirmation, and cannot say what for.
+That is the same staleness the Consequences already accept, and it is safe for the same
+reason — nothing gates on it.
+
+Rejected, in order of how nearly they worked:
+
+- **Persist the two lists** (JSONB columns beside the enum). A migration plus a backfill
+  that cannot run, for data derivable in milliseconds from bytes we already hold — and it
+  would freeze the names against the schema of the day they were written, so PR #368's
+  `<section class>` fix would leave stale lists behind. That is precisely the drift §1's
+  *call the editor's own functions* rule exists to prevent.
+- **Fetch the lists from the app-origin API when the dialog opens.** ADR-0089 §6 is
+  explicit that the owner view makes no cross-origin call and carries no capability in its
+  payload. Standing up a data plane for a tooltip reopens that argument for the smallest
+  prize on offer.
+- **Re-probe on every owner-view render.** A parse plus a serialise on the common path, to
+  answer a question whose answer is "nothing" for nearly every report.
+
+What crosses to the client is element and attribute **names** only — no bytes, no report
+content, no capability — so the payload stays inside ADR-0089 §6.
+
 ## Consequences
 
 **Good.**
@@ -108,6 +150,7 @@ And, inheriting ADR-0080 §4's general rule unchanged: **fidelity is read by thi
 ## More information
 
 - Implementation: `packages/report-html/src/fidelity-probe.ts` (the probe + the normaliser), `packages/adapters/src/fidelity-probe.ts` (the port implementation), `packages/application/src/ports.ts` (`FidelityProbe`), `packages/application/src/use-cases/upload-report.ts` (the one call site), `packages/db/drizzle/0023_report_versions_fidelity.sql`.
+- §7 (the read-time re-derivation of the lost items): `apps/view/app/view/lossy-warning.ts`, consumed by `apps/view/app/routes/$slug_.view.tsx` and rendered by `apps/view/app/view/components/LossyEditDialog.tsx`. Dashboard hint: `apps/app/app/server/fidelity-notice.server.ts`. MCP surface: `apps/mcp/src/tools.ts`.
 - Schema contract: `docs/db-design.md` — `report_versions.fidelity` + the `version_fidelity` enum.
 - Wire contract: `docs/api/openapi.yaml` — `ReportSummary.fidelity`, `VersionSummary.fidelity`, `ReportContent.fidelity`.
 - Term: **Fidelity** in `docs/domain-glossary.md` (Reports & Folders context).

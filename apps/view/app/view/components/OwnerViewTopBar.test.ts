@@ -20,6 +20,10 @@ function render(overrides: Partial<OwnerViewTopBarProps> = {}): string {
     versionsHref: "/abcde12345/edit?panel=versions",
     editHref: "/abcde12345/edit",
     canEdit: true,
+    // The overwhelmingly common case (ADR-0090: probed only when editability
+    // is `editable`, and lossless for every editor-authored save), so it is
+    // the fixture's default and the lossy cases opt in.
+    lossyWarning: null,
     ...overrides,
   };
   return renderToStaticMarkup(createElement(OwnerViewTopBar, props));
@@ -73,5 +77,64 @@ describe("OwnerViewTopBar", () => {
     const html = render({ docTitle: '<img src=x onerror="alert(1)">' });
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img");
+  });
+
+  // ── The lossy Edit confirm (ADR-0090, #364) ────────────────────────────
+  describe("when the live version is lossy", () => {
+    const warning = { lostElements: ["script", "svg"], lostAttributes: ["onclick"] };
+
+    it("keeps Edit a real link to the editor — the dialog intercepts, it does not replace", () => {
+      // Progressive enhancement, and it is load-bearing rather than tidy: with
+      // JS unavailable the owner still reaches the editor, and reaching the
+      // editor is harmless because the editor writes nothing until Save. A
+      // <button> here would strand that owner for the sake of a warning.
+      const html = render({ lossyWarning: warning });
+      expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit</);
+    });
+
+    it("names the elements and attributes a save would drop", () => {
+      const html = render({ lossyWarning: warning });
+      expect(html).toContain("script");
+      expect(html).toContain("svg");
+      expect(html).toContain("onclick");
+    });
+
+    it("promises that nothing changes until Save, and offers both ways out", () => {
+      // ADR-0090 §5: this explains and proceeds. "Edit anyway" must exist and
+      // must go to the editor — a dialog that could only cancel would be the
+      // gate the ADR forbids.
+      const html = render({ lossyWarning: warning });
+      expect(html).toMatch(/until you save|until Save/i);
+      expect(html).toContain("Cancel");
+      expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit anyway</);
+    });
+
+    it("says something true when the probe could not name the items", () => {
+      // `loadLossyWarning` returns empty lists when the bytes could not be
+      // re-read: the recorded verdict still stands, so the dialog still asks —
+      // it just cannot itemise. It must not render an empty list and it must
+      // not claim nothing would be lost.
+      const html = render({ lossyWarning: { lostElements: [], lostAttributes: [] } });
+      expect(html).toMatch(/until you save|until Save/i);
+      expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit anyway</);
+    });
+
+    it("renders no dialog at all when the version is lossless or never probed", () => {
+      // The common path stays exactly what it was before this ticket: one
+      // anchor, no dialog markup, no JS.
+      const html = render({ lossyWarning: null });
+      expect(html).not.toContain("<dialog");
+      expect(html).not.toContain("Edit anyway");
+      expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit</);
+    });
+
+    it("withholds the dialog with the actions on the owner-read degrade", () => {
+      // No Edit action means no Edit confirm. The degrade withholds the
+      // affordance, so warning about its consequences would be noise about
+      // something the visitor cannot do.
+      const html = render({ canEdit: false, lossyWarning: warning });
+      expect(html).not.toContain("<dialog");
+      expect(html).not.toContain("Edit anyway");
+    });
   });
 });

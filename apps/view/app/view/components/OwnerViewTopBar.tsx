@@ -7,6 +7,8 @@
 // data plane and holds no token in its payload (ADR-0089 §6); giving this bar
 // a client-side API call would mean re-opening that argument.
 import { buttonClass, ChromeBar, chromeBarPillClass } from "arp-ui";
+import type { LossyWarning } from "../lossy-warning";
+import { LossyEditDialog } from "./LossyEditDialog";
 
 export interface OwnerViewTopBarProps {
   /** The report's title. Author-controlled, so it is rendered as a text node
@@ -25,6 +27,11 @@ export interface OwnerViewTopBarProps {
    *  verified `oa` fallback but holds no edit capability, so the action that
    *  would fail is not offered. */
   readonly canEdit: boolean;
+  /** What an editor save would drop (ADR-0090), or `null` when the live
+   *  version is `lossless` or was never probed — which is almost always. Non-
+   *  null turns Edit into a confirm step; the loader decided that, this bar
+   *  only renders it. */
+  readonly lossyWarning: LossyWarning | null;
 }
 
 export function OwnerViewTopBar({
@@ -33,6 +40,7 @@ export function OwnerViewTopBar({
   versionsHref,
   editHref,
   canEdit,
+  lossyWarning,
 }: OwnerViewTopBarProps) {
   return (
     <ChromeBar
@@ -67,9 +75,19 @@ export function OwnerViewTopBar({
           <a href={versionsHref} className={buttonClass("secondary", "sm")}>
             Versions
           </a>
-          <a href={editHref} className={buttonClass("primary", "sm")}>
-            Edit
-          </a>
+          {/* ADR-0090 / #364. On a LOSSY live version Edit gains a confirm
+              step that names what a save would drop; on `lossless` or UNKNOWN
+              — almost every report — it stays the plain anchor it has always
+              been, with no dialog markup and no JS. Both render the same
+              `editHref`, because the confirm INTERCEPTS the navigation rather
+              than replacing it. */}
+          {lossyWarning ? (
+            <LossyEditDialog editHref={editHref} warning={lossyWarning} />
+          ) : (
+            <a href={editHref} className={buttonClass("primary", "sm")}>
+              Edit
+            </a>
+          )}
         </>
       ) : null}
     </ChromeBar>

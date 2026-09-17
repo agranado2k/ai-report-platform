@@ -9,6 +9,7 @@
 // without this seam the hash behaviour below was untestable anywhere — and it
 // was: dropping the forwarding used to break `#3` silently.
 import { useEffect, useState } from "react";
+import type { LossyWarning } from "../lossy-warning";
 import { OwnerViewTopBar } from "./OwnerViewTopBar";
 import { ReportFrame } from "./ReportFrame";
 
@@ -22,9 +23,19 @@ export interface OwnerViewChromeProps {
   readonly shareState: string;
   /** False on the owner-read degrade — withholds Versions and Edit both. */
   readonly canEdit: boolean;
+  /** ADR-0090 — what an editor save would drop, or `null` when the live
+   *  version is `lossless` or was never probed. Resolved by the loader
+   *  (`../lossy-warning.ts`); this component only carries it to the bar. */
+  readonly lossyWarning: LossyWarning | null;
 }
 
-export function OwnerViewChrome({ slug, docTitle, shareState, canEdit }: OwnerViewChromeProps) {
+export function OwnerViewChrome({
+  slug,
+  docTitle,
+  shareState,
+  canEdit,
+  lossyWarning,
+}: OwnerViewChromeProps) {
   // The hash is forwarded AT LOAD, once, and never again (ticket #361 AC 4).
   //
   // It starts empty and is adopted in an effect rather than read during
@@ -58,6 +69,7 @@ export function OwnerViewChrome({ slug, docTitle, shareState, canEdit }: OwnerVi
         versionsHref={`/${slug}/edit`}
         editHref={`/${slug}/edit`}
         canEdit={canEdit}
+        lossyWarning={lossyWarning}
       />
       <main className="min-h-0 flex-1">
         <ReportFrame slug={slug} hash={hash} title={docTitle} />
