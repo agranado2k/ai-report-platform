@@ -123,7 +123,9 @@ function normalizeOrigin(origin: string): string {
   try {
     url = new URL(origin);
   } catch {
-    throw new Error(`authenticatedViewHeaders: appOrigin is not a valid URL: ${JSON.stringify(origin)}`);
+    throw new Error(
+      `authenticatedViewHeaders: appOrigin is not a valid URL: ${JSON.stringify(origin)}`,
+    );
   }
   if (url.username || url.password) {
     throw new Error("authenticatedViewHeaders: appOrigin must not carry credentials");

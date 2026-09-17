@@ -169,8 +169,9 @@ describe("viewHeaders", () => {
 
     it("does NOT leak the allowlist into the edit-route profile (ADR-0063, out of scope)", () => {
       const editCsp =
-        authenticatedViewHeaders({ appOrigin: "https://app.example.com" }).get("Content-Security-Policy") ??
-        "";
+        authenticatedViewHeaders({ appOrigin: "https://app.example.com" }).get(
+          "Content-Security-Policy",
+        ) ?? "";
       for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
         expect(editCsp).not.toContain(host);
       }
@@ -397,7 +398,9 @@ describe("authenticatedViewHeaders", () => {
   it("SECURITY: rejects non-http(s) schemes, embedded credentials, and non-local http", () => {
     expect(() => authenticatedViewHeaders({ appOrigin: "javascript:alert(1)" })).toThrow();
     expect(() => authenticatedViewHeaders({ appOrigin: "data:text/html,x" })).toThrow();
-    expect(() => authenticatedViewHeaders({ appOrigin: "https://user:pass@app.centaurspec.com" })).toThrow();
+    expect(() =>
+      authenticatedViewHeaders({ appOrigin: "https://user:pass@app.centaurspec.com" }),
+    ).toThrow();
     expect(() => authenticatedViewHeaders({ appOrigin: "http://app.centaurspec.com" })).toThrow(); // prod must be https
     expect(() => authenticatedViewHeaders({ appOrigin: "not a url" })).toThrow();
     // http IS allowed for localhost dev:
@@ -415,7 +418,8 @@ describe("authenticatedViewHeaders", () => {
   });
 
   it("keeps frame-ancestors, base-uri, and object-src as strict as the public profile", () => {
-    const csp = authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
+    const csp =
+      authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("object-src 'none'");
@@ -440,7 +444,9 @@ describe("authenticatedViewHeaders", () => {
   });
 
   it("sets Cache-Control: no-store — the edit route is authenticated + per-user", () => {
-    expect(authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Cache-Control")).toBe("no-store");
+    expect(authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Cache-Control")).toBe(
+      "no-store",
+    );
   });
 
   it("defaults the Report-To endpoint the same way as the public profile", () => {
@@ -472,7 +478,8 @@ describe("authenticatedViewHeaders vs viewHeaders — the two profiles differ on
 
   it("the public profile carries a sandbox CSP header value; the edit profile does not", () => {
     const publicCsp = viewHeaders().get("Content-Security-Policy") ?? "";
-    const editCsp = authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
+    const editCsp =
+      authenticatedViewHeaders({ appOrigin: APP_ORIGIN }).get("Content-Security-Policy") ?? "";
     expect(publicCsp).toContain("sandbox allow-forms");
     expect(editCsp).not.toContain("sandbox");
   });
