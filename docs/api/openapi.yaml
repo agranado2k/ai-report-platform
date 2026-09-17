@@ -1408,7 +1408,7 @@ paths:
 
 
         Headers are ADR-0063's authenticated profile, reused unchanged
-        (`editViewHeaders`): `Origin-Agent-Cluster: ?1` so the chrome and the
+        (`authenticatedViewHeaders`): `Origin-Agent-Cluster: ?1` so the chrome and the
         report it frames are uniformly origin-keyed, `frame-src 'self'` to
         permit the frame from this side (ADR-0088's `frame-ancestors 'self'` on
         the report's own response is the other half), `frame-ancestors 'none'`
