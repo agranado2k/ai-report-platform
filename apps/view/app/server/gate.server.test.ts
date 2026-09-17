@@ -1775,6 +1775,41 @@ describe("decideServe — purpose: ownerView — the Grantee read token (ADR-009
     });
   });
 
+  it("with BOTH `oa` and `gr`, emits exactly ONE arp_unlock — the owner's, as the serve arm does", async () => {
+    // Unreachable through the one mint (`ownerOpenLocation` picks exactly one
+    // of `oa=` / `gr=` off one `isOwner` boolean, ADR-0091 §2), so this is a
+    // defense-in-depth row, not a live defect. It exists because the SERVE arm
+    // already declares the invariant out loud — "never two `Set-Cookie`s racing
+    // for the same name and Path", with `oa` winning the single slot — and an
+    // invariant that holds in one arm and not its sibling is one refactor away
+    // from being false in both. Both CAPABILITY cookies are still written; it
+    // is only the shared `arp_unlock` slot at `Path=/<slug>` that is exclusive.
+    const et = editToken();
+    const oa = ownerAccess();
+    const gr = granteeRead();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}&gr=${encodeURIComponent(gr)}`,
+    });
+
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_GRANTEE_COOKIE}=${encodeURIComponent(gr)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        // The owner's 24h token, NOT the grantee's 15 min — the same precedence
+        // the serve arm applies, so the two arms cannot disagree about which
+        // capability the frame ends up carrying.
+        `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+    expect(decision.cookies.filter((c: string) => c.startsWith(`${UNLOCK_COOKIE}=`))).toHaveLength(
+      1,
+    );
+  });
+
   it("keeps the grantee capability OFF the framed path and off /edit (§4a, §4b)", async () => {
     const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
       path: `/${SLUG}/view?et=${encodeURIComponent(editToken())}&gr=${encodeURIComponent(granteeRead())}`,

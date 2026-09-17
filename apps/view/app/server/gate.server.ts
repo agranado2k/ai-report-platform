@@ -888,40 +888,39 @@ async function decideOwnerView(
       kind: "setCookieAndRedirect",
       cookies: [
         capabilityCookie(OWNER_VIEW_SURFACE, slug, cap.token, cap.maxAge),
-        ...(oa
-          ? [
-              ownerFallbackCookie(OWNER_VIEW_SURFACE, slug, oa, cap.maxAge),
-              // Max-Age is the `oa` token's OWN remaining life, not the edit
-              // token's. Capping it at the edit capability's ~15 min would
-              // start bouncing the FRAME to the unlock wall mid-session — the
-              // one place the user cannot see a URL to explain it.
-              unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps)),
-            ]
-          : []),
-        // The WRITE-GRANTEE's equivalent pair (ADR-0091 §3). Mutually exclusive
-        // with the `oa` pair above in practice, because `ownerOpenLocation`
-        // mints exactly one of `oa=` / `gr=` off one `isOwner` boolean — but
-        // written as an independent spread rather than an `else`, so that if
-        // both ever did arrive the result is two verified read capabilities
-        // rather than a silently dropped one.
-        //
-        // Unlike the owner's, this Max-Age IS the grantee's whole 15 minutes,
-        // which is also the edit capability's: ADR-0091 §4's point is that the
-        // grantee's session expires all at once and repairs through the app's
-        // one mint, where a revoked grant is actually caught. The mid-session
-        // bounce §4c worried about is bounded by the chrome expiring with it.
+        ...(oa ? [ownerFallbackCookie(OWNER_VIEW_SURFACE, slug, oa, cap.maxAge)] : []),
+        // The WRITE-GRANTEE's equivalent capability cookie (ADR-0091 §3).
+        // Mutually exclusive with the `oa` one above in practice, because
+        // `ownerOpenLocation` mints exactly one of `oa=` / `gr=` off one
+        // `isOwner` boolean — but written as an independent spread rather than
+        // an `else`, so that if both ever did arrive the result is two
+        // verified capabilities at their own names rather than a silently
+        // dropped one. These two have DIFFERENT cookie names, so both can be
+        // written without either shadowing the other.
         ...(gr
-          ? [
-              granteeReadCookie(
-                OWNER_VIEW_SURFACE,
-                OWNER_VIEW_GRANTEE_COOKIE,
-                slug,
-                gr,
-                cap.maxAge,
-              ),
-              granteeUnlockCookie(gr, slug, deps),
-            ]
+          ? [granteeReadCookie(OWNER_VIEW_SURFACE, OWNER_VIEW_GRANTEE_COOKIE, slug, gr, cap.maxAge)]
           : []),
+        // `arp_unlock` is the ONE slot the two read capabilities SHARE — same
+        // name, same `Path=/<slug>` — so unlike the capability cookies above it
+        // is written exactly once, with the owner winning. That is the serve
+        // arm's rule (see its `oa ? … : gr ? …` ternary), mirrored here so the
+        // two arms cannot disagree about which token the framed navigation ends
+        // up carrying. Emitting both, as this arm once did, put two
+        // `Set-Cookie`s at the same name and Path with the grantee's appended
+        // LAST — the opposite precedence to the serve arm's.
+        //
+        // The owner's Max-Age is the `oa` token's OWN remaining life (24h), not
+        // the edit token's: capping it at the edit capability's ~15 min would
+        // start bouncing the FRAME to the unlock wall mid-session — the one
+        // place the user cannot see a URL to explain it. The grantee's IS its
+        // whole 15 minutes, which is also the edit capability's: ADR-0091 §4's
+        // point is that the grantee's session expires all at once and repairs
+        // through the app's one mint, where a revoked grant is actually caught.
+        ...(oa
+          ? [unlockCookie(slug, oa, ownerAccessMaxAge(oa, slug, deps))]
+          : gr
+            ? [granteeUnlockCookie(gr, slug, deps)]
+            : []),
       ],
       to: `/${slug}/view`,
     };
