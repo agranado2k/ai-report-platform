@@ -277,7 +277,7 @@ confusing failure in the one place the user cannot see the URL.
 
 ### 5. Headers: ADR-0063's authenticated profile, reused unchanged
 
-The route responds with **`editViewHeaders({ appOrigin })`** — `packages/headers` is not
+The route responds with **`authenticatedViewHeaders({ appOrigin })`** — `packages/headers` is not
 modified by this ADR. That profile already carries exactly what this route needs, and the
 fit is not a coincidence: it is the viewer origin's *authenticated first-party* profile,
 and this is the viewer origin's second authenticated first-party route.
@@ -300,6 +300,11 @@ Naming: `editViewHeaders` now serves two routes and its name has narrowed past i
 meaning. Renaming it to something like `authenticatedViewHeaders` is a **recorded
 mechanical follow-up — #375**, deliberately not done here: a rename across a
 security-header surface does not belong in the same diff as a new authenticated route.
+
+**Done (2026-09-17, #375 / PR #378).** The builder is now `authenticatedViewHeaders`
+(and its options type `AuthenticatedViewHeadersOptions`). A pure rename: the emitted
+header bytes are unchanged, pinned by `packages/headers/src/view-headers.test.ts`, which
+also pins the complete header set so an added or removed header fails the suite.
 
 ### 6. Why the chrome page is safe to be non-sandboxed (ADR-0069)
 
@@ -353,7 +358,7 @@ the first place.
 
 So the tier gains its first served-over-HTTP project, `owner-view-framing`. Its server
 serves the header stack **from the real exported builders** (`viewHeaders()`,
-`editViewHeaders()`) rather than a restated string — the ADR-0088 rule, kept: a test that
+`authenticatedViewHeaders()`) rather than a restated string — the ADR-0088 rule, kept: a test that
 restates the policy proves only that someone typed it twice.
 
 ### 8. Known limitation: a write-grantee on a gated report

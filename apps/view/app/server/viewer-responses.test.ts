@@ -6,7 +6,7 @@
 // hold honest is the property that made them worth sharing: EVERY response
 // that carries no first-party UI wears the PUBLIC header profile, and every
 // one of them is `no-store` and `noindex`. A copy that quietly drifted — a
-// missing `x-robots-tag`, an `editViewHeaders()` on a bare redirect — is a
+// missing `x-robots-tag`, an `authenticatedViewHeaders()` on a bare redirect — is a
 // leak that no route test would notice, because the route under test would
 // still redirect to the right place.
 import { describe, expect, it } from "vitest";
@@ -30,7 +30,7 @@ describe("viewerTextResponse", () => {
 
   it("wears the PUBLIC header profile — no authenticated-route CSP", () => {
     // The whole reason these are shared: a response with no first-party UI in
-    // it gets the stricter, unauthenticated header set. `editViewHeaders()`
+    // it gets the stricter, unauthenticated header set. `authenticatedViewHeaders()`
     // relaxes `frame-src` to `'self'` so the owner view can frame the report;
     // a bare 404 has nothing to frame and must not carry that permission.
     const csp = viewerTextResponse(404, "Not found").headers.get("Content-Security-Policy") ?? "";

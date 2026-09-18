@@ -1,3 +1,3 @@
 export { appHeaders } from "./app-headers";
-export type { EditViewHeadersOptions, SecureHeadersOptions } from "./types";
-export { editViewHeaders, viewHeaders } from "./view-headers";
+export type { AuthenticatedViewHeadersOptions, SecureHeadersOptions } from "./types";
+export { authenticatedViewHeaders, viewHeaders } from "./view-headers";

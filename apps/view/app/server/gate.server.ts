@@ -723,7 +723,7 @@ async function decideEdit(
   }
 
   // A valid, already-redeemed arp_edit cookie. Never render the editor without
-  // a configured app origin — editViewHeaders REQUIRES it for connect-src, and
+  // a configured app origin — authenticatedViewHeaders REQUIRES it for connect-src, and
   // there would be nowhere for Save to POST to anyway (fail closed).
   if (!deps.appOrigin) return degraded(EDIT_SURFACE, slug, oa, "app-origin-unset", deps);
 
@@ -873,7 +873,7 @@ async function decideOwnerView(
   }
 
   // Never render the chrome without a configured app origin — its header
-  // profile (editViewHeaders) requires one for connect-src (fail closed).
+  // profile (authenticatedViewHeaders) requires one for connect-src (fail closed).
   if (!deps.appOrigin) return degraded(OWNER_VIEW_SURFACE, slug, oa, "app-origin-unset", deps);
 
   // Any non-"serve" outcome or a lookup failure degrades to the public viewer,
