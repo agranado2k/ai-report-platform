@@ -1,6 +1,7 @@
 # ADR-0089: The owner view — first-party chrome over the byte-for-byte report
 
-- **Status**: Accepted (2026-09-10) — amends ADR-0038 (a third route profile on the viewer
+- **Status**: Accepted (2026-09-10); **§8's known limitation resolved 2026-09-17 by
+  ADR-0091** (the Grantee read token) — amends ADR-0038 (a third route profile on the viewer
   origin), ADR-0056/ADR-0059 §4 (**only** in where an owner *lands*; the owner-open
   redirect flip itself is #363, not this record), and ADR-0079 §4 (§7 — "hermetic" is
   narrowed to "nothing outside the process", so the tier may bind a loopback server)
@@ -361,7 +362,13 @@ serves the header stack **from the real exported builders** (`viewHeaders()`,
 `authenticatedViewHeaders()`) rather than a restated string — the ADR-0088 rule, kept: a test that
 restates the policy proves only that someone typed it twice.
 
-### 8. Known limitation: a write-grantee on a gated report
+### 8. A write-grantee on a gated report — RESOLVED by ADR-0091
+
+> **Superseded 2026-09-17 by [ADR-0091](0091-grantee-read-token.md).** This section
+> recorded a known limitation and deferred the fix to its own ticket (#376). That ticket
+> is done and landed alongside #363; the limitation below is **no longer live**. It is
+> kept as written, because it is the problem statement ADR-0091 answers and the reason the
+> `oa`-shaped solution could not simply be reused.
 
 A non-owner `canWrite` user is deliberately never minted an `oa` — an `owner: true` claim
 for a non-owner is the privilege escalation ADR-0063 review #146 caught. So a grantee
@@ -370,12 +377,22 @@ reaches the owner view with `capability: "write"` and full chrome, but for a rep
 merits and will show the unlock hand-off inside the frame. For `public`, and for `org`
 where the mode admits them, the frame simply works.
 
-This is **not** blocking: until #363 flips owner-open, nothing routes anyone here by
-default. The recorded door is a grantee-safe read capability minted by the app — a
+This was **not** blocking: until #363 flipped owner-open, nothing routed anyone here by
+default. The recorded door was a grantee-safe read capability minted by the app — a
 scope-bound, mode-independent read token that is explicitly **not** `owner: true` — which
-is a decision for its own ticket, not a thing to improvise inside this route. That ticket
-is **#376**, and it should be decided before or alongside #363, which is the change that
-makes this reachable. It is named here so #363 does not discover it as a surprise.
+was a decision for its own ticket rather than something to improvise inside this route.
+
+**ADR-0091 is that decision.** It adds the **Grantee read token**
+(`{slug, exp, sub, scope: "granteeRead"}` — no `owner` field, no `mode` field), minted at
+`/open` by the same `isOwner` ternary that decides `oa=` so the two are mutually exclusive
+by construction, verified (never minted) on this origin, and redeemed into the same
+`arp_unlock` cookie at `Path=/<slug>` that §4c already describes. The hand-off in §4 gains
+one row for it: `GET /<slug>/view?et=…&gr=…` sets `arp_view`, `arp_view_gr`
+(`Path=/<slug>/view`) and `arp_unlock` (`Path=/<slug>`). The token is bounded at the Edit
+token's own 15 minutes rather than `OWNER_TTL_SECONDS` — ownership cannot be revoked, a
+write grant can — and it deliberately takes **no** part in the `capability` value, the
+rejection-vs-absence funnel routing, or the degrade target, all of which stay exactly as
+this record left them.
 
 ### 9. What this ADR does not decide
 
@@ -383,6 +400,18 @@ makes this reachable. It is named here so #363 does not discover it as a surpris
   owner. This record defines the landing surface and its hand-off; the flip is #363's.
   What #363 needs from here: keep appending `&oa=` for owners (§4c depends on it), and
   point at `/<slug>/view?et=…&oa=…`.
+
+  > **Landed 2026-09-17 (#363).** `/open` now defaults to `${viewOrigin}/${slug}/view`,
+  > with `et=` and `oa=` (or, per ADR-0091, a grantee's `gr=`) threaded exactly as this
+  > record specified. One thing the flip had to add that is worth naming here, because it
+  > is a property of §4b rather than of #363: the mint now takes a **destination**, and
+  > `/edit`'s funnel carries `?to=edit`. §4b makes the Edit action a plain link to
+  > `/<slug>/edit` precisely so it arrives with no capability and funnels through the app's
+  > one mint for a live `canWrite` re-check — so once that mint's default became the owner
+  > view, an unqualified funnel would have answered Edit with the owner view the user just
+  > clicked Edit on, and the editor would have been unreachable. The funnel target is
+  > therefore a property of the `Surface`, beside its cookie pair and its degrade event
+  > names.
 - **The lossy-edit confirm dialog** (#364). The Edit action here is a plain navigation.
 - **The fidelity verdict and upload warnings** (#362) — including the `[hidden]` defect
   the spike reproduced. Nothing here reads or routes on `Editability` (ADR-0080 §4 stands).

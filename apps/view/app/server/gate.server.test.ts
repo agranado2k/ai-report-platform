@@ -25,6 +25,7 @@ import {
   makeSlug,
   mintAccessToken,
   mintEditToken,
+  mintGranteeReadToken,
   orgId,
   type Report,
   type Result,
@@ -43,6 +44,7 @@ import {
   editUnopenableLine,
   type GateDeps,
   OWNER_VIEW_COOKIE,
+  OWNER_VIEW_GRANTEE_COOKIE,
   OWNER_VIEW_OWNER_COOKIE,
   type OwnerViewDecision,
   ownerViewDegradeLine,
@@ -197,6 +199,12 @@ const editToken = (ttl = 900, now = NOW, slug = SLUG) =>
  *  longer an owner fallback and these tests must mint the real thing. */
 const ownerAccess = (ttl = 86_400, now = NOW, slug = SLUG) =>
   mintAccessToken(slug, ttl, SECRET, now, { owner: true });
+/** A GENUINE `gr=` grantee read capability — the shape `ownerOpenLocation` mints
+ *  for a canWrite NON-owner (ADR-0091). Note the TTL: the Edit token's own 15
+ *  minutes, deliberately NOT the owner token's 24h, because ownership cannot be
+ *  revoked and a write grant can. */
+const granteeRead = (ttl = 900, now = NOW, slug = SLUG) =>
+  mintGranteeReadToken(slug, "user_grantee", ttl, SECRET, now);
 
 // ---------------------------------------------------------------------------
 // Slug validation — shared by both purposes (the routes' makeSlug guard).
@@ -596,7 +604,10 @@ describe("decideServe edit — token/cookie decision", () => {
   // /reports/{slug}/open is the ONE edit-token mint, so a visitor with no valid
   // capability is sent there instead of being silently degraded to the
   // read-only viewer.
-  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open`;
+  // #363: the mint's default landing is now the OWNER VIEW, so /edit's
+  // funnel has to ask for the editor by name — otherwise clicking Edit on
+  // the owner view funnels back to the owner view and loops.
+  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`;
 
   it("no token at all → funnel to the app's edit-token mint (/open)", async () => {
     expect(await decideEdit(buildReport({ verdict: "clean" }))).toEqual({
@@ -829,7 +840,7 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oa)}`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     // The funnel is the happy path for a writer whose token simply needs
     // re-minting — not a degrade, so nothing to warn about.
     expect(warn).not.toHaveBeenCalled();
@@ -878,7 +889,7 @@ describe("decideServe edit — the `oa=` owner-access degrade hand-off (Phase 5-
         path: `/${SLUG}/edit?et=garbage`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -977,7 +988,7 @@ describe("decideServe edit — the owner fallback survives the 303 (cookie-carri
         now: NOW + 901,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -1078,7 +1089,7 @@ describe("decideServe edit — an unverified oa= is not an owner fallback", () =
         path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(oaOf())}`,
         warn,
       }),
-    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+    ).toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit` });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -1142,15 +1153,53 @@ describe("degradeTargetFor", () => {
     });
     expect(degradeTargetFor(decision, SLUG)).toEqual({
       to: `/${SLUG}?access=${encodeURIComponent(oa)}`,
+      readOnlyTo: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
       ownerFallback: true,
     });
+  });
+
+  // THE 409 PAGE'S LINK, and why it is not the bare owner view.
+  //
+  // #363 repointed "Open the read-only view" at `/<slug>/view`. Pointing at the
+  // owner view is right — it IS the read-only view now — but dropping the
+  // capability was not: the owner view holds none under its own Path, so a
+  // PRIVATE report's owner following a bare link funnels to the app's mint and
+  // depends on that funnel being configured and reachable to get back. That is
+  // the Phase 5-H cycle in a new costume, and the deployed smoke caught it.
+  //
+  // So the verified fallback rides the owner-view URL instead. NOTHING IS
+  // MINTED: this is the very `oa` the visitor presented on this request, which
+  // `acceptOwnerFallback` already verified (HMAC, this slug, unexpired,
+  // `owner === true`), so the view origin stays credential-free (ADR-0056). The
+  // owner view redeems an `oa`-only query through ADR-0089 §3's second hand-off
+  // row — cookies set, 303 to the clean URL, frame serves.
+  it("a served editor with an owner fallback → a read-only link that CARRIES it, on the owner view", async () => {
+    const oa = ownerAccess();
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}; arp_edit_oa=${encodeURIComponent(oa)}`,
+    });
+    const target = degradeTargetFor(decision, SLUG);
+    expect(target.readOnlyTo).toBe(`/${SLUG}/view?oa=${encodeURIComponent(oa)}`);
+    // Root-relative, and not an off-site jump — `unopenableDocument` enforces
+    // this too, but the value it is handed should already be well-formed.
+    expect(target.readOnlyTo.startsWith(`/${SLUG}/view`)).toBe(true);
+    expect(target.readOnlyTo.startsWith("//")).toBe(false);
   });
 
   it("a served editor without one → the bare viewer, not flagged", async () => {
     const decision = await decideEdit(buildReport({ verdict: "clean" }), {
       cookie: `arp_edit=${editToken()}`,
     });
-    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}`,
+      // No fallback to carry — a write-grantee, or an owner whose `oa` did not
+      // verify. The bare owner view is correct for them: it funnels to the ONE
+      // mint, which re-checks `canWrite` LIVE and hands back whatever they are
+      // currently entitled to (an `oa`, or since ADR-0091 a `gr`). That hop is
+      // the revocation property, not a cost.
+      readOnlyTo: `/${SLUG}/view`,
+      ownerFallback: false,
+    });
   });
 
   // The decision kinds the edit purpose cannot produce, but whose types the
@@ -1162,7 +1211,11 @@ describe("degradeTargetFor", () => {
     ["redirect", { kind: "redirect", to: "/elsewhere" }],
     ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
   ])("%s → the bare viewer for this slug, not flagged", (_n, decision) => {
-    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}`,
+      readOnlyTo: `/${SLUG}/view`,
+      ownerFallback: false,
+    });
   });
 });
 
@@ -1730,5 +1783,247 @@ describe("decideServe — purpose: ownerView — post-capability degrades", () =
       status: 404,
       message: "Not found",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purpose: "ownerView" — the Grantee read token (ADR-0091).
+//
+// The rows ADR-0089 §8 could not have. A write-grantee (canWrite NON-owner) is
+// deliberately never minted an `owner:true` `oa` — review #146 — so before this
+// record they reached the owner view with full chrome and a framed `GET /<slug>`
+// that had no cookie to unlock it: chrome around the unlock wall. `gr=` is the
+// read capability they carry instead.
+// ---------------------------------------------------------------------------
+describe("decideServe — purpose: ownerView — the Grantee read token (ADR-0091)", () => {
+  it("redeems a verified `gr` into arp_view_gr AND the unlock cookie the framed /<slug> needs", async () => {
+    const et = editToken();
+    const gr = granteeRead();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&gr=${encodeURIComponent(gr)}`,
+    });
+
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_GRANTEE_COOKIE}=${encodeURIComponent(gr)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        // Path=/<slug> — the one cookie the sandboxed frame's navigation
+        // carries, and the whole point of the capability. Max-Age is the `gr`
+        // token's own remaining life (15 min, ADR-0091 §4), not 24h.
+        `${UNLOCK_COOKIE}=${gr}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+  });
+
+  it("with BOTH `oa` and `gr`, emits exactly ONE arp_unlock — the owner's, as the serve arm does", async () => {
+    // Unreachable through the one mint (`ownerOpenLocation` picks exactly one
+    // of `oa=` / `gr=` off one `isOwner` boolean, ADR-0091 §2), so this is a
+    // defense-in-depth row, not a live defect. It exists because the SERVE arm
+    // already declares the invariant out loud — "never two `Set-Cookie`s racing
+    // for the same name and Path", with `oa` winning the single slot — and an
+    // invariant that holds in one arm and not its sibling is one refactor away
+    // from being false in both. Both CAPABILITY cookies are still written; it
+    // is only the shared `arp_unlock` slot at `Path=/<slug>` that is exclusive.
+    const et = editToken();
+    const oa = ownerAccess();
+    const gr = granteeRead();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}&gr=${encodeURIComponent(gr)}`,
+    });
+
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+    expect(decision).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [
+        `${OWNER_VIEW_COOKIE}=${et}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_OWNER_COOKIE}=${encodeURIComponent(oa)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        `${OWNER_VIEW_GRANTEE_COOKIE}=${encodeURIComponent(gr)}; Path=/${SLUG}/view; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+        // The owner's 24h token, NOT the grantee's 15 min — the same precedence
+        // the serve arm applies, so the two arms cannot disagree about which
+        // capability the frame ends up carrying.
+        `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+      ],
+      to: `/${SLUG}/view`,
+    });
+    expect(decision.cookies.filter((c: string) => c.startsWith(`${UNLOCK_COOKIE}=`))).toHaveLength(
+      1,
+    );
+  });
+
+  it("keeps the grantee capability OFF the framed path and off /edit (§4a, §4b)", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(editToken())}&gr=${encodeURIComponent(granteeRead())}`,
+    });
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+    for (const cookie of decision.cookies) {
+      if (cookie.startsWith(`${UNLOCK_COOKIE}=`)) continue; // the deliberate read exception
+      expect(cookie).toContain(`Path=/${SLUG}/view;`);
+    }
+    // Nothing under /edit: that absence is what makes the Edit action funnel
+    // through the app's one mint and get a LIVE canWrite re-check — which for a
+    // grantee is precisely where a revoked grant stops working.
+    expect(decision.cookies.some((c) => c.includes(`Path=/${SLUG}/edit`))).toBe(false);
+  });
+
+  it("re-issues the unlock cookie on EVERY serve holding a verified `gr`, not only at the 303", async () => {
+    // The same one-rule-over-every-arm ADR-0089 §3 applies to `oa`. An
+    // arm-specific cookie is what rots when the matrix grows a row.
+    const gr = granteeRead();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}; ${OWNER_VIEW_GRANTEE_COOKIE}=${encodeURIComponent(gr)}`,
+    });
+    expect(decision).toMatchObject({
+      kind: "serve",
+      capability: "write",
+      cookies: [
+        `${UNLOCK_COOKIE}=${gr}; Path=/${SLUG}; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      ],
+    });
+  });
+
+  it("without a `gr` the grantee serves with NO unlock cookie — the ADR-0089 §8 state, for contrast", async () => {
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}`,
+    });
+    expect(decision).toMatchObject({ kind: "serve", capability: "write", cookies: [] });
+  });
+
+  it("ignores an UNVERIFIABLE `gr` — wrong secret, wrong slug, expired, or an oversized string", async () => {
+    const cases = [
+      mintGranteeReadToken(SLUG, "user_1", 900, "wrong-secret", NOW),
+      mintGranteeReadToken(OTHER_SLUG, "user_1", 900, SECRET, NOW),
+      mintGranteeReadToken(SLUG, "user_1", 900, SECRET, NOW - 5000),
+      "x".repeat(1100),
+    ];
+    for (const bad of cases) {
+      const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        path: `/${SLUG}/view?et=${encodeURIComponent(editToken())}&gr=${encodeURIComponent(bad)}`,
+      });
+      // Only the capability cookie — no grantee cookie, and crucially no
+      // unlock cookie minted off an unverified token.
+      expect(decision).toMatchObject({ kind: "setCookieAndRedirect" });
+      if (decision.kind !== "setCookieAndRedirect") throw new Error("unreachable");
+      expect(decision.cookies).toHaveLength(1);
+      expect(decision.cookies[0]).toContain(OWNER_VIEW_COOKIE);
+    }
+  });
+
+  it("an owner:true Access token presented as `gr` is NOT accepted — the token types do not cross", async () => {
+    // The cross-parse boundary at the gate. `readGranteeReadToken` requires
+    // `scope: "granteeRead"`, which an Access token has not got.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(editToken())}&gr=${encodeURIComponent(ownerAccess())}`,
+    });
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+    expect(decision.cookies).toHaveLength(1);
+    expect(decision.cookies.some((c) => c.startsWith(`${UNLOCK_COOKIE}=`))).toBe(false);
+  });
+
+  it("a `gr` never becomes an owner fallback: capability stays `write` and ownerFallback stays false", async () => {
+    // ADR-0091 §7 — `gr` is deliberately NOT a fallback capability. It must not
+    // produce `ownerRead`, must not flip the boolean that selects the OWNER
+    // degrade event, and must not steer `degradeTo`.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      cookie: `${OWNER_VIEW_COOKIE}=${editToken()}; ${OWNER_VIEW_GRANTEE_COOKIE}=${encodeURIComponent(granteeRead())}`,
+    });
+    expect(decision).toMatchObject({
+      kind: "serve",
+      capability: "write",
+      ownerFallback: false,
+      degradeTo: `/${SLUG}`,
+    });
+  });
+
+  it("a grantee with NO valid capability funnels to the app's one mint, even holding a `gr`", async () => {
+    // ADR-0091 §7 again: `gr` cannot cause a serve on its own. The funnel
+    // re-runs the LIVE canWrite check, which is strictly better than serving
+    // chrome off a stale cookie — and it is where a revoked grant is caught.
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?gr=${encodeURIComponent(granteeRead())}`,
+    });
+    expect(decision).toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open`,
+    });
+  });
+
+  it("the owner path is untouched — `oa` still wins its own three-cookie hand-off", async () => {
+    const et = editToken();
+    const oa = ownerAccess();
+    const decision = await decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+      path: `/${SLUG}/view?et=${encodeURIComponent(et)}&oa=${encodeURIComponent(oa)}`,
+    });
+    if (decision.kind !== "setCookieAndRedirect") throw new Error("expected the hand-off");
+    expect(decision.cookies).toHaveLength(3);
+    expect(decision.cookies[1]).toContain(OWNER_VIEW_OWNER_COOKIE);
+    expect(decision.cookies[2]).toBe(
+      `${UNLOCK_COOKIE}=${oa}; Path=/${SLUG}; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+    );
+  });
+
+  it("the PUBLIC view purpose serves a private report off a grantee read unlock cookie", async () => {
+    // The end-to-end point of the whole record: this is the framed request the
+    // iframe makes, and it is what used to hit the unlock wall.
+    const gr = granteeRead();
+    await expect(
+      decideView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        cookie: `${UNLOCK_COOKIE}=${gr}`,
+      }),
+    ).resolves.toMatchObject({ kind: "serve" });
+  });
+
+  it.each([
+    ["private", PRIVATE],
+    ["password", PW],
+    ["allowlist", ALLOW],
+    ["org", ORG],
+  ])("the framed request serves a %s report off the grantee read cookie — mode-independent (ADR-0091 §6)", async (_label, acl) => {
+    await expect(
+      decideView(buildReport({ verdict: "clean", acl }), {
+        cookie: `${UNLOCK_COOKIE}=${granteeRead()}`,
+      }),
+    ).resolves.toMatchObject({ kind: "serve" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #363 — the funnel is SURFACE-SPECIFIC once owner-open lands on the owner view.
+//
+// Both authenticated surfaces funnel a denied request to the app's ONE mint
+// (`funnelTarget`). Until #363 that mint had one destination, so one target
+// sufficed. Now it has two, and the owner view's Edit action is a plain link to
+// `/<slug>/edit` that deliberately holds no capability under that Path — it is
+// SUPPOSED to funnel, because that hop is the live `canWrite` re-check
+// (ADR-0089 §4b). A funnel that forgot to name the editor would send the user
+// straight back to the owner view: Edit would never open the editor.
+// ---------------------------------------------------------------------------
+describe("decideServe — the funnel names its destination (#363)", () => {
+  it("/edit funnels to the mint ASKING FOR THE EDITOR (`?to=edit`)", async () => {
+    await expect(decideEdit(buildReport({ verdict: "clean", acl: PRIVATE }))).resolves.toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`,
+    });
+  });
+
+  it("/edit funnels to the editor for a REJECTED capability too, not only an absent one", async () => {
+    // The rejection-vs-absence routing (ADR-0063 Phase 5-G) is untouched; what
+    // changes is only where the funnel points. A rejected token still funnels
+    // even with a verified `oa` in hand.
+    await expect(
+      decideEdit(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        path: `/${SLUG}/edit?et=garbage&oa=${encodeURIComponent(ownerAccess())}`,
+      }),
+    ).resolves.toEqual({
+      kind: "redirect",
+      to: `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`,
+    });
+  });
+
+  it("the owner view funnels to the mint's DEFAULT destination — itself, unqualified", async () => {
+    await expect(decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }))).resolves.toEqual(
+      { kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` },
+    );
   });
 });

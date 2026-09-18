@@ -106,13 +106,35 @@ export function ReportRow({
 
       {/* Row actions — hover-revealed (also on keyboard focus / while open), a
           native <details> menu (no JS, CSP-safe). The full menu/keyboard model
-          is #347; this just adds the reveal + keeps the existing actions. */}
+          is #347; this just adds the reveal + keeps the existing actions.
+
+          #363 adds Edit here as its own control. The row used to have ONE
+          destination and it was the editor, which is why an owner clicked Edit
+          when they wanted to LOOK at their report — the regression ADR-0089
+          exists to fix. Now the stretched overlay above means Open (the owner
+          view: chrome around the byte-for-byte report) and editing is this
+          explicit, separate act.
+
+          It is a link to `/reports/{slug}/open?to=edit`, NOT straight to the
+          view origin: the editor needs an `Edit token`, and `/open` is the one
+          place that mints one (ADR-0059 §4) after re-checking `canWrite` live.
+          `z-10` lifts it above the `absolute inset-0` overlay — without that
+          the overlay swallows the click and Edit silently means Open. */}
       <div
         className={cx(
-          "relative z-10 justify-self-end opacity-0 transition-opacity",
+          "relative z-10 flex items-center gap-1 justify-self-end opacity-0 transition-opacity",
           "group-hover:opacity-100 focus-within:opacity-100",
         )}
       >
+        {r.isPublished ? (
+          <a
+            href={`/reports/${r.slug}/open?to=edit`}
+            className="rounded-control px-2 py-1 text-xs font-medium text-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+          >
+            Edit
+            <span className="sr-only"> {r.title}</span>
+          </a>
+        ) : null}
         <details className="shrink-0">
           <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
             <MoreIcon className="size-4" />

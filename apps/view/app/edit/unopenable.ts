@@ -92,18 +92,29 @@ export interface UnopenableDocumentArgs {
    * couldn't EDIT it and still could not READ it — the 2026-08-06 lockout in
    * its last remaining form.
    *
-   * The route already holds the fix: the `oa` fallback (query or `arp_edit_oa`
-   * cookie) that the gate has ALREADY verified with `acceptOwnerFallback`
-   * (HMAC + this slug + unexpired + `owner === true`), baked into
-   * `decision.degradeTo` as `?access=`. Carrying it here mints NOTHING — the
-   * view origin stays credential-free (ADR-0056: the app authorizes, the viewer
-   * verifies) — and reuses the ONE degrade-target answer rather than growing a
-   * second one, which is exactly the duplication `degradeTargetFor` exists to
-   * prevent.
+   * Phase 5-H broke that cycle by baking the gate's ALREADY-verified `oa`
+   * (query or `arp_edit_oa` cookie) into this href as `?access=`, calling it
+   * "the ONE token this page may carry".
    *
-   * Omitted / not root-relative → the bare `/{slug}`, which is the CORRECT link
-   * for a write-grantee: `ownerOpenLocation` deliberately never mints them an
-   * `oa`, and the unlock page they land on recognises write access.
+   * Since #363 the SURFACE moved and the capability did not: the href is now
+   * `/{slug}/view?oa=<verified oa>` — the owner view, which is what "the
+   * read-only view" means now, still carrying the fallback. Dropping the token
+   * was tried and is wrong: the owner view holds no capability under its own
+   * Path either, so a bare link makes a private report's owner depend entirely
+   * on the funnel being configured and reachable to get back to their own
+   * report — Phase 5-H's cycle in a new costume, caught by the deployed smoke.
+   *
+   * Carrying it mints NOTHING. It is the `oa` the visitor presented on this very
+   * request, already verified by `acceptOwnerFallback` (HMAC + this slug +
+   * unexpired + `owner === true`), so the view origin stays credential-free
+   * (ADR-0056: the app authorizes, the viewer verifies). The owner view redeems
+   * an `oa`-only query through ADR-0089 §3's second hand-off row. And it reuses
+   * the ONE degrade-target answer (`degradeTargetFor`) rather than growing a
+   * second one, which is exactly the duplication that helper exists to prevent.
+   *
+   * Omitted / not root-relative → the bare `/{slug}/view`, which is also the
+   * correct link for a write-grantee: they are never minted an `oa`, and the
+   * funnel is where their live `canWrite` re-check happens.
    */
   readonly readOnlyHref?: string;
 }
@@ -121,7 +132,27 @@ export interface UnopenableDocumentArgs {
 function rootRelativePath(href: string | undefined, slug: string): string {
   return href?.startsWith("/") && !href.startsWith("//") && !href.startsWith("/\\")
     ? href
-    : `/${slug}`;
+    : ownerViewPath(slug);
+}
+
+/**
+ * The fallback destination — this report's OWNER VIEW (#363).
+ *
+ * It was the bare `/{slug}` until owner-open flipped, and it is simply the right
+ * surface now — this page's action says "open the read-only view", and the owner
+ * view IS the read-only view.
+ *
+ * This is the CAPABILITY-LESS form, used when the caller passes no href or an
+ * unusable one. The caller normally passes `degradeTargetFor(...).readOnlyTo`,
+ * which is this path plus the verified `oa` when the visitor presented one —
+ * because the owner view holds no capability under its own Path, so a bare link
+ * leaves a private report's owner depending on the funnel to reach their own
+ * report, which is ADR-0063 Phase 5-H's cycle all over again. A write-grantee
+ * legitimately gets this bare form: they are never minted an `oa`, and funnelling
+ * is where their live `canWrite` re-check comes from (ADR-0089 §4b).
+ */
+function ownerViewPath(slug: string): string {
+  return `/${slug}/view`;
 }
 
 /** Build the loader payload for the unopenable-document page. Carries no EDIT

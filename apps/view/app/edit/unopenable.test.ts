@@ -45,7 +45,10 @@ describe("the /edit unopenable-document page", () => {
       slug: "abcdefghij",
       docTitle: "Q3 report",
     });
-    expect(payload.unopenable.readOnlyHref).toBe("/abcdefghij");
+    // #363: the owner view, not the bare viewer. It is the read-only surface
+    // now — chrome above the byte-for-byte report — and it reaches the content
+    // for EVERY principal, which the bare link did not.
+    expect(payload.unopenable.readOnlyHref).toBe("/abcdefghij/view");
     expect(payload.docTitle).toBe("Q3 report");
     expect(payload.unopenable.reason).toBe("document-unparsable");
     expect(payload.unopenable.explanation).toBe(UNOPENABLE_EXPLANATION["document-unparsable"]);
@@ -70,29 +73,41 @@ describe("the /edit unopenable-document page", () => {
   // verifies), and an unverified `oa` never becomes a `degradeTo` in the
   // first place.
   // ---------------------------------------------------------------------
-  it("carries the route's owner fallback into the read-only link", () => {
+  // #363 SUPERSEDES THE MECHANISM, KEEPS THE PROPERTY. Phase 5-H fixed the
+  // cycle by carrying the gate's VERIFIED `oa` into the href as `?access=`.
+  // With owner-open flipped, the route points this link at the OWNER VIEW
+  // instead, and the cycle closes a better way: `/{slug}/view` holds no
+  // capability under that Path, so it funnels to the app's ONE mint, which
+  // re-checks `canWrite` LIVE and hands back a fresh capability. The property
+  // Phase 5-H bought — the one forward action actually reaches the content —
+  // is preserved for BOTH principals, and two things improve.
+  it("points the read-only link at the owner view, carrying NO token at all", () => {
     const { unopenable } = unopenableDocument({
       reason: "document-unsplittable",
       slug: "abcdefghij",
       docTitle: "T",
-      // Exactly what degradeTargetFor returns for a served editor whose
-      // gate verified an `oa` (query or arp_edit_oa cookie).
-      readOnlyHref: "/abcdefghij?access=owner.token.value",
+      readOnlyHref: "/abcdefghij/view",
     });
-    expect(unopenable.readOnlyHref).toBe("/abcdefghij?access=owner.token.value");
+    expect(unopenable.readOnlyHref).toBe("/abcdefghij/view");
+    // The 409 page no longer emits a 24h `owner:true` token into an anchor.
+    // Phase 5-H called that href "the ONE token this page may carry"; after
+    // the flip it carries none, because the capability is re-minted by the app
+    // rather than forwarded by this page.
+    expect(unopenable.readOnlyHref).not.toMatch(/access=|token/i);
   });
 
-  it("leaves the link bare for a write-grantee, who never has an owner fallback", () => {
-    // `ownerOpenLocation` deliberately never mints an `oa` for a grantee, so
-    // the gate's degrade target is the bare viewer — which is CORRECT for
-    // them: they reach `/unlock/{slug}`, which recognises write access.
+  it("gives a write-grantee the SAME working link, not a lesser one", () => {
+    // Before, a grantee got the bare `/{slug}` because `ownerOpenLocation`
+    // never mints them an `oa`. Now they get the owner view like everyone
+    // else, and ADR-0091's Grantee read token is what makes the report
+    // actually render inside its frame rather than an unlock wall.
     const { unopenable } = unopenableDocument({
       reason: "document-unsplittable",
       slug: "abcdefghij",
       docTitle: "T",
-      readOnlyHref: "/abcdefghij",
+      readOnlyHref: "/abcdefghij/view",
     });
-    expect(unopenable.readOnlyHref).toBe("/abcdefghij");
+    expect(unopenable.readOnlyHref).toBe("/abcdefghij/view");
   });
 
   // The read-only link is same-origin and built from the report's OWN slug, so
@@ -110,9 +125,10 @@ describe("the /edit unopenable-document page", () => {
 
   // The href is now supplied by the caller, so the invariant this file's type
   // documents ("ALWAYS a root-relative path") has to be ENFORCED rather than
-  // assumed. Today's only caller passes `degradeTargetFor`'s output, which is
-  // built from a validated Slug — but a future caller passing anything else
-  // must not be able to turn this anchor into an off-site jump.
+  // assumed. Today's only caller passes the owner-view path built from a
+  // validated Slug (since #363; it used to pass `degradeTargetFor`'s `?access=`
+  // output) — but a future caller passing anything else must not be able to
+  // turn this anchor into an off-site jump.
   it.each([
     ["absolute", "https://evil.example/steal"],
     ["protocol-relative", "//evil.example/steal"],
@@ -126,7 +142,7 @@ describe("the /edit unopenable-document page", () => {
       docTitle: "T",
       readOnlyHref: href,
     });
-    expect(unopenable.readOnlyHref).toBe("/abcdefghij");
+    expect(unopenable.readOnlyHref).toBe("/abcdefghij/view");
   });
 
   // The payload is serialized into the page. It must carry no EDIT capability:
@@ -135,28 +151,17 @@ describe("the /edit unopenable-document page", () => {
   // fallback in `readOnlyHref` is the ONE token this page may carry, and only
   // because the route already verified it and the user already holds it (it
   // arrived on their own request, in the query or the arp_edit_oa cookie).
-  it("carries no capability at all when the route has no owner fallback", () => {
+  it("carries no capability at all — and since #363 that holds unconditionally", () => {
+    // Stronger than it used to be. This assertion previously had a sibling
+    // covering the case where the href DID carry a verified `oa`; after the
+    // flip there is no such case, so the whole payload is capability-free on
+    // every path through this page.
     const payload = unopenableDocument({
       reason: "document-unsplittable",
       slug: "abcdefghij",
       docTitle: "T",
-      readOnlyHref: "/abcdefghij",
+      readOnlyHref: "/abcdefghij/view",
     });
     expect(JSON.stringify(payload)).not.toMatch(/token|access=|et=|oa=/i);
-  });
-
-  it("carries the read-only fallback and nothing else when it has one", () => {
-    const payload = unopenableDocument({
-      reason: "document-unsplittable",
-      slug: "abcdefghij",
-      docTitle: "T",
-      readOnlyHref: "/abcdefghij?access=owner.token.value",
-    });
-    // The ONLY occurrence of a token anywhere in the payload is the one inside
-    // the read-only href — nothing re-exports it as a separate field a client
-    // script could read off more conveniently, and no edit token appears.
-    const { readOnlyHref, ...rest } = payload.unopenable;
-    expect(JSON.stringify({ ...payload, unopenable: rest })).not.toMatch(/token|access=|et=|oa=/i);
-    expect(readOnlyHref).toContain("?access=");
   });
 });

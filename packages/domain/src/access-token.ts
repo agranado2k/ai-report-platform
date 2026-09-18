@@ -26,10 +26,24 @@ export interface AccessClaims extends TokenClaims {
 
 /** Narrow a parsed JSON payload into `AccessClaims`, or null if it doesn't look
  *  like one. Mirrors the pre-codec-extraction validation exactly (same field
- *  checks, same rejection of a mistyped `mode`/`email`/`owner`). */
+ *  checks, same rejection of a mistyped `mode`/`email`/`owner`), plus the
+ *  ADR-0091 `scope` rejection below. */
 function parseAccessClaims(raw: unknown): AccessClaims | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const claims = raw as Partial<AccessClaims>;
+  const claims = raw as Partial<AccessClaims> & { readonly scope?: unknown };
+  // A token carrying a `scope` is NEVER an Access token (ADR-0091 §1). `scope`
+  // is the single-purpose discriminant of the OTHER two members of this token
+  // family — `Edit token` (`"edit"`) and `Grantee read token` (`"granteeRead"`)
+  // — which share this secret and this wire format. Both of those already
+  // refuse to narrow an `AccessClaims` payload; until ADR-0091 the reverse was
+  // not true. An Edit token DID narrow here as `{slug, exp}`, which was never
+  // an escalation (no `owner`, no `mode`, so `resolveAccessDecision`'s mode
+  // check yields `unlock`) but was true by EFFECT rather than by construction —
+  // and a third token in the family would have inherited the same looseness.
+  // Rejecting the key makes the family's separation structural in BOTH
+  // directions. Behaviour-preserving for every token that exists: no mint site
+  // has ever set `scope` on an Access token.
+  if (claims.scope !== undefined) return null;
   if (typeof claims.slug !== "string" || typeof claims.exp !== "number") return null;
   if (claims.mode !== undefined && typeof claims.mode !== "string") return null;
   if (claims.email !== undefined && typeof claims.email !== "string") return null;

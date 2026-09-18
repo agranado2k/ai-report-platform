@@ -188,16 +188,34 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // token. `viewHeaders()` would be wrong here; its top-level `sandbox` CSP
     // is for the untrusted report on `GET /<slug>`, not for this app's own UI.
     //
-    // The page's one forward action — "Open the read-only view" — carries the
-    // gate's OWN degrade target (`degradeTargetFor`), not a bare `/${slug}`.
-    // The bare link was the last hop of the same lockout: for a PRIVATE report
-    // it lands on the public viewer, which redirects to the app's unlock page,
-    // which offers `/reports/{slug}/open`, which comes straight back here — a
-    // cycle that never reaches the content. The target already embeds the
-    // `?access=` owner fallback the gate VERIFIED (acceptOwnerFallback), so
-    // nothing is minted on this credential-free origin; a write-grantee, who
-    // never has one, gets the bare link, which is correct for them (the unlock
-    // page recognises write access).
+    // The page's one forward action — "Open the read-only view" — points at
+    // the OWNER VIEW (#363). It was the gate's degrade target, `/${slug}` plus
+    // the `?access=<verified oa>` Phase 5-H had to bolt on, because the bare
+    // link was the last hop of the 2026-08-06 lockout: for a PRIVATE report it
+    // lands on the public viewer, which redirects to the app's unlock page,
+    // which offers `/reports/{slug}/open`, which came straight back here — a
+    // cycle that never reaches the content.
+    //
+    // With owner-open flipped, `/${slug}/view` closes that cycle better and
+    // points at the OWNER VIEW — which is what "the read-only view" means since
+    // the flip — and still CARRIES the verified owner fallback when the visitor
+    // presented one, exactly as Phase 5-H's `?access=` link did. Only the
+    // surface moved; the capability did not.
+    //
+    // Both facts matter. The owner view without a capability holds none under
+    // its own Path, so a private report's owner would depend entirely on the
+    // funnel to get back to their own report — Phase 5-H's cycle in a new
+    // costume, which the deployed smoke caught. And nothing is minted here: the
+    // `oa` is the one this very request presented and `acceptOwnerFallback`
+    // already verified, so the view origin stays credential-free (ADR-0056).
+    //
+    // A write-grantee still gets the bare owner view and still funnels — they
+    // are never minted an `oa`, and the funnel is where their live `canWrite`
+    // re-check, and since ADR-0091 their own `gr`, comes from.
+    //
+    // `degradeTargetFor` answers both this href and the degrade `Location`, so
+    // the two cannot drift apart (review #247); its `ownerFallback` boolean is
+    // what the log line records — never the token.
     const readOnly = degradeTargetFor(decision, slug);
     console.warn(editUnopenableLine(slug, loaded.reason, readOnly.ownerFallback));
     const unopenableHeaders = authenticatedViewHeaders({ appOrigin });
@@ -207,7 +225,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
         reason: loaded.reason,
         slug,
         docTitle: report.title,
-        readOnlyHref: readOnly.to,
+        readOnlyHref: readOnly.readOnlyTo,
       }),
       {
         status: UNOPENABLE_STATUS,
