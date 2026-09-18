@@ -36,6 +36,9 @@ export async function loader(args: LoaderFunctionArgs) {
   // (the root gate sends anonymous users to sign-in). We never reveal whether
   // the report exists.
   const actor = await resolveActorForRead(args);
+  // Read ONCE: two `new URL(...)` parses of the same request URL is two places
+  // for the two query reads below to drift apart.
+  const query = new URL(args.request.url).searchParams;
 
   const location = await ownerOpenLocation(
     {
@@ -60,8 +63,15 @@ export async function loader(args: LoaderFunctionArgs) {
       // free text. It is not an authorization input: `loadWritableReport` gates
       // both destinations identically, so the worst a bad value can do is land
       // a canWrite user on the default surface.
-      destination:
-        new URL(args.request.url).searchParams.get("to") === "edit" ? "editor" : "ownerView",
+      destination: query.get("to") === "edit" ? "editor" : "ownerView",
+      // `?panel=` is the editor's side-panel hint (#382), forwarded here by
+      // the view gate's `/edit` funnel. Passed RAW — `ownerOpenLocation`
+      // validates it against the closed enum and drops anything else, which
+      // keeps that decision in the seam the unit tests reach rather than in
+      // this transport shell. It is not an authorization input and not a
+      // destination input: it cannot change who is admitted, what is minted,
+      // or which surface the capability is spent on.
+      panel: query.get("panel"),
     },
   );
   return redirect(location, { headers: { "cache-control": "no-store" } });

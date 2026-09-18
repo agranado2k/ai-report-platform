@@ -42,13 +42,16 @@ import {
 } from "arp-application";
 import {
   type EditClaims,
+  type EditorPanel,
   makeSlug,
   type Report,
   type ReportVersion,
   readAccessToken,
   readEditToken,
   readGranteeReadToken,
+  readPanelHint,
   type Slug,
+  withPanelHint,
 } from "arp-domain";
 import { parseVersionQuery } from "./version-query";
 
@@ -829,7 +832,16 @@ async function decideEdit(
   const cap = readCapability(url, request.headers.get("cookie"), slug, EDIT_SURFACE, deps);
   const { oa } = cap;
 
-  if (cap.kind === "refused") return deniedEdit(slug, oa, cap.cause, deps);
+  // The editor's side-panel hint (#382, completing #377). Validated HERE,
+  // before either redirect below is built, so the only thing that can reach a
+  // `panel=` in a location this gate emits is a member of the closed enum —
+  // never a string the caller chose. It is read AFTER `readCapability` and
+  // consulted by NEITHER branch's decision: it is appended to a location the
+  // capability decision has already chosen, so it cannot move a visitor
+  // between arms, and it reaches no cookie, no header profile and no ACL.
+  const panel = readPanelHint(url.searchParams.get("panel"));
+
+  if (cap.kind === "refused") return deniedEdit(slug, oa, cap.cause, deps, panel);
   if (cap.kind === "handoff") {
     return {
       kind: "setCookieAndRedirect",
@@ -840,7 +852,16 @@ async function decideEdit(
         capabilityCookie(EDIT_SURFACE, slug, cap.token, cap.maxAge),
         ...(oa ? [ownerFallbackCookie(EDIT_SURFACE, slug, oa, cap.maxAge)] : []),
       ],
-      to: `/${slug}/edit`,
+      // The clean URL keeps the panel hint (#382). "Clean" here is ADR-0089
+      // §4's property and it is about TOKENS — "no token is ever served on",
+      // so that a capability leaves the address bar, the history and the
+      // referer before anything renders. A `panel=` is not a capability: it
+      // survives precisely because it grants nothing, and it has to survive
+      // because this 303 is the hop that used to eat it. The owner view's
+      // Versions action funnels (ADR-0089 §4b), comes back through the mint,
+      // and lands here — so without this the editor opened on the comments
+      // tab for the one click whose entire purpose was version history.
+      to: withPanelHint(`/${slug}/edit`, panel),
     };
   }
 
@@ -1379,6 +1400,13 @@ function funnelTarget(
   oa: string | undefined,
   cause: EditDenialCause,
   deps: GateDeps,
+  // The editor's panel hint, when the denied request carried one (#382).
+  // Threaded as DATA past the one implementation rather than added to
+  // `Surface`: `funnelQuery` says which surface the re-minted capability is
+  // for and is a fixed property of that surface, while this varies per
+  // request and belongs to no surface at all. The owner view calls this
+  // function too and passes nothing — it has no side panel to name.
+  panel?: EditorPanel,
 ): string | undefined {
   const canFunnel = Boolean(deps.secret && deps.appOrigin);
   // `surface.funnelQuery` names which surface the re-minted capability should
@@ -1388,7 +1416,10 @@ function funnelTarget(
   // the way that bug gets written is by adding a surface and forgetting one of
   // its three data points.
   return canFunnel && (cause === "rejected" || !oa)
-    ? `${deps.appOrigin}/reports/${slug}/open${surface.funnelQuery}`
+    ? // The hint rides ONLY the funnel, never a degrade: a degrade goes to the
+      // bare public viewer, which has no panel to open, and a parameter that
+      // nothing downstream reads has no business in a visitor's address bar.
+      withPanelHint(`${deps.appOrigin}/reports/${slug}/open${surface.funnelQuery}`, panel)
     : undefined;
 }
 
@@ -1400,10 +1431,11 @@ function deniedEdit(
   oa: string | undefined,
   cause: EditDenialCause,
   deps: GateDeps,
+  panel?: EditorPanel,
 ): EditDecision {
   // NOT a degrade — the funnel is the happy path for a writer whose token
   // simply needs re-minting. It re-enters through the mint, so no warning.
-  const funnel = funnelTarget(EDIT_SURFACE, slug, oa, cause, deps);
+  const funnel = funnelTarget(EDIT_SURFACE, slug, oa, cause, deps, panel);
   if (funnel) return { kind: "redirect", to: funnel };
   // Observability (claude-review #187): when an OWNER's edit-token round-trip
   // is denied and we degrade them to a read-only view (`oa` present), emit a

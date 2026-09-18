@@ -2027,3 +2027,128 @@ describe("decideServe — the funnel names its destination (#363)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// The editor panel hint through the edit funnel (#382, completing #377).
+//
+// `?panel=versions` reaches the editor from the owner view's Versions action —
+// a PLAIN LINK to `/<slug>/edit` that deliberately carries no capability
+// (ADR-0089 §4b: that hop is the live `canWrite` re-check, bought back). So on
+// the very first click the hint meets a gate with nothing to admit, and the
+// two redirects the gate builds are where it lived or died: before this, both
+// dropped it and the editor opened closed on comments — #377's headline
+// acceptance criterion, false in the only flow that produces it.
+//
+// Every case below is also an assertion about what did NOT change. The hint is
+// read AFTER the capability decision is made and only ever appended to a
+// location that decision already chose: it cannot move a visitor between arms,
+// and it cannot appear on an arm the editor does not own.
+// ---------------------------------------------------------------------------
+describe("decideServe edit — the panel hint through the funnel (#382)", () => {
+  const OPEN = `${APP_ORIGIN}/reports/${SLUG}/open?to=edit`;
+
+  it("the funnel to the app's mint carries the hint, so the round trip can bring it back", async () => {
+    await expect(
+      decideEdit(buildReport({ verdict: "clean" }), { path: `/${SLUG}/edit?panel=versions` }),
+    ).resolves.toEqual({ kind: "redirect", to: `${OPEN}&panel=versions` });
+  });
+
+  it("carries `comments` too — the enum, not one special-cased value", async () => {
+    await expect(
+      decideEdit(buildReport({ verdict: "clean" }), { path: `/${SLUG}/edit?panel=comments` }),
+    ).resolves.toEqual({ kind: "redirect", to: `${OPEN}&panel=comments` });
+  });
+
+  it.each([
+    ["an unknown panel", "diff"],
+    ["the wrong case", "Versions"],
+    ["an injected second parameter", "versions%26et%3Dstolen"],
+    ["an absolute URL", "https%3A%2F%2Fevil.example"],
+    ["an empty value", ""],
+  ])("drops %s BEFORE the redirect is built — nothing but the enum reaches a URL", async (_name, raw) => {
+    await expect(
+      decideEdit(buildReport({ verdict: "clean" }), { path: `/${SLUG}/edit?panel=${raw}` }),
+    ).resolves.toEqual({ kind: "redirect", to: OPEN });
+  });
+
+  it("the hand-off's clean-URL 303 keeps the hint — the last hop, and the one the editor reads", async () => {
+    const et = editToken();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&panel=versions`,
+      }),
+    ).toEqual({
+      kind: "setCookieAndRedirect",
+      // BYTE-IDENTICAL to the hand-off's cookies without a hint (the case
+      // above in "token/cookie decision"). The hint changes where the 303
+      // points and NOTHING about what it persists: no cookie, no Path, no
+      // Max-Age, no second capability.
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
+      to: `/${SLUG}/edit?panel=versions`,
+    });
+  });
+
+  it("the hand-off drops an unrecognised hint, exactly as the funnel does", async () => {
+    const et = editToken();
+    expect(
+      await decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?et=${encodeURIComponent(et)}&panel=../../etc/passwd`,
+      }),
+    ).toEqual({
+      kind: "setCookieAndRedirect",
+      cookies: [`arp_edit=${et}; Path=/${SLUG}/edit; Max-Age=900; HttpOnly; Secure; SameSite=Lax`],
+      to: `/${SLUG}/edit`,
+    });
+  });
+
+  it("changes NO gate decision: a hint on a request that would degrade still degrades, bare", async () => {
+    // No appOrigin → nowhere to funnel → the public viewer. A hint must never
+    // ride a degrade: the bare `/<slug>` has no panel, and a query on it would
+    // be a `panel=` in the address bar of a surface that cannot honour it.
+    await expect(
+      decideEdit(buildReport({ verdict: "clean" }), {
+        path: `/${SLUG}/edit?panel=versions`,
+        appOrigin: undefined,
+      }),
+    ).resolves.toEqual({ kind: "redirect", to: `/${SLUG}` });
+  });
+
+  it("changes NO gate decision: a hint admits nobody a bare request would not admit", async () => {
+    // A PRIVATE report, no capability, no secret to judge one by. The hint is
+    // the only difference from the degrade case the suite already pins, and it
+    // makes none: same arm, same target.
+    await expect(
+      decideEdit(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        path: `/${SLUG}/edit?panel=versions`,
+        secret: undefined,
+      }),
+    ).resolves.toEqual({ kind: "redirect", to: `/${SLUG}` });
+  });
+
+  it("serves the editor unchanged when the capability is already in hand", async () => {
+    // Past the 303 the hint is the client's business (`initialPanelState`),
+    // not the gate's: the serve arm must be indistinguishable with and without
+    // it, or the hint has become an input to what is served.
+    const et = editToken();
+    const withHint = await decideEdit(buildReport({ verdict: "clean" }), {
+      path: `/${SLUG}/edit?panel=versions`,
+      cookie: `arp_edit=${et}`,
+    });
+    const without = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${et}`,
+    });
+    expect(withHint).toEqual(without);
+    expect(withHint.kind).toBe("serve");
+  });
+
+  it("the OWNER VIEW's funnel never carries it — the hint names an editor panel", async () => {
+    // `/<slug>/view` has no side panel to open, and the mint's default landing
+    // IS the owner view. Forwarding a hint here would put a parameter nothing
+    // downstream reads into an owner's address bar and history.
+    await expect(
+      decideOwnerView(buildReport({ verdict: "clean", acl: PRIVATE }), {
+        path: `/${SLUG}/view?panel=versions`,
+      }),
+    ).resolves.toEqual({ kind: "redirect", to: `${APP_ORIGIN}/reports/${SLUG}/open` });
+  });
+});
