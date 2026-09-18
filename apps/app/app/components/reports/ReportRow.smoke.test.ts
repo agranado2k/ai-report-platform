@@ -30,16 +30,26 @@ const sharing = {
   discardWarning: null,
   formKey: "k1",
 };
-const base = {
+type Notice = { label: string; title: string } | null;
+const base: {
+  slug: string;
+  title: string;
+  folderId: string;
+  displayFolderId: string;
+  editabilityNotice: Notice;
+  fidelityNotice: Notice;
+  sharing: typeof sharing;
+} = {
   slug: "abc",
   title: "Q3 roadmap",
   folderId: "f1",
   displayFolderId: "f1",
   editabilityNotice: null,
+  fidelityNotice: null,
   sharing,
 };
 const folders = [{ id: "f1", name: "Root" }];
-const render = (over: { isPublished: boolean }) =>
+const render = (over: Partial<typeof base> & { isPublished: boolean }) =>
   renderToStaticMarkup(
     h(ReportRow, {
       report: { ...base, ...over },
@@ -49,6 +59,11 @@ const render = (over: { isPublished: boolean }) =>
       pendingSharing: null,
     }),
   );
+
+const VIEW_ONLY = {
+  label: "View-only",
+  title: "This report still views exactly as published, but saving from the editor would drop…",
+};
 
 describe("ReportRow", () => {
   it("is a semantic <li> carrying the report title, slug and folder", () => {
@@ -68,5 +83,45 @@ describe("ReportRow", () => {
     const html = render({ isPublished: true });
     expect(html).toContain("focus-within:opacity-100");
     expect(html).toContain("Delete report");
+  });
+
+  // ── Fidelity, ADR-0090 / #364 ──────────────────────────────────────────
+  it("shows the view-only hint when the live version is lossy", () => {
+    const html = render({ isPublished: true, fidelityNotice: VIEW_ONLY });
+    expect(html).toContain("View-only");
+    // The explanation rides the `title` attribute, exactly as the editability
+    // notice does — the badge is the summary, the tooltip is the sentence.
+    expect(html).toContain("saving from the editor would drop");
+  });
+
+  it("says nothing when the live version is lossless or never probed", () => {
+    // `fidelityNotice: null` covers BOTH — the server already collapsed
+    // `lossless` and UNKNOWN to "nothing to say" (fidelity-notice.server.ts),
+    // so the row has no second verdict to re-decide.
+    expect(render({ isPublished: true })).not.toContain("View-only");
+  });
+
+  it("renders the two verdicts independently — a lossy report is not 'Not editable'", () => {
+    // `editable` + `lossy` is the combination ADR-0090 exists for, so the row
+    // must be able to carry the fidelity hint with NO editability notice
+    // beside it. A row that only showed one badge slot would make the common
+    // case unrepresentable.
+    const html = render({ isPublished: true, fidelityNotice: VIEW_ONLY });
+    expect(html).toContain("View-only");
+    expect(html).not.toContain("Not editable");
+  });
+
+  it("carries BOTH badges at once when the two verdicts both have something to say", () => {
+    // The previous test shows fidelity alone; this one is the claim that
+    // actually constrains the markup. ADR-0090's premise is that the verdicts
+    // are orthogonal, so the row needs two badge SLOTS — fold them into one
+    // and this is the only test here that fails.
+    const html = render({
+      isPublished: true,
+      editabilityNotice: { label: "Not editable", title: "The editor cannot open this report." },
+      fidelityNotice: VIEW_ONLY,
+    });
+    expect(html).toContain("Not editable");
+    expect(html).toContain("View-only");
   });
 });

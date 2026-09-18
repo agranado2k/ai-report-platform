@@ -87,5 +87,18 @@ export default defineConfig({
       grep: /@owner-view-chrome/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // ADR-0090 / #364: the Edit confirm on a LOSSY live version. Over
+      // `file://` with the chrome project, for the same reason — this is about
+      // a native <dialog> in a real browser (`showModal()`, `:modal`, the
+      // backdrop, Esc) and about whether a click NAVIGATED, none of which a
+      // static SSR render can observe and none of which need an origin. Its
+      // own tag because it mounts the same entry with different props, and a
+      // shared tag would make the two describe blocks' cases indistinguishable
+      // when one of them fails.
+      name: "owner-view-lossy",
+      grep: /@owner-view-lossy/,
+      use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
+    },
   ],
 });

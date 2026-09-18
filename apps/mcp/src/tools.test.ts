@@ -638,3 +638,98 @@ describe("Editability is legible to an agent (ADR-0080)", () => {
     }
   });
 });
+
+describe("Fidelity is legible to an agent (ADR-0090, #364)", () => {
+  const readDescriptionOf = (name: string) =>
+    (
+      collectTools(registerReadTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+  const writeDescriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  /** The tools that actually RETURN the verdict — ADR-0090 §6's read
+   *  surfaces. `reports_upload` is deliberately absent: its response carries
+   *  `editability` and no `fidelity` (see the dedicated test below). */
+  const FIDELITY_TOOLS = [
+    ["reports_get", readDescriptionOf],
+    ["reports_list_versions", readDescriptionOf],
+    ["reports_get_content", readDescriptionOf],
+  ] as const;
+
+  it.each(FIDELITY_TOOLS)("%s names `fidelity` and both of its values", (name, describeOf) => {
+    const d = describeOf(name);
+    expect(d).toMatch(/fidelity/);
+    expect(d).toMatch(/lossless/);
+    expect(d).toMatch(/lossy/);
+  });
+
+  it.each(FIDELITY_TOOLS)("%s says null means NEVER PROBED, not lossless", (name, describeOf) => {
+    // The whole point of ADR-0090 §4's explicit `null`: an agent that reads
+    // UNKNOWN as "fine" re-acquires exactly the false reassurance the field
+    // exists to remove. The description has to spend the words.
+    const d = describeOf(name);
+    expect(d).toMatch(/null/);
+    expect(d).toMatch(/never probed|not probed|unknown/i);
+  });
+
+  it("explains that `lossy` means a SAVE would drop content, not that the report is broken", () => {
+    // ADR-0090 §5: fidelity explains, it never gates. An agent told only
+    // "lossy" would reasonably re-upload in a panic; the honest framing is
+    // that the report views perfectly and the cost is paid on the next editor
+    // save. Asserted on `reports_get` — the tool an agent actually learns the
+    // verdict from — rather than on the upload, whose response has no verdict
+    // to frame.
+    const d = readDescriptionOf("reports_get");
+    expect(d).toMatch(/still views|views (fine|perfectly|normally)/i);
+    expect(d).toMatch(/sav(e|ed|ing)/i);
+  });
+
+  it("reports_upload does NOT promise a `fidelity` field its response has no room for", () => {
+    // Verified against the wire, not assumed: `UploadResult`
+    // (packages/application/src/use-cases/upload-report.ts),
+    // `uploadResultToHttp` (packages/http/src/upload-response.ts) and
+    // `UploadResult.required` in docs/api/openapi.yaml all carry `editability`
+    // and NO `fidelity`. ADR-0090 §6 assigns the upload-side lossy signal to
+    // the warnings ticket, not to a field here.
+    //
+    // A description that promises a field the response does not carry is worse
+    // than silence: MCP is this product's primary write surface, so every
+    // agent would read for something that is never there. If the field is ever
+    // added to the upload response, this test is the thing that should be
+    // deleted first — deliberately, and with the wire change beside it.
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).not.toMatch(/fidelity/i);
+  });
+
+  it("keeps fidelity and editability as TWO questions, never collapsing them", () => {
+    // `editable` + `lossy` is the case ADR-0090 exists for. A description that
+    // named only one of the pair would teach an agent the fourth-enum-value
+    // mistake the ADR rejected as option 2.
+    for (const [name, describeOf] of FIDELITY_TOOLS) {
+      const d = describeOf(name);
+      expect(d, `${name} names both verdicts`).toMatch(/editability/);
+      expect(d, `${name} names both verdicts`).toMatch(/fidelity/);
+    }
+  });
+
+  it("passes the API's `fidelity` through to the agent verbatim — it is not a client field", () => {
+    // The MCP server is a thin client (ADR-003/0051): the verdict is computed
+    // and serialised by /api/v1, and these tools must not narrow it away. A
+    // description promising a field the handler drops is worse than silence.
+    const { client } = recordingClient({
+      ok: true,
+      data: { slug: "abcde12345", editability: "editable", fidelity: "lossy" },
+    });
+    const tool = collectTools(registerReadTools, client).get("reports_get");
+    expect(tool).toBeDefined();
+    return tool?.handler({ slug: "abcde12345" }).then((result) => {
+      expect(textOf(result)).toContain('"fidelity": "lossy"');
+    });
+  });
+});
