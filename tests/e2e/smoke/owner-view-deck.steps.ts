@@ -40,7 +40,6 @@ const FONTS_STYLESHEET_HOST = "https://fonts.googleapis.com/";
 // Module state — `workers: 1` makes this safe (see playwright.config.ts).
 let session: TestSession;
 let slug: string;
-let deckTitle: string;
 
 /** Every attempt the BROWSER made at the Google Fonts stylesheet, and how each
  *  one ended. Populated from the moment before the owner view is navigated to,
@@ -88,7 +87,6 @@ Given("a private script-driven deck I own is published", async ({ page }) => {
   expect(uploadResponse.status(), JSON.stringify(body)).toBe(201);
   expect(typeof body.slug).toBe("string");
   slug = body.slug as string;
-  deckTitle = typeof body.title === "string" ? body.title : "Owner view e2e deck";
 
   // PRIVATE, and asserted rather than assumed. Private-by-default is ADR-0075,
   // but this scenario's whole cookie story (ADR-0089 §4c: the 303 must plant
@@ -127,17 +125,24 @@ When("I open that deck from the dashboard", async ({ page }) => {
     "the signed-in owner must reach their own dashboard; a sign-in redirect here means the browser storageState is not authenticated",
   ).toBe(200);
 
-  // The row's Open affordance is the stretched link in `ReportRow.tsx`, whose
-  // only accessible name is the `sr-only` "Open <title>" span. Reaching it by
-  // ROLE + NAME is what makes this an assertion about the product's real
-  // affordance rather than about a CSS class: an overlay that stopped being a
-  // link, or lost its accessible name, fails here — and so does a report that
-  // is not `isPublished`, which renders no overlay at all (#334).
-  const open = page.getByRole("link", { name: `Open ${deckTitle}` });
+  // The row's Open affordance is the stretched link in `ReportRow.tsx`. It is
+  // found by the one thing that is truly this report's — its href — rather
+  // than by accessible name, because the API upload path sets no title at all
+  // (`uploadReport` falls back to "Untitled report"), so a name-keyed locator
+  // would match every other report the reused per-PR Neon branch has
+  // accumulated, or nothing. Asking for the href and then asserting the NAME
+  // keeps both halves of the affordance under test, and keeps them
+  // independent: the link must point at the one mint, AND it must be a real,
+  // accessibly-named control rather than a bare clickable div.
+  const open = page.locator(`a[href="/reports/${slug}/open"]`);
   await expect(
     open,
-    `the dashboard row for ${slug} must offer an Open link — this is the owner's real entry point`,
-  ).toHaveAttribute("href", `/reports/${slug}/open`);
+    `the dashboard row for ${slug} must offer exactly one Open link — this is the owner's real entry point. Zero means either the ?q= filter did not surface the row, or the report is not \`isPublished\` and so renders no overlay at all (#334).`,
+  ).toHaveCount(1);
+  await expect(
+    open,
+    'the Open overlay\'s only accessible name is its `sr-only` "Open <title>" span — an overlay that lost it is unreachable to a screen reader and to keyboard users',
+  ).toHaveAccessibleName(/^Open\s+\S/);
 
   // (2) WHY THE CLICK IS NOT FOLLOWED. On a preview VIEW_ORIGIN is unset
   // (Terraform wires it prod-only), so `/reports/{slug}/open` builds its
