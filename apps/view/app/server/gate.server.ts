@@ -362,6 +362,35 @@ function degradeLocation(slug: string, oa: string | undefined): string {
   return oa ? `/${slug}?access=${encodeURIComponent(oa)}` : `/${slug}`;
 }
 
+/** Where the 409 "can't be opened in the editor" page's ONE forward action
+ *  points — this report's OWNER VIEW (#363), carrying the verified owner
+ *  fallback when there is one.
+ *
+ *  `degradeLocation`'s sibling, and deliberately built right beside it from the
+ *  SAME `oa`: a `Location` the browser follows and an `href` the user clicks
+ *  must not be able to disagree about whether the visitor arrives with a
+ *  capability (review #247). They differ only in SURFACE — the degrade goes to
+ *  the bare viewer, this goes to the owner view, which is what "the read-only
+ *  view" means since the flip.
+ *
+ *  Carrying the token is not a widening and mints nothing: this is the very
+ *  `oa` the visitor presented on this request, already verified by
+ *  `acceptOwnerFallback` (HMAC, this slug, unexpired, `owner === true`), so
+ *  ADR-0056's keystone holds — the app authorized, the viewer only verified.
+ *  The owner view redeems an `oa`-only query through ADR-0089 §3's second
+ *  hand-off row: cookies set, 303 to the clean URL, the framed report serves.
+ *
+ *  Without it the link is bare, and for a PRIVATE report that resurrects
+ *  ADR-0063 Phase 5-H's cycle — the owner view holds no capability under its
+ *  own Path, so the owner's one forward action depends entirely on the funnel
+ *  being configured and reachable to get them back to their own report. A
+ *  write-grantee still gets the bare link and still funnels: they were never
+ *  minted an `oa`, and the funnel is where their live `canWrite` re-check (and
+ *  since ADR-0091 their own `gr`) comes from. */
+function ownerViewLocation(slug: string, oa: string | undefined): string {
+  return oa ? `/${slug}/view?oa=${encodeURIComponent(oa)}` : `/${slug}/view`;
+}
+
 /** Why an /edit request could not render the editor. Every value is a DISTINCT
  *  production failure mode — the incident that motivated this enum was
  *  indistinguishable from four other causes precisely because nothing logged
@@ -499,10 +528,14 @@ export function editUnopenableLine(
 export function degradeTargetFor(
   decision: EditDecision,
   slug: string,
-): { readonly to: string; readonly ownerFallback: boolean } {
+): { readonly to: string; readonly readOnlyTo: string; readonly ownerFallback: boolean } {
   return decision.kind === "serve"
-    ? { to: decision.degradeTo, ownerFallback: decision.ownerFallback }
-    : { to: `/${slug}`, ownerFallback: false };
+    ? {
+        to: decision.degradeTo,
+        readOnlyTo: decision.readOnlyTo,
+        ownerFallback: decision.ownerFallback,
+      }
+    : { to: `/${slug}`, readOnlyTo: `/${slug}/view`, ownerFallback: false };
 }
 
 export type Purpose = "view" | "edit" | "ownerView";
@@ -590,6 +623,11 @@ export type EditDecision =
        *  user clicks want the identical destination; giving them two answers is
        *  how the first one silently rotted. */
       readonly degradeTo: string;
+      /** Where the 409 page's "Open the read-only view" link points — the OWNER
+       *  VIEW (#363), carrying the same verified owner fallback `degradeTo`
+       *  carries. Built beside `degradeTo` from the same `oa` so the two cannot
+       *  disagree about whether the visitor arrives with a capability. */
+      readonly readOnlyTo: string;
       /** Whether `degradeTo` carries an owner fallback — selects the log event. */
       readonly ownerFallback: boolean;
     }
@@ -827,6 +865,7 @@ async function decideEdit(
     version: outcome.value.version,
     edit: { token: cap.token, claims: cap.claims },
     degradeTo: degradeLocation(slug, oa),
+    readOnlyTo: ownerViewLocation(slug, oa),
     ownerFallback: oa !== undefined,
   };
 }

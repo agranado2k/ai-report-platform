@@ -1153,15 +1153,53 @@ describe("degradeTargetFor", () => {
     });
     expect(degradeTargetFor(decision, SLUG)).toEqual({
       to: `/${SLUG}?access=${encodeURIComponent(oa)}`,
+      readOnlyTo: `/${SLUG}/view?oa=${encodeURIComponent(oa)}`,
       ownerFallback: true,
     });
+  });
+
+  // THE 409 PAGE'S LINK, and why it is not the bare owner view.
+  //
+  // #363 repointed "Open the read-only view" at `/<slug>/view`. Pointing at the
+  // owner view is right — it IS the read-only view now — but dropping the
+  // capability was not: the owner view holds none under its own Path, so a
+  // PRIVATE report's owner following a bare link funnels to the app's mint and
+  // depends on that funnel being configured and reachable to get back. That is
+  // the Phase 5-H cycle in a new costume, and the deployed smoke caught it.
+  //
+  // So the verified fallback rides the owner-view URL instead. NOTHING IS
+  // MINTED: this is the very `oa` the visitor presented on this request, which
+  // `acceptOwnerFallback` already verified (HMAC, this slug, unexpired,
+  // `owner === true`), so the view origin stays credential-free (ADR-0056). The
+  // owner view redeems an `oa`-only query through ADR-0089 §3's second hand-off
+  // row — cookies set, 303 to the clean URL, frame serves.
+  it("a served editor with an owner fallback → a read-only link that CARRIES it, on the owner view", async () => {
+    const oa = ownerAccess();
+    const decision = await decideEdit(buildReport({ verdict: "clean" }), {
+      cookie: `arp_edit=${editToken()}; arp_edit_oa=${encodeURIComponent(oa)}`,
+    });
+    const target = degradeTargetFor(decision, SLUG);
+    expect(target.readOnlyTo).toBe(`/${SLUG}/view?oa=${encodeURIComponent(oa)}`);
+    // Root-relative, and not an off-site jump — `unopenableDocument` enforces
+    // this too, but the value it is handed should already be well-formed.
+    expect(target.readOnlyTo.startsWith(`/${SLUG}/view`)).toBe(true);
+    expect(target.readOnlyTo.startsWith("//")).toBe(false);
   });
 
   it("a served editor without one → the bare viewer, not flagged", async () => {
     const decision = await decideEdit(buildReport({ verdict: "clean" }), {
       cookie: `arp_edit=${editToken()}`,
     });
-    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}`,
+      // No fallback to carry — a write-grantee, or an owner whose `oa` did not
+      // verify. The bare owner view is correct for them: it funnels to the ONE
+      // mint, which re-checks `canWrite` LIVE and hands back whatever they are
+      // currently entitled to (an `oa`, or since ADR-0091 a `gr`). That hop is
+      // the revocation property, not a cost.
+      readOnlyTo: `/${SLUG}/view`,
+      ownerFallback: false,
+    });
   });
 
   // The decision kinds the edit purpose cannot produce, but whose types the
@@ -1173,7 +1211,11 @@ describe("degradeTargetFor", () => {
     ["redirect", { kind: "redirect", to: "/elsewhere" }],
     ["setCookieAndRedirect", { kind: "setCookieAndRedirect", cookies: [], to: "/x" }],
   ])("%s → the bare viewer for this slug, not flagged", (_n, decision) => {
-    expect(degradeTargetFor(decision, SLUG)).toEqual({ to: `/${SLUG}`, ownerFallback: false });
+    expect(degradeTargetFor(decision, SLUG)).toEqual({
+      to: `/${SLUG}`,
+      readOnlyTo: `/${SLUG}/view`,
+      ownerFallback: false,
+    });
   });
 });
 

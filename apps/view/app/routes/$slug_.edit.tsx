@@ -197,18 +197,25 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // cycle that never reaches the content.
     //
     // With owner-open flipped, `/${slug}/view` closes that cycle better and
-    // carries NO token: it holds no capability under its own Path, so it
-    // funnels to the app's ONE mint, which re-checks `canWrite` LIVE and hands
-    // back a fresh capability (ADR-0089 §4b), landing the visitor on the owner
-    // view with the report rendered in its frame. A write-grantee gets the
-    // same working link rather than the lesser bare one — ADR-0091's Grantee
-    // read token is what makes their frame render instead of an unlock wall.
-    // So this page no longer emits a 24h `owner:true` token into an anchor at
-    // all, which Phase 5-H called "the ONE token this page may carry".
+    // points at the OWNER VIEW — which is what "the read-only view" means since
+    // the flip — and still CARRIES the verified owner fallback when the visitor
+    // presented one, exactly as Phase 5-H's `?access=` link did. Only the
+    // surface moved; the capability did not.
     //
-    // `degradeTargetFor` is still consulted, for its `ownerFallback` BOOLEAN
-    // only: the log line records whether an owner fallback was in hand, which
-    // is what distinguishes the two outcomes that matter operationally.
+    // Both facts matter. The owner view without a capability holds none under
+    // its own Path, so a private report's owner would depend entirely on the
+    // funnel to get back to their own report — Phase 5-H's cycle in a new
+    // costume, which the deployed smoke caught. And nothing is minted here: the
+    // `oa` is the one this very request presented and `acceptOwnerFallback`
+    // already verified, so the view origin stays credential-free (ADR-0056).
+    //
+    // A write-grantee still gets the bare owner view and still funnels — they
+    // are never minted an `oa`, and the funnel is where their live `canWrite`
+    // re-check, and since ADR-0091 their own `gr`, comes from.
+    //
+    // `degradeTargetFor` answers both this href and the degrade `Location`, so
+    // the two cannot drift apart (review #247); its `ownerFallback` boolean is
+    // what the log line records — never the token.
     const readOnly = degradeTargetFor(decision, slug);
     console.warn(editUnopenableLine(slug, loaded.reason, readOnly.ownerFallback));
     const unopenableHeaders = authenticatedViewHeaders({ appOrigin });
@@ -218,7 +225,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
         reason: loaded.reason,
         slug,
         docTitle: report.title,
-        readOnlyHref: `/${slug}/view`,
+        readOnlyHref: readOnly.readOnlyTo,
       }),
       {
         status: UNOPENABLE_STATUS,

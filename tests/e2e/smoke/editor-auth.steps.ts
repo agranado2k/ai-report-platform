@@ -420,9 +420,18 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
   // is an improvement and whose net effect is that the OWNER of a private,
   // unopenable report cannot read it at all. The `arp_edit_oa` cookie carried
   // above IS the owner fallback, already verified by the gate, so the link must
-  // carry it as `?access=`.
+  // carry it.
+  //
+  // SINCE #363 THE SURFACE MOVED, NOT THE REQUIREMENT. The link points at the
+  // owner view — which is what "the read-only view" means now — so the shape is
+  // `/{slug}/view?oa=…` rather than `/{slug}?access=…`. The property under test
+  // is unchanged and deliberately still asserted: the one forward action this
+  // page offers must arrive holding a capability. A bare `/{slug}/view` would
+  // hold none under its own Path and would put the owner straight back into a
+  // funnel-dependent round trip — the same defect in a new costume, which is
+  // exactly what this assertion caught when the link was first repointed.
   expect(
     body,
-    "the read-only link must carry the verified owner fallback — a bare /{slug} sends a private report's owner to the unlock wall and back here, forever",
-  ).toContain(`/${slug}?access=`);
+    "the read-only link must carry the verified owner fallback — a bare owner-view link leaves a private report's owner depending on the funnel to reach their own report",
+  ).toContain(`/${slug}/view?oa=`);
 });

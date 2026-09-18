@@ -96,23 +96,25 @@ export interface UnopenableDocumentArgs {
    * (query or `arp_edit_oa` cookie) into this href as `?access=`, calling it
    * "the ONE token this page may carry".
    *
-   * SINCE #363 IT CARRIES NO TOKEN AT ALL. The link is now the owner view,
-   * `/{slug}/view`, which closes the same cycle by a better route: the owner
-   * view holds no capability under that path either, so following it funnels
-   * through the app's ONE mint (`/reports/{slug}/open`), which re-checks
-   * `canWrite` LIVE and hands back whatever capability the visitor is currently
-   * entitled to — an owner's `oa`, or since ADR-0091 a write-grantee's `gr`.
-   * So the property Phase 5-H bought — the one forward action actually reaches
-   * the content — now holds for BOTH principals, and it holds without this page
-   * emitting a 24h `owner:true` token into an anchor that lands in the history
-   * and the referer of every outbound link. Minting still happens nowhere here:
-   * the view origin stays credential-free (ADR-0056: the app authorizes, the
-   * viewer verifies).
+   * Since #363 the SURFACE moved and the capability did not: the href is now
+   * `/{slug}/view?oa=<verified oa>` — the owner view, which is what "the
+   * read-only view" means now, still carrying the fallback. Dropping the token
+   * was tried and is wrong: the owner view holds no capability under its own
+   * Path either, so a bare link makes a private report's owner depend entirely
+   * on the funnel being configured and reachable to get back to their own
+   * report — Phase 5-H's cycle in a new costume, caught by the deployed smoke.
    *
-   * `degradeTargetFor` is therefore no longer consulted for this href — only
-   * its `ownerFallback` boolean, for the log line.
+   * Carrying it mints NOTHING. It is the `oa` the visitor presented on this very
+   * request, already verified by `acceptOwnerFallback` (HMAC + this slug +
+   * unexpired + `owner === true`), so the view origin stays credential-free
+   * (ADR-0056: the app authorizes, the viewer verifies). The owner view redeems
+   * an `oa`-only query through ADR-0089 §3's second hand-off row. And it reuses
+   * the ONE degrade-target answer (`degradeTargetFor`) rather than growing a
+   * second one, which is exactly the duplication that helper exists to prevent.
    *
-   * Omitted / not root-relative → the bare `/{slug}`.
+   * Omitted / not root-relative → the bare `/{slug}/view`, which is also the
+   * correct link for a write-grantee: they are never minted an `oa`, and the
+   * funnel is where their live `canWrite` re-check happens.
    */
   readonly readOnlyHref?: string;
 }
@@ -136,14 +138,18 @@ function rootRelativePath(href: string | undefined, slug: string): string {
 /**
  * The fallback destination — this report's OWNER VIEW (#363).
  *
- * It was the bare `/{slug}` until owner-open flipped. That bare link is the one
- * Phase 5-H had to patch with `?access=<verified oa>`, because for a PRIVATE
- * report it walked the owner to the unlock page and back round. The owner view
- * closes the same cycle without carrying a token: it holds no capability under
- * its own Path, so it funnels to the app's ONE mint, which re-checks `canWrite`
- * LIVE and hands back a fresh one (ADR-0089 §4b). It is also simply the right
- * surface — this page's action says "open the read-only view", and the owner
- * view IS the read-only view now.
+ * It was the bare `/{slug}` until owner-open flipped, and it is simply the right
+ * surface now — this page's action says "open the read-only view", and the owner
+ * view IS the read-only view.
+ *
+ * This is the CAPABILITY-LESS form, used when the caller passes no href or an
+ * unusable one. The caller normally passes `degradeTargetFor(...).readOnlyTo`,
+ * which is this path plus the verified `oa` when the visitor presented one —
+ * because the owner view holds no capability under its own Path, so a bare link
+ * leaves a private report's owner depending on the funnel to reach their own
+ * report, which is ADR-0063 Phase 5-H's cycle all over again. A write-grantee
+ * legitimately gets this bare form: they are never minted an `oa`, and funnelling
+ * is where their live `canWrite` re-check comes from (ADR-0089 §4b).
  */
 function ownerViewPath(slug: string): string {
   return `/${slug}/view`;
