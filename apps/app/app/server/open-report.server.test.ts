@@ -573,3 +573,155 @@ describe("ownerOpenLocation — the destination (#363)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The editor panel hint through the mint (#382, completing #377).
+//
+// The owner view's Versions action is a plain link to `/<slug>/edit?panel=
+// versions` that deliberately holds no capability under that Path, so the
+// FIRST click funnels here for the live `canWrite` re-check (ADR-0089 §4b).
+// This function builds the location that funnel comes back to — so if it
+// drops the hint, the editor opens on the comments tab and the owner's one
+// click was spent on nothing.
+//
+// The mint FORWARDS the hint; it never routes on it. `?to=` alone chooses the
+// destination (unchanged), the `loadWritableReport` gate alone chooses who is
+// admitted (unchanged), and the hint is appended afterwards to whatever
+// location those two already decided.
+// ---------------------------------------------------------------------------
+describe("ownerOpenLocation — the editor panel hint (#382)", () => {
+  it("threads the hint into the editor hand-off, alongside the capability", async () => {
+    const { reports } = await seededReports("sssssssssm");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "sssssssssm",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+      panel: "versions",
+    });
+
+    expect(location.startsWith(`${VIEW}/sssssssssm/edit?et=`)).toBe(true);
+    // Last, after the capability: the tokens stay adjacent to `et=` and the
+    // hint is visibly the thing that grants nothing.
+    expect(location.endsWith("&panel=versions")).toBe(true);
+    expect(location).toContain("&oa=");
+  });
+
+  it("threads `comments` too — the enum, not one special-cased value", async () => {
+    const { reports } = await seededReports("sssssssssn");
+    const { deps } = makeDeps(reports);
+    await expect(
+      ownerOpenLocation(deps, {
+        actor: { orgId: ORG, userId: OWNER },
+        rawHandle: "sssssssssn",
+        viewOrigin: VIEW,
+        secret: SECRET,
+        destination: "editor",
+        panel: "comments",
+      }),
+    ).resolves.toContain("&panel=comments");
+  });
+
+  it.each([
+    ["an unknown panel", "diff"],
+    ["the wrong case", "Versions"],
+    ["an injected parameter", "versions&et=stolen"],
+    ["an absolute URL", "https://evil.example/x"],
+    ["an empty value", ""],
+    ["nothing at all", null],
+  ])("drops %s before the location is built", async (_name, raw) => {
+    const { reports } = await seededReports("ssssssssso");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "ssssssssso",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+      panel: raw,
+    });
+    expect(location).not.toContain("panel");
+    // …and the hand-off is otherwise exactly the one it builds with no hint
+    // at all: a rubbish hint costs the user nothing.
+    expect(location.startsWith(`${VIEW}/ssssssssso/edit?et=`)).toBe(true);
+  });
+
+  it("never rides the OWNER VIEW hand-off — that surface has no side panel", async () => {
+    // Only the gate's `/edit` funnel forwards a hint, so this shape arrives
+    // only if someone hand-crafts it. The owner view renders no panel, so the
+    // parameter would sit unread in an owner's address bar and history.
+    const { reports } = await seededReports("ssssssssnp");
+    const { deps } = makeDeps(reports);
+    const location = await ownerOpenLocation(deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "ssssssssnp",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      panel: "versions",
+    });
+    expect(location.startsWith(`${VIEW}/ssssssssnp/view?et=`)).toBe(true);
+    expect(location).not.toContain("panel");
+  });
+
+  it("admits nobody a hintless request would not admit", async () => {
+    const { reports } = await seededReports("ssssssssnq");
+    const { deps } = makeDeps(reports);
+    await expect(
+      ownerOpenLocation(deps, {
+        actor: { orgId: ORG, userId: COLLEAGUE },
+        rawHandle: "ssssssssnq",
+        viewOrigin: VIEW,
+        secret: SECRET,
+        destination: "editor",
+        panel: "versions",
+      }),
+    ).resolves.toBe("/");
+  });
+
+  it("no secret configured: the bare gated viewer, with no hint on it", async () => {
+    // Nothing was minted, so there is no editor to land in — the fall-through
+    // is the public viewer, and a panel hint there names nothing.
+    const { reports } = await seededReports("ssssssssnr");
+    const { deps } = makeDeps(reports);
+    await expect(
+      ownerOpenLocation(deps, {
+        actor: { orgId: ORG, userId: OWNER },
+        rawHandle: "ssssssssnr",
+        viewOrigin: VIEW,
+        secret: undefined,
+        destination: "editor",
+        panel: "versions",
+      }),
+    ).resolves.toBe(`${VIEW}/ssssssssnr`);
+  });
+
+  it("changes NOTHING about the capability or its audit trail", async () => {
+    // The mint is the security keystone (ADR-0059 §4). A hint that altered the
+    // token, its TTL, its claims or what the mint logs would be a capability
+    // wearing a hint's clothes.
+    const withHint = await seededReports("ssssssssns");
+    const hinted = makeDeps(withHint.reports);
+    const hintedLocation = await ownerOpenLocation(hinted.deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "ssssssssns",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+      panel: "versions",
+    });
+    const bare = makeDeps(withHint.reports);
+    const bareLocation = await ownerOpenLocation(bare.deps, {
+      actor: { orgId: ORG, userId: OWNER },
+      rawHandle: "ssssssssns",
+      viewOrigin: VIEW,
+      secret: SECRET,
+      destination: "editor",
+    });
+
+    expect(hintedLocation).toBe(`${bareLocation}&panel=versions`);
+    expect(hinted.logged).toEqual(bare.logged);
+    expect(JSON.stringify(hinted.logged)).not.toContain("panel");
+  });
+});

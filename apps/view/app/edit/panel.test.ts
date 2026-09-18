@@ -1,9 +1,11 @@
+import { EDITOR_PANELS } from "arp-domain";
 import { describe, expect, it } from "vitest";
 import {
   closePanel,
   INITIAL_PANEL_STATE,
   initialPanelState,
   openPanel,
+  PANEL_TABS,
   selectPanelTab,
   unresolvedCount,
 } from "./panel";
@@ -108,5 +110,28 @@ describe("initialPanelState", () => {
     // disagreeing with the rest of the panel.
     expect(initialPanelState(null).open).toBe(false);
     expect(initialPanelState("nope")).toBe(INITIAL_PANEL_STATE);
+  });
+
+  it("its deep-linkable list IS the domain enum, member for member (#382)", () => {
+    // The runtime half of the drift guard. `panel.ts` cannot value-import
+    // `EDITOR_PANELS` (the arp-domain barrel drags `node:crypto` into the
+    // browser bundle), so it declares an EXHAUSTIVE `Record<PanelTab, true>`
+    // that fails the BUILD on a missing or extra key. This test is the other
+    // half: it runs in node, imports the enum for real, and fails if the two
+    // lists ever differ in content or order.
+    expect([...PANEL_TABS]).toEqual([...EDITOR_PANELS]);
+  });
+
+  it.each(
+    EDITOR_PANELS,
+  )("honours %s — the editor's tabs and the hint the funnel carries are ONE enum (#382)", (panel) => {
+    // The hint now crosses two origins and four hops before it arrives here:
+    // owner view → the view gate's `/edit` funnel → the app's mint → the
+    // gate's clean-URL 303 → this function. Every one of those validates
+    // against `EDITOR_PANELS`. If this file kept a private list, a tab added
+    // to one and not the other would deep-link from the address bar and die
+    // on the click that actually produces it — which is #382 exactly, in a
+    // new place.
+    expect(initialPanelState(panel)).toEqual(openPanel(panel));
   });
 });

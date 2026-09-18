@@ -9,19 +9,61 @@
 // `hashchange` — a static SSR render can observe none of them, and apps/view
 // has no jsdom tier. The pure half (`reportFrameSrc`) is unit-tested in
 // `apps/view/app/view/frame.test.ts`; this is the composition the user meets.
+import { readFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 import { buildHarness } from "./harness/build.mjs";
 
 const FRAME = "iframe[title]";
+/** The slug the harness entry mounts the chrome with. */
+const SLUG = "abcde12345";
 
 test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
   let harnessPage: string;
+  /** The other end of the funnel: the editor's side-panel chrome, seeded by
+   *  the shipped `initialPanelState` from its own query string (#382). */
+  let editorPage: string;
+  let server: Server;
+  let origin: string;
 
   test.beforeAll(async () => {
     // The fixture arg is unused by this entry (the chrome injects no report —
     // it frames one by URL); pass the existing one so the shared page-shell
     // writer has something to inline.
     harnessPage = await buildHarness("report.html", "entry-owner-view.tsx");
+    editorPage = await buildHarness("report.html", "entry-edit-panel.tsx");
+
+    // ONE ephemeral loopback server, for the funnel case below only (the hash
+    // cases stay over `file://` — they are about React, not about an origin).
+    // The owner view's actions are ROOT-ABSOLUTE links (`/<slug>/edit`), and
+    // over `file://` those resolve to the filesystem root and never commit, so
+    // a real click cannot be followed there at all. Two static pages behind
+    // the two paths the chrome links to is the smallest thing that lets the
+    // browser do what the owner's browser does. Still hermetic in every sense
+    // ADR-0079 cares about — no deployment, no credentials, no database, no
+    // network — and the precedent is `owner-view-framing.spec.ts`, which binds
+    // one for the same reason (ADR-0089 §7).
+    const pages: Record<string, string> = {
+      [`/${SLUG}/view`]: harnessPage,
+      [`/${SLUG}/edit`]: editorPage,
+    };
+    server = createServer((req, res) => {
+      const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+      const file = pages[path];
+      if (!file) {
+        res.writeHead(404).end("not found");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(readFileSync(file, "utf8"));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  test.afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
   test("forwards the address bar's fragment into the frame at load", async ({ page }) => {
@@ -80,6 +122,59 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
       "href",
       "/abcde12345/edit",
     );
+  });
+
+  test("Versions reaches the editor with the versions panel ALREADY OPEN (#382)", async ({
+    page,
+  }) => {
+    // The claim #377 made and could not keep. Its href was right, but the
+    // owner view's Versions action is a PLAIN LINK holding no capability
+    // (ADR-0089 §4b), so the click funnels: the view gate, the app's one mint,
+    // then back through the gate's clean-URL 303. Every one of those hops
+    // rebuilds the URL from its parts, and every one of them dropped the hint
+    // — so the editor opened closed on comments for the one click whose whole
+    // purpose was version history.
+    //
+    // WHAT THIS TEST OWNS, and what it does not. The three redirect hops are
+    // pinned in the node tier, at the seams that build them (gate.server.test
+    // .ts, open-report.server.test.ts); the server behind this page is a
+    // stand-in for them, not a re-implementation of them. What no node test
+    // can observe is the end of the chain, and that is what runs here: a real
+    // click, a real navigation carrying the query, and the editor's own panel
+    // chrome MOUNTING open on versions from it. `initialPanelState` is a lazy
+    // `useState` initialiser — a statement about mounting, which apps/view's
+    // `environment: "node"` vitest tier cannot make.
+    await page.goto(`${origin}/${SLUG}/view`);
+    await expect(page.getByTestId("owner-view")).toBeVisible();
+
+    await page.getByRole("link", { name: "Versions" }).click();
+    await expect(page).toHaveURL(`${origin}/${SLUG}/edit?panel=versions`);
+
+    await expect(page.getByTestId("side-panel")).toHaveAttribute("data-tab", "versions");
+    await expect(page.getByRole("button", { name: "Versions" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByRole("button", { name: "Comments" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect(
+      page.getByRole("button", { name: /^Open comments and versions panel/ }),
+    ).toHaveCount(0);
+  });
+
+  test("an ordinary editor visit is unchanged: closed, behind the edge affordance", async ({
+    page,
+  }) => {
+    // The counterpart that makes the case above mean something. With no hint
+    // the editor still opens document-dominant, so a panel that were open by
+    // default could not satisfy both tests at once.
+    await page.goto(`${origin}/${SLUG}/edit`);
+    await expect(
+      page.getByRole("button", { name: /^Open comments and versions panel/ }),
+    ).toBeVisible();
+    await expect(page.getByTestId("side-panel")).toHaveCount(0);
   });
 
   test("a LATER top-level hash change does not remount or re-navigate the frame", async ({

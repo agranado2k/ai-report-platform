@@ -44,7 +44,13 @@ import {
   type ReportRepository,
   type TenancyActor,
 } from "arp-application";
-import { mintAccessToken, mintEditToken, mintGranteeReadToken } from "arp-domain";
+import {
+  mintAccessToken,
+  mintEditToken,
+  mintGranteeReadToken,
+  readPanelHint,
+  withPanelHint,
+} from "arp-domain";
 import { resolveReportSlug } from "./report-handle.server";
 
 export const EDIT_TTL_SECONDS = 900; // 15 min edit capability (ADR-0063) — a write is
@@ -121,6 +127,26 @@ export interface OwnerOpenRequest {
    * bare gated viewer when no secret is configured.
    */
   readonly destination?: OwnerOpenDestination;
+  /**
+   * The editor's side-panel hint, exactly as it arrived on the query (#382).
+   * RAW on purpose: this function validates it against the closed
+   * `EditorPanel` enum, so the route stays a transport shell and the drop
+   * happens in the seam the tests can reach.
+   *
+   * It exists because the funnel eats hints. The owner view's Versions action
+   * is a plain link to `/<slug>/edit?panel=versions` holding no capability
+   * (ADR-0089 §4b), so the first click lands at this mint and comes back on
+   * the location built below — which, until now, was the bare editor URL. The
+   * hint died here, and the editor opened on comments for the one click whose
+   * whole purpose was version history.
+   *
+   * FORWARDED, NEVER ROUTED ON. `destination` (`?to=`) alone decides which
+   * surface this mint spends the capability on, and `loadWritableReport`
+   * alone decides who gets one; the hint is appended to whatever location
+   * those two already chose. ADR-0063's rule for this seam — do not give the
+   * one mint a second job — is what that separation buys.
+   */
+  readonly panel?: string | null;
 }
 
 /** Where `/reports/{slug}/open` spends the capability it mints (#363). */
@@ -251,6 +277,16 @@ export async function ownerOpenLocation(
 
   const segment = DESTINATION_SEGMENT[destination];
   const location = `${req.viewOrigin}/${slug.value}/${segment}?et=${encodeURIComponent(editToken)}`;
+  // The panel hint (#382), validated here and only here on this origin: an
+  // unrecognised value is DROPPED before it can reach the string below, so the
+  // only thing that can appear as `panel=` is a member of the closed enum.
+  //
+  // EDITOR ONLY, and that is an append condition rather than a branch: the
+  // destination was chosen above by `?to=` and is not reconsidered. The owner
+  // view has no side panel, so forwarding a hint there would put a parameter
+  // nothing downstream reads into an owner's address bar, history and referer
+  // — and the gate's owner-view funnel never sends one anyway.
+  const panel = destination === "editor" ? readPanelHint(req.panel) : undefined;
   // Exactly one of these is ever appended (see the ternary above).
   //
   // `oa=` carries the SAME exposure the pre-Phase-5 owner-view flow already had
@@ -265,7 +301,15 @@ export async function ownerOpenLocation(
   // clean-URL 303's query strip.
   // It exists only for the owner-view destination (see the mint above), so no
   // destination check is needed here.
-  if (ownerAccessToken) return `${location}&oa=${encodeURIComponent(ownerAccessToken)}`;
-  if (granteeReadToken) return `${location}&gr=${encodeURIComponent(granteeReadToken)}`;
-  return location;
+  //
+  // The hint goes on LAST, after whichever read capability was minted. The
+  // tokens stay adjacent to `et=` (the existing shapes are unchanged), and
+  // the ordering says what the parameters are: capabilities first, then the
+  // thing that grants nothing.
+  const readCapability = ownerAccessToken
+    ? `&oa=${encodeURIComponent(ownerAccessToken)}`
+    : granteeReadToken
+      ? `&gr=${encodeURIComponent(granteeReadToken)}`
+      : "";
+  return withPanelHint(`${location}${readCapability}`, panel);
 }
