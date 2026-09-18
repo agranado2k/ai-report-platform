@@ -218,6 +218,9 @@ importers:
       '@types/supertest':
         specifier: ^6.0.0
         version: 6.0.3
+      arp-headers:
+        specifier: workspace:*
+        version: link:../../packages/headers
       esbuild:
         specifier: ^0.25.12
         version: 0.25.12
@@ -355,6 +358,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.2
         version: 0.5.2
+      arp-headers:
+        specifier: workspace:*
+        version: link:../headers
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -523,6 +529,9 @@ importers:
 
   packages/report-html:
     dependencies:
+      arp-headers:
+        specifier: workspace:*
+        version: link:../headers
       linkedom:
         specifier: ^0.18.13
         version: 0.18.13

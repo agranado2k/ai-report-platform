@@ -353,7 +353,16 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "it opens); a document with no <body> tag at all is fine and opens normally; " +
         "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
         "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
-        "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
+        "Re-upload a full <html><body>…</body></html> document if you want it to be editable. " +
+        "The response also carries warnings[] — a list of { code, detail }, EMPTY when there is " +
+        "nothing to say (never absent). code is 'external-resource-blocked' (one per URL your " +
+        "document references that the viewer's Content-Security-Policy will not load — see the " +
+        "VIEWER CSP ALLOWLIST in the html parameter) or 'editor-lossy' (opening this report in " +
+        "the editor and saving it would not keep the whole document; detail names what would be " +
+        "dropped). A warning is NOT an error and never changes the status: the upload succeeded " +
+        "and the bytes are stored and served exactly as you sent them. Read them while you still " +
+        "have the document — fix it and call this again with update_slug, and the view_url is " +
+        "unchanged.",
       inputSchema: {
         html: z
           .string()
@@ -373,7 +382,21 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
               "attribute order is not preserved. SIZE: the MCP transport caps the whole " +
               "JSON-RPC request at 4 MiB, and JSON escaping inflates the HTML in transit — " +
               "keep the document under ~3.5MB or the call fails with HTTP 413. Bigger " +
-              "files go through the web upload instead (per-file cap 25 MiB).",
+              "files go through the web upload instead (per-file cap 25 MiB). " +
+              "SELF-CONTAINED: the document is served byte-for-byte on the viewer origin and " +
+              "NO host CSS reset, stylesheet or script is injected around it — anything your " +
+              "report relies on must be inside your report. (1) If you toggle the `hidden` " +
+              "attribute (slides, tabs, accordions), put `[hidden]{display:none!important}` in " +
+              "your own stylesheet; nothing else will, and without it every hidden section " +
+              "renders at once. (2) Fonts: inline them as data: URIs, or load them from Google " +
+              "Fonts. (3) No host-relative assets (`/logo.png`, `./app.js`, `theme.css`): this " +
+              "upload is ONE self-contained document and nothing is stored beside it, so those " +
+              "404. Inline every asset as a data: URI. (4) External URLs load ONLY from the " +
+              "VIEWER CSP ALLOWLIST: https://fonts.googleapis.com (stylesheets), " +
+              "https://fonts.gstatic.com (font files), https://cdnjs.cloudflare.com and " +
+              "https://cdn.jsdelivr.net/npm/ (scripts). EVERYTHING else is blocked by the " +
+              "viewer, including any image, iframe or webfont from any other host — and the " +
+              "upload response's warnings[] names each one it finds.",
           ),
         update_slug: z
           .string()
