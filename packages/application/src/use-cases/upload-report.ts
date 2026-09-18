@@ -33,10 +33,12 @@ import { type CanWriteDeps, canWrite } from "../load-owned";
 import type {
   AuditLogger,
   BlobStore,
+  BlockedExternalResource,
   BundleProcessor,
   EditabilityProbe,
   EventOutbox,
   FidelityProbe,
+  FidelityVerdict,
   FolderRepository,
   Hasher,
   IdempotencyStore,
@@ -44,6 +46,7 @@ import type {
   PlanLimiter,
   ProcessedBundle,
   ReportRepository,
+  ResourceScanner,
   ScanQueue,
   SlugFactory,
   UnitOfWork,
@@ -64,6 +67,9 @@ export interface UploadReportDeps extends CanWriteDeps {
   /** What a save through the editor would COST this version (ADR-0090) — the
    *  orthogonal twin, run at the same moment through the same seam. */
   readonly fidelity: FidelityProbe;
+  /** What the VIEWER will refuse to load out of this document (#365) — the
+   *  third write-time question, asked while the author still holds the bytes. */
+  readonly resources: ResourceScanner;
   readonly idempotency: IdempotencyStore;
   readonly outbox: EventOutbox;
   /** Audit log (ADR-0070) — one `report.uploaded` row per fresh upload/re-upload. */
@@ -108,6 +114,32 @@ export interface UploadCommand {
   readonly sourceDoc?: Record<string, unknown>;
 }
 
+/**
+ * What an upload has to TELL its author about what they just published (#365).
+ *
+ * A closed set of codes, because the consumer is usually an agent: MCP is this
+ * product's primary write surface, and an agent that can branch on a code can
+ * fix the document and re-upload before a human ever opens it. A free-text
+ * message alone would be readable and un-actionable.
+ *
+ * - `external-resource-blocked` — the document references a URL the viewer's
+ *   CSP (ADR-0088) will not load. One per blocked URL.
+ * - `editor-lossy` — this version's recorded Fidelity (ADR-0090) is `lossy`:
+ *   opening it in the editor and saving would drop part of the document.
+ *
+ * A warning is ADVISORY and never a rejection: it does not change the status
+ * code, does not fail the upload, and the bytes are stored and served exactly
+ * as uploaded either way. Publishing view-only content, or content that reaches
+ * for a host the viewer blocks, is a legitimate thing to do.
+ */
+export type UploadWarningCode = "external-resource-blocked" | "editor-lossy";
+
+export interface UploadWarning {
+  readonly code: UploadWarningCode;
+  /** A sentence naming the specific thing and what to do about it. */
+  readonly detail: string;
+}
+
 export interface UploadResult {
   readonly slug: string;
   readonly version: number;
@@ -117,6 +149,10 @@ export interface UploadResult {
    *  product's primary write surface — learns immediately that what it just
    *  published views fine and will not open in the editor. */
   readonly editability: VersionEditability | null;
+  /** What the author should know about what they just published (#365). ALWAYS
+   *  present — an upload with nothing to say carries an empty list, never an
+   *  absent field, so a client can tell "no warnings" from "an old server". */
+  readonly warnings: readonly UploadWarning[];
 }
 
 export interface UploadOutcome {
@@ -166,8 +202,21 @@ export async function uploadReport(
   // split or parse there is no round trip to run, so there is no honest
   // verdict and UNKNOWN is the only truthful answer. Never a rejection either:
   // publishing view-only content is legitimate.
-  const fidelity =
+  const fidelityVerdict =
     editability === "editable" ? probeFidelity(deps, bundle, cmd.sourceDoc !== undefined) : null;
+  const fidelity = fidelityVerdict?.fidelity ?? null;
+
+  // 2e. Upload warnings (#365). The two write-time questions above answer what
+  // the EDITOR would do with these bytes; this one answers what the VIEWER
+  // will, by scanning the document for references the ADR-0088 allowlist does
+  // not cover. Assembled here, in the one place that already holds both
+  // answers, so the HTTP response and the MCP tool cannot drift apart.
+  //
+  // Advisory, exactly like its inputs: warnings never change the status code
+  // and never reject. And the scan never FETCHES what it finds — the uploaded
+  // document is untrusted content (ADR-0069) and the port is synchronous so
+  // that it cannot.
+  const warnings = assembleWarnings(scanResources(deps, bundle), fidelityVerdict);
 
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
   //
@@ -243,6 +292,7 @@ export async function uploadReport(
     version: newVersion.versionNo,
     scanStatus: newVersion.scanStatus,
     editability: newVersion.editability,
+    warnings,
   };
   const committed = await deps.uow.run(async () => {
     const saved = await deps.reports.save(report);
@@ -316,7 +366,11 @@ function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
     // `editability` key at all, and rejecting it would turn every pre-existing
     // in-flight idempotency record into a 500. `undefined` is normalized to
     // `null` (UNKNOWN) below — the same honest answer the column gives.
-    (b.editability !== undefined && b.editability !== null && typeof b.editability !== "string")
+    (b.editability !== undefined && b.editability !== null && typeof b.editability !== "string") ||
+    // Present-but-optional for the same reason, one change later: a record
+    // stored before #365 has no `warnings` key, and reading it as a 500 would
+    // punish every in-flight upload across the deploy that adds them.
+    (b.warnings !== undefined && !Array.isArray(b.warnings))
   ) {
     return err({
       kind: "Unexpected",
@@ -326,6 +380,7 @@ function parseUploadResult(body: unknown): Result<UploadResult, AppError> {
   return ok({
     ...(b as unknown as UploadResult),
     editability: (b.editability ?? null) as VersionEditability | null,
+    warnings: (b.warnings ?? []) as readonly UploadWarning[],
   });
 }
 
@@ -373,19 +428,154 @@ function probeEditability(
  * entry-document bytes there is nothing to round-trip, and guessing `lossless`
  * would be the false assurance the field exists to remove.
  *
- * Only the VERDICT is persisted. The probe also reports WHAT the round trip
- * would drop, which is what the Edit confirm dialog and the upload warnings
- * will name (PRD #356); those are separate tickets, so the lost items stay on
- * the port's contract rather than in this column.
+ * Only the VERDICT is persisted (ADR-0090 §3). The WHOLE verdict is returned
+ * here because the lost items are what the `editor-lossy` warning names (#365):
+ * "this edit is lossy" without a subject is an alarm nobody can act on.
  */
 function probeFidelity(
   deps: Pick<UploadReportDeps, "fidelity">,
   bundle: ProcessedBundle,
   hasSourceDoc: boolean,
-): VersionFidelity | null {
+): FidelityVerdict | null {
   const entry = bundle.files.find((f) => f.path === bundle.entryDocument);
   if (!entry) return null;
-  return deps.fidelity.probe(entry.bytes, hasSourceDoc)?.fidelity ?? null;
+  return deps.fidelity.probe(entry.bytes, hasSourceDoc);
+}
+
+/**
+ * Ask the scanner what the viewer will refuse to load (#365).
+ *
+ * Same UNKNOWN rule as its two siblings, with the same consequence: no entry
+ * document means nothing to read, so the honest answer is "nothing found" —
+ * which here is also the safe one, because an absent warning costs a hint,
+ * never a security decision.
+ */
+function scanResources(
+  deps: Pick<UploadReportDeps, "resources">,
+  bundle: ProcessedBundle,
+): readonly BlockedExternalResource[] {
+  const entry = bundle.files.find((f) => f.path === bundle.entryDocument);
+  if (!entry) return [];
+  return deps.resources.scan(entry.bytes);
+}
+
+/**
+ * Turn the two write-time findings into the author-facing list (#365).
+ *
+ * Ordering is deliberate and stable: the blocked resources first, in the order
+ * the document references them, then the editor verdict. Resource warnings are
+ * per-URL and immediately fixable in the document; the editor one is a single
+ * statement about the whole thing, and reads as the summary it is when it comes
+ * last.
+ */
+/**
+ * How many blocked resources are named individually.
+ *
+ * A bound, not a preference. The scan is total over an untrusted document, so
+ * a few KB of repeated `<img>` tags produced a warning each: a multi-MB
+ * response, and the same list persisted verbatim into the idempotency record
+ * inside the commit transaction. Fifty named resources is already more than an
+ * author will work through by hand, and the rest are summarised rather than
+ * dropped.
+ */
+const MAX_RESOURCE_WARNINGS = 50;
+
+/**
+ * How much of a URL is quoted back.
+ *
+ * The URL is attacker-controlled text from the uploaded document, and this
+ * text is handed to an agent by `reports_upload`. It is bounded so a document
+ * cannot use the warning list as a channel for a payload of arbitrary size.
+ */
+const MAX_URL_IN_DETAIL = 300;
+
+function assembleWarnings(
+  blocked: readonly BlockedExternalResource[],
+  fidelity: FidelityVerdict | null,
+): readonly UploadWarning[] {
+  const named = blocked.slice(0, MAX_RESOURCE_WARNINGS);
+  const warnings: UploadWarning[] = named.map((resource) => ({
+    code: "external-resource-blocked" as const,
+    detail: blockedResourceDetail(resource),
+  }));
+  const remaining = blocked.length - named.length;
+  if (remaining > 0) {
+    // Summarised, never silently dropped: a list that just stopped would tell
+    // the author the rest of their document is fine.
+    warnings.push({
+      code: "external-resource-blocked",
+      detail:
+        `…and ${remaining} more external resources will be blocked by the viewer's ` +
+        `Content-Security-Policy. The first ${MAX_RESOURCE_WARNINGS} are named above. ` +
+        "The report still publishes and views — only these resources will not load.",
+    });
+  }
+  if (fidelity?.fidelity === "lossy") {
+    warnings.push({ code: "editor-lossy", detail: lossyDetail(fidelity) });
+  }
+  return warnings;
+}
+
+/**
+ * A URL from the uploaded document, made safe to quote back.
+ *
+ * The scan reports the URL exactly as the document writes it — that is its
+ * contract, and the string the author searches for. Presenting it is a
+ * different job. This text travels to an agent through `reports_upload`, so
+ * the bytes an uploader chose are UNTRUSTED CONTENT arriving on an agent's
+ * input (ADR-0069): control characters are collapsed so a `src` cannot forge
+ * line structure in whatever is reading the response, and the length is
+ * bounded so the warning list cannot carry an arbitrary payload. Neither makes
+ * hostile text harmless — nothing here can — but both remove the shapes that
+ * let it pretend to be something other than a URL the document contained.
+ */
+function displayUrl(url: string): string {
+  const overlong = url.length > MAX_URL_IN_DETAIL;
+  // Bound FIRST, then rewrite: the input is attacker-sized, and there is no
+  // reason to walk 50 KB to render 300 characters of it.
+  const bounded = overlong ? url.slice(0, MAX_URL_IN_DETAIL) : url;
+  const flattened = Array.from(bounded, (ch) => (isControlChar(ch) ? " " : ch))
+    .join("")
+    .trim();
+  return overlong ? `${flattened}… (truncated)` : flattened;
+}
+
+/** A C0 control character or DEL — the codes that let text forge line and field
+ *  structure in whatever renders it. Written as a code comparison rather than a
+ *  character class because a control character in a regex is itself a lint
+ *  error (`noControlCharactersInRegex`), and rightly so. */
+function isControlChar(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code < 0x20 || code === 0x7f;
+}
+
+function blockedResourceDetail({ url, directive, allowed }: BlockedExternalResource): string {
+  const permitted =
+    allowed.length > 0
+      ? `${directive} allows only ${allowed.join(", ")}`
+      : directive === "frame-src"
+        ? // The public viewer policy declares NO `frame-src` (ADR-0088) — frames
+          // are governed by the `default-src` fallback. Naming a directive the
+          // policy does not have would tell an agent there is one to widen.
+          "frames fall back to default-src 'self', which allows no external host"
+        : `${directive} allows no external host`;
+  return (
+    `${displayUrl(url)} will be blocked by the viewer's Content-Security-Policy: ${permitted}. ` +
+    "Inline the asset (a data: URI works) or load it from an allowed host. " +
+    "The report still publishes and views — only this resource will not load."
+  );
+}
+
+function lossyDetail({ lostElements, lostAttributes }: FidelityVerdict): string {
+  const parts: string[] = [];
+  if (lostElements.length > 0) parts.push(`elements: ${lostElements.join(", ")}`);
+  if (lostAttributes.length > 0) parts.push(`attributes: ${lostAttributes.join(", ")}`);
+  const what = parts.length > 0 ? ` It would drop ${parts.join("; ")}.` : "";
+  return (
+    "Opening this report in the editor and saving it would not keep the whole document." +
+    `${what} The published bytes are served untouched (ADR-0038) — this affects only a ` +
+    "save made through the editor."
+  );
 }
 
 function create(

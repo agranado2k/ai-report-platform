@@ -20,15 +20,16 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { describeReportSharing } from "arp-domain";
-import { editViewHeaders } from "arp-headers/view";
+import { authenticatedViewHeaders } from "arp-headers/view";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { decideServe, ownerViewDegradeLine } from "../server/gate.server";
 import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
 import { OwnerViewChrome } from "../view/components/OwnerViewChrome";
+import { loadLossyWarning } from "../view/lossy-warning";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const { secret, appOrigin } = viewerAccessConfig();
-  const { reports, grants, orgWriteGrants } = viewerDeps();
+  const { reports, grants, orgWriteGrants, blobs } = viewerDeps();
   const slug = params.slug ?? "";
 
   const decision = await decideServe(request, slug, "ownerView", {
@@ -67,7 +68,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // the spike made non-negotiable: `Origin-Agent-Cluster: ?1`, so the chrome
   // and the report it frames are UNIFORMLY origin-keyed — Chromium warns when
   // they disagree.
-  const headers = editViewHeaders({ appOrigin });
+  const headers = authenticatedViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 
   // The frame's own read capability (ADR-0089 §4c). APPEND, for the same
@@ -105,12 +106,42 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // calls nothing cross-origin, so it carries nothing, and its capability
   // stays in HttpOnly cookies this page's own JS cannot read. Adding a
   // client-side API call here would mean re-opening that argument.
+
+  // ADR-0090 / #364 — what an editor save would COST, for the Edit confirm.
+  //
+  // Gated twice, and both gates matter. The recorded verdict gates the work
+  // (`loadLossyWarning` reads nothing at all unless the live version is
+  // `lossy`, so the common path pays exactly what it paid before), and
+  // `canEdit` gates the question itself: the owner-read degrade offers no Edit
+  // action, so there is no consequence to warn about and no reason to spend a
+  // blob read on one.
+  //
+  // WHY RE-PROBE rather than read a stored list: ADR-0090 persists the verdict
+  // only, by design — the reasoning, and the three rejected alternatives, are
+  // recorded at the top of `../view/lossy-warning.ts`.
+  //
+  // The lists are element and attribute NAMES — no bytes, no capability, no
+  // report content — so this stays inside ADR-0089 §6's rule about what may
+  // enter this payload.
+  const lossyWarning =
+    decision.capability === "write"
+      ? await loadLossyWarning({
+          blobs,
+          reportId: decision.report.id,
+          versionId: decision.version.id,
+          entryDocument: decision.version.manifest.entryDocument,
+          fidelity: decision.version.fidelity,
+          slug: decision.report.slug,
+        })
+      : null;
+
   return json(
     {
       slug: decision.report.slug,
       docTitle: decision.report.title,
       shareState: sharing.label,
       canEdit: decision.capability === "write",
+      lossyWarning,
     },
     { headers },
   );

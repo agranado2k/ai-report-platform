@@ -54,6 +54,34 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     await expect(page.locator(FRAME)).toHaveAttribute("src", "/abcde12345");
   });
 
+  test("Versions deep-links into the editor's versions tab, in one click (#377)", async ({
+    page,
+  }) => {
+    // Version history lives in the editor's own side panel, so Versions is a
+    // deep link INTO the editor rather than a second destination. Pointing it
+    // at a bare `/<slug>/edit` landed the owner with the panel CLOSED on the
+    // comments tab — one click short of what they asked for, and nothing on
+    // screen to say why. `?panel=versions` is the entry point that closes it
+    // (`apps/view/app/edit/panel.ts`).
+    //
+    // Asserted here, on the MOUNTED chrome, because this is the composition:
+    // the route builds the href and `OwnerViewTopBar` renders it, and the bar's
+    // own fixture cannot prove the route agrees with it.
+    await page.goto(`file://${harnessPage}`);
+    await expect(page.getByTestId("owner-view")).toBeVisible();
+
+    await expect(page.getByRole("link", { name: "Versions" })).toHaveAttribute(
+      "href",
+      "/abcde12345/edit?panel=versions",
+    );
+    // Edit stays the bare editor URL — the two props hold two intents, and
+    // this is the assertion that keeps them from being quietly re-merged.
+    await expect(page.getByRole("link", { name: "Edit", exact: true })).toHaveAttribute(
+      "href",
+      "/abcde12345/edit",
+    );
+  });
+
   test("a LATER top-level hash change does not remount or re-navigate the frame", async ({
     page,
   }) => {

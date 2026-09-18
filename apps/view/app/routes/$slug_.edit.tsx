@@ -48,7 +48,7 @@
 // ADR-0063's "4c client" note).
 import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { versionIdToWire } from "arp-domain";
 import {
   type ActiveFormats,
@@ -59,7 +59,7 @@ import {
   type ReportEditorHandle,
   type SelectionGeometry,
 } from "arp-editor";
-import { editViewHeaders } from "arp-headers/view";
+import { authenticatedViewHeaders } from "arp-headers/view";
 import { type PMDocJson, reinjectShell } from "arp-report-html";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addComment, listComments } from "../edit/comments-client";
@@ -76,7 +76,7 @@ import { loadEditableDocument } from "../edit/load-document";
 import { buildEditLoaderExtras } from "../edit/loader-data";
 import {
   closePanel,
-  INITIAL_PANEL_STATE,
+  initialPanelState,
   openPanel,
   type PanelState,
   selectPanelTab,
@@ -183,7 +183,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // follow — and finally tells the user WHY (edit/unopenable.ts).
     //
     // Same route, so the SAME ADR-013 header stack as the editor render below
-    // (`editViewHeaders`): this is the first-party Remix document, and it
+    // (`authenticatedViewHeaders`): this is the first-party Remix document, and it
     // carries strictly less than the editor does — no report bytes, no edit
     // token. `viewHeaders()` would be wrong here; its top-level `sandbox` CSP
     // is for the untrusted report on `GET /<slug>`, not for this app's own UI.
@@ -211,7 +211,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // is what distinguishes the two outcomes that matter operationally.
     const readOnly = degradeTargetFor(decision, slug);
     console.warn(editUnopenableLine(slug, loaded.reason, readOnly.ownerFallback));
-    const unopenableHeaders = editViewHeaders({ appOrigin });
+    const unopenableHeaders = authenticatedViewHeaders({ appOrigin });
     unopenableHeaders.set("x-robots-tag", "noindex, nofollow");
     return json(
       unopenableDocument({
@@ -258,7 +258,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     console.warn(JSON.stringify({ event: "edit-versions-truncated-at-cap", slug }));
   }
 
-  const headers = editViewHeaders({ appOrigin });
+  const headers = authenticatedViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 
   // SECURITY: `editToken` is returned to the CLIENT below (loader JSON,
@@ -273,7 +273,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // `sandbox=""`, for Compare). Those iframes execute no
   // script of their own and cannot reach into the PARENT document's JS
   // context (the one holding `editToken`) — the token's real exposure
-  // boundary is instead this route's OWN CSP (`editViewHeaders`'s
+  // boundary is instead this route's OWN CSP (`authenticatedViewHeaders`'s
   // `script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) — nothing but
   // this app's first-party bundle ever executes in the document that holds
   // the token.
@@ -356,7 +356,24 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
   // The side panel: collapsed by default (document-dominant), with a remembered
   // inner tab. Replaces the old `activeTab: "comments"|"versions"|null` — see
   // ../edit/panel.ts for the pure state helpers.
-  const [panel, setPanel] = useState<PanelState>(INITIAL_PANEL_STATE);
+  // The panel's URL entry point (#377). `?panel=versions` is what makes the
+  // owner view's Versions action (ADR-0089) actually REACH version history,
+  // which lives in this side panel rather than on a surface of its own.
+  //
+  // `useSearchParams` rather than `window.location.search`: the router knows
+  // the URL on the server too, so the first client render matches the server's
+  // and no hydration mismatch is possible.
+  //
+  // Read ONCE, in a lazy initialiser — this is seed state, not synced state.
+  // Passing it as a dependency instead would re-open the panel every time the
+  // query changed for any other reason, and fighting the user's own tab
+  // switches is worse than the gap this closes. It grants nothing: the gate
+  // above already decided this render happens, and an unknown value falls back
+  // to exactly today's default.
+  const [searchParams] = useSearchParams();
+  const [panel, setPanel] = useState<PanelState>(() =>
+    initialPanelState(searchParams.get("panel")),
+  );
   const [comments, setComments] = useState<readonly CommentWire[]>(initialComments);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
   // WHERE the selection sits (host viewport coordinates) — drives the

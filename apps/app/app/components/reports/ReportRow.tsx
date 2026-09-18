@@ -25,6 +25,11 @@ export interface ReportRowItem {
   readonly displayFolderId: string;
   /** ADR-0080 — why edit won't work, or null. Rendered, never re-decided. */
   readonly editabilityNotice: { readonly label: string; readonly title: string } | null;
+  /** ADR-0090 — what a SAVE would cost, or null. The orthogonal verdict: this
+   *  one fires on a report the editor opens perfectly well. Its own slot, not
+   *  a variant of the one above, because `editable` + `lossy` is a real state
+   *  and one badge could not carry both sentences. Rendered, never re-decided. */
+  readonly fidelityNotice: { readonly label: string; readonly title: string } | null;
   readonly sharing: ComponentProps<typeof ReportSharingMenu>["node"];
 }
 
@@ -70,6 +75,16 @@ export function ReportRow({
           {r.editabilityNotice ? (
             <Badge tone="neutral" className="relative z-10" title={r.editabilityNotice.title}>
               {r.editabilityNotice.label}
+            </Badge>
+          ) : null}
+          {/* ADR-0090 — the second verdict, in its own slot beside the first.
+              Both can be absent, either can be present; in practice they are
+              mutually exclusive (fidelity is only probed when editability is
+              `editable`), but nothing here depends on that, so a future
+              schema change cannot make the row drop a sentence. */}
+          {r.fidelityNotice ? (
+            <Badge tone="neutral" className="relative z-10" title={r.fidelityNotice.title}>
+              {r.fidelityNotice.label}
             </Badge>
           ) : null}
         </div>

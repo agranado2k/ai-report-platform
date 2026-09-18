@@ -28,6 +28,11 @@ export {
   FALLBACK_INS_CLASS,
   STRUCTURAL_DIFF_UNAVAILABLE_LABEL,
 } from "./html-fallback.js";
+// What the viewer's CSP will refuse to load, asked at upload time so the author
+// learns it while they still hold the document (#365). Reads the ONE allowlist
+// (ADR-0088); never fetches anything (ADR-0069).
+export type { BlockedDirective, BlockedExternalResource, ScanOptions } from "./resource-scan.js";
+export { scanBlockedResources } from "./resource-scan.js";
 // Exported so the editor's link-activation gate can reuse the SAME
 // dangerous-URL predicate the schema enforces at parse/serialize time
 // (ADR-0062 Amendment 3), rather than growing a second copy of it.

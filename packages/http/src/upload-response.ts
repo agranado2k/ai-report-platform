@@ -26,7 +26,7 @@ export function uploadResultToHttp(
   opts: UploadResponseOptions,
 ): HttpResponse {
   if (result.ok) {
-    const { slug, version, scanStatus, editability } = result.value.result;
+    const { slug, version, scanStatus, editability, warnings } = result.value.result;
     const { reportId } = result.value; // the created report's id (fresh upload only)
     const viewUrl = `${opts.viewBaseUrl}/${slug}`;
     return {
@@ -45,6 +45,13 @@ export function uploadResultToHttp(
         // not, why. Always present; `null` = UNKNOWN. Never a rejection: the
         // upload succeeded, the bytes are stored verbatim and will serve.
         editability,
+        // #365 — what the author should know about what they just published:
+        // the external resources the viewer's CSP will block (ADR-0088) and
+        // whether a save through the editor would be lossy (ADR-0090). ALWAYS
+        // present, `[]` when there is nothing to say, so a client can tell a
+        // clean upload from a server that does not compute warnings. Advisory:
+        // the status is 201 either way and no warning ever rejects an upload.
+        warnings,
         mode: opts.mode,
       },
       headers: { Location: viewUrl },

@@ -22,6 +22,37 @@ export interface PanelState {
 
 export const INITIAL_PANEL_STATE: PanelState = { open: false, tab: "comments" };
 
+/** The tabs a URL is allowed to name. Derived from one place so a third tab
+ *  cannot become deep-linkable by accident, nor stay un-linkable by omission. */
+const PANEL_TABS: readonly PanelTab[] = ["comments", "versions"];
+
+/**
+ * The panel state a fresh editor mount starts in, given the `?panel=` search
+ * param (#377).
+ *
+ * Version history lives in this panel rather than on a surface of its own, so
+ * the owner view's Versions action (ADR-0089) had nowhere to point: it landed
+ * on `/<slug>/edit` with the panel closed on comments, one click short of what
+ * the owner asked for. This is the entry point that closes that gap.
+ *
+ * The param is a **hint, not a capability**. It chooses which tab a panel the
+ * caller could already open starts on; it grants nothing, reveals nothing and
+ * is read by no gate. An absent or unrecognised value is not an error — it is
+ * simply not a hint, and falls back to `INITIAL_PANEL_STATE` itself (the
+ * constant, not a copy of its value) so this function cannot drift from the
+ * panel's own default.
+ *
+ * Read ONCE at mount, deliberately. Syncing panel state to the URL for the
+ * rest of the session would make every tab switch a navigation and hand the
+ * back button a job nobody asked it to do; the ticket asks for a way in, not a
+ * live channel.
+ */
+export function initialPanelState(panel: string | null): PanelState {
+  return PANEL_TABS.includes(panel as PanelTab)
+    ? openPanel(panel as PanelTab)
+    : INITIAL_PANEL_STATE;
+}
+
 /** Count of ACTIVE (unresolved) comment THREADS — root comments (`parent_id`
  *  null) whose `resolved_at` is null. Replies never count (they share their
  *  parent thread), and a resolved thread is done. This is the number the

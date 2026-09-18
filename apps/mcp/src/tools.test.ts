@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ACL_MODES, COMMENT_INTENTS, FOLDER_VISIBILITIES, REPORT_SHARING_STATES } from "arp-domain";
+import { VIEW_CSP_ALLOWLIST } from "arp-headers/view";
 import { describe, expect, it } from "vitest";
 import type { ApiClient, ApiResult } from "./client";
 import {
@@ -636,5 +637,186 @@ describe("Editability is legible to an agent (ADR-0080)", () => {
     ]) {
       if (d.includes("editability")) expect(d).toMatch(/null|unknown/i);
     }
+  });
+});
+
+describe("reports_upload authoring guidance (#365)", () => {
+  const writeDescriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  const uploadHtmlParam = () =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get("reports_upload")?.config
+        .inputSchema as Record<string, { description?: string }>
+    ).html?.description ?? "";
+
+  // The MCP tool and the HTTP endpoint return the SAME list — the tool is a
+  // thin client over /api/v1 (ADR-003), so the warnings it hands an agent are
+  // the API's own, unfiltered and unreworded.
+  it("hands the API's warnings[] back to the agent verbatim", async () => {
+    const warnings = [
+      { code: "external-resource-blocked", detail: "https://unpkg.com/x.js will be blocked" },
+      { code: "editor-lossy", detail: "would drop elements: script" },
+    ];
+    const { client } = recordingClient({
+      ok: true,
+      data: { object: "report", slug: "abc12345", version: 1, warnings },
+    });
+    const res = await collectTools(registerWriteTools, client)
+      .get("reports_upload")
+      ?.handler({ html: "<html><body><p>x</p></body></html>" });
+    expect(res?.isError).toBeUndefined();
+    expect((res?.structuredContent as { warnings?: unknown })?.warnings).toEqual(warnings);
+  });
+
+  // The response half: an agent that just published something the viewer will
+  // render degraded must learn it from the response it already reads, while it
+  // still holds the document — not from a human opening the report later.
+  it("names warnings[] and both of its codes", () => {
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).toMatch(/warnings/);
+    expect(d).toMatch(/external-resource-blocked/);
+    expect(d).toMatch(/editor-lossy/);
+  });
+
+  it("says a warning is never a rejection", () => {
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).toMatch(/not an error|never an error|still (uploads|publishes|succeeds)/i);
+  });
+
+  // The authoring half. Nothing is injected around a report at serve time
+  // (ADR-0038), so every rule below is one the GENERATOR has to follow — and
+  // the tool description is the only guidance that reaches every MCP client.
+  it("names the viewer CSP allowlist by name, with EVERY host actually on it", () => {
+    // Derived from the ADR-0088 constant, not restated: widening the real
+    // allowlist fails here until the guidance an agent reads catches up.
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/viewer CSP allowlist/i);
+    for (const host of Object.values(VIEW_CSP_ALLOWLIST).flat()) {
+      expect(guidance).toContain(host);
+    }
+  });
+
+  it("tells the author to ship their own [hidden] rule", () => {
+    // The motivating bug of PRD #356: an artifact that toggles `hidden` renders
+    // every slide at once here, because no host reset is injected.
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important\s*\}/);
+  });
+
+  it("says no host reset or stylesheet is injected around the report", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/no .*reset|nothing is injected|no host (css|stylesheet|reset)/i);
+  });
+
+  it("tells the author how to get fonts: data: URIs or Google Fonts", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/data:/);
+    expect(guidance).toMatch(/Google Fonts/i);
+  });
+
+  it("rules out host-relative assets — the upload is ONE document", () => {
+    const guidance = `${writeDescriptionOf("reports_upload")} ${uploadHtmlParam()}`;
+    expect(guidance).toMatch(/relative/i);
+    expect(guidance).toMatch(/self-contained|one document|single document/i);
+  });
+});
+
+describe("Fidelity is legible to an agent (ADR-0090, #364)", () => {
+  const readDescriptionOf = (name: string) =>
+    (
+      collectTools(registerReadTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+  const writeDescriptionOf = (name: string) =>
+    (
+      collectTools(registerWriteTools, {} as ApiClient).get(name)?.config as {
+        description?: string;
+      }
+    )?.description ?? "";
+
+  /** The tools that actually RETURN the verdict — ADR-0090 §6's read
+   *  surfaces. `reports_upload` is deliberately absent: its response carries
+   *  `editability` and no `fidelity` (see the dedicated test below). */
+  const FIDELITY_TOOLS = [
+    ["reports_get", readDescriptionOf],
+    ["reports_list_versions", readDescriptionOf],
+    ["reports_get_content", readDescriptionOf],
+  ] as const;
+
+  it.each(FIDELITY_TOOLS)("%s names `fidelity` and both of its values", (name, describeOf) => {
+    const d = describeOf(name);
+    expect(d).toMatch(/fidelity/);
+    expect(d).toMatch(/lossless/);
+    expect(d).toMatch(/lossy/);
+  });
+
+  it.each(FIDELITY_TOOLS)("%s says null means NEVER PROBED, not lossless", (name, describeOf) => {
+    // The whole point of ADR-0090 §4's explicit `null`: an agent that reads
+    // UNKNOWN as "fine" re-acquires exactly the false reassurance the field
+    // exists to remove. The description has to spend the words.
+    const d = describeOf(name);
+    expect(d).toMatch(/null/);
+    expect(d).toMatch(/never probed|not probed|unknown/i);
+  });
+
+  it("explains that `lossy` means a SAVE would drop content, not that the report is broken", () => {
+    // ADR-0090 §5: fidelity explains, it never gates. An agent told only
+    // "lossy" would reasonably re-upload in a panic; the honest framing is
+    // that the report views perfectly and the cost is paid on the next editor
+    // save. Asserted on `reports_get` — the tool an agent actually learns the
+    // verdict from — rather than on the upload, whose response has no verdict
+    // to frame.
+    const d = readDescriptionOf("reports_get");
+    expect(d).toMatch(/still views|views (fine|perfectly|normally)/i);
+    expect(d).toMatch(/sav(e|ed|ing)/i);
+  });
+
+  it("reports_upload does NOT promise a `fidelity` field its response has no room for", () => {
+    // Verified against the wire, not assumed: `UploadResult`
+    // (packages/application/src/use-cases/upload-report.ts),
+    // `uploadResultToHttp` (packages/http/src/upload-response.ts) and
+    // `UploadResult.required` in docs/api/openapi.yaml all carry `editability`
+    // and NO `fidelity`. ADR-0090 §6 assigns the upload-side lossy signal to
+    // the warnings ticket, not to a field here.
+    //
+    // A description that promises a field the response does not carry is worse
+    // than silence: MCP is this product's primary write surface, so every
+    // agent would read for something that is never there. If the field is ever
+    // added to the upload response, this test is the thing that should be
+    // deleted first — deliberately, and with the wire change beside it.
+    const d = writeDescriptionOf("reports_upload");
+    expect(d).not.toMatch(/fidelity/i);
+  });
+
+  it("keeps fidelity and editability as TWO questions, never collapsing them", () => {
+    // `editable` + `lossy` is the case ADR-0090 exists for. A description that
+    // named only one of the pair would teach an agent the fourth-enum-value
+    // mistake the ADR rejected as option 2.
+    for (const [name, describeOf] of FIDELITY_TOOLS) {
+      const d = describeOf(name);
+      expect(d, `${name} names both verdicts`).toMatch(/editability/);
+      expect(d, `${name} names both verdicts`).toMatch(/fidelity/);
+    }
+  });
+
+  it("passes the API's `fidelity` through to the agent verbatim — it is not a client field", () => {
+    // The MCP server is a thin client (ADR-003/0051): the verdict is computed
+    // and serialised by /api/v1, and these tools must not narrow it away. A
+    // description promising a field the handler drops is worse than silence.
+    const { client } = recordingClient({
+      ok: true,
+      data: { slug: "abcde12345", editability: "editable", fidelity: "lossy" },
+    });
+    const tool = collectTools(registerReadTools, client).get("reports_get");
+    expect(tool).toBeDefined();
+    return tool?.handler({ slug: "abcde12345" }).then((result) => {
+      expect(textOf(result)).toContain('"fidelity": "lossy"');
+    });
   });
 });

@@ -90,7 +90,7 @@ error pages, the 302/303 redirects that set the `arp_unlock`/`arp_edit` cookies,
 deliberately. That is acceptable because those bodies are the platform's own static
 strings: they reference no external resources, so the allowlist grants them nothing they
 use, and `frame-ancestors 'self'` admits only the view origin itself as an embedder. The
-ADR-0063 `editViewHeaders()` profile — the one that will serve the editor *document* — is
+ADR-0063 `authenticatedViewHeaders()` profile — the one that will serve the editor *document* — is
 untouched, carries no allowlist, and keeps `frame-ancestors 'none'`.
 
 **The four hosts are one named constant** — the **Viewer CSP allowlist**

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   closePanel,
   INITIAL_PANEL_STATE,
+  initialPanelState,
   openPanel,
   selectPanelTab,
   unresolvedCount,
@@ -67,5 +68,45 @@ describe("panel state", () => {
     const onVersions = selectPanelTab(openPanel("versions"), "versions");
     const closed = closePanel(onVersions);
     expect(closed).toEqual({ open: false, tab: "versions" });
+  });
+});
+
+// ── The URL entry point (#377) ───────────────────────────────────────────
+describe("initialPanelState", () => {
+  it("opens on versions for `?panel=versions` — the owner view's Versions action", () => {
+    // The whole reason the ticket exists: the owner view's Versions action
+    // lands on `/<slug>/edit`, and version history lives in this panel. Before
+    // this, it arrived closed on the comments tab — one click short of the
+    // thing the owner asked for, with nothing to explain why.
+    expect(initialPanelState("versions")).toEqual({ open: true, tab: "versions" });
+  });
+
+  it("opens on comments for `?panel=comments`", () => {
+    expect(initialPanelState("comments")).toEqual({ open: true, tab: "comments" });
+  });
+
+  it("falls back to the default for an absent param", () => {
+    // `null` is what `URLSearchParams.get` returns for a param that is not
+    // there, which is the overwhelmingly common case: every editor visit that
+    // did not come through a deep link.
+    expect(initialPanelState(null)).toEqual(INITIAL_PANEL_STATE);
+  });
+
+  it("falls back to the default for an unknown value, and never throws", () => {
+    // The param is a HINT, not a capability (#377). It must not widen what the
+    // route serves or who it serves it to, and a value nobody recognises is
+    // not an error — it is just not a hint. Anything else would let a crafted
+    // URL turn a typo into a 500 on an authenticated surface.
+    for (const value of ["", "  ", "Versions", "settings", "__proto__", "1", "versions;drop"]) {
+      expect(initialPanelState(value), value).toEqual(INITIAL_PANEL_STATE);
+    }
+  });
+
+  it("is closed by default — the document stays the dominant element", () => {
+    // Pins the fallback to the SHARED constant rather than to a copy of its
+    // value, so a future change to the default cannot leave this function
+    // disagreeing with the rest of the panel.
+    expect(initialPanelState(null).open).toBe(false);
+    expect(initialPanelState("nope")).toBe(INITIAL_PANEL_STATE);
   });
 });

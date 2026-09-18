@@ -9,6 +9,7 @@
 // without this seam the hash behaviour below was untestable anywhere — and it
 // was: dropping the forwarding used to break `#3` silently.
 import { useEffect, useState } from "react";
+import type { LossyWarning } from "../lossy-warning";
 import { OwnerViewTopBar } from "./OwnerViewTopBar";
 import { ReportFrame } from "./ReportFrame";
 
@@ -22,9 +23,19 @@ export interface OwnerViewChromeProps {
   readonly shareState: string;
   /** False on the owner-read degrade — withholds Versions and Edit both. */
   readonly canEdit: boolean;
+  /** ADR-0090 — what an editor save would drop, or `null` when the live
+   *  version is `lossless` or was never probed. Resolved by the loader
+   *  (`../lossy-warning.ts`); this component only carries it to the bar. */
+  readonly lossyWarning: LossyWarning | null;
 }
 
-export function OwnerViewChrome({ slug, docTitle, shareState, canEdit }: OwnerViewChromeProps) {
+export function OwnerViewChrome({
+  slug,
+  docTitle,
+  shareState,
+  canEdit,
+  lossyWarning,
+}: OwnerViewChromeProps) {
   // The hash is forwarded AT LOAD, once, and never again (ticket #361 AC 4).
   //
   // It starts empty and is adopted in an effect rather than read during
@@ -50,14 +61,23 @@ export function OwnerViewChrome({ slug, docTitle, shareState, canEdit }: OwnerVi
       <OwnerViewTopBar
         docTitle={docTitle}
         shareState={shareState}
-        // Two props, one value today: version history lives in the editor's own
-        // side panel, so Versions is a deep-link INTO the editor rather than a
-        // second destination. They stay two props because they are two user
-        // intents that can diverge — the day versions gets a surface of its
-        // own, only this line changes.
-        versionsHref={`/${slug}/edit`}
+        // Two props, two values (#377). Version history lives in the editor's
+        // own side panel, so Versions is a deep-link INTO the editor rather
+        // than a second destination — and `?panel=versions` is what makes it
+        // actually arrive there. Without the param this landed the owner in
+        // the editor with the panel CLOSED on the comments tab: one click
+        // short of what they asked for, with nothing to say why.
+        //
+        // The param is a hint the editor reads once at mount
+        // (`../../edit/panel.ts`), not a capability. It changes no gate and
+        // widens nothing: this href still points at `/<slug>/edit`, which
+        // holds no capability under that Path and funnels through the app's
+        // one mint to re-check `canWrite` live (ADR-0089 §4b), exactly as
+        // before.
+        versionsHref={`/${slug}/edit?panel=versions`}
         editHref={`/${slug}/edit`}
         canEdit={canEdit}
+        lossyWarning={lossyWarning}
       />
       <main className="min-h-0 flex-1">
         <ReportFrame slug={slug} hash={hash} title={docTitle} />

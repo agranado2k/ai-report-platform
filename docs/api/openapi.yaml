@@ -1408,7 +1408,7 @@ paths:
 
 
         Headers are ADR-0063's authenticated profile, reused unchanged
-        (`editViewHeaders`): `Origin-Agent-Cluster: ?1` so the chrome and the
+        (`authenticatedViewHeaders`): `Origin-Agent-Cluster: ?1` so the chrome and the
         report it frames are uniformly origin-keyed, `frame-src 'self'` to
         permit the frame from this side (ADR-0088's `frame-ancestors 'self'` on
         the report's own response is the other half), `frame-ancestors 'none'`
@@ -1586,7 +1586,7 @@ components:
     UploadResult:
       description: The created `report` resource (ADR-0053).
       type: object
-      required: [object, slug, view_url, version, scan_status, editability, mode]
+      required: [object, slug, view_url, version, scan_status, editability, warnings, mode]
       properties:
         object: { type: string, enum: [report] }
         id:
@@ -1623,10 +1623,49 @@ components:
             NEVER equivalent to un-editable.
             Advisory only: an un-editable document still uploads, still versions,
             and is still served byte-for-byte by the viewer (ADR-0038).
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/UploadWarning' }
+          description: >
+            What the author should know about what they just published — read
+            while they still hold the document. ALWAYS present: an upload with
+            nothing to say carries `[]`, never an absent field, so a client can
+            tell a clean upload from a server that does not compute warnings.
+            Advisory only — a warning never changes the status code and never
+            rejects an upload.
         mode:
           type: string
           enum: [prod, dev]
           description: The deployment the resource belongs to — "prod" (live) or "dev" (preview/dev), ADR-0053.
+
+    UploadWarning:
+      description: >
+        One thing an upload has to tell its author (#365). The `code` is a closed
+        enum because the primary consumer is an agent: MCP is this product's main
+        write surface, and an agent that can branch on a code can fix the document
+        and re-upload before a human ever opens the report.
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum: [external-resource-blocked, editor-lossy]
+          description: >
+            `external-resource-blocked` — the document references a URL the public
+            viewer's Content-Security-Policy will not load (ADR-0088: the **Viewer
+            CSP allowlist** permits Google Fonts for stylesheets and font files and
+            cdnjs / jsDelivr-npm for scripts; `img-src` and frames stay pinned to
+            the viewer origin). One warning per blocked URL; `data:` URIs and
+            same-document references raise none.
+            `editor-lossy` — this version's recorded **Fidelity** (ADR-0090) is
+            `lossy`: opening the report in the editor and saving it would not keep
+            the whole document.
+        detail:
+          type: string
+          description: >
+            A sentence naming the specific thing and what to do about it — the
+            blocked URL and the directive that rejects it, or the elements and
+            attributes a save through the editor would drop.
 
     ReportList:
       description: A cursor-paginated list of reports (ADR-0053 list envelope).

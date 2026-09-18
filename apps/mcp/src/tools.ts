@@ -134,6 +134,11 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "included only when you are the report's owner. Also returns editability: 'editable' | " +
         "'unsplittable' | 'unparsable' | null — whether the LIVE version can be opened in the " +
         "editor (ADR-0080). null means UNKNOWN (never probed), NOT un-editable. " +
+        "Next to it, fidelity: 'lossless' | 'lossy' | null (ADR-0090) — whether the editor " +
+        "would KEEP the live version's content, a SEPARATE question from whether it can open " +
+        "it. 'lossy' means opening it works but saving would drop content the editor's schema " +
+        "does not keep (inline <script>, inline <svg>, some attributes); the report itself " +
+        "still views perfectly. null means UNKNOWN (never probed), NOT lossless. " +
         "Read-only. Use it to confirm a report " +
         "exists / check its title, folder or sharing before an update, move, or delete. A " +
         "missing slug returns not-found; a report outside your org returns forbidden.",
@@ -153,9 +158,14 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
         "List a report's ReportVersion history (ADR-0065) as a cursor-paginated list " +
         "({object:'list', data, has_more}), newest-created first; each item has id " +
         "(version_…), version_no, uploaded_by (user_…), uploaded_at, scan_status, " +
-        "size_bytes, origin ('upload' | 'editor'), and editability ('editable' | 'unsplittable' " +
+        "size_bytes, origin ('upload' | 'editor'), editability ('editable' | 'unsplittable' " +
         "| 'unparsable' | null — whether THAT version's bytes can be opened in the editor, " +
-        "ADR-0080; null means UNKNOWN, not un-editable). Read-only. Page with starting_after.",
+        "ADR-0080; null means UNKNOWN, not un-editable), and fidelity ('lossless' | 'lossy' | " +
+        "null — whether the editor would KEEP that version's content if it saved it, ADR-0090; " +
+        "'lossy' opens fine but a save would drop inline <script>/<svg> and unretained " +
+        "attributes; null means UNKNOWN because it was never probed, NOT lossless). The two " +
+        "are independent: 'editable' + 'lossy' is a real and common combination. " +
+        "Read-only. Page with starting_after.",
       inputSchema: {
         slug: SLUG_INPUT,
         ...cursorInputs("version"),
@@ -178,7 +188,13 @@ export function registerReadTools(server: McpServer, client: ApiClient): void {
       title: "Read a report's stored content",
       description:
         "Read back a report's stored document — returns { object:'report_content', slug, " +
-        "version_id, version_no, content_type, html }. Defaults to the LIVE version; pass " +
+        "version_id, version_no, content_type, html, editability, fidelity }. editability " +
+        "('editable' | 'unsplittable' | 'unparsable' | null, ADR-0080) is whether the editor " +
+        "can OPEN the version you just read; fidelity ('lossless' | 'lossy' | null, ADR-0090) " +
+        "is whether it would KEEP it — 'lossy' means a save would drop inline <script>/<svg> " +
+        "and unretained attributes, so edit this `html` yourself and re-upload rather than " +
+        "round-tripping it through the editor. For both, null means UNKNOWN because it was " +
+        "never probed — never read null as 'editable' or as 'lossless'. Defaults to the LIVE version; pass " +
         "`version` (a version_… id from reports_list_versions) to read a specific one. Pass " +
         "include_source:true to also get `source`, the lossless ProseMirror doc, when that " +
         "version has one (an externally-uploaded version has none, so `source` is omitted). " +
@@ -337,7 +353,16 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "it opens); a document with no <body> tag at all is fine and opens normally; " +
         "'unparsable' means the body defeated the editor's parser; null means UNKNOWN. This is " +
         "NOT an error: the upload succeeded and the report still views perfectly at view_url. " +
-        "Re-upload a full <html><body>…</body></html> document if you want it to be editable.",
+        "Re-upload a full <html><body>…</body></html> document if you want it to be editable. " +
+        "The response also carries warnings[] — a list of { code, detail }, EMPTY when there is " +
+        "nothing to say (never absent). code is 'external-resource-blocked' (one per URL your " +
+        "document references that the viewer's Content-Security-Policy will not load — see the " +
+        "VIEWER CSP ALLOWLIST in the html parameter) or 'editor-lossy' (opening this report in " +
+        "the editor and saving it would not keep the whole document; detail names what would be " +
+        "dropped). A warning is NOT an error and never changes the status: the upload succeeded " +
+        "and the bytes are stored and served exactly as you sent them. Read them while you still " +
+        "have the document — fix it and call this again with update_slug, and the view_url is " +
+        "unchanged.",
       inputSchema: {
         html: z
           .string()
@@ -357,7 +382,21 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
               "attribute order is not preserved. SIZE: the MCP transport caps the whole " +
               "JSON-RPC request at 4 MiB, and JSON escaping inflates the HTML in transit — " +
               "keep the document under ~3.5MB or the call fails with HTTP 413. Bigger " +
-              "files go through the web upload instead (per-file cap 25 MiB).",
+              "files go through the web upload instead (per-file cap 25 MiB). " +
+              "SELF-CONTAINED: the document is served byte-for-byte on the viewer origin and " +
+              "NO host CSS reset, stylesheet or script is injected around it — anything your " +
+              "report relies on must be inside your report. (1) If you toggle the `hidden` " +
+              "attribute (slides, tabs, accordions), put `[hidden]{display:none!important}` in " +
+              "your own stylesheet; nothing else will, and without it every hidden section " +
+              "renders at once. (2) Fonts: inline them as data: URIs, or load them from Google " +
+              "Fonts. (3) No host-relative assets (`/logo.png`, `./app.js`, `theme.css`): this " +
+              "upload is ONE self-contained document and nothing is stored beside it, so those " +
+              "404. Inline every asset as a data: URI. (4) External URLs load ONLY from the " +
+              "VIEWER CSP ALLOWLIST: https://fonts.googleapis.com (stylesheets), " +
+              "https://fonts.gstatic.com (font files), https://cdnjs.cloudflare.com and " +
+              "https://cdn.jsdelivr.net/npm/ (scripts). EVERYTHING else is blocked by the " +
+              "viewer, including any image, iframe or webfont from any other host — and the " +
+              "upload response's warnings[] names each one it finds.",
           ),
         update_slug: z
           .string()

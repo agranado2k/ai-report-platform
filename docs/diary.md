@@ -6193,6 +6193,87 @@ on it — the Edit confirm dialog and the upload warnings — are separate ticke
 the recorded fact lands and is reviewable before anything is built on it. Glossary
 term and ADR index updated in the same change.
 
+### 2026-09-17 — Fidelity reaches the people who decide (#364), and Versions reaches the panel (#377)
+
+ADR-0090 landed the verdict and deliberately stopped there: §6 recorded the
+fact and left every consumer to its own ticket, so the thing being built on
+would be reviewable first. **#364** builds them. The four MCP tools name
+`fidelity` beside `editability` — both values, and the rule that keeps it
+honest, that `null` is NEVER PROBED and never "lossless"; the wire already
+carried it, so what was missing was the half an agent actually reads. The
+dashboard row grows a **View-only** hint on a lossy live version, as its own
+badge slot rather than a fourth branch of the editability notice, because
+`editable` + `lossy` is the combination the ADR exists for and one badge cannot
+hold two sentences. And the owner view's Edit action asks first, naming what a
+save would drop.
+
+The interesting question was where the *names* come from: ADR-0090 persists the
+verdict only, and the port's `lostElements` / `lostAttributes` are dropped at
+upload. Recorded as **ADR-0090 §7** — the recorded verdict decides WHETHER to
+warn, a fresh `probeFidelity` supplies the NAMES, and it runs only when the
+live version is already `lossy`, so the common path pays nothing. Storing the
+lists was rejected because it would freeze them against the schema of the day
+and re-create exactly the drift §1's call-the-editor rule exists to prevent;
+fetching them cross-origin was rejected against ADR-0089 §6. Everything that
+can fail on the way — unreadable blob, absent object, UNKNOWN probe, a fresh
+round trip that now comes back clean — yields a warning with empty lists rather
+than no warning, and the copy says something true without one. Withholding the
+dialog because a read failed would convert an infrastructure hiccup into the
+silent lossy save the dialog exists to prevent.
+
+It **explains and proceeds** (ADR-0090 §5). Edit stays a real anchor the dialog
+merely intercepts, so a JS-less owner still reaches the editor — harmless,
+because the editor writes nothing until Save — and "Edit anyway" is an ordinary
+link to the same href. A verdict that can go stale must never lock an owner out
+of their own report.
+
+**#377** is the small one the same chrome had been waiting for. The owner
+view's Versions action pointed at `/<slug>/edit`, but the editor's side panel
+had no URL entry point, so it landed with the panel closed on the comments tab
+— one click short, with nothing to say why. `?panel=versions` is now a hint the
+editor reads once at mount, through `useSearchParams` so server and first
+client render agree; an unknown or absent value falls back to
+`INITIAL_PANEL_STATE` itself. A hint, not a capability: no gate, no header
+profile and `decideEdit` are touched, and the href still funnels through the
+app's one mint. `OwnerViewTopBar`'s fixture had used distinct hrefs all along
+for precisely this; the route finally matches it.
+
+Both shipped from one worktree, `fidelity-surface` / `feat/fidelity-surface`,
+because both change the owner view chrome's actions. The browser tier gained an
+`@owner-view-lossy` project: `showModal()` vs a rendered-open dialog, the click
+that must NOT navigate, Cancel, Esc — none of it expressible in a static render,
+and apps/view still has no jsdom tier.
+
+### 2026-09-17 — Upload warnings: telling the author before they let go of the document (#365)
+
+The upload response — HTTP and the MCP `reports_upload` tool — now carries
+`warnings[]`, each `{ code, detail }`, with two codes: `external-resource-blocked`
+(one per external URL the viewer's CSP will refuse to load) and `editor-lossy`
+(this ReportVersion's recorded Fidelity is `lossy`, with the lost items named).
+This is the consumer ADR-0090 deliberately deferred, now that the recorded facts
+exist. Warnings never change the status code and never reject: an upload with
+nothing to say returns `[]`, never an absent field, so a client can tell a clean
+upload from a server that does not compute warnings.
+
+Two things worth keeping. First, the scan is **directive-aware**, which turned out
+to matter more than expected: a host is not allowed or blocked in the abstract but
+per CSP directive, so `cdnjs.cloudflare.com` clears as a script and is blocked as
+an image — `img-src` stays pinned to the view origin precisely because a wildcard
+image source is an exfiltration channel (ADR-0088). A host-only check would have
+cleared the image and taught agents the wrong rule. Second, the scan reads
+`VIEW_CSP_ALLOWLIST` itself rather than a copy, and the tests derive their
+expectations from that same object, so widening the allowlist widens the scanner
+and fails the MCP guidance test until the text an agent reads catches up.
+
+Shaped as the third write-time question beside the two probes: a synchronous
+`ResourceScanner` port (ADR-0024), implemented in `packages/adapters` over
+`arp-report-html`'s `scanBlockedResources`. Synchronous on purpose — the uploaded
+document is untrusted content and a scan that cannot await cannot fetch (ADR-0069).
+The `reports_upload` description gained the self-contained authoring rules the
+allowlist implies (ship your own `[hidden]{display:none!important}`; inline fonts
+or use Google Fonts; no host-relative assets; no host reset is injected). Glossary
+term **Upload warning** and `docs/api/openapi.yaml` updated in the same change.
+
 ### 2026-09-17 — Owner-open lands on the owner view, and the grantee gets a key to the frame
 
 Two tickets in one change, because the second is what makes the first's gap
