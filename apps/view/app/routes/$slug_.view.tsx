@@ -20,7 +20,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { describeReportSharing } from "arp-domain";
-import { editViewHeaders } from "arp-headers/view";
+import { authenticatedViewHeaders } from "arp-headers/view";
 import { viewerAccessConfig, viewerDeps } from "../server/container.server";
 import { decideServe, ownerViewDegradeLine } from "../server/gate.server";
 import { viewerRedirectResponse, viewerTextResponse } from "../server/viewer-responses";
@@ -67,7 +67,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // the spike made non-negotiable: `Origin-Agent-Cluster: ?1`, so the chrome
   // and the report it frames are UNIFORMLY origin-keyed — Chromium warns when
   // they disagree.
-  const headers = editViewHeaders({ appOrigin });
+  const headers = authenticatedViewHeaders({ appOrigin });
   headers.set("x-robots-tag", "noindex, nofollow");
 
   // The frame's own read capability (ADR-0089 §4c). APPEND, for the same

@@ -22,7 +22,7 @@
 // database, no network — and it is the instrument the 2026-09-09 spike used to
 // establish the contract in the first place.
 //
-// THE HEADERS ARE THE REAL ONES. `viewHeaders()` and `editViewHeaders()` are
+// THE HEADERS ARE THE REAL ONES. `viewHeaders()` and `authenticatedViewHeaders()` are
 // imported and served verbatim, never restated as strings. ADR-0088's rule: a
 // test that retypes the policy proves only that someone typed it twice, and
 // would keep passing after the shipped policy changed underneath it.
@@ -46,7 +46,7 @@ import {
 // tier is not a workspace package and has no dependency on `arp-headers`.
 // What matters is that these are the SHIPPED builders — importing them by any
 // route beats restating their output as a string.
-import { editViewHeaders, viewHeaders } from "../../packages/headers/src/view-headers";
+import { authenticatedViewHeaders, viewHeaders } from "../../packages/headers/src/view-headers";
 
 const SLUG = "abcde12345";
 const OTHER_SLUG = "zzzzzzzzzz";
@@ -150,7 +150,7 @@ test.beforeAll(async () => {
     // The REAL header builders, not restatements of them.
     const headers =
       path === `/${SLUG}/view`
-        ? editViewHeaders({ appOrigin: "http://127.0.0.1:1" })
+        ? authenticatedViewHeaders({ appOrigin: "http://127.0.0.1:1" })
         : viewHeaders();
     for (const [k, v] of headers) res.setHeader(k, v);
     // `Headers` folds duplicate CSP values into one comma-joined string on
