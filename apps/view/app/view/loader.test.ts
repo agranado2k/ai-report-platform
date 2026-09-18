@@ -298,7 +298,7 @@ describe("GET /<slug>/view — the loader's defensive `!appOrigin` narrowing", (
     // header profile needs it for `connect-src`), read independently of the
     // Decision, so the two can only be kept in agreement by the gate. If they
     // ever disagree, this is the difference between an owner degrading with a
-    // log line and `editViewHeaders(undefined)` failing open.
+    // log line and `authenticatedViewHeaders(undefined)` failing open.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     state.appOrigin = undefined;
     state.forcedDecision = {

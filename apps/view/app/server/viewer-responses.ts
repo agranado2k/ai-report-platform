@@ -6,7 +6,7 @@
 // same shape: the PUBLIC header profile, `no-store`, `noindex, nofollow`.
 //
 // The profile is the reason this is shared rather than three private helpers.
-// `viewHeaders()` is the unauthenticated set; `editViewHeaders()` is the
+// `viewHeaders()` is the unauthenticated set; `authenticatedViewHeaders()` is the
 // authenticated one, and what it adds is `frame-src 'self'` (permission to
 // frame the report) and `frame-ancestors 'none'`, granted because the owner
 // view's chrome is our own first-party UI. A response with no first-party UI
