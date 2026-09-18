@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type APIRequestContext, type APIResponse, expect, test } from "@playwright/test";
+import { type APIResponse, expect, test } from "@playwright/test";
 import { createBdd } from "playwright-bdd";
 import { mintTestSession, type TestSession } from "../support/clerk-session";
 import { followToTerminal } from "../support/follow";
+import { drainUntilClean } from "../support/scan-drain";
 
 const { Given, When, Then } = createBdd();
 
@@ -231,43 +232,20 @@ Then(
 
 // ── The scan drain: what makes a preview's upload SERVABLE ──────────────────
 //
-// `POST /internal/scan-drain` is the async scan worker's HTTP trigger
-// (ADR-0045). In production a Cloudflare Cron Trigger calls it every ~minute;
-// on a preview nothing does, which is why an uploaded report sits at
-// `scan_status: pending` forever and `/edit` can only redirect. The route is
-// fail-closed: 503 when the secret is unset, 401 on a mismatch — so a broken
-// wiring is loud, never a silent skip.
-async function drainUntilClean(api: APIRequestContext, targetSlug: string): Promise<void> {
-  const auth = { Authorization: `Bearer ${session.jwt}` };
-  // Bounded: the drain claims a batch per tick and the stub scanner promotes
-  // synchronously, so one tick normally suffices. A few more cover a cold
-  // Neon branch and pg-boss's own first-run bootstrap.
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const drained = await api.post("/internal/scan-drain", {
-      headers: { Authorization: `Bearer ${SCAN_DRAIN_SECRET}` },
-    });
-    expect(
-      drained.status(),
-      `POST /internal/scan-drain answered ${drained.status()} — 503 means SCAN_DRAIN_SECRET is unset on the preview, 401 means e2e.yml and preview-isolation.yml derived DIFFERENT values (they must stay byte-identical)`,
-    ).toBe(200);
-
-    const versions = await api.get(`/api/v1/reports/${targetSlug}/versions`, { headers: auth });
-    expect(versions.status()).toBe(200);
-    const body = (await versions.json()) as { data?: { scan_status?: string }[] };
-    if (body.data?.[0]?.scan_status === "clean") return;
-    await new Promise((r) => setTimeout(r, 1_000));
-  }
-  throw new Error(
-    `report ${targetSlug} never reached scan_status: clean after 10 drain ticks — the scan pipeline, not the editor, is what failed here`,
-  );
-}
-
+// The loop itself now lives in `../support/scan-drain`, because the owner-view
+// deck scenario (#366) needs the same thing for the same reason: a report that
+// is not servable cannot be FRAMED either. Its header carries the full ADR-0045
+// rationale and the fail-closed contract; what stays here is only the gate on
+// whether this run can drive it at all.
 Given("that report has been scanned clean", async ({ page }) => {
   test.skip(
     !SCAN_DRAIN_SECRET,
     "E2E_SCAN_DRAIN_SECRET not set — the scan drain cannot be driven, so the report never becomes servable",
   );
-  await drainUntilClean(page.request, slug);
+  await drainUntilClean(page.request, slug, {
+    drainSecret: SCAN_DRAIN_SECRET,
+    jwt: session.jwt,
+  });
 });
 
 // THE HOP THAT MATTERED. Every step of BOTH production incidents happened here:
