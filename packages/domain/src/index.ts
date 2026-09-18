@@ -8,6 +8,7 @@ export * from "./claims-codec";
 export * from "./comment";
 export * from "./comment-id";
 export * from "./edit-token";
+export * from "./editor-panel";
 export * from "./email-address";
 export * from "./errors";
 export * from "./events";

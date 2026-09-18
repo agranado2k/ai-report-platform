@@ -5,12 +5,26 @@
 // unit-testable without a mounted React tree (apps/view has no component-DOM
 // test tier; see vitest.config.ts's `apps/view/app/edit/**/*.test.ts` glob and
 // the `environment: "node"` note there).
+// TYPE-ONLY import (erased at build), the rule this tree already runs on: a
+// VALUE import from the `arp-domain` barrel drags its `node:crypto`-using
+// modules into the browser bundle and breaks the Vite/Rollup build (see
+// comment-format.ts, intent-options.ts). `EditorPanel` costs nothing at
+// runtime, and the exhaustive map below buys the drift-safety a runtime
+// `EDITOR_PANELS` import would have.
+import type { EditorPanel } from "arp-domain";
 import type { CommentWire } from "./wire-types";
 
 /** Which tab the OPEN panel shows. Unlike the old `PanelTab` (which folded the
  *  closed state into a `null`), open/closed is now a separate boolean — the
- *  panel always has a remembered tab even while collapsed. */
-export type PanelTab = "comments" | "versions";
+ *  panel always has a remembered tab even while collapsed.
+ *
+ *  It IS the domain's `EditorPanel` — the vocabulary the URL hint is spelled
+ *  in (#382) — rather than a structurally identical twin declared here. The
+ *  hint now crosses two origins and four hops before it reaches this file, and
+ *  every hop validates it against that enum, so the two must be one type or
+ *  the editor can grow a tab the funnel silently refuses to carry: a deep link
+ *  that works from the address bar and dies on the click that produces it. */
+export type PanelTab = EditorPanel;
 
 export interface PanelState {
   /** Whether the side panel is expanded. Closed by default — the document is
@@ -22,9 +36,21 @@ export interface PanelState {
 
 export const INITIAL_PANEL_STATE: PanelState = { open: false, tab: "comments" };
 
-/** The tabs a URL is allowed to name. Derived from one place so a third tab
- *  cannot become deep-linkable by accident, nor stay un-linkable by omission. */
-const PANEL_TABS: readonly PanelTab[] = ["comments", "versions"];
+/** The tabs a URL is allowed to name, as a `Record<PanelTab, true>` so it stays
+ *  EXHAUSTIVE at compile time: a panel added to (or removed from) the domain
+ *  `EditorPanel` enum breaks the BUILD here until this follows. That is the
+ *  same drift-safety a runtime `EDITOR_PANELS` import would give, without the
+ *  bundle cost the type-only rule above exists for — and it matters more since
+ *  #382, because this list and the enum the FUNNEL validates against have to
+ *  agree across two origins and four hops. A tab the editor honours but the
+ *  funnel refuses to carry is a deep link that works from the address bar and
+ *  dies on the click that produces it. `panel.test.ts` pins the runtime half. */
+const DEEP_LINKABLE_PANELS: Record<PanelTab, true> = { comments: true, versions: true };
+
+/** The same set as a list, for the membership test below. Exported for the
+ *  drift guard in `panel.test.ts`, which is a node test and CAN value-import
+ *  the domain enum to compare against. */
+export const PANEL_TABS = Object.keys(DEEP_LINKABLE_PANELS) as readonly PanelTab[];
 
 /**
  * The panel state a fresh editor mount starts in, given the `?panel=` search
