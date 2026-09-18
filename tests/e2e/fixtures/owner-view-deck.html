@@ -1,0 +1,154 @@
+<!doctype html>
+<!--
+  THE OWNER-VIEW DECK FIXTURE (#366) — a TEST ASSET, not a schema fixture.
+
+  It lives under the e2e tree rather than in `packages/report-html/src/fixtures/`
+  deliberately: nothing in the product imports it, no schema is derived from it,
+  and no production standard bends for it. It exists to be UPLOADED, exactly as
+  a user's generated artifact would be, and then to be judged as one.
+
+  Every element below is load-bearing for one assertion in
+  `owner-view-deck.feature`, and each is the smallest thing that can carry it:
+
+  - TWO SLIDES TOGGLED BY `hidden`. The shape ADR-0089's 2026-09-09 spike found
+    broken in the editor — a deck reduced to a flat wall of text — and the shape
+    the owner view exists to render as published.
+
+  - ITS OWN `[hidden] { display: none !important }` RESET. The artifact host
+    ships one; the canonical `/<slug>` ships the author's bytes and nothing else
+    (ADR-0038), so a deck that relies on the host's reset renders both slides at
+    once. That defect is real and is #362's (a fidelity verdict surfaced to the
+    author), NOT something the viewer injects a fix for — so this fixture must
+    be correct STANDING ALONE, or it would be testing the wrong thing. The
+    `!important` is what lets it beat `.slide { display: flex }` regardless of
+    rule order.
+
+  - AN INLINE SCRIPT ADVANCING ON ArrowRight. `allow-scripts` without
+    `allow-same-origin` is the pairing ADR-0089 §2 rests on; a report that does
+    not run script would prove nothing about it. Inline, because the report's
+    CSP carries `script-src 'unsafe-inline'` (ADR-0088) and an external script
+    would be testing a CDN instead.
+
+  - A GOOGLE FONTS `<link>`. The one directly observable consequence of
+    ADR-0088's artifact-parity allowlist (`style-src … https://fonts.googleapis.com`).
+    Before that ADR this request was refused by the CSP; the scenario asserts it
+    is not, and can tell a CSP refusal from an unreachable host because a
+    CSP-blocked subresource never becomes a network request at all.
+
+  WHAT THIS SCRIPT DELIBERATELY DOES NOT TOUCH, and why it is not an accident.
+  In an opaque origin (`allow-scripts` WITHOUT `allow-same-origin`, ADR-0089 §2)
+  three ordinary APIs throw `SecurityError` on access — measured on Chromium
+  148.0.7778.96 over this exact attribute set:
+
+      localStorage    SecurityError — the document is sandboxed and lacks the
+      sessionStorage                  'allow-same-origin' flag
+      document.cookie
+
+  An UNCAUGHT throw in a deck's bootstrap aborts the whole inline script before
+  it shows its first slide, so the frame paints nothing at all — which is how a
+  perfectly well-served 200 renders blank. `history.replaceState`/`pushState`
+  with a hash URL, and reading `location.hash`, were measured in the same run
+  and are all FINE, so they are not the hazard they look like.
+
+  This fixture therefore keeps its bootstrap to `getElementById`,
+  `addEventListener` and the `hidden` property — none of them origin-sensitive
+  — so a failure here is a failure of the OWNER VIEW, never of the fixture. A
+  deck that needs storage must wrap it in try/catch; that is a constraint on
+  report authors (and a product-side fidelity question), not something this test
+  asset may paper over by being unrealistic in the other direction.
+
+  `__E2E_NONCE__` is substituted per run by the steps file. The upload's ADR-0039
+  derived key hashes the content, and preview-isolation.yml REUSES the per-PR
+  Neon branch across pushes — so byte-stable fixture content would make the
+  second push REPLAY the first upload's response instead of uploading, and every
+  assertion below would silently read a row created by older code. The nonce
+  keeps the content hash fresh so every run really uploads. (The same defect bit
+  `editor-auth.steps.ts`; see its `randomUUID()` note.)
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Owner view e2e deck</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap"
+    />
+    <style>
+      /* The reset the artifact host would otherwise have supplied. Without it
+         `.slide { display: flex }` wins over the `hidden` attribute's UA style
+         and BOTH slides paint at once. */
+      [hidden] {
+        display: none !important;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, sans-serif;
+        background: #0b0f17;
+        color: #e8ecf4;
+      }
+
+      .slide {
+        display: flex;
+        height: 100vh;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+      }
+
+      .slide h1 {
+        margin: 0;
+        font-size: clamp(2rem, 8vw, 4rem);
+        font-weight: 700;
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 400;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="slide" id="slide-1" data-testid="slide-1">
+      <h1>Slide one</h1>
+      <p class="hint">Press the right arrow key to advance.</p>
+    </section>
+
+    <section class="slide" id="slide-2" data-testid="slide-2" hidden>
+      <h1>Slide two</h1>
+      <p class="hint">The deck advanced inside the frame.</p>
+    </section>
+
+    <script>
+      (() => {
+        var slides = [
+          document.getElementById("slide-1"),
+          document.getElementById("slide-2"),
+        ];
+        var index = 0;
+
+        function show(next) {
+          var i;
+          index = Math.min(Math.max(next, 0), slides.length - 1);
+          for (i = 0; i < slides.length; i += 1) {
+            slides[i].hidden = i !== index;
+          }
+        }
+
+        // Listening on `document` (not on a focused element) is what a real
+        // generated deck does, and it is what makes the owner view's
+        // focus-the-iframe-on-load behaviour (ReportFrame) observable: without
+        // that focus the key event never reaches this document at all.
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowRight") show(index + 1);
+          if (event.key === "ArrowLeft") show(index - 1);
+        });
+      })();
+    </script>
+    <!-- run nonce: __E2E_NONCE__ -->
+  </body>
+</html>
