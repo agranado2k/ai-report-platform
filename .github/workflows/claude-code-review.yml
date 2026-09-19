@@ -11,6 +11,16 @@ name: Claude Code Review
 # on the diff; it does NOT commit or push.
 #
 # permissions: pull-requests write to post the review; the rest read-only.
+#
+# CHECK SEMANTICS (issue #388, amends ADR-030 — the mirror of the #371 fix for
+# the Gemini `review` check): the `claude-review` check is ADVISORY (it is NOT a
+# required status check on `main` — AI review never gates merge), but it is
+# fail-visibly. Green means a Claude review actually ran; red means it did not
+# (quota/rate-limit 429, missing/invalid CLAUDE_CODE_OAUTH_TOKEN, overloaded 5xx,
+# or the action failing), with the classified reason in the job summary. It is no
+# longer allowed to report a false green when `continue-on-error` swallowed a
+# failure. The gate is the classifier step at the end
+# (scripts/classify-claude-review.sh, a shim over scripts/classify-ai-review.sh).
 
 on:
   pull_request:
@@ -35,9 +45,12 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
-        # Bot review is advisory (solo-developer policy — can't gate merge). Transient
-        # Anthropic API outages shouldn't fail the PR check; the review
-        # just becomes a no-op for this run.
+        # `continue-on-error` lets the job REACH the classifier step below even
+        # when the review step exits non-zero (rate-limit 429, missing/invalid
+        # auth, overloaded 5xx). It no longer decides the check's colour — the
+        # classifier does (issue #388). Without a review actually running, this
+        # check must not be green: a green `claude-review` check that proves
+        # nothing defeats ADR-030's second-vendor purpose.
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
@@ -61,3 +74,50 @@ jobs:
           claude_args: |
             --max-turns 25
             --model claude-opus-4-8
+
+      - name: Enforce that a review actually ran
+        # The gate for issue #388 — the mirror of gemini-review.yml's #371 gate.
+        # Runs even when the review step failed (`if: always()`), classifies WHY
+        # (quota / auth / missing / transient / unknown), and exits non-zero for
+        # anything that is NOT a real review, so THIS step — not `continue-on-error`
+        # above — decides the check colour. A green `claude-review` check now
+        # means, and only means, that a Claude review ran; the reason for a red
+        # one lands in the job summary, with quota distinguishable from auth.
+        #
+        # The check stays ADVISORY (ADR-030 — AI review never gates merge; it is
+        # not a required status check on `main`), but "advisory" no longer means
+        # "silently green when nothing happened": red-but-non-blocking is the
+        # honest state a solo maintainer can act on (re-run, top up quota, or
+        # merge on the Gemini review alone).
+        #
+        # The Claude action exposes NO `outputs.error` (unlike run-gemini-cli).
+        # It exposes `outputs.conclusion` (success|failure) and
+        # `outputs.execution_file` — a JSON array of the run's SDK messages. We
+        # extract ONLY the error-bearing fields (the `type:"result"` events with
+        # `is_error:true` — their subtype + result text), never the reviewed diff,
+        # so the code under review cannot spoof a classification. The extracted
+        # text is untrusted data (ADR-0069): it reaches the classifier through
+        # stdin, never interpolated into the shell.
+        if: always()
+        env:
+          CLAUDE_OUTCOME: ${{ steps.claude-review.outcome }}
+          CLAUDE_CONCLUSION: ${{ steps.claude-review.outputs.conclusion }}
+          CLAUDE_EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: |
+          err=""
+          if [ -n "${CLAUDE_EXECUTION_FILE:-}" ] && [ -f "${CLAUDE_EXECUTION_FILE}" ]; then
+            err=$(jq -r '
+              [ .[]?
+                | select((.type == "result") and (.is_error == true))
+                | ((.subtype // "") + " " + (.result // ""))
+              ] | join("\n")
+            ' "${CLAUDE_EXECUTION_FILE}" 2>/dev/null || true)
+          fi
+          # The action sets outputs.conclusion=failure even if it were to exit 0
+          # with a swallowed is_error; fold that into the outcome the classifier
+          # sees so that case can never read as a clean RAN.
+          outcome="${CLAUDE_OUTCOME}"
+          if [ "${CLAUDE_CONCLUSION:-}" = "failure" ]; then
+            outcome="failure"
+          fi
+          printf '%s' "$err" | scripts/classify-claude-review.sh "$outcome"
