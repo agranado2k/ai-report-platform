@@ -46,9 +46,9 @@ describe("scanSandboxStorageAccess — top-level storage reads in inline scripts
   it("does NOT flag a top-level IIFE whose call sits inside try/catch — the throw is caught", () => {
     // A synchronous throw from an IIFE body propagates through the call and is
     // caught by the enclosing try — the exact remediation the warning recommends.
-    expect(
-      apis(doc(`try { (function () { localStorage.getItem("x"); })(); } catch {}`)),
-    ).toEqual([]);
+    expect(apis(doc(`try { (function () { localStorage.getItem("x"); })(); } catch {}`))).toEqual(
+      [],
+    );
     expect(apis(doc(`try { (() => { const c = document.cookie; })(); } catch {}`))).toEqual([]);
   });
 
