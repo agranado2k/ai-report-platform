@@ -157,13 +157,34 @@ function neutralizeDangerousHref(spec: DOMOutputSpec): DOMOutputSpec {
  * directly in the JSON would otherwise reach `toDOM` untouched. `toDOM`
  * re-sanitizes below rather than trusting `attrs.style` — sanitizeStyle is
  * idempotent, so this is a no-op for the normal parsed-from-HTML case.
+ *
+ * `validate: "string|null"` closes the OTHER half of the PR #156 lesson (the
+ * same guard `withId` puts on `id`, ticket #370): a `Node.fromJSON`-built doc
+ * bypasses `getAttrs`, so without the validator a sidecar could set `class`/
+ * `style` to an object/array and hand it to `toDOM`. The validator rejects the
+ * doc outright; `mergeAttrsIntoOutputSpec` only ever writes STRING values, so
+ * both ends are closed.
+ *
+ * DEFAULT PRESERVATION (ticket #370): applied as a schema-wide sweep (schema.ts),
+ * this wraps nodes that ALREADY declare a `class` with a meaningful default
+ * (`card` → `"card"`, `grid` → `"grid"`, `tablewrap` → `"tablewrap"`,
+ * `resrow` → `"resrow"`). Re-declaring `class: { default: null }` would erase
+ * that default for a node created programmatically (not parsed), a behaviour
+ * change the ticket forbids ("nodes that already retain them keep their
+ * behaviour"). So an existing non-null default is carried forward; only the
+ * validator is added on top.
  */
 export function withClassStyle<T extends NodeSpec | MarkSpec>(spec: T): T {
   const originalToDOM = spec.toDOM as ((n: never) => DOMOutputSpec) | undefined;
   if (!originalToDOM) return spec;
+  const existingAttrs = (spec.attrs ?? {}) as Record<string, { default?: unknown } | undefined>;
   return {
     ...spec,
-    attrs: { ...(spec.attrs ?? {}), class: { default: null }, style: { default: null } },
+    attrs: {
+      ...existingAttrs,
+      class: { default: existingAttrs.class?.default ?? null, validate: "string|null" },
+      style: { default: existingAttrs.style?.default ?? null, validate: "string|null" },
+    },
     parseDOM: ((spec.parseDOM as TagParseRule[] | undefined) ?? []).map((rule) => ({
       ...rule,
       getAttrs: (dom: HTMLElement): Attrs | false => {
