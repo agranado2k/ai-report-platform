@@ -31,149 +31,173 @@ const cases: ReadonlyArray<{
   readonly html: string;
   readonly probe: string;
   readonly expectClass: string;
+  readonly expectStyle: string;
 }> = [
   {
     name: "card — dedicated block node that already retained class, now also style",
     html: '<div class="card pillar" style="color:var(--now)"><p>t</p></div>',
     probe: "div.card",
     expectClass: "card pillar",
+    expectStyle: "color:var(--now)",
   },
   {
     name: "grid — class+cols node, now also style",
     html: '<div class="grid g2" style="gap:8px"><div class="card"><p>t</p></div></div>',
     probe: "div.grid",
     expectClass: "grid g2",
+    expectStyle: "gap:8px",
   },
   {
     name: "checklist — toDOM hard-coded class:'checklist', now verbatim + style",
     html: '<ul class="checklist tight" style="margin:0"><li>a</li></ul>',
     probe: "ul.checklist",
     expectClass: "checklist tight",
+    expectStyle: "margin:0",
   },
   {
     name: "checklist_item — <li> that dropped both before",
     html: '<ul class="checklist"><li class="done" style="opacity:.5">a</li></ul>',
     probe: "li.done",
     expectClass: "done",
+    expectStyle: "opacity:.5",
   },
   {
     name: "tablewrap — dropped style before",
     html: '<div class="tablewrap wide" style="overflow:auto"><table><tbody><tr><td>c</td></tr></tbody></table></div>',
     probe: "div.tablewrap",
     expectClass: "tablewrap wide",
+    expectStyle: "overflow:auto",
   },
   {
     name: "table — class node that dropped style before",
     html: '<div class="tablewrap"><table class="grid-table" style="width:100%"><tbody><tr><td>c</td></tr></tbody></table></div>',
     probe: "table.grid-table",
     expectClass: "grid-table",
+    expectStyle: "width:100%",
   },
   {
     name: "table_head (thead) — dropped both before",
     html: '<div class="tablewrap"><table><thead class="th-head" style="background:#eee"><tr><th>H</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table></div>',
     probe: "thead.th-head",
     expectClass: "th-head",
+    expectStyle: "background:#eee",
   },
   {
     name: "table_body (tbody) — dropped both before",
     html: '<div class="tablewrap"><table><tbody class="tb" style="color:#111"><tr><td>c</td></tr></tbody></table></div>',
     probe: "tbody.tb",
     expectClass: "tb",
+    expectStyle: "color:#111",
   },
   {
     name: "table_row (tr) — dropped both before",
     html: '<div class="tablewrap"><table><tbody><tr class="hr" style="height:2rem"><td>c</td></tr></tbody></table></div>',
     probe: "tr.hr",
     expectClass: "hr",
+    expectStyle: "height:2rem",
   },
   {
     name: "table_header (th) — retained style before, now class too",
     html: '<div class="tablewrap"><table><thead><tr><th class="num" style="width:22%">H</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table></div>',
     probe: "th.num",
     expectClass: "num",
+    expectStyle: "width:22%",
   },
   {
     name: "table_cell (td) — retained style before, now class too",
     html: '<div class="tablewrap"><table><tbody><tr><td class="cell" style="color:var(--now)">c</td></tr></tbody></table></div>',
     probe: "td.cell",
     expectClass: "cell",
+    expectStyle: "color:var(--now)",
   },
   {
     name: "details — class+open node that dropped style before",
     html: '<details class="resgroup card" style="margin:0" open><summary>S</summary><p>b</p></details>',
     probe: "details.resgroup",
     expectClass: "resgroup card",
+    expectStyle: "margin:0",
   },
   {
     name: "summary — dropped both before",
     html: '<details><summary class="head" style="font-weight:700">S</summary><p>b</p></details>',
     probe: "summary.head",
     expectClass: "head",
+    expectStyle: "font-weight:700",
   },
   {
     name: "resrow — class node that dropped style before",
     html: '<div class="resrow special" style="gap:4px"><p>t</p></div>',
     probe: "div.resrow",
     expectClass: "resrow special",
+    expectStyle: "gap:4px",
   },
   {
     name: "rt — inline-content container, class reduced to 'rt' before",
     html: '<div class="rt hot" style="color:red">t</div>',
     probe: "div.rt",
     expectClass: "rt hot",
+    expectStyle: "color:red",
   },
   {
     name: "rd — inline-content container",
     html: '<div class="rd em" style="color:red">t</div>',
     probe: "div.rd",
     expectClass: "rd em",
+    expectStyle: "color:red",
   },
   {
     name: "rtags — inline-content container",
     html: '<div class="rtags row" style="gap:4px"><span class="chip chip-cto">C</span></div>',
     probe: "div.rtags",
     expectClass: "rtags row",
+    expectStyle: "gap:4px",
   },
   {
     name: "chips — inline-content container",
     html: '<div class="chips row" style="gap:4px"><span class="chip chip-cto">C</span></div>',
     probe: "div.chips",
     expectClass: "chips row",
+    expectStyle: "gap:4px",
   },
   {
     name: "block-label — inline-content container",
     html: '<div class="block-label big" style="color:red">Read</div>',
     probe: "div.block-label",
     expectClass: "block-label big",
+    expectStyle: "color:red",
   },
   {
     name: "sec — non-array {dom,contentDOM} toDOM, dropped both before",
     html: '<h2 class="sec big" style="color:teal"><span class="secnum">01</span>Title</h2>',
     probe: "h2.sec",
     expectClass: "sec big",
+    expectStyle: "color:teal",
   },
   {
     name: "section — REGRESSION: class already worked (#368), style is the new half",
     html: '<section class="slide" style="padding:2rem"><p>t</p></section>',
     probe: "section",
     expectClass: "slide",
+    expectStyle: "padding:2rem",
   },
   {
     name: "htmlBlock (aside) — REGRESSION: catch-all already retained both",
     html: '<aside class="note" style="color:#333"><p>t</p></aside>',
     probe: "aside.note",
     expectClass: "note",
+    expectStyle: "color:#333",
   },
   {
     name: "heading — REGRESSION: schema-basic node already retained both",
     html: '<h3 class="sub" style="color:var(--now)">H</h3>',
     probe: "h3.sub",
     expectClass: "sub",
+    expectStyle: "color:var(--now)",
   },
 ];
 
 describe("class + sanitized style retention on every named block node (#370)", () => {
-  for (const { name, html, probe, expectClass } of cases) {
+  for (const { name, html, probe, expectClass, expectStyle } of cases) {
     it(`retains class (verbatim) + style (sanitized) on ${name}`, () => {
       const out = roundTrip(html);
       const document = getDomEnvironmentDocument();
@@ -182,8 +206,10 @@ describe("class + sanitized style retention on every named block node (#370)", (
       const element = container.querySelector(probe);
       expect(element, `expected to find ${probe} in ${out}`).not.toBeNull();
       expect(element?.getAttribute("class")).toBe(expectClass);
-      // The inert style declaration survives the round trip.
-      expect(element?.getAttribute("style") ?? "").not.toBe("");
+      // Assert the EXACT surviving style value, not just that some style
+      // survived — a bug that mangled the declaration while leaving it
+      // non-empty must fail here (the coverage gap Claude's review flagged).
+      expect(element?.getAttribute("style")).toBe(expectStyle);
     });
   }
 });
@@ -236,6 +262,25 @@ describe("Node.fromJSON refuses a non-string class/style in the _source.json sid
 
   it("rejects a non-string style", () => {
     expect(withTamperedAttr("style")).toThrow();
+  });
+});
+
+describe("a dangerous STRING style is re-sanitized at toDOM time on the fromJSON path (#370)", () => {
+  // `validate: "string|null"` only rejects a NON-string; a dangerous STRING
+  // passes it. The sidecar path bypasses `getAttrs` (the PR #156 lesson), so
+  // getAttrs-time sanitization never runs on such a doc — `toDOM`'s own
+  // re-sanitize is the ONLY gate left. `serializeBody` builds the node via
+  // `Node.fromJSON` and then serializes through `toDOM`, so mutating the parsed
+  // JSON exercises exactly that route.
+  it("strips a url(...) smuggled through the sidecar while keeping the inert sibling", () => {
+    const doc = parseBody('<div class="card"><p>t</p></div>') as Record<string, unknown>;
+    const card = (doc.content as Array<Record<string, unknown>>)[0];
+    (card.attrs as Record<string, unknown>).style =
+      "background:url(https://attacker.example/leak); color:var(--now)";
+    const out = serializeBody(doc as never);
+    expect(out).not.toContain("url(");
+    expect(out).not.toContain("attacker.example");
+    expect(out).toContain("color:var(--now)");
   });
 });
 
