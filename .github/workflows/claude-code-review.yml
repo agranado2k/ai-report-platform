@@ -106,8 +106,16 @@ jobs:
         run: |
           err=""
           if [ -n "${CLAUDE_EXECUTION_FILE:-}" ] && [ -f "${CLAUDE_EXECUTION_FILE}" ]; then
-            err=$(jq -r '
-              [ .[]?
+            # @v1 writes this file as JSON.stringify(messages, null, 2) — a single
+            # pretty-printed array. The `if type=="array" then .[] else . end`
+            # prelude also tolerates an NDJSON shape (one object per line) without
+            # `--slurp`, which would break the confirmed array case: default jq
+            # reads the array as one value (iterated by `.[]`) or each NDJSON line
+            # as its own value (used directly). Either way we select ONLY the
+            # error-bearing result events, never the reviewed diff.
+            err=$(jq -rn '
+              [ inputs
+                | (if type == "array" then .[] else . end)
                 | select((.type == "result") and (.is_error == true))
                 | ((.subtype // "") + " " + (.result // ""))
               ] | join("\n")
