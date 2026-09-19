@@ -302,11 +302,15 @@ describe("the sweep is schema-wide, so a block node added later inherits it (#37
   });
 });
 
-describe("the sweep never touches marks (#370)", () => {
-  // Marks split and merge by attribute EQUALITY, so an `id`/`class` carried on a
-  // mark would be copied onto every run the mark splits into — one attribute
-  // silently becoming N. The chip/pill/kbd marks reconstruct their class from a
-  // variant instead; they must carry no raw class/style/id.
+describe("the class/style SWEEP never touches marks; id never reaches any mark (#370)", () => {
+  // Precise scope (the sweep in schema.ts iterates `nodes`, never `marks`):
+  // `link`/`em`/`strong` marks DO carry `class`/`style` (+ the new validator) —
+  // that is ADR-0062 §3's deliberate generic inline retention, applied by the
+  // SEPARATE pre-existing mark loop, not by this PR's sweep. What must never
+  // reach a mark is `id`: marks split and merge by attribute EQUALITY, so an
+  // `id` on a mark would be copied onto every run it splits into — one id
+  // silently becoming N. The chip/pill/kbd marks additionally reconstruct their
+  // class from a variant, so they carry no raw class/style/id at all.
   for (const name of ["chip", "pill", "kbd"]) {
     it(`reconstructed mark '${name}' carries no raw class/style/id`, () => {
       const spec = reportSchema.spec.marks.get(name);
