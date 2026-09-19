@@ -123,8 +123,10 @@ Why it is safe and why it works, in one line each:
 
 The closed `Upload warning` set (ADR-0088 / #365) gains a third code,
 **`sandbox-incompatible`**, joining `external-resource-blocked` and `editor-lossy`. It is
-emitted, one per distinct API, when the entry document reads `localStorage`,
-`sessionStorage`, or `document.cookie` at the top level of an inline `<script>`. Its
+emitted, one per distinct API, when the entry document reads or writes `localStorage`,
+`sessionStorage`, or `document.cookie` at the top level of an inline `<script>` — a write
+(`document.cookie = …`, `localStorage.setItem(…)`, `window.localStorage = …`) throws the
+same `SecurityError` as a read in the opaque-origin frame, so the scan flags either. Its
 `detail` names the specific API and tells the reader — usually an agent — that the owner
 view runs the report in a storage-less sandboxed frame where that access throws, and to
 guard it (feature-detect or `try/catch`) so the report still paints. The canonical
