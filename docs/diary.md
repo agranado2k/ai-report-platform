@@ -6430,7 +6430,7 @@ Two documentation-only fixes, no source touched.
 The `sandbox-incompatible` scanner (`scanSandboxStorageAccess` in `arp-report-html`,
 reached through the `ResourceScanner.scanSandbox` port) detects an *access* to
 `localStorage` / `sessionStorage` / `document.cookie` — the member/reference shape — and so
-flags **writes** (`document.cookie = …`, `localStorage.setItem(…)`, `window.localStorage = …`)
+flags **writes** (`document.cookie = …`, `localStorage.setItem(…)`, `sessionStorage.clear()`)
 exactly as it flags reads: the assignment's left-hand `MemberExpression` is walked and
 `detect`ed like any other. That is intended — in the owner view's `allow-same-origin`-less
 frame a *write* throws the same `SecurityError` as a read. ADR-0092 §2 and the glossary said
