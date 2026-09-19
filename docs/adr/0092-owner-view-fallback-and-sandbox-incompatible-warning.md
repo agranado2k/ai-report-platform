@@ -93,7 +93,7 @@ guarantees, without loosening those guarantees**.
    **Chosen** — option 2 for the reader, this for the author. Emitted when the uploaded
    document reads `localStorage`, `sessionStorage`, or `document.cookie` at the **top level
    of an inline `<script>`** (unguarded — not inside a function and not inside a `try`), via
-   the existing `ResourceScanner` port. Advisory exactly like its two siblings: it never
+   the existing `UploadScanner` port. Advisory exactly like its two siblings: it never
    fetches, never rejects, never changes the status code.
 
 ## Decision outcome
@@ -132,7 +132,7 @@ guard it (feature-detect or `try/catch`) so the report still paints. The canonic
 
 Mechanism, reusing #365's exactly:
 
-- The scan reaches `packages/application` through the **`ResourceScanner` port** (ADR-0024
+- The scan reaches `packages/application` through the **`UploadScanner` port** (ADR-0024
   keeps the layer dependency-locked), which gains one method, `scanSandbox`, beside `scan`.
   The real predicate lives in `arp-report-html` (`scanSandboxStorageAccess`) next to
   `scanBlockedResources`, and the adapter bridges the two.
@@ -173,9 +173,9 @@ and noise. It stays advisory and total: a script that will not parse contributes
   present control in the chrome, including on reports that render perfectly framed.
 - The author (or their agent) learns at upload time, in an actionable code, that a report
   will blank in the owner view — closing the loop the reader fallback only mitigates.
-- The `ResourceScanner` port now answers two questions; its name is narrower than its job.
-  A rename is deliberately **not** done here — it is a mechanical follow-up, not part of a
-  behavior diff (shared-invariants §; the ADR-0089 §5 precedent for #375).
+- The `UploadScanner` port now answers two questions; the rename from `ResourceScanner` to
+  reflect this was a deliberate mechanical follow-up (ticket #390), not part of a behavior
+  diff (shared-invariants §; the ADR-0089 §5 precedent for #375).
 - The heuristic will have false negatives (storage read via a computed property, an
   aliased global, `eval`) and false positives (a top-level read that the report's own logic
   makes unreachable). Both are acceptable because the warning is advisory and the reader
@@ -188,7 +188,7 @@ and noise. It stays advisory and total: a script that will not parse contributes
   frame. This record adds no new browser experiment; it builds on that measurement.
 - Implementation: `apps/view/app/view/components/OwnerViewTopBar.tsx` +
   `OwnerViewChrome.tsx` (the control); `packages/report-html/src/sandbox-scan.ts` (the
-  heuristic); `packages/application/src/ports.ts` (`ResourceScanner.scanSandbox`,
+  heuristic); `packages/application/src/ports.ts` (`UploadScanner.scanSandbox`,
   `SandboxStorageAccess`), `packages/adapters/src/resource-scanner.ts` (the bridge),
   `packages/application/src/use-cases/upload-report.ts` (assembly + the new code).
 - Proof: `tests/browser/owner-view-chrome.spec.ts` (the control is present and points at

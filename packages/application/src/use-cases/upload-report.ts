@@ -46,7 +46,7 @@ import type {
   PlanLimiter,
   ProcessedBundle,
   ReportRepository,
-  ResourceScanner,
+  UploadScanner,
   SandboxStorageAccess,
   ScanQueue,
   SlugFactory,
@@ -70,7 +70,7 @@ export interface UploadReportDeps extends CanWriteDeps {
   readonly fidelity: FidelityProbe;
   /** What the VIEWER will refuse to load out of this document (#365) — the
    *  third write-time question, asked while the author still holds the bytes. */
-  readonly resources: ResourceScanner;
+  readonly resources: UploadScanner;
   readonly idempotency: IdempotencyStore;
   readonly outbox: EventOutbox;
   /** Audit log (ADR-0070) — one `report.uploaded` row per fresh upload/re-upload. */

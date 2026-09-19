@@ -4,15 +4,15 @@ import { fileURLToPath } from "node:url";
 import { VIEW_CSP_ALLOWLIST } from "arp-headers/view";
 import { describe, expect, it } from "vitest";
 import { HtmlBundleProcessor } from "./bundle-processor";
-import { ReportHtmlResourceScanner } from "./resource-scanner";
+import { ReportHtmlUploadScanner } from "./resource-scanner";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) =>
   readFileSync(path.resolve(__dirname, `../../report-html/src/fixtures/${name}`), "utf-8");
 
-describe("ReportHtmlResourceScanner", () => {
-  const scanner = new ReportHtmlResourceScanner();
+describe("ReportHtmlUploadScanner", () => {
+  const scanner = new ReportHtmlUploadScanner();
 
   it("says nothing about a self-contained report", () => {
     expect(scanner.scan(enc(fixture("ai-readiness-report.html")))).toEqual([]);
@@ -49,8 +49,8 @@ describe("ReportHtmlResourceScanner", () => {
   });
 });
 
-describe("ReportHtmlResourceScanner.scanSandbox (#385)", () => {
-  const scanner = new ReportHtmlResourceScanner();
+describe("ReportHtmlUploadScanner.scanSandbox (#385)", () => {
+  const scanner = new ReportHtmlUploadScanner();
 
   it("names a storage API read unguarded at the top level of an inline script", () => {
     const html =
@@ -87,12 +87,12 @@ describe("the deployment's view origin is 'self'", () => {
   const selfRef = `<html><body><img src="${VIEW}/logo.png" alt=""></body></html>`;
 
   it("clears an absolute URL on the configured view origin", () => {
-    expect(new ReportHtmlResourceScanner(VIEW).scan(enc(selfRef))).toEqual([]);
+    expect(new ReportHtmlUploadScanner(VIEW).scan(enc(selfRef))).toEqual([]);
   });
 
   it("still names a resource on any other origin", () => {
     const html = `<html><body><script src="https://unpkg.com/x.js"></script></body></html>`;
-    expect(new ReportHtmlResourceScanner(VIEW).scan(enc(html)).map((r) => r.url)).toEqual([
+    expect(new ReportHtmlUploadScanner(VIEW).scan(enc(html)).map((r) => r.url)).toEqual([
       "https://unpkg.com/x.js",
     ]);
   });
@@ -100,7 +100,7 @@ describe("the deployment's view origin is 'self'", () => {
   it("warns about that same self URL on a deployment with no configured origin", () => {
     // Previews and dev leave `VIEW_ORIGIN` unset — the scan then reports what
     // it can prove rather than guessing an origin.
-    expect(new ReportHtmlResourceScanner().scan(enc(selfRef)).map((r) => r.url)).toEqual([
+    expect(new ReportHtmlUploadScanner().scan(enc(selfRef)).map((r) => r.url)).toEqual([
       `${VIEW}/logo.png`,
     ]);
   });
@@ -112,7 +112,7 @@ describe("the read path is unchanged by the resource scan (ADR-0038)", () => {
   // document that reaches for unpkg is stored and served exactly as uploaded —
   // nothing here rewrites a URL to an allowlisted host.
   const proc = new HtmlBundleProcessor();
-  const scanner = new ReportHtmlResourceScanner();
+  const scanner = new ReportHtmlUploadScanner();
 
   it("stores a document full of blocked references verbatim", async () => {
     const html =
