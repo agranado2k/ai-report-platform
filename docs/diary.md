@@ -6419,3 +6419,45 @@ Containment untouched: the iframe contract, the CSP
 (`connect-src`/`frame-ancestors`/`script-src`/the second `sandbox` header),
 `packages/headers` and `GET /<slug>` are all unchanged. Tier: implementer.
 Worktree `sandbox-fallback`, branch `feat/sandbox-fallback`.
+
+### 2026-09-19 — Claude review check made fail-visibly (#388)
+
+Closed the second half of the review-integrity work #371 opened. The
+`claude-review` check in `claude-code-review.yml` carried the identical
+false-green the Gemini `review` check had: its `Run Claude Code Review` step ran
+under `continue-on-error: true` with **no enforcing gate**, so when the Claude
+review no-opped — an Anthropic rate limit (429), a missing/invalid
+`CLAUDE_CODE_OAUTH_TOKEN`, an overloaded upstream (5xx), or the action failing —
+the check still reported SUCCESS with no review posted, defeating ADR-030's
+second-vendor purpose. Surfaced during the PR #386 review and tracked as the
+deferred follow-up in the ADR-030 amendment.
+
+Mirrored the #371 pattern exactly: keep `continue-on-error` so the job reaches a
+final `if: always()` "Enforce that a review actually ran" gate step that
+classifies the reason (quota / auth / missing / transient / unknown), writes a
+distinct line to the job summary (quota distinguishable from auth), and exits
+non-zero for anything but a real review — so the gate, not `continue-on-error`,
+decides the check colour. The check stays **advisory** (not required-for-merge —
+AI review never gates merge, ADR-030's original decision).
+
+Rather than copy-paste a second near-identical script, **generalized** the pure
+classifier into `scripts/classify-ai-review.sh` (vendor via `REVIEW_VENDOR`, a
+superset of both vendors' error signatures). `classify-gemini-review.sh` and the
+new `classify-claude-review.sh` are now thin shims over it — one unit-tested
+classifier serves both vendors, and the existing Gemini tests stay green
+(`test:scripts`: 10 Gemini + 14 Claude, 70 total green).
+
+The seam differs between the two actions, verified before wiring:
+`run-gemini-cli` exposes `outputs.error`, but `anthropics/claude-code-action@v1`
+does **not** — it exposes `outputs.conclusion` (success/failure) and
+`outputs.execution_file` (a JSON array of the run's SDK messages). The Claude
+gate extracts only the error-bearing fields (`type:"result"` events with
+`is_error:true` — their `subtype` + `result` text) with `jq`, never the reviewed
+diff, so the code under review cannot spoof a classification; that untrusted text
+(ADR-0069) reaches the classifier through stdin, never interpolated into the
+shell. Folds `outputs.conclusion` into the outcome as belt-and-suspenders (a
+swallowed `is_error` can never read as a clean RAN).
+
+ADR-030 amended in `docs/spec.html` (2026-09-19 amendment) to record that the
+Claude follow-up landed. Tier: implementer. Worktree `claude-review-fix`, branch
+`ci/claude-review-fix`.
