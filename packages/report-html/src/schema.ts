@@ -51,18 +51,28 @@ nodes = nodes
   .addToEnd("rtags", rtagsNode)
   .addToEnd("chips", chipsNode)
   .addToEnd("block_label", blockLabelNode);
-// Retain class/style on every schema-basic node so bespoke classes on
-// otherwise-standard elements (e.g. `<h3 class="sub">`) degrade to
-// "preserved but uninterpreted" instead of being stripped.
-for (const name of [
-  "paragraph",
-  "heading",
-  "blockquote",
-  "code_block",
-  "bullet_list",
-  "ordered_list",
-  "list_item",
-]) {
+// Retain class (verbatim) + style (sanitized) on EVERY named block node
+// (ADR-0062 §3, ticket #370) — not just the schema-basic ones like
+// `<h3 class="sub">`, but the whole bespoke report vocabulary (`card`, `sec`,
+// the table family, `details`/`summary`, `resrow`, the `rt`/`rd`/… containers,
+// …). Swept the same way as the `id` sweep below, so a block node spec added
+// later inherits the retention for free instead of silently dropping bespoke
+// classes/inline styles on the first edit-save. `withClassStyle` composes over
+// a node that already retains class through its own spec (`card`/`grid`/… keep
+// their behaviour and gain `style`); the glossary's `Retained attribute set`
+// already promises this on "any node".
+//
+// NODE-ONLY (never marks — an id/class on a mark multiplies across the runs a
+// mark splits into; see withId's doc comment) and BLOCK-ONLY (inline nodes like
+// `image`/`hard_break` are out of the "named block node" set the ticket scopes).
+// Applied BEFORE `withParagraphVariant` and the `id` sweep, exactly where the
+// narrower schema-basic loop it replaces used to sit, so those wrappers still
+// layer on top in that order.
+const classStyleNodeNames: string[] = [];
+nodes.forEach((name, spec) => {
+  if (spec.toDOM && spec.group !== "inline" && !spec.inline) classStyleNodeNames.push(name);
+});
+for (const name of classStyleNodeNames) {
   const spec = nodes.get(name);
   if (spec) nodes = nodes.update(name, withClassStyle(spec));
 }
