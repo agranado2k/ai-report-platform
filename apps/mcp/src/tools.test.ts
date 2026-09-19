@@ -676,10 +676,11 @@ describe("reports_upload authoring guidance (#365)", () => {
   // The response half: an agent that just published something the viewer will
   // render degraded must learn it from the response it already reads, while it
   // still holds the document — not from a human opening the report later.
-  it("names warnings[] and both of its codes", () => {
+  it("names warnings[] and all three of its codes", () => {
     const d = writeDescriptionOf("reports_upload");
     expect(d).toMatch(/warnings/);
     expect(d).toMatch(/external-resource-blocked/);
+    expect(d).toMatch(/sandbox-incompatible/);
     expect(d).toMatch(/editor-lossy/);
   });
 
