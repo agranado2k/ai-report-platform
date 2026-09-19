@@ -6339,3 +6339,39 @@ same cycle by funnelling to the mint, so the page now carries none.
 
 `GET /<slug>` is untouched, byte for byte, and so is `packages/headers`.
 Worktree `owner-open-flip`, branch `feat/owner-open-flip`.
+
+### 2026-09-18 — The Gemini `review` check can no longer lie green (#371, amends ADR-030)
+
+`continue-on-error: true` on the Gemini review step was masking every failure at
+the job level — the daily free-tier quota (HTTP 429 `TerminalQuotaError`), a
+missing `GEMINI_API_KEY`, and an absent CLI all left the `review` check **green
+with no review posted** (surfaced while landing #368/#369). With
+`continue-on-error`, `steps.<id>.outcome` is `failure` but `conclusion` is
+`success`, so the whole job concluded green. A green check that does not prove a
+review happened defeats ADR-030's second-vendor purpose.
+
+Fix: keep the review step under `continue-on-error` (so the job still *reaches*
+the gate), give it `id: gemini`, and add a final classifier step (`if: always()`)
+that reads the step's `outcome` and its structured `error` output, classifies the
+reason — `QUOTA | AUTH | MISSING_CLI | TRANSIENT | UNKNOWN` — writes the reason to
+the job summary (quota worded so it is unambiguously distinct from auth), and
+exits non-zero for anything that is not a real review. That step, not
+`continue-on-error`, now decides the check colour. The classification is a pure,
+unit-tested shell function (`scripts/classify-gemini-review.sh`,
+`scripts/test/classify-gemini-review.test.mjs`, the `test:scripts` tier); the
+YAML wiring is validated by the workflow's own run.
+
+Decision recorded in the ADR-030 amendment: the check stays **advisory** (not a
+required status check — AI review still never gates merge) but is now
+**fail-visibly** — green ⟺ a review ran; every other outcome is red with the
+reason in the summary. Red was chosen over a Checks-API neutral conclusion for
+simplicity. The reviewer's error text is treated as untrusted data (ADR-0069):
+passed via an env var into the script's stdin, never interpolated into the shell.
+
+`claude-code-review.yml` carries the same `continue-on-error` shape and the same
+latent false-green — recorded as a follow-up, not fixed here (one ticket, one
+slice). **Open for the operator:** whether to move Gemini to a paid tier or a
+higher-daily-quota model — this change makes the failure honest at any tier and
+spends nothing; the quota-headroom call is flagged in the PR's Notes for review.
+
+Worktree `gemini-review-fix`, branch `ci/gemini-review-fix`.
