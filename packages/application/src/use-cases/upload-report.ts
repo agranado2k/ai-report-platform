@@ -46,11 +46,11 @@ import type {
   PlanLimiter,
   ProcessedBundle,
   ReportRepository,
-  UploadScanner,
   SandboxStorageAccess,
   ScanQueue,
   SlugFactory,
   UnitOfWork,
+  UploadScanner,
 } from "../ports";
 
 const ROUTE = "POST /api/v1/reports";

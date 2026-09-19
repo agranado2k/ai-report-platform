@@ -21,11 +21,7 @@
 // stores, still versions, and is still served byte-for-byte; naming the
 // reference only lets its author fix it while they still hold the document.
 
-import type {
-  BlockedExternalResource,
-  UploadScanner,
-  SandboxStorageAccess,
-} from "arp-application";
+import type { BlockedExternalResource, SandboxStorageAccess, UploadScanner } from "arp-application";
 import { scanBlockedResources, scanSandboxStorageAccess } from "arp-report-html";
 
 export class ReportHtmlUploadScanner implements UploadScanner {
