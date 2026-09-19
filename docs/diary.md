@@ -6339,3 +6339,47 @@ same cycle by funnelling to the mint, so the page now carries none.
 
 `GET /<slug>` is untouched, byte for byte, and so is `packages/headers`.
 Worktree `owner-open-flip`, branch `feat/owner-open-flip`.
+
+### 2026-09-19 — ADR-0092: the owner-view fallback control + the `sandbox-incompatible` upload warning (#385)
+
+Dogfooding the shipped owner view (#361/#381), root-caused by #366, surfaced a
+product gap: the owner view frames the report in a sandbox with no
+`allow-same-origin` (ADR-0089 §2), so `localStorage`, `sessionStorage` and
+`document.cookie` throw `SecurityError` inside it. A report whose inline bootstrap
+reads one of them *before first paint* dies on the uncaught throw and renders
+completely blank — a 200 that shows nothing (repro: PRD #356's deck ZmsH1iKiTl,
+Chromium 148). Common in generator output: theme persistence, "last slide"
+memory, analytics. The raw `/<slug>` is unaffected — it is a top-level document,
+not sandboxed — but the reader in the owner view had no way to reach it.
+
+`allow-same-origin` cannot come back: that absence *is* the containment (the
+review-#146 / lethal-trifecta escalation the sandbox exists to prevent), so this
+is a product decision about a report that cannot run under the frame's
+guarantees, not a loosening. **ADR-0092** records the operator's chosen shape —
+a chrome fallback for the reader plus an upload warning for the author — and the
+rejected options (upload-warning-only; active blank-detection, which is
+impossible across the opaque origin the containment creates).
+
+For the reader: `OwnerViewTopBar` now **always** shows an unobtrusive "Open in
+new tab" control — a plain anchor to the canonical `/<slug>`, `target="_blank"`,
+`rel="noopener"`, present even on the owner-read degrade — opening the report as
+a TOP-LEVEL document where storage works. It serves directly because the
+owner-view hand-off already set `arp_unlock` at `Path=/<slug>` (ADR-0089 §4c /
+ADR-0091, verified by dogfooding). No blank-detection: the frame is opaque, so
+the chrome can read no load/error/paint signal, and a control gated on a fragile
+guess is worse than one always there.
+
+For the author: a third `Upload warning` code, **`sandbox-incompatible`** (joining
+`external-resource-blocked` and `editor-lossy`, #365), emitted one-per-API when
+the entry document reads storage/cookie **unguarded at the top level of an inline
+`<script>`**. Detected with a real parser (`acorn`, AST) rather than a token
+search, so a `try/catch`-guarded or function-scoped read is not nagged — guarding
+is the very fix the warning recommends. It reaches `packages/application` through
+the existing `ResourceScanner` port (a new `scanSandbox` method, ADR-0024),
+assembled in `uploadReport` beside the ADR-0088 resource scan; synchronous, never
+fetches, never rejects, never changes the status code (ADR-0069).
+
+Containment untouched: the iframe contract, the CSP
+(`connect-src`/`frame-ancestors`/`script-src`/the second `sandbox` header),
+`packages/headers` and `GET /<slug>` are all unchanged. Tier: implementer.
+Worktree `sandbox-fallback`, branch `feat/sandbox-fallback`.
