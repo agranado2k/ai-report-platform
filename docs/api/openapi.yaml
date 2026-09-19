@@ -1649,7 +1649,7 @@ components:
       properties:
         code:
           type: string
-          enum: [external-resource-blocked, editor-lossy]
+          enum: [external-resource-blocked, sandbox-incompatible, editor-lossy]
           description: >
             `external-resource-blocked` — the document references a URL the public
             viewer's Content-Security-Policy will not load (ADR-0088: the **Viewer
@@ -1657,6 +1657,12 @@ components:
             cdnjs / jsDelivr-npm for scripts; `img-src` and frames stay pinned to
             the viewer origin). One warning per blocked URL; `data:` URIs and
             same-document references raise none.
+            `sandbox-incompatible` — an inline `<script>` reads `localStorage`,
+            `sessionStorage` or `document.cookie` at its top level, unguarded
+            (ADR-0092). Those throw in the owner view's storage-less sandboxed
+            frame, so an unguarded read blanks that frame; the canonical
+            `view.<domain>/<slug>` URL is unaffected. One warning per distinct
+            API; guard the access (feature-detect or try/catch) and re-upload.
             `editor-lossy` — this version's recorded **Fidelity** (ADR-0090) is
             `lossy`: opening the report in the editor and saving it would not keep
             the whole document.
