@@ -6268,7 +6268,7 @@ expectations from that same object, so widening the allowlist widens the scanner
 and fails the MCP guidance test until the text an agent reads catches up.
 
 Shaped as the third write-time question beside the two probes: a synchronous
-`ResourceScanner` port (ADR-0024), implemented in `packages/adapters` over
+`UploadScanner` port (ADR-0024), implemented in `packages/adapters` over
 `arp-report-html`'s `scanBlockedResources`. Synchronous on purpose — the uploaded
 document is untrusted content and a scan that cannot await cannot fetch (ADR-0069).
 The `reports_upload` description gained the self-contained authoring rules the
@@ -6413,7 +6413,7 @@ the entry document reads storage/cookie **unguarded at the top level of an inlin
 `<script>`**. Detected with a real parser (`acorn`, AST) rather than a token
 search, so a `try/catch`-guarded or function-scoped read is not nagged — guarding
 is the very fix the warning recommends. It reaches `packages/application` through
-the existing `ResourceScanner` port (a new `scanSandbox` method, ADR-0024),
+the existing `UploadScanner` port (a new `scanSandbox` method, ADR-0024),
 assembled in `uploadReport` beside the ADR-0088 resource scan; synchronous, never
 fetches, never rejects, never changes the status code (ADR-0069).
 

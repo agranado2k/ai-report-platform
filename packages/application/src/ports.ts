@@ -1036,7 +1036,7 @@ export interface SandboxStorageAccess {
   readonly api: string;
 }
 
-export interface ResourceScanner {
+export interface UploadScanner {
   /**
    * @param entryDocument the entry document's bytes, exactly as they will be stored
    * @returns every external reference the viewer's CSP will block; empty when

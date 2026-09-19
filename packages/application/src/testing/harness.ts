@@ -12,7 +12,7 @@ import {
   FakeFidelityProbe,
   FakeHasher,
   FakePlanLimiter,
-  FakeResourceScanner,
+  FakeUploadScanner,
   InMemoryAuditLogger,
   InMemoryBlobStore,
   InMemoryEventOutbox,
@@ -41,7 +41,7 @@ export interface AppTestHarness {
   readonly fidelity: FakeFidelityProbe;
   /** What the VIEWER will refuse to load (#365) — scripted, so a test can make an
    *  upload reach past the ADR-0088 allowlist without hand-crafting a document. */
-  readonly resources: FakeResourceScanner;
+  readonly resources: FakeUploadScanner;
   readonly idempotency: InMemoryIdempotencyStore;
   readonly outbox: InMemoryEventOutbox;
   /** Audit log (ADR-0070) — every mutating action's audit_log row. */
@@ -92,7 +92,7 @@ export function makeAppTestHarness(overrides: AppTestHarnessOverrides = {}): App
   const bundles = overrides.bundles ?? new FakeBundleProcessor();
   const editability = overrides.editability ?? new FakeEditabilityProbe();
   const fidelity = overrides.fidelity ?? new FakeFidelityProbe();
-  const resources = overrides.resources ?? new FakeResourceScanner();
+  const resources = overrides.resources ?? new FakeUploadScanner();
   const idempotency = overrides.idempotency ?? new InMemoryIdempotencyStore();
   const outbox = overrides.outbox ?? new InMemoryEventOutbox();
   const audit = overrides.audit ?? new InMemoryAuditLogger();

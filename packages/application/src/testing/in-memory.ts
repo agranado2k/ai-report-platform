@@ -85,7 +85,6 @@ import type {
   ReportSummary,
   ReportVersionSummary,
   ReportViewer,
-  ResourceScanner,
   SandboxStorageAccess,
   ScanJobMessage,
   ScanQueue,
@@ -93,6 +92,7 @@ import type {
   ScanWorkQueue,
   SlugFactory,
   UnitOfWork,
+  UploadScanner,
   VersionPage,
   WriteGrant,
   WriteGrantStore,
@@ -847,7 +847,7 @@ export class FakeFidelityProbe implements FidelityProbe {
   }
 }
 
-/** A scripted {@link ResourceScanner} (#365). Records every document it was
+/** A scripted {@link UploadScanner} (#365). Records every document it was
  *  handed, so a test can assert WHETHER it was consulted — "no entry document,
  *  no scan" is a property of the caller, and an unconsulted scanner is how you
  *  see it holding. Defaults to a self-contained document: nothing blocked.
@@ -856,7 +856,7 @@ export class FakeFidelityProbe implements FidelityProbe {
  *  two siblings are not: the real predicate — and its reading of the ADR-0088
  *  allowlist — is covered by `packages/report-html/src/resource-scan.test.ts`
  *  and the adapter's own test. */
-export class FakeResourceScanner implements ResourceScanner {
+export class FakeUploadScanner implements UploadScanner {
   private blocked: readonly BlockedExternalResource[] = [];
   private sandbox: readonly SandboxStorageAccess[] = [];
   readonly scanned: string[] = [];

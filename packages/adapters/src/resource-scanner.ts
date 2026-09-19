@@ -1,4 +1,4 @@
-// ReportHtmlResourceScanner — the ResourceScanner port (#365), backed by the
+// ReportHtmlUploadScanner — the UploadScanner port (#365), backed by the
 // scan that reads the Viewer CSP allowlist itself.
 //
 // The third of the write-time questions, beside ReportHtmlEditabilityProbe
@@ -21,14 +21,10 @@
 // stores, still versions, and is still served byte-for-byte; naming the
 // reference only lets its author fix it while they still hold the document.
 
-import type {
-  BlockedExternalResource,
-  ResourceScanner,
-  SandboxStorageAccess,
-} from "arp-application";
+import type { BlockedExternalResource, SandboxStorageAccess, UploadScanner } from "arp-application";
 import { scanBlockedResources, scanSandboxStorageAccess } from "arp-report-html";
 
-export class ReportHtmlResourceScanner implements ResourceScanner {
+export class ReportHtmlUploadScanner implements UploadScanner {
   /**
    * @param viewOrigin the origin reports are served from on this deployment
    * (`VIEW_ORIGIN` — the same value `view_url` is built from). Every fetch

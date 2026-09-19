@@ -31,7 +31,7 @@ import {
   R2BlobStore,
   ReportHtmlEditabilityProbe,
   ReportHtmlFidelityProbe,
-  ReportHtmlResourceScanner,
+  ReportHtmlUploadScanner,
   ResendEmailSender,
   Sha256Hasher,
   SystemClock,
@@ -249,7 +249,7 @@ export function deps(): UploadReportDeps {
     // warn about an absolute self URL that prod would clear. Deliberate: the
     // alternative is guessing an origin and clearing a resource the viewer
     // really does refuse.
-    resources: new ReportHtmlResourceScanner(env.VIEW_ORIGIN),
+    resources: new ReportHtmlUploadScanner(env.VIEW_ORIGIN),
     idempotency: new DrizzleIdempotencyStore(ctx),
     outbox: new DrizzleEventOutbox(ctx),
     audit: auditLogger(),
