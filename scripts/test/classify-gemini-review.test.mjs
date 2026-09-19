@@ -55,6 +55,16 @@ test("a successful step with a real review is green (RAN, exit 0)", () => {
   assert.match(r.summary, /ran|review posted|completed/i);
 });
 
+test("the real production green path — success outcome with no error output — is RAN, exit 0", () => {
+  // The live happy path posts nothing on stderr: `steps.gemini.outputs.error`
+  // is empty, so the classifier reads empty stdin. Guards against a regression
+  // where empty stdin under `set -eu` (the `err=$(cat || true)` read) trips the
+  // script into a non-RAN token or a non-zero exit.
+  const r = run("success", "");
+  assert.equal(r.token, "RAN");
+  assert.equal(r.code, 0);
+});
+
 test("429 daily-quota exhaustion is RED and classified as QUOTA", () => {
   const err =
     "ApiError: TerminalQuotaError: You have exhausted your daily quota on this model. [429]\n";
