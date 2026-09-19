@@ -18,6 +18,14 @@ name: Gemini Code Review
 #
 # Consumer Gemini Code Assist on GitHub is being shut down July 17, 2026
 # — the run-gemini-cli action is the supported path forward.
+#
+# CHECK SEMANTICS (issue #371, amends ADR-030): the `review` check is ADVISORY
+# (it is NOT a required status check on `main` — AI review never gates merge),
+# but it is fail-visibly. Green means a Gemini review actually ran; red means it
+# did not (quota / auth / missing CLI / transient outage), with the classified
+# reason in the job summary. It is no longer allowed to report a false green when
+# `continue-on-error` swallowed a failure. The gate is the classifier step at
+# the end (scripts/classify-gemini-review.sh).
 
 on:
   pull_request:
@@ -48,9 +56,13 @@ jobs:
           fetch-depth: 1
 
       - name: Run Gemini PR review
-        # Bot review is advisory (solo-developer policy — can't gate merge). Transient
-        # Gemini API outages (e.g. 503 UNAVAILABLE) shouldn't fail the
-        # PR check; the review just becomes a no-op for this run.
+        id: gemini
+        # `continue-on-error` lets the job REACH the classifier step below even
+        # when the review step exits non-zero (quota 429, missing auth, absent
+        # CLI). It no longer decides the check's colour — the classifier does
+        # (issue #371). Without a review actually running, this check must not be
+        # green: a green `review` check that proves nothing defeats ADR-030's
+        # second-vendor purpose.
         continue-on-error: true
         uses: google-github-actions/run-gemini-cli@v0
         env:
@@ -125,3 +137,28 @@ jobs:
 
             Provide constructive feedback in a structured format. Keep
             comments inline on specific lines where possible.
+
+      - name: Enforce that a review actually ran
+        # The gate for issue #371. Runs even when the review step failed
+        # (`if: always()`), reads that step's outcome + structured error output,
+        # and classifies the reason (quota / auth / missing CLI / transient /
+        # unknown). It exits non-zero for anything that is NOT a real review, so
+        # THIS step — not `continue-on-error` above — decides the check colour.
+        # A green `review` check now means, and only means, that a Gemini review
+        # ran. The reason for a red check lands in the job summary, with quota
+        # distinguishable from an auth failure.
+        #
+        # The check stays ADVISORY (ADR-030 — AI review never gates merge; it is
+        # not a required status check on `main`), but "advisory" no longer means
+        # "silently green when nothing happened": red-but-non-blocking is the
+        # honest state a solo maintainer can act on (re-run, top up quota, or
+        # merge on the Claude review alone).
+        #
+        # The reviewer's error text is untrusted data (ADR-0069): it is passed
+        # through an env var into the script's stdin, never interpolated into the
+        # shell, and the script only reads and classifies it.
+        if: always()
+        env:
+          GEMINI_OUTCOME: ${{ steps.gemini.outcome }}
+          GEMINI_ERROR: ${{ steps.gemini.outputs.error }}
+        run: printf '%s' "$GEMINI_ERROR" | scripts/classify-gemini-review.sh "$GEMINI_OUTCOME"
