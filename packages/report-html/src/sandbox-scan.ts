@@ -156,20 +156,27 @@ function walk(
 
   switch (node.type) {
     case "TryStatement": {
-      // The `try` block is the guarded region; its catch/finally also run under
-      // a handler in practice, so treat the whole statement as guarded — a read
-      // there is either caught or a fallback the author wrote on purpose.
-      for (const child of childNodes(node)) walk(child, record, inExec, true);
+      // A read in the `try` block or the `catch` handler is caught (or is a
+      // fallback the author wrote on purpose), so treat those as guarded. A
+      // throw in `finally`, though, propagates past this statement's own
+      // handler, so the finalizer keeps the caller's guard — unguarded at top
+      // level. (A missed unguarded `finally` read is an accepted false negative,
+      // ADR-0092; what matters here is not to wrongly *report* the guarded ones.)
+      if (isNode(node.block)) walk(node.block, record, inExec, true);
+      if (isNode(node.handler)) walk(node.handler, record, inExec, true);
+      if (isNode(node.finalizer)) walk(node.finalizer, record, inExec, guarded);
       return;
     }
     case "CallExpression":
     case "NewExpression": {
       const callee = node.callee;
       // An IIFE — `(function(){…})()` / `(()=>{…})()` — runs its body NOW, so
-      // its body stays on the synchronous exec path (guarded resets: the IIFE
-      // opens a fresh scope with no try around it yet).
+      // the body stays on the synchronous exec path AND keeps the caller's
+      // guard: a `try` around the *call* catches a synchronous throw from the
+      // body. Only the body is a read site — the parameter and function-name
+      // positions are bindings, not reads, so they are not walked.
       if (isNode(callee) && isFunction(callee)) {
-        for (const child of childNodes(callee)) walk(child, record, inExec, false);
+        if (isNode(callee.body)) walk(callee.body, record, inExec, guarded);
       } else if (isNode(callee)) {
         walk(callee, record, inExec, guarded);
       }
@@ -178,6 +185,31 @@ function walk(
       if (Array.isArray(node.arguments)) {
         for (const arg of node.arguments) if (isNode(arg)) walk(arg, record, inExec, guarded);
       }
+      return;
+    }
+    case "MemberExpression": {
+      // `detect` (above) has already judged this member as a whole
+      // (`document.cookie`, `window.localStorage`, …). Recurse into the OBJECT,
+      // which may itself be an access, but into the PROPERTY only when it is
+      // computed: `x[localStorage]` reads the global, `x.localStorage` names a
+      // field on `x` and is not a read of the throwing global.
+      if (isNode(node.object)) walk(node.object, record, inExec, guarded);
+      if (node.computed && isNode(node.property)) walk(node.property, record, inExec, guarded);
+      return;
+    }
+    case "Property": {
+      // The VALUE is a read (and, for shorthand `{ localStorage }`, is the
+      // reference); the KEY is a read only when computed (`{ [localStorage]: 1 }`).
+      // A plain key `{ localStorage: 1 }` names a field, not the global.
+      if (node.computed && isNode(node.key)) walk(node.key, record, inExec, guarded);
+      if (isNode(node.value)) walk(node.value, record, inExec, guarded);
+      return;
+    }
+    case "VariableDeclarator": {
+      // `id` is a binding target, not a read; only the initializer executes.
+      // (A destructuring read such as `const { localStorage } = window` is an
+      // accepted false negative per ADR-0092.)
+      if (isNode(node.init)) walk(node.init, record, inExec, guarded);
       return;
     }
     default: {
@@ -214,10 +246,12 @@ function detect(node: AnyNode, record: (api: SandboxStorageApi) => void): void {
   }
   if (node.type === "Identifier") {
     const api = STORAGE_GLOBALS[node.name as string];
-    // A bare `localStorage` / `sessionStorage` reference. `nonReferencePositions`
-    // (declaration ids, property keys, member `.property`) are pruned by walking
-    // MemberExpression via its own case above and by these globals never being
-    // legitimate binding names in generated reports.
+    // A bare `localStorage` / `sessionStorage` reference. `detect` only ever
+    // sees an identifier that `walk` reached through a genuine reference slot:
+    // non-reference positions (declaration/parameter ids, non-computed property
+    // keys and member `.property` names) are pruned by the dedicated `walk`
+    // cases for MemberExpression / Property / VariableDeclarator / the IIFE
+    // branch, so by the time we are here the name is being read, not bound.
     if (api) record(api);
   }
 }

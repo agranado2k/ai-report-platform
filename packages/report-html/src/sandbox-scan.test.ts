@@ -43,6 +43,37 @@ describe("scanSandboxStorageAccess — top-level storage reads in inline scripts
     expect(apis(doc(`try { const t = localStorage.getItem("theme"); } catch {}`))).toEqual([]);
   });
 
+  it("does NOT flag a top-level IIFE whose call sits inside try/catch — the throw is caught", () => {
+    // A synchronous throw from an IIFE body propagates through the call and is
+    // caught by the enclosing try — the exact remediation the warning recommends.
+    expect(
+      apis(doc(`try { (function () { localStorage.getItem("x"); })(); } catch {}`)),
+    ).toEqual([]);
+    expect(apis(doc(`try { (() => { const c = document.cookie; })(); } catch {}`))).toEqual([]);
+  });
+
+  it("does NOT flag an object-literal property KEY named after a storage global", () => {
+    expect(apis(doc(`const cfg = { localStorage: false, sessionStorage: 1 };`))).toEqual([]);
+  });
+
+  it("does NOT flag a member .property read on a non-window object", () => {
+    expect(apis(doc(`const t = settings.localStorage; const c = this.sessionStorage;`))).toEqual(
+      [],
+    );
+  });
+
+  it("does NOT flag a local binding that merely shares a storage global's name", () => {
+    // The binding position is not a read. (A later reference to the shadowing
+    // local cannot be distinguished from the global without scope analysis, and
+    // is an accepted false positive per ADR-0092 — so this asserts the binding
+    // itself, not a subsequent use.)
+    expect(apis(doc(`const localStorage = makeShim();`))).toEqual([]);
+  });
+
+  it("does NOT flag an IIFE parameter that shadows a storage global", () => {
+    expect(apis(doc(`(function (localStorage) {})(shim);`))).toEqual([]);
+  });
+
   it("does NOT flag a read inside a function that is only defined, not called", () => {
     expect(
       apis(doc(`function remember() { localStorage.setItem("x", "1"); } el.onclick = remember;`)),
