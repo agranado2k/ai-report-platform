@@ -83,19 +83,13 @@ test("an Anthropic 429 rate limit is RED and classified as QUOTA", () => {
 });
 
 test("a usage-limit / credit-exhaustion message is classified as QUOTA", () => {
-  const r = run(
-    "failure",
-    "Claude Code: Credit balance is too low to access the Anthropic API.\n",
-  );
+  const r = run("failure", "Claude Code: Credit balance is too low to access the Anthropic API.\n");
   assert.equal(r.token, "QUOTA");
   assert.equal(r.code, 1);
 });
 
 test("a missing OAuth token is RED and classified as AUTH", () => {
-  const r = run(
-    "failure",
-    "Error: CLAUDE_CODE_OAUTH_TOKEN is required but was not provided.\n",
-  );
+  const r = run("failure", "Error: CLAUDE_CODE_OAUTH_TOKEN is required but was not provided.\n");
   assert.equal(r.token, "AUTH");
   assert.equal(r.code, 1);
   assert.match(r.summary, /auth/i);
