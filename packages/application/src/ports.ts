@@ -1021,6 +1021,21 @@ export interface BlockedExternalResource {
   readonly allowed: readonly string[];
 }
 
+/**
+ * One storage API the OWNER VIEW's sandboxed frame cannot run (#385, ADR-0092).
+ *
+ * The owner view frames the report in a sandbox with no `allow-same-origin`
+ * (ADR-0089 §2), so `localStorage`, `sessionStorage` and `document.cookie` throw
+ * `SecurityError` inside it. A report that reads one at the top level of an
+ * inline script — before first paint — blanks. The real predicate is
+ * `arp-report-html`'s `scanSandboxStorageAccess`, reached through the same port
+ * for the same ADR-0024 reason `scan` is: answering needs a JS parser.
+ */
+export interface SandboxStorageAccess {
+  /** The API read: `localStorage`, `sessionStorage` or `document.cookie`. */
+  readonly api: string;
+}
+
 export interface ResourceScanner {
   /**
    * @param entryDocument the entry document's bytes, exactly as they will be stored
@@ -1029,4 +1044,15 @@ export interface ResourceScanner {
    *   returns nothing, and it never rejects an upload.
    */
   scan(entryDocument: Uint8Array): readonly BlockedExternalResource[];
+
+  /**
+   * @param entryDocument the entry document's bytes, exactly as they will be stored
+   * @returns every distinct storage API the document reads at the top level of
+   *   an inline script — the reads that will throw in the owner view's
+   *   opaque-origin frame (#385). Empty when the document reads none, or guards
+   *   every read. Total and synchronous for the same reasons as `scan`: the
+   *   document is untrusted content, so a scan that cannot await cannot fetch
+   *   (ADR-0069), and an upload must never fail for asking.
+   */
+  scanSandbox(entryDocument: Uint8Array): readonly SandboxStorageAccess[];
 }

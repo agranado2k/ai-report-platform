@@ -529,6 +529,9 @@ importers:
 
   packages/report-html:
     dependencies:
+      acorn:
+        specifier: ^8.16.0
+        version: 8.16.0
       arp-headers:
         specifier: workspace:*
         version: link:../headers

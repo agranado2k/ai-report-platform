@@ -86,6 +86,7 @@ import type {
   ReportVersionSummary,
   ReportViewer,
   ResourceScanner,
+  SandboxStorageAccess,
   ScanJobMessage,
   ScanQueue,
   ScanRequest,
@@ -857,15 +858,31 @@ export class FakeFidelityProbe implements FidelityProbe {
  *  and the adapter's own test. */
 export class FakeResourceScanner implements ResourceScanner {
   private blocked: readonly BlockedExternalResource[] = [];
+  private sandbox: readonly SandboxStorageAccess[] = [];
   readonly scanned: string[] = [];
+  /** The bytes handed to `scanSandbox`, so a test can assert WHETHER it was
+   *  consulted — "no entry document, no scan" is a property of the caller. */
+  readonly sandboxScanned: string[] = [];
 
   setBlocked(blocked: readonly BlockedExternalResource[]): void {
     this.blocked = blocked;
   }
 
+  /** Canned owner-view-incompatible reads (#385), same shape and rationale as
+   *  `setBlocked`: the real heuristic is covered by `arp-report-html`'s
+   *  `sandbox-scan.test.ts` and the adapter's own test. */
+  setSandboxAccess(sandbox: readonly SandboxStorageAccess[]): void {
+    this.sandbox = sandbox;
+  }
+
   scan(entryDocument: Uint8Array): readonly BlockedExternalResource[] {
     this.scanned.push(new TextDecoder().decode(entryDocument));
     return this.blocked;
+  }
+
+  scanSandbox(entryDocument: Uint8Array): readonly SandboxStorageAccess[] {
+    this.sandboxScanned.push(new TextDecoder().decode(entryDocument));
+    return this.sandbox;
   }
 }
 

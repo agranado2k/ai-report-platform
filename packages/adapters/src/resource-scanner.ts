@@ -21,8 +21,12 @@
 // stores, still versions, and is still served byte-for-byte; naming the
 // reference only lets its author fix it while they still hold the document.
 
-import type { BlockedExternalResource, ResourceScanner } from "arp-application";
-import { scanBlockedResources } from "arp-report-html";
+import type {
+  BlockedExternalResource,
+  ResourceScanner,
+  SandboxStorageAccess,
+} from "arp-application";
+import { scanBlockedResources, scanSandboxStorageAccess } from "arp-report-html";
 
 export class ReportHtmlResourceScanner implements ResourceScanner {
   /**
@@ -46,5 +50,13 @@ export class ReportHtmlResourceScanner implements ResourceScanner {
     return scanBlockedResources(new TextDecoder().decode(entryDocument), {
       viewOrigin: this.viewOrigin,
     });
+  }
+
+  scanSandbox(entryDocument: Uint8Array): readonly SandboxStorageAccess[] {
+    // Same UTF-8, `fatal: false` decode as `scan`: malformed bytes become
+    // U+FFFD rather than throwing, so the scan stays total. The stored bytes
+    // are untouched — this decode is local to answering the question, and needs
+    // no view origin because a storage read is not a URL (ADR-0092, #385).
+    return scanSandboxStorageAccess(new TextDecoder().decode(entryDocument));
   }
 }

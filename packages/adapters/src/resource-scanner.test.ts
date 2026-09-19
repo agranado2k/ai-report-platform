@@ -49,6 +49,33 @@ describe("ReportHtmlResourceScanner", () => {
   });
 });
 
+describe("ReportHtmlResourceScanner.scanSandbox (#385)", () => {
+  const scanner = new ReportHtmlResourceScanner();
+
+  it("names a storage API read unguarded at the top level of an inline script", () => {
+    const html =
+      '<html><head><script>const t = localStorage.getItem("theme");</script></head></html>';
+    expect(scanner.scanSandbox(enc(html))).toEqual([{ api: "localStorage" }]);
+  });
+
+  it("says nothing when every storage read is guarded by try/catch", () => {
+    const html =
+      "<html><head><script>try { const c = document.cookie; } catch {}</script></head></html>";
+    expect(scanner.scanSandbox(enc(html))).toEqual([]);
+  });
+
+  it("decodes bytes as UTF-8, the same way scan() does", () => {
+    const html =
+      '<html><head><script>/* café ☕ */ sessionStorage.setItem("s", "1");</script></head></html>';
+    expect(scanner.scanSandbox(enc(html))).toEqual([{ api: "sessionStorage" }]);
+  });
+
+  it("never throws, whatever the bytes are — asking must not crash the write path", () => {
+    expect(() => scanner.scanSandbox(new Uint8Array([0xff, 0xfe, 0x00, 0x01]))).not.toThrow();
+    expect(() => scanner.scanSandbox(enc(""))).not.toThrow();
+  });
+});
+
 describe("the deployment's view origin is 'self'", () => {
   // Every fetch directive in the ADR-0088 viewer policy begins with `'self'`,
   // so an author who writes the view origin out in full has written something
