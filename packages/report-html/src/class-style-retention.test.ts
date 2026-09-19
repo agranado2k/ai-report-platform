@@ -274,7 +274,7 @@ describe("a dangerous STRING style is re-sanitized at toDOM time on the fromJSON
   // JSON exercises exactly that route.
   it("strips a url(...) smuggled through the sidecar while keeping the inert sibling", () => {
     const doc = parseBody('<div class="card"><p>t</p></div>') as Record<string, unknown>;
-    const card = (doc.content as Array<Record<string, unknown>>)[0];
+    const card = (doc.content as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
     (card.attrs as Record<string, unknown>).style =
       "background:url(https://attacker.example/leak); color:var(--now)";
     const out = serializeBody(doc as never);
