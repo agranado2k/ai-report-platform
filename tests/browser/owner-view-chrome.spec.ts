@@ -96,6 +96,40 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     await expect(page.locator(FRAME)).toHaveAttribute("src", "/abcde12345");
   });
 
+  test("always offers an 'Open in new tab' escape to the top-level report (#385)", async ({
+    page,
+  }) => {
+    // ADR-0092. The framed report runs in a storage-less opaque origin
+    // (ADR-0089 §2); a deck that reads localStorage/cookie before paint blanks
+    // there. This control opens the CANONICAL `/<slug>` as a TOP-LEVEL document,
+    // where storage works and the hand-off's `Path=/<slug>` unlock cookie serves
+    // it directly. No blank-detection — the opaque frame exposes no signal to
+    // read — so the control is unconditional.
+    await page.goto(`file://${harnessPage}`);
+    await expect(page.getByTestId("owner-view")).toBeVisible();
+
+    const open = page.getByRole("link", { name: "Open in new tab" });
+    await expect(open).toHaveAttribute("href", "/abcde12345");
+    // Top-level, not the frame; `noopener` denies the opened page a handle back.
+    await expect(open).toHaveAttribute("target", "_blank");
+    await expect(open).toHaveAttribute("rel", "noopener");
+  });
+
+  test("keeps the 'Open in new tab' escape on the owner-read degrade (#385)", async ({ page }) => {
+    // The escape matters MOST here: a read-capable owner whose edit round-trip
+    // failed still needs to reach a report that blanks in the frame. Versions
+    // and Edit are withheld on this degrade; the fallback is not.
+    await page.goto(`file://${harnessPage}?canEdit=0`);
+    await expect(page.getByTestId("owner-view")).toBeVisible();
+
+    await expect(page.getByRole("link", { name: "Open in new tab" })).toHaveAttribute(
+      "href",
+      "/abcde12345",
+    );
+    await expect(page.getByRole("link", { name: "Versions" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Edit", exact: true })).toHaveCount(0);
+  });
+
   test("Versions deep-links into the editor's versions tab, in one click (#377)", async ({
     page,
   }) => {

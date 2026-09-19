@@ -33,6 +33,11 @@ export {
 // (ADR-0088); never fetches anything (ADR-0069).
 export type { BlockedDirective, BlockedExternalResource, ScanOptions } from "./resource-scan.js";
 export { scanBlockedResources } from "./resource-scan.js";
+// What the OWNER VIEW's storage-less sandboxed frame cannot run, asked at upload
+// time so the author learns it while they still hold the document (#385). A
+// scan, never a fetch (ADR-0069); advisory, never a rejection (ADR-0092).
+export type { SandboxStorageAccess, SandboxStorageApi } from "./sandbox-scan.js";
+export { scanSandboxStorageAccess } from "./sandbox-scan.js";
 // Exported so the editor's link-activation gate can reuse the SAME
 // dangerous-URL predicate the schema enforces at parse/serialize time
 // (ADR-0062 Amendment 3), rather than growing a second copy of it.

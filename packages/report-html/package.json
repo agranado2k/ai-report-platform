@@ -13,6 +13,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "acorn": "^8.16.0",
     "arp-headers": "workspace:*",
     "linkedom": "^0.18.13",
     "prosemirror-changeset": "^2.4.1",

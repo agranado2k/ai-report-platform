@@ -786,13 +786,67 @@ describe("uploadReport — upload warnings (#365)", () => {
     expect(r.ok && r.value.result.warnings).toEqual([]);
   });
 
-  it("orders resource warnings first, then the editor verdict", async () => {
+  it("raises sandbox-incompatible, one per storage API read at an inline script's top level (#385)", async () => {
+    const { deps, resources } = makeDeps();
+    resources.setSandboxAccess([{ api: "localStorage" }, { api: "document.cookie" }]);
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.result.warnings.map((w) => w.code)).toEqual([
+      "sandbox-incompatible",
+      "sandbox-incompatible",
+    ]);
+    const [first, second] = r.value.result.warnings;
+    expect(first?.detail).toContain("localStorage");
+    expect(second?.detail).toContain("document.cookie");
+  });
+
+  it("tells the author the owner-view frame is storage-less and to guard the access", async () => {
+    const { deps, resources } = makeDeps();
+    resources.setSandboxAccess([{ api: "localStorage" }]);
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const detail = r.value.result.warnings[0]?.detail ?? "";
+    expect(detail).toContain("localStorage");
+    expect(detail).toContain("SecurityError");
+    expect(detail).toContain("try/catch");
+    // Names the canonical URL as the unaffected escape, so an agent knows the
+    // report still works — the owner view's fallback control opens exactly it.
+    expect(detail).toContain("/<slug>");
+  });
+
+  it("scans the ENTRY DOCUMENT's bytes for sandbox access, verbatim", async () => {
+    const { deps, resources } = makeDeps();
+    await uploadReport(deps, cmd());
+    expect(resources.sandboxScanned).toEqual(["<h1>ok</h1>"]);
+  });
+
+  it("does not consult the sandbox scan when the bundle has no entry-document bytes", async () => {
+    const { deps, bundles, resources } = makeDeps();
+    bundles.setResult(
+      ok({
+        files: [],
+        entryDocument: "index.html",
+        contentHash: "hash-default",
+        sizeBytes: 0,
+      }),
+    );
+    const r = await uploadReport(deps, cmd());
+    expect(r.ok).toBe(true);
+    expect(resources.sandboxScanned).toEqual([]);
+    if (r.ok) expect(r.value.result.warnings).toEqual([]);
+  });
+
+  it("orders resource warnings first, then sandbox-incompatible, then the editor verdict", async () => {
     const { deps, resources, fidelity } = makeDeps();
     resources.setBlocked([blocked("https://unpkg.com/x.js")]);
+    resources.setSandboxAccess([{ api: "localStorage" }]);
     fidelity.setVerdict({ fidelity: "lossy", lostElements: ["script"], lostAttributes: [] });
     const r = await uploadReport(deps, cmd());
     expect(r.ok && r.value.result.warnings.map((w) => w.code)).toEqual([
       "external-resource-blocked",
+      "sandbox-incompatible",
       "editor-lossy",
     ]);
   });

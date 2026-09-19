@@ -357,7 +357,11 @@ export function registerWriteTools(server: McpServer, client: ApiClient): void {
         "The response also carries warnings[] — a list of { code, detail }, EMPTY when there is " +
         "nothing to say (never absent). code is 'external-resource-blocked' (one per URL your " +
         "document references that the viewer's Content-Security-Policy will not load — see the " +
-        "VIEWER CSP ALLOWLIST in the html parameter) or 'editor-lossy' (opening this report in " +
+        "VIEWER CSP ALLOWLIST in the html parameter), 'sandbox-incompatible' (an inline <script> " +
+        "reads localStorage, sessionStorage or document.cookie at its top level, unguarded — those " +
+        "throw in the owner view's storage-less sandboxed frame and blank it, so guard the access " +
+        "with feature-detection or try/catch; the canonical view_url is unaffected), or " +
+        "'editor-lossy' (opening this report in " +
         "the editor and saving it would not keep the whole document; detail names what would be " +
         "dropped). A warning is NOT an error and never changes the status: the upload succeeded " +
         "and the bytes are stored and served exactly as you sent them. Read them while you still " +

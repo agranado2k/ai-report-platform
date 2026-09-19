@@ -11,6 +11,7 @@ function render(overrides: Partial<OwnerViewTopBarProps> = {}): string {
   const props: OwnerViewTopBarProps = {
     docTitle: "Q3 roadmap review",
     shareState: "Private",
+    openHref: "/abcde12345",
     // DISTINCT on purpose, even though the route happens to point both at the
     // editor today (versions live in the editor's own side panel). Given both
     // the same value, every assertion below would survive the two hrefs being
@@ -51,6 +52,25 @@ describe("OwnerViewTopBar", () => {
     const html = render();
     expect(html).toMatch(/href="\/abcde12345\/edit\?panel=versions"[^>]*>Versions</);
     expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit</);
+  });
+
+  it("always offers 'Open in new tab' — the top-level escape from a blank frame (#385)", () => {
+    // ADR-0092. The framed report is opaque-origin (ADR-0089 §2); a deck that
+    // reads storage before paint blanks there. This opens the canonical
+    // `/<slug>` as a TOP-LEVEL document, with `target="_blank"` and
+    // `rel="noopener"`, and never points at `/edit`.
+    const html = render();
+    expect(html).toMatch(/href="\/abcde12345"[^>]*>Open in new tab</);
+    const anchor = html.match(/<a[^>]*>Open in new tab<\/a>/)?.[0] ?? "";
+    expect(anchor).toContain('target="_blank"');
+    expect(anchor).toContain('rel="noopener"');
+  });
+
+  it("keeps the 'Open in new tab' escape on the owner-read degrade (#385)", () => {
+    // The escape matters most here: a read-capable owner still needs to reach a
+    // report that blanks in the frame, even though Versions and Edit are gone.
+    const html = render({ canEdit: false });
+    expect(html).toMatch(/href="\/abcde12345"[^>]*>Open in new tab</);
   });
 
   it("withholds BOTH actions on the owner-read degrade, but keeps the chrome", () => {

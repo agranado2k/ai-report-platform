@@ -75,6 +75,32 @@ describe("uploadResultToHttp — success", () => {
     ]);
   });
 
+  it("carries a sandbox-incompatible warning on the wire, code + detail (#385)", () => {
+    // The third warning code (ADR-0092): the report reads storage at an inline
+    // script's top level, so it will blank in the owner view's sandboxed frame.
+    // The wire must pass the new code through unchanged to the agent.
+    const res = uploadResultToHttp(
+      ok(
+        outcome({
+          warnings: [
+            {
+              code: "sandbox-incompatible",
+              detail: "This report reads localStorage at the top level of an inline <script>.",
+            },
+          ],
+        }),
+      ),
+      OPTS,
+    );
+    expect(res.status).toBe(201);
+    expect((res.body as { warnings?: unknown }).warnings).toEqual([
+      {
+        code: "sandbox-incompatible",
+        detail: "This report reads localStorage at the top level of an inline <script>.",
+      },
+    ]);
+  });
+
   it("emits warnings: [] (never omitted) when there is nothing to warn about", () => {
     // Absent-vs-empty is the difference between "this upload is clean" and
     // "this server does not compute warnings"; a client must be able to tell.

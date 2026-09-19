@@ -47,6 +47,7 @@ import type {
   ProcessedBundle,
   ReportRepository,
   ResourceScanner,
+  SandboxStorageAccess,
   ScanQueue,
   SlugFactory,
   UnitOfWork,
@@ -124,6 +125,11 @@ export interface UploadCommand {
  *
  * - `external-resource-blocked` — the document references a URL the viewer's
  *   CSP (ADR-0088) will not load. One per blocked URL.
+ * - `sandbox-incompatible` — the document reads `localStorage`,
+ *   `sessionStorage` or `document.cookie` at the top level of an inline
+ *   `<script>` (ADR-0092, #385). Those throw in the owner view's opaque-origin
+ *   frame (ADR-0089 §2, no `allow-same-origin`), so an unguarded read before
+ *   first paint blanks the framed report. One per distinct API.
  * - `editor-lossy` — this version's recorded Fidelity (ADR-0090) is `lossy`:
  *   opening it in the editor and saving would drop part of the document.
  *
@@ -132,7 +138,10 @@ export interface UploadCommand {
  * as uploaded either way. Publishing view-only content, or content that reaches
  * for a host the viewer blocks, is a legitimate thing to do.
  */
-export type UploadWarningCode = "external-resource-blocked" | "editor-lossy";
+export type UploadWarningCode =
+  | "external-resource-blocked"
+  | "sandbox-incompatible"
+  | "editor-lossy";
 
 export interface UploadWarning {
   readonly code: UploadWarningCode;
@@ -216,7 +225,11 @@ export async function uploadReport(
   // and never reject. And the scan never FETCHES what it finds — the uploaded
   // document is untrusted content (ADR-0069) and the port is synchronous so
   // that it cannot.
-  const warnings = assembleWarnings(scanResources(deps, bundle), fidelityVerdict);
+  const warnings = assembleWarnings(
+    scanResources(deps, bundle),
+    scanSandbox(deps, bundle),
+    fidelityVerdict,
+  );
 
   // 3. Idempotency (ADR-0039): explicit key, else derived from user+route+hash+target.
   //
@@ -460,13 +473,31 @@ function scanResources(
 }
 
 /**
- * Turn the two write-time findings into the author-facing list (#365).
+ * Ask the scanner what the OWNER VIEW's sandboxed frame cannot run (#385).
+ *
+ * The fourth write-time question, on the same port as `scanResources` and with
+ * the same UNKNOWN rule: no entry document, nothing to read, "nothing found" —
+ * which is also the safe answer, since an absent warning costs a hint, never a
+ * security decision. It reads storage/cookie accesses at the top level of inline
+ * scripts; those throw in the owner view's opaque-origin frame (ADR-0089 §2).
+ */
+function scanSandbox(
+  deps: Pick<UploadReportDeps, "resources">,
+  bundle: ProcessedBundle,
+): readonly SandboxStorageAccess[] {
+  const entry = bundle.files.find((f) => f.path === bundle.entryDocument);
+  if (!entry) return [];
+  return deps.resources.scanSandbox(entry.bytes);
+}
+
+/**
+ * Turn the write-time findings into the author-facing list (#365, #385).
  *
  * Ordering is deliberate and stable: the blocked resources first, in the order
- * the document references them, then the editor verdict. Resource warnings are
- * per-URL and immediately fixable in the document; the editor one is a single
- * statement about the whole thing, and reads as the summary it is when it comes
- * last.
+ * the document references them, then the owner-view sandbox incompatibilities,
+ * then the editor verdict. The first two are per-item and immediately fixable in
+ * the document; the editor one is a single statement about the whole thing, and
+ * reads as the summary it is when it comes last.
  */
 /**
  * How many blocked resources are named individually.
@@ -491,6 +522,7 @@ const MAX_URL_IN_DETAIL = 300;
 
 function assembleWarnings(
   blocked: readonly BlockedExternalResource[],
+  sandbox: readonly SandboxStorageAccess[],
   fidelity: FidelityVerdict | null,
 ): readonly UploadWarning[] {
   const named = blocked.slice(0, MAX_RESOURCE_WARNINGS);
@@ -509,6 +541,11 @@ function assembleWarnings(
         `Content-Security-Policy. The first ${MAX_RESOURCE_WARNINGS} are named above. ` +
         "The report still publishes and views — only these resources will not load.",
     });
+  }
+  // The scan already deduplicates and there are at most three distinct APIs, so
+  // no cap is needed here — unlike the unbounded resource list above.
+  for (const access of sandbox) {
+    warnings.push({ code: "sandbox-incompatible", detail: sandboxIncompatibleDetail(access) });
   }
   if (fidelity?.fidelity === "lossy") {
     warnings.push({ code: "editor-lossy", detail: lossyDetail(fidelity) });
@@ -563,6 +600,28 @@ function blockedResourceDetail({ url, directive, allowed }: BlockedExternalResou
     `${displayUrl(url)} will be blocked by the viewer's Content-Security-Policy: ${permitted}. ` +
     "Inline the asset (a data: URI works) or load it from an allowed host. " +
     "The report still publishes and views — only this resource will not load."
+  );
+}
+
+/**
+ * The author-facing sentence for one owner-view sandbox incompatibility (#385).
+ *
+ * Unlike `blockedResourceDetail`, the interpolated value here is NOT attacker
+ * text: `api` comes from a fixed three-value enum the scanner produces, not from
+ * the document, so there is nothing to sanitise or bound. The text is written
+ * for an agent (`reports_upload` is the primary write surface): it names the API,
+ * why it fails in the owner view's frame, the fix, and that the canonical URL is
+ * unaffected — the exact URL the owner view's own "Open in new tab" control
+ * opens (ADR-0092).
+ */
+function sandboxIncompatibleDetail({ api }: SandboxStorageAccess): string {
+  return (
+    `This report reads ${api} at the top level of an inline <script>. The owner view ` +
+    "frames it in a storage-less sandboxed iframe (no allow-same-origin, ADR-0089), where " +
+    `${api} throws a SecurityError — an unguarded read before first paint leaves the framed ` +
+    "report blank. Guard the access (feature-detect, or wrap it in try/catch) so the report " +
+    "still paints. The report still publishes and views — the canonical /<slug> URL runs at " +
+    "top level, where storage works, and is unaffected."
   );
 }
 
