@@ -61,6 +61,10 @@ export function OwnerViewChrome({
       <OwnerViewTopBar
         docTitle={docTitle}
         shareState={shareState}
+        // The always-present escape to the top-level report (ADR-0092, #385):
+        // the CANONICAL `/<slug>`, which the framed navigation's `Path=/<slug>`
+        // unlock cookie already serves, opened in a new tab where storage works.
+        openHref={`/${slug}`}
         // Two props, two values (#377). Version history lives in the editor's
         // own side panel, so Versions is a deep-link INTO the editor rather
         // than a second destination — and `?panel=versions` is what makes it

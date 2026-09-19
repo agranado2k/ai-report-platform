@@ -17,6 +17,12 @@ export interface OwnerViewTopBarProps {
   /** How the report is shared, already resolved to display copy by the
    *  loader — this component makes no policy decision of its own. */
   readonly shareState: string;
+  /** Where "Open in new tab" goes: the canonical `/<slug>` as a TOP-LEVEL
+   *  document (ADR-0092). Always offered — it is the reliable escape for a
+   *  report that blanks in the storage-less sandboxed frame (ADR-0089 §2),
+   *  since no cross-origin blank-detection is possible across the opaque
+   *  origin. Opens with `target="_blank"` / `rel="noopener"`. */
+  readonly openHref: string;
   /** Where "Versions" goes (the editor's Versions panel, on the app's mint). */
   readonly versionsHref: string;
   /** Where "Edit" goes. A plain navigation to `/<slug>/edit` — which, holding
@@ -37,6 +43,7 @@ export interface OwnerViewTopBarProps {
 export function OwnerViewTopBar({
   docTitle,
   shareState,
+  openHref,
   versionsHref,
   editHref,
   canEdit,
@@ -57,6 +64,21 @@ export function OwnerViewTopBar({
         <span className={chromeBarPillClass(true)}>{shareState}</span>
       }
     >
+      {/* The unconditional escape (ADR-0092, #385). A report that reads
+          storage/cookie before first paint blanks in the owner view's
+          storage-less sandboxed frame (ADR-0089 §2). This opens the CANONICAL
+          `/<slug>` as a TOP-LEVEL document — a real origin where storage works,
+          served directly by the hand-off's `Path=/<slug>` unlock cookie — in a
+          new tab. Present for EVERY report, blank or not: the frame is opaque,
+          so the chrome cannot read whether a given report errored, and a
+          control gated on a fragile guess is worse than one always there.
+          `rel="noopener"` denies the opened top-level page a handle back to the
+          chrome; it is unobtrusive (secondary), sitting left of the
+          capability-gated actions. */}
+      <a href={openHref} target="_blank" rel="noopener" className={buttonClass("secondary", "sm")}>
+        Open in new tab
+      </a>
+
       {/* Anchors wearing the button look (`buttonClass`) rather than
           `<Button>`: both actions are plain navigations, and a real link is
           what makes them middle-clickable, focusable and screen-reader
