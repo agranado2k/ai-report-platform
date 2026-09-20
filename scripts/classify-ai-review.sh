@@ -52,6 +52,14 @@ match() {
   printf '%s' "$err" | grep -iqE "$1"
 }
 
+# Turn-cap detection (#394). TURNCAP_RE recognises that the reviewer hit its
+# per-run turn ceiling; it MUST stay identical to the grep in the gate step of
+# .github/workflows/claude-code-review.yml. BODY_POSTED_RE is the fixed sentinel
+# that gate appends only after confirming a review body was posted — the sole
+# signal that greens a truncation (see the TRUNCATED branch below).
+TURNCAP_RE='error_max_turns|maximum number of turns|max[ _-]?turns|reached.*turn limit'
+BODY_POSTED_RE='ai[_ -]?review[_ -]?body[_ -]?posted'
+
 # Classify. Error-text markers win over the step outcome (belt and suspenders:
 # the action can swallow an error and still exit 0 — the ticket's re-run case),
 # so a known failure signature is always caught even on a "success" outcome.
@@ -68,20 +76,19 @@ match() {
 # with a note. Only a turn cap that posted NOTHING is a real no-review and stays
 # red. Deciding it first also means the posted review body — model-authored and,
 # per ADR-0069, untrusted — can never trip the QUOTA/AUTH/TRANSIENT markers below.
-if match 'error_max_turns|maximum number of turns|max[ _-]?turns|reached.*turn limit'; then
-  # Body present? Lowercase first (portable — no GNU-only `sed` I flag), strip the
-  # turn-cap markers, then all whitespace/punctuation. Anything left is the posted
-  # (partial) review the workflow fed alongside the subtype.
-  rest=$(printf '%s' "$err" | tr 'A-Z' 'a-z' \
-    | sed -e 's/error_max_turns//g' \
-          -e 's/maximum number of turns//g' \
-          -e 's/max[ _-]*turns//g' \
-          -e 's/reached the turn limit//g' \
-    | tr -d '[:space:][:punct:]')
-  if [ -n "$rest" ]; then
+#
+# TURNCAP_RE must stay identical to the grep in claude-code-review.yml's gate
+# step (the one place the sentinel below is appended). BODY_POSTED_RE is the
+# fixed sentinel the gate appends when — and only when — it confirmed a review
+# body was posted. The green/red decision keys on that sentinel ALONE, never on
+# residual model/result text, so no amount of model- or diff-authored content can
+# turn a no-review green (ADR-0069). No text-stripping heuristic, so there is no
+# match/strip list to drift out of lockstep.
+if match "$TURNCAP_RE"; then
+  if match "$BODY_POSTED_RE"; then
     token=TRUNCATED
   else
-    # Hit the cap with nothing posted — a real no-review.
+    # Hit the cap with no posted-body sentinel — a real no-review.
     token=UNKNOWN
   fi
 elif match 'cli not found|command not found|not found in \$?path|could not find.*(claude|cli)|executable.*not found'; then
