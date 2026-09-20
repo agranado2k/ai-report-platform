@@ -133,11 +133,12 @@ jobs:
             # cannot tell a review that posted a partial result from one that
             # posted nothing. When the run hit the turn cap, check whether it
             # produced any assistant text (evidence a review body was posted) and,
-            # if so, append a FIXED sentinel — never the model's own text, so the
-            # classified stream stays ADR-0069-clean. No content → nothing
-            # appended → the classifier keeps it red. The classifier greens
-            # (TRUNCATED, with a note) only when a body is present.
-            if printf '%s' "$err" | grep -qiE 'error_max_turns|max[ _-]?turns|reached.*turn limit'; then
+            # if so, append the FIXED sentinel `AI_REVIEW_BODY_POSTED` — never the
+            # model's own text, so the classified stream stays ADR-0069-clean and
+            # the classifier's green/red decision keys on the sentinel ALONE. No
+            # content → nothing appended → the classifier keeps it red. The grep
+            # below MUST match TURNCAP_RE in scripts/classify-ai-review.sh.
+            if printf '%s' "$err" | grep -qiE 'error_max_turns|maximum number of turns|max[ _-]?turns|reached.*turn limit'; then
               posted=$(jq -rn '
                 [ inputs
                   | (if type == "array" then .[] else . end)
@@ -146,8 +147,7 @@ jobs:
                 ] | join("")
               ' "${CLAUDE_EXECUTION_FILE}" 2>/dev/null | tr -d '[:space:]' | wc -c | tr -d ' ')
               if [ "${posted:-0}" != "0" ]; then
-                err="${err}
-          review body was posted before the turn cap"
+                err="${err} AI_REVIEW_BODY_POSTED"
               fi
             fi
           fi
