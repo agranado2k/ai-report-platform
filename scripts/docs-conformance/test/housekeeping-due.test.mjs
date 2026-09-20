@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,7 +10,7 @@ import {
   ROW_LABEL,
   run,
 } from "../validators/housekeeping-due.mjs";
-import { cleanup, ctxFor, hasRule, makeFixture } from "./helpers.mjs";
+import { cleanup, ctxFor, hasRule } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 

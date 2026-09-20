@@ -61,6 +61,9 @@ Audit for injection of every kind the stack admits (SQL/NoSQL, command, template
 
 **Shell-hazard audit — when the diff touches shell code or operator-facing command snippets.** Two shapes with reproduced data-loss incidents in this framework's own history; judge each changed command by what it does on FAILURE, not success, and cite `constitution/shared-code-craft.md` §11–§12 by number the way ADRs and AST numbers are cited:
 
+- **Truncate-before-failure (§11) — HIGH.** A `>` aimed at a file the repo or operator cannot lose, fed by a command that can fail — the redirect empties the target before the producer runs. Scratch-then-move is the fix; flag the bare form even when today's producer "cannot fail", because the next edit changes the producer, not the redirect.
+- **Interpreter drift (§12) — HIGH.** A snippet with no declared shell, or an unbraced expansion followed by text an interactive shell can reinterpret (`"$REF:x"` forms). The finding is the unpinned form itself, never whether the author's own shell happens to bite today — the operator's shell is not the author's.
+
 #### Agent 2 — API & CRUD Contract Manager (Opus)
 
 Verify CRUD symmetry, HTTP status codes, and DTO data leaks. For this repo, also check OpenAPI contract changes (`docs/api/openapi.yaml`) when API routes change.
@@ -163,7 +166,7 @@ The one agent whose job is the question the other six never ask: **did anything 
 **Context isolation (non-negotiable):** this sub-agent runs with a fresh context and receives ONLY:
 
 1. The diff (`merge-base...HEAD`) scoped to the **contract artifacts** below.
-2. The originating spec: the PRD/ticket issue body (from the branch name / PR description / `Part of #N` references) and any ADRs the diff touches.
+2. The originating spec: the PRD/ticket issue body (from the branch name / PR description / `Part of #N` references) and any ADRs the diff touches. **When reading a PR description, stop at the marker line `<!-- explain-diff-appendix -->` where present**: `/implement` appends the author's `/explain-diff` narrative below it, and the implementer's narrative is exactly what this agent's context isolation exists to exclude. A body without the marker is read whole — an ordinary `---` rule is formatting, never a boundary.
 3. The output of `scripts/behavior-delta.sh` (the deterministic candidate list) and of
    `scripts/mutation-delta.sh` (the mutation delta over the changed domain source).
 

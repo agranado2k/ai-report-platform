@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { DEFAULT_GLOSSARY, parseEntries, run } from "../validators/banned-words.mjs";
-import { cleanup, configWith, ctxFor, hasRule, makeFixture } from "./helpers.mjs";
-
-const here = dirname(fileURLToPath(import.meta.url));
+import { cleanup, configWith, ctxFor, hasRule } from "./helpers.mjs";
 
 // The glossary is scanned too now (#189), and the fixture's decoy "## Another
 // section" line is a real use of a banned word — which is the point of the

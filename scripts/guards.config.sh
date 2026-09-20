@@ -53,7 +53,9 @@ GUARD_TEST_RE='\.(test|spec)\.(ts|tsx|mjs)$|\.feature$'
 # The process/agent surface names BOTH the current homes (`.agents/skills/`
 # since kit 0.14.0, `constitution/`, `AGENTS.md`) and the pre-move ones
 # (`.claude/`, `CLAUDE.md`) — the old patterns cost nothing and keep the verdict
-# stable on any branch that still touches the legacy address.
+# stable on any branch that still touches the legacy address. `scripts/` is
+# scoped to the top-level guards/gates/tooling and the docs harness: a change
+# under `scripts/test/` is a test, and the edited-tests surface already owns it.
 BEHAVIOR_DELTA_SURFACES='API surface (docs/api/openapi.yaml)|^docs/api/openapi\.yaml$
 Error semantics (packages/http, RFC 9457 model — ADR-0040)|^packages/http/
 Domain events (docs/events.md)|^docs/events\.md$
@@ -61,7 +63,7 @@ Persistence (packages/db, docs/db-design.md)|^packages/db/|^docs/db-design\.md$
 Configuration (packages/env — ADR-0043)|^packages/env/
 Security posture (packages/headers — CSP / Trusted Types)|^packages/headers/
 Agent-facing prompt surfaces (apps/mcp — ADR-0072)|^apps/mcp/(src/(instructions|prompts|tools)|skill/|packaging/)
-Process & agent surfaces (.agents/skills, the constitution, AGENTS.md, .husky, docs gate — ADR-026/0082)|^\.agents/|^\.claude/|^constitution/|^AGENTS\.md$|/AGENTS\.md$|^CLAUDE\.md$|/CLAUDE\.md$|^GEMINI\.md$|^\.husky/|^scripts/'
+Process & agent surfaces (.agents/skills, the constitution, AGENTS.md, .husky, docs gate — ADR-026/0082)|^\.agents/|^\.claude/|^constitution/|^AGENTS\.md$|/AGENTS\.md$|^CLAUDE\.md$|/CLAUDE\.md$|^GEMINI\.md$|^\.husky/|^scripts/[^/]*\.(sh|mjs)$|^scripts/docs-conformance/'
 
 # Executable specification files. behavior-delta flags these when EDITED inside a
 # structure-only commit.

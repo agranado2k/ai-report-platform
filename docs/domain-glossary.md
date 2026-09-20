@@ -146,7 +146,7 @@ a decision — the other context's block will not mention it.
 
 - **Reports & Folders → Identity & Access**: shared kernel — co-owner; `UserId` and `OrgId`. Also conformist — downstream; consumes `UserCreated` as an optional write-grant backfill (ADR-0060).
 - **Reports & Folders → Abuse & Moderation**: conformist — upstream; publishes `ReportVersionUploaded` (the scan-job trigger). Also conformist — downstream; consumes `ReportVersionScanned` (sets `ReportVersion.scan_status`, auto-publishes on `clean`) and `ReportTakenDown` (sets `Report.deleted_at`).
-- **Reports & Folders → Authoring & Collaboration**: conformist — upstream; the published `ReportVersion`'s document model (ADR-0062) is what comments anchor to. `CommentAdded` is reserved for this context with no consumer yet.
+- **Reports & Folders → Authoring & Collaboration**: conformist — upstream; the published `ReportVersion`'s document model (ADR-0062) is what comments anchor to. The three `Comment*` events are reserved for this context as a future consumer; none is subscribed today.
 
 ### Abuse & Moderation
 
@@ -156,7 +156,7 @@ a decision — the other context's block will not mention it.
 ### Authoring & Collaboration
 
 - **Authoring & Collaboration → Identity & Access**: shared kernel — co-owner; `UserId` and `OrgId`.
-- **Authoring & Collaboration → Reports & Folders**: conformist — downstream; reads the published document model to resolve comment anchors and keeps no model of the report itself. Publishes `CommentAdded`, `CommentResolved`, `CommentEdited` (consumed today only by the `AuditLogger`).
+- **Authoring & Collaboration → Reports & Folders**: conformist — downstream; reads the published document model to resolve comment anchors and keeps no model of the report itself. Publishes `CommentAdded`, `CommentResolved`, `CommentEdited` into the transactional outbox with no subscriber yet (`docs/events.md`; the audit rows are written synchronously by the use case, not via these events — ADR-0070).
 
 ---
 

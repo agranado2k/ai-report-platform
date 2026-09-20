@@ -23,7 +23,7 @@ Runs two parallel agents — one performs a rigorous PR review, the other evalua
 
 Launch a general-purpose agent with the following task:
 
-> Read the review guidelines from `.claude/skills/review-pr/SKILL.md` and follow them exactly, with these overrides:
+> Read the review guidelines from `.agents/skills/review-pr/SKILL.md` and follow them exactly, with these overrides:
 >
 > - **Branch scope:** Use `<merge-base>` from step 0 above. Only review files changed between `<merge-base>` and `HEAD`.
 > - **Do NOT post anything to GitHub.** Skip steps 6 and 7 entirely. Just produce the severity-based summary report (step 5).

@@ -72,6 +72,9 @@
       },
       "assist": {
         "enabled": false
+      },
+      "linter": {
+        "enabled": false
       }
     }
   ],

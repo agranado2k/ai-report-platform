@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -7,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import defaultConfig from "../config.mjs";
 import { makeContext } from "../context.mjs";
 import { ANCHORS, run } from "../validators/design-brief.mjs";
-import { cleanup, ctxFor, hasRule, makeFixture } from "./helpers.mjs";
+import { cleanup, ctxFor, hasRule } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -145,7 +144,7 @@ test("the designBrief.article override points the rule at a different file", () 
 test("no stamped article, no finding — the templates-stamped rule owns that state", () => {
   // The marks are spelled from parts: a literal one outside a .template is
   // itself a gate violation, and this test file is not a template.
-  const mark = (name) => "{{" + name + "}}";
+  const mark = (name) => `{{${name}}}`;
   const ctx = ctxFor({
     "constitution/local-engineering.md.template": [
       `**Paradigm**: ${mark("PARADIGM")}`,

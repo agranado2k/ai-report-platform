@@ -73,7 +73,7 @@ Bucket what you find:
 
 Before triaging external bot comments, invoke **`/review-and-evaluate`** locally to get our own project-aware reading of the diff. The skill runs two parallel agents:
 
-1. **PR Reviewer** — via `.claude/skills/review-pr/SKILL.md`; two axes: 6 Axis-1 standards sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list, and the Axis-2 Spec & Behavior sub-agent (Agent 7) produces the §5b behavior confirm-list. The confirm-list is a **distinct output**: ✅/❌ items triage normally below; ⚠️ UNSPECIFIED items bypass the verdict table entirely — hard rule 4 makes them human-only.
+1. **PR Reviewer** — via `.agents/skills/review-pr/SKILL.md`; two axes: 6 Axis-1 standards sub-agents (Security, API/CRUD, Pattern, Simplicity, Reuse/DRY, Test hygiene) produce a severity-bucketed finding list, and the Axis-2 Spec & Behavior sub-agent (Agent 7) produces the §5b behavior confirm-list. The confirm-list is a **distinct output**: ✅/❌ items triage normally below; ⚠️ UNSPECIFIED items bypass the verdict table entirely — hard rule 4 makes them human-only.
 2. **Context Alignment Analyst** — reads the commits, the changed files, `CLAUDE.md`, and `docs/diary.md` (the ADR record), then evaluates each finding for **Apply / Skip / Discuss**.
 
 The skill normally ends interactively ("Which items would you like me to apply?"). **In the `/pr-iterate` context, bypass the question** and consume the verdicts directly:
@@ -236,7 +236,7 @@ Next: <continue / stop — converged / stop — escalation>
 
 Sibling skills this one invokes:
 
-- **`/review-and-evaluate`** (`.claude/skills/review-and-evaluate/SKILL.md`) — the local review step inserted at iteration step 2.
-- **`/review-pr`** (`.claude/skills/review-pr/SKILL.md`) — used internally by `/review-and-evaluate` for the 6-sub-agent review.
+- **`/review-and-evaluate`** (`.agents/skills/review-and-evaluate/SKILL.md`) — the local review step inserted at iteration step 2.
+- **`/review-pr`** (`.agents/skills/review-pr/SKILL.md`) — used internally by `/review-and-evaluate` for the 6-sub-agent review.
 
 When citing an ADR in a reply, always include the number — future-me and future-collaborators will grep for it.

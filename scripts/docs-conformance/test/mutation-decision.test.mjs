@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import defaultConfig from "../config.mjs";
 import { makeContext } from "../context.mjs";
 import { run } from "../validators/mutation-decision.mjs";
-import { cleanup, ctxFor, hasRule, makeFixture } from "./helpers.mjs";
+import { cleanup, ctxFor, hasRule } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
