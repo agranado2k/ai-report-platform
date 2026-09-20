@@ -72,7 +72,7 @@ that skill is the single home for them, not this file.
   code. (The root states this as a hard rule; it is repeated here only as the boundary
   list's first member.)
 - **Not a place to add runtime dependencies casually.** Every new dependency goes through
-  PR review (Claude + Gemini, plus the operator's own read-through) and may require an
+  PR review (Claude, plus the operator's own read-through) and may require an
   ADR — especially for the domain and application layers, which are dependency-locked.
 - **Not a place to bypass branch protection.** `PUSH_WITHOUT_DOCS=1` and
   `PUSH_WITHOUT_TESTS=1` are the only escape hatches for `.husky/pre-push`, and both print

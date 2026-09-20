@@ -19,7 +19,7 @@
 ### Open questions / unresolved decisions
 
 - **`/` (dashboard landing) — gated or public?** Currently gated by the app-wide auth gate (anon → `/sign-in`); decide whether to allowlist `/` as a public signed-out landing. One-line change either way.
-- **Gemini `review` tier/quota** (from #371) — whether to move Gemini to a paid tier or a higher-daily-quota model. #371 made the check fail-visibly honest at any tier (green ⟺ a review ran) and spends nothing; the quota-headroom call is the operator's. **NB the daily free-tier quota (HTTP 429) now legitimately turns the `review` check red — that is expected, not a regression.**
+- ~~**Gemini `review` tier/quota** (from #371)~~ — **RESOLVED by retirement (#394, 2026-09-19).** Google deprecated the Gemini reviewer's model, so the Gemini `review` check is removed entirely; AI review is single-vendor (Claude) for now and the "expected red on daily-quota" caveat no longer exists. Reintroducing a different second vendor later is tracked as a possibility behind the `scripts/classify-ai-review.sh` seam (ADR-030 amendment).
 - **`claude-code-review.yml` carries the same latent false-green** that #371 fixed for Gemini (`continue-on-error` masking failures) — recorded follow-up, not yet fixed.
 - **`ResourceScanner` port rename** — after ADR-0092's `scanSandbox` the port answers two questions and its name is narrower than its job; a mechanical rename follow-up (in flight as the `scanner-rename` worktree), deliberately separated from the behavior diff.
 - License — `README.md` says TBD. Pick before any public launch.
@@ -6492,3 +6492,51 @@ swallowed `is_error` can never read as a clean RAN).
 ADR-030 amended in `docs/spec.html` (2026-09-19 amendment) to record that the
 Claude follow-up landed. Tier: implementer. Worktree `claude-review-fix`, branch
 `ci/claude-review-fix`.
+
+### 2026-09-19 — Retire the Gemini AI reviewer; Claude review survives truncation (#394, amends ADR-030)
+
+**(1) Gemini reviewer retired.** Google deprecated the model the Gemini reviewer
+ran (`google-github-actions/run-gemini-cli@v0` on `gemini-2.5-pro`), so the
+Gemini half of ADR-030 is removed, not repaired. Deleted:
+`.github/workflows/gemini-review.yml`, its classifier shim
+`scripts/classify-gemini-review.sh`, and that shim's test
+`scripts/test/classify-gemini-review.test.mjs`. Kept whole: the Claude path
+(`claude-code-review.yml`, `scripts/classify-claude-review.sh`, its test) and the
+shared `scripts/classify-ai-review.sh`. From the shared classifier only
+genuinely-dead Gemini-branded vocabulary was trimmed (the `TerminalQuotaError`
+and `GEMINI_API_KEY` literals, the `gemini` CLI-name alternative); its generic
+quota/auth/5xx markers stay on purpose as the **vendor-neutral seam** a future
+second reviewer plugs into (add a `REVIEW_VENDOR=<Name>` shim + workflow).
+
+**Consequence, named not hidden:** AI review is now single-vendor (Claude), so
+the reviewer shares the author's model family and with it the author's blind
+spots — the exact property `constitution/shared-invariants.md` warns a second,
+different vendor exists to break. ADR-030's original decision rejected a single
+reviewer for that reason; the cost is accepted for now, with reintroduction
+behind the same seam recorded as the way back. Operationally, the #371
+"expected red on daily-quota (HTTP 429)" caveat disappears — `claude-review` is
+the sole AI-review check on a PR.
+
+Dead `gemini-review.yml` / `classify-gemini-review.sh` references were cleaned so
+`pnpm docs:check` stays green: `constitution/local-workflow.md`,
+`constitution/local-engineering.md`, `.claude/skills/implement/SKILL.md`,
+`.claude/skills/pr-iterate/SKILL.md`, `README.md`. **Left untouched, out of
+scope:** the `GEMINI_API_KEY` Terraform secret + its `docs/infra.md` row (now
+unused but removing it is an infra change / apply), the Gemini CLI *MCP
+extension* (`apps/mcp/packaging/gemini-extension/`, `docs/mcp-usage.md`, the
+`GEMINI.md` shims) which serve Gemini-CLI *users* of the MCP server and are
+unrelated to the reviewer, and `commitlint.config.js`'s proper-noun list. The
+`.agents/skills/` kit templates (placeholder-vendor source) are also left as-is.
+
+**(2) Claude review survives its turn cap.** A new `TRUNCATED` classification in
+`scripts/classify-ai-review.sh`: when the Claude reviewer hits its `--max-turns`
+ceiling (`error_max_turns`) but a review body was still posted, the check goes
+**green with a note** ("review ran but was truncated at max turns — may be
+incomplete") instead of red-as-UNKNOWN; a turn-cap that posted *nothing* stays
+red (a real no-review). Covered test-first in
+`scripts/test/classify-claude-review.test.mjs` (both branches). The Claude
+action's `--max-turns` was raised 25 → 45 in `claude-code-review.yml` so
+truncation is rare. The check stays **advisory** (never required-for-merge). The
+turn-cap decision is recorded in the same ADR-030 amendment.
+
+Tier: implementer. Worktree `drop-gemini`, branch `ci/drop-gemini`.

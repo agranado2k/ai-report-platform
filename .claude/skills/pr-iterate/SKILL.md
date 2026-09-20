@@ -1,6 +1,6 @@
 ---
 name: pr-iterate
-description: One closed-loop iteration on an open PR — read CI checks + Claude / Gemini / human review comments, triage against this repo's ADRs, apply valid suggestions, reply with reasoning on rejected ones, push fixes as Conventional Commits, and report status. Invoke as `/pr-iterate <PR#>`. Compose with `/loop /pr-iterate <PR#>` for continuous monitoring until green.
+description: One closed-loop iteration on an open PR — read CI checks + Claude / human review comments, triage against this repo's ADRs, apply valid suggestions, reply with reasoning on rejected ones, push fixes as Conventional Commits, and report status. Invoke as `/pr-iterate <PR#>`. Compose with `/loop /pr-iterate <PR#>` for continuous monitoring until green.
 ---
 
 # /pr-iterate — closed-loop PR drive-to-green
@@ -65,7 +65,7 @@ gh api "repos/{owner}/{repo}/pulls/$PR/comments" --paginate
 Bucket what you find:
 
 - **Failing / pending checks** → name, conclusion, URL to logs
-- **Bot review threads** from `claude[bot]`, `claude-review[bot]`, `gemini-cli[bot]`, `gemini-review[bot]` (and any other `*[bot]` accounts)
+- **Bot review threads** from `claude[bot]`, `claude-review[bot]` (and any other `*[bot]` accounts)
 - **Human threads** — anyone who isn't a `[bot]`
 - **Top-level PR comments** vs **inline review-thread comments** — they live in different endpoints and reply differently
 
@@ -84,7 +84,7 @@ The skill normally ends interactively ("Which items would you like me to apply?"
 | **Skip** | Record it in the iteration report ("not applied — reason: …") and move on. |
 | **Discuss** | Add to the escalation list. Don't apply; surface to operator at end of iteration. |
 
-The local review is **complementary** to the bot reviews from `claude-review` / `gemini-review`. They look at the same diff with different lenses:
+The local review is **complementary** to the bot review from `claude-review`. They look at the same diff with different lenses:
 
 - **Bot reviews**: third-party AI, prompted with generic-plus-ADR context, posts inline GitHub comments.
 - **`/review-and-evaluate`**: our own skill run, fresh per iteration, has full local file access + the live diary content.
@@ -210,7 +210,7 @@ PR #<N> — "<title>" — iteration <i>
 
 Status:
   Checks:        <green>/<total> green · <failing> failing · <pending> pending
-  Bot threads:   <open>/<total> open  (claude: <X>, gemini: <Y>)
+  Bot threads:   <open>/<total> open  (claude: <X>)
   Human threads: <unresolved>/<total>
   /review-and-evaluate verdicts:
     Apply: <X>  · Skip: <Y> · Discuss: <Z>
@@ -229,7 +229,7 @@ Next: <continue / stop — converged / stop — escalation>
 - ADR-014 (service worker block at edge): same
 - ADR-024 (no fp-ts / Effect / Remeda): same
 - ADR-025 (PR-only, signed commits, linear history): `infra/terraform/modules/github-repo/main.tf`
-- ADR-030 (dual AI review — Claude + Gemini): `.github/workflows/claude-code-review.yml` + `.github/workflows/gemini-review.yml`
+- ADR-030 (AI review — Claude; Gemini retired #394): `.github/workflows/claude-code-review.yml`
 - Solo-dev branch-protection policy (0 required approvals): `infra/terraform/modules/github-repo/main.tf`
 - Conventional Commits + semantic-release + signed-merge-commit convention (ADR-0044): `commitlint.config.js` + `.releaserc.json` + `.husky/commit-msg`
 - ADR-0044 (signed merge commits — supersedes ADR-0035's bot-merge `/merge` flow): CLAUDE.md "Use Conventional Commits" section

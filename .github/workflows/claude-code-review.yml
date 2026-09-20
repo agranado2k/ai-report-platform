@@ -50,7 +50,7 @@ jobs:
         # auth, overloaded 5xx). It no longer decides the check's colour — the
         # classifier does (issue #388). Without a review actually running, this
         # check must not be green: a green `claude-review` check that proves
-        # nothing defeats ADR-030's second-vendor purpose.
+        # nothing defeats ADR-030's purpose (green must mean a review ran).
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
@@ -72,23 +72,31 @@ jobs:
             security headers), ADR-014 (service-worker block at edge), Conventional
             Commits violations, and any drift from docs/db-design.md / the glossary.
           claude_args: |
-            --max-turns 25
+            --max-turns 45
             --model claude-opus-4-8
+        # --max-turns raised 25 -> 45 (issue #394): a review that runs out of turns
+        # is now classified TRUNCATED (green with a note) rather than lost, but a
+        # higher budget makes truncation rare in the first place. 45 gives a
+        # multi-file PR review room to read the ADRs + walk each changed file
+        # without materially raising cost on a normal PR (the model stops when
+        # done, well under the cap); it is a ceiling, not a target.
 
       - name: Enforce that a review actually ran
-        # The gate for issue #388 — the mirror of gemini-review.yml's #371 gate.
-        # Runs even when the review step failed (`if: always()`), classifies WHY
-        # (quota / auth / missing / transient / unknown), and exits non-zero for
-        # anything that is NOT a real review, so THIS step — not `continue-on-error`
-        # above — decides the check colour. A green `claude-review` check now
-        # means, and only means, that a Claude review ran; the reason for a red
-        # one lands in the job summary, with quota distinguishable from auth.
+        # The gate for issue #388 (the #371 pattern; Claude-only since the Gemini
+        # reviewer was retired in #394). Runs even when the review step failed
+        # (`if: always()`), classifies WHY (quota / auth / missing / transient /
+        # truncated / unknown), and exits non-zero for anything that is NOT a real
+        # review, so THIS step — not `continue-on-error` above — decides the check
+        # colour. A green `claude-review` check now means, and only means, that a
+        # Claude review ran (possibly TRUNCATED at the turn cap — green with a
+        # note); the reason for a red one lands in the job summary, with quota
+        # distinguishable from auth.
         #
         # The check stays ADVISORY (ADR-030 — AI review never gates merge; it is
         # not a required status check on `main`), but "advisory" no longer means
         # "silently green when nothing happened": red-but-non-blocking is the
         # honest state a solo maintainer can act on (re-run, top up quota, or
-        # merge on the Gemini review alone).
+        # merge without the AI-review signal for this run).
         #
         # The Claude action exposes NO `outputs.error` (unlike run-gemini-cli).
         # It exposes `outputs.conclusion` (success|failure) and
@@ -120,6 +128,28 @@ jobs:
                 | ((.subtype // "") + " " + (.result // ""))
               ] | join("\n")
             ' "${CLAUDE_EXECUTION_FILE}" 2>/dev/null || true)
+            # TRUNCATED signal (#394): on an `error_max_turns` truncation the
+            # result event's `.result` is usually empty, so the error text alone
+            # cannot tell a review that posted a partial result from one that
+            # posted nothing. When the run hit the turn cap, check whether it
+            # produced any assistant text (evidence a review body was posted) and,
+            # if so, append a FIXED sentinel — never the model's own text, so the
+            # classified stream stays ADR-0069-clean. No content → nothing
+            # appended → the classifier keeps it red. The classifier greens
+            # (TRUNCATED, with a note) only when a body is present.
+            if printf '%s' "$err" | grep -qiE 'error_max_turns|max[ _-]?turns|reached.*turn limit'; then
+              posted=$(jq -rn '
+                [ inputs
+                  | (if type == "array" then .[] else . end)
+                  | select(.type == "assistant")
+                  | (.message.content // [] | .[]? | select(.type == "text") | .text)
+                ] | join("")
+              ' "${CLAUDE_EXECUTION_FILE}" 2>/dev/null | tr -d '[:space:]' | wc -c | tr -d ' ')
+              if [ "${posted:-0}" != "0" ]; then
+                err="${err}
+          review body was posted before the turn cap"
+              fi
+            fi
           fi
           # The action sets outputs.conclusion=failure even if it were to exit 0
           # with a swallowed is_error; fold that into the outcome the classifier

@@ -69,17 +69,21 @@ eight local validators (ADR index/MADR, glossary, events, features, gherkin, Ope
 depend on `ctx.paths` — removed upstream — keep running. The fork is recorded in `VERSION`'s
 deviation note; it can retire when the kit upstreams the docs-skeleton validators.
 
-## Automated review (ADR-030 — fully wired)
+## Automated review (ADR-030)
 
-Every PR gets **dual AI review**: Claude via `.github/workflows/claude-code-review.yml`
-and Gemini via `.github/workflows/gemini-review.yml`. Both auto-run on PR open / sync /
-ready / reopen and post inline review comments. The `@claude` mention bot
-(`.github/workflows/claude.yml`) additionally answers in PR, issue, and review-comment
-threads with `use_commit_signing: true`, so any commits it pushes satisfy branch
-protection.
+Every PR gets **AI review from Claude** via `.github/workflows/claude-code-review.yml`,
+which auto-runs on PR open / sync / ready / reopen and posts inline review comments. The
+`@claude` mention bot (`.github/workflows/claude.yml`) additionally answers in PR, issue,
+and review-comment threads with `use_commit_signing: true`, so any commits it pushes
+satisfy branch protection.
 
-- Auth: `CLAUDE_CODE_OAUTH_TOKEN` (set by `/install-github-app`) and `GEMINI_API_KEY` (set
-  by the Phase 0b Terraform) — both already in repo secrets.
+AI review is **single-vendor for now**: the Gemini reviewer was retired (#394) because
+Google deprecated its model. That leaves the reviewer sharing the author's model family, so
+it shares the author's blind spots (`shared-invariants.md` — that is the exact property a
+second, different vendor exists to break). A different second vendor can be reintroduced
+later behind the same classifier/gate seam (`scripts/classify-ai-review.sh`, ADR-030).
+
+- Auth: `CLAUDE_CODE_OAUTH_TOKEN` (set by `/install-github-app`) — in repo secrets.
 - Under the solo-developer branch-protection policy (`required_approving_review_count = 0`),
   human approval is **not required to merge**: the PR mechanism plus CI status checks are
   the gate. Bot reviews are **advisory** and do not gate merge.
