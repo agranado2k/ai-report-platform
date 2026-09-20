@@ -6542,6 +6542,20 @@ turn-cap decision is recorded in the same ADR-030 amendment.
 
 Tier: implementer. Worktree `drop-gemini`, branch `ci/drop-gemini`.
 
+**Follow-up (#395 review, branch `ci/turn-cap-sentinel`).** PR #395 was merged at
+its first two commits (retirement + truncation). The wired `claude-review` on it
+ran green (approve-with-nits) and caught a real low-severity bug in the truncation
+commit: the `TRUNCATED` body check stripped the turn-cap markers and tested for
+leftover text, but the strip list was narrower than the match alternation, so a
+phrasing like `reached its turn limit` matched yet was not stripped and
+false-greened with nothing posted. This follow-up replaces strip-and-diff with
+detection of a single fixed sentinel (`AI_REVIEW_BODY_POSTED`) the gate appends
+only after confirming a posted review body — so the green/red decision keys on
+that sentinel alone, never on residual model/result text (ADR-0069), and there is
+no match/strip list to drift. Also folds retirement notes into `docs/spec.html`'s
+non-ADR live-infra references (the workflow catalog + phase narrative). Tier:
+implementer.
+
 ### 2026-09-20 — Adopted agentic-sdlc v0.20.0 (0.12.0 → 0.20.0, eight releases)
 
 Bumped the kit shared layer **0.12.0 → 0.20.0** via `UPDATING.md` (worktree
