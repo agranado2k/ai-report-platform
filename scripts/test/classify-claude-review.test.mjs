@@ -165,3 +165,45 @@ test("the summary names the Claude vendor, not Gemini", () => {
   assert.match(r.summary, /Claude/i);
   assert.doesNotMatch(r.summary, /Gemini/i);
 });
+
+// ── TRUNCATED: the reviewer hit its --max-turns ceiling (issue #394) ─────────
+// Hitting the turn cap is NOT a hard failure like quota/auth. If a review was
+// still posted before the ceiling, the AI-review signal exists (just possibly
+// incomplete), so the check goes GREEN with a note. Only a turn cap that posted
+// NOTHING is a real no-review and stays red. The workflow feeds the reviewer's
+// SDK result subtype (`error_max_turns`) plus, when a review body was produced,
+// evidence of that body; the classifier decides at the (outcome, errorText) seam.
+
+test("a max-turns run that still posted a review is TRUNCATED and green-with-note", () => {
+  const err = "error_max_turns review body was posted before the turn cap\n";
+  const r = run("failure", err);
+  assert.equal(r.token, "TRUNCATED");
+  assert.equal(r.code, 0);
+  assert.match(r.summary, /truncat/i);
+  assert.match(r.summary, /max[ -]?turns/i);
+  // green-with-note explicitly flags the review may be incomplete
+  assert.match(r.summary, /incomplete|may be/i);
+});
+
+test("a max-turns run that posted NOTHING is RED (a real no-review)", () => {
+  // Bare subtype marker, no review body alongside it → not a real review.
+  const r = run("failure", "error_max_turns\n");
+  assert.notEqual(r.token, "TRUNCATED");
+  assert.equal(r.code, 1);
+});
+
+test("a truncated review whose posted body mentions 'rate limit' is TRUNCATED, not QUOTA", () => {
+  // TRUNCATED is decided BEFORE the quota/auth/transient markers so the posted
+  // (model-authored, ADR-0069-untrusted) review text cannot flip the class.
+  const err = "error_max_turns The handler should return 429 when the rate limit is hit.\n";
+  const r = run("failure", err);
+  assert.equal(r.token, "TRUNCATED");
+  assert.equal(r.code, 0);
+});
+
+test("a max-turns truncation that swallowed its error and exited 0 is still TRUNCATED-green", () => {
+  const err = "error_max_turns review body was posted before the turn cap\n";
+  const r = run("success", err);
+  assert.equal(r.token, "TRUNCATED");
+  assert.equal(r.code, 0);
+});

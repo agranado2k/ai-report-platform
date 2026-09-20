@@ -26,10 +26,15 @@
 #   <outcome>     the GitHub Actions step outcome: success|failure|cancelled|...
 #   <error-file>  file with the step's error/stderr text; if omitted, read stdin.
 #
-# stdout: one classification token — RAN | QUOTA | AUTH | MISSING_CLI | TRANSIENT | UNKNOWN
-# exit:   0 only for RAN (a review actually ran); 1 for every other token.
+# stdout: one classification token —
+#         RAN | TRUNCATED | QUOTA | AUTH | MISSING_CLI | TRANSIENT | UNKNOWN
+# exit:   0 for RAN and TRUNCATED (a review actually ran — TRUNCATED means it ran
+#         but the reviewer hit its turn cap and the result may be incomplete);
+#         1 for every other token (no review ran).
 #
-# A green check now means, and only means, that a review by REVIEW_VENDOR ran.
+# A green check now means, and only means, that a review by REVIEW_VENDOR ran
+# (possibly truncated). Truncated-with-a-note is still a review; truncated with
+# nothing posted is not, and stays red.
 
 set -eu
 
@@ -56,7 +61,30 @@ match() {
 # overloaded_error [529], "Credit balance is too low". The remaining markers are
 # generic (quota / auth / 5xx phrasings, not tied to any one vendor) and are kept
 # on purpose: they are the vendor-neutral seam a future second reviewer plugs into.
-if match 'cli not found|command not found|not found in \$?path|could not find.*(claude|cli)|executable.*not found'; then
+# TRUNCATED is decided FIRST (issue #394). The reviewer hit its per-run turn
+# ceiling — the Claude SDK result subtype `error_max_turns`. That is NOT a hard
+# failure like quota/auth: if a review body was still posted before the ceiling,
+# the AI-review signal exists (just possibly incomplete), so the check goes GREEN
+# with a note. Only a turn cap that posted NOTHING is a real no-review and stays
+# red. Deciding it first also means the posted review body — model-authored and,
+# per ADR-0069, untrusted — can never trip the QUOTA/AUTH/TRANSIENT markers below.
+if match 'error_max_turns|maximum number of turns|max[ _-]?turns|reached.*turn limit'; then
+  # Body present? Lowercase first (portable — no GNU-only `sed` I flag), strip the
+  # turn-cap markers, then all whitespace/punctuation. Anything left is the posted
+  # (partial) review the workflow fed alongside the subtype.
+  rest=$(printf '%s' "$err" | tr 'A-Z' 'a-z' \
+    | sed -e 's/error_max_turns//g' \
+          -e 's/maximum number of turns//g' \
+          -e 's/max[ _-]*turns//g' \
+          -e 's/reached the turn limit//g' \
+    | tr -d '[:space:][:punct:]')
+  if [ -n "$rest" ]; then
+    token=TRUNCATED
+  else
+    # Hit the cap with nothing posted — a real no-review.
+    token=UNKNOWN
+  fi
+elif match 'cli not found|command not found|not found in \$?path|could not find.*(claude|cli)|executable.*not found'; then
   token=MISSING_CLI
 elif match 'exhausted your daily quota|resource[_ ]exhausted|quota exceeded|exceeded your.*quota|daily quota|rate[_ ]?limit|rate_limit_error|credit balance is too low|usage limit|\b429\b|\[429\]'; then
   token=QUOTA
@@ -76,6 +104,7 @@ fi
 # from auth in the summary).
 case "$token" in
   RAN)         headline=":white_check_mark: ${vendor} review ran and posted its result." ;;
+  TRUNCATED)   headline=":warning: ${vendor} review ran but was truncated at max turns — it posted a result that may be incomplete." ;;
   QUOTA)       headline=":no_entry: ${vendor} review did NOT run — quota/rate-limit exhausted (HTTP 429) on the configured model." ;;
   AUTH)        headline=":no_entry: ${vendor} review did NOT run — an authentication failure (a missing or invalid credential: token / API key)." ;;
   MISSING_CLI) headline=":no_entry: ${vendor} review did NOT run — the ${vendor} review action / CLI was not found." ;;
@@ -93,9 +122,17 @@ if [ "${GITHUB_STEP_SUMMARY:-}" != "" ]; then
     echo "- Review step outcome: \`${outcome:-<none>}\`"
     if [ "$token" != "RAN" ]; then
       echo ""
-      echo "This check is **advisory** (ADR-030 — AI review never gates merge), but a"
-      echo "red result means no ${vendor} review happened, so the second-vendor signal is"
-      echo "absent for this run. It is no longer allowed to report a false green."
+      if [ "$token" = "TRUNCATED" ]; then
+        echo "This check is **advisory** (ADR-030 — AI review never gates merge). The review"
+        echo "ran and posted a result, but ${vendor} hit its per-run turn cap"
+        echo "(\`--max-turns\`), so the review **may be incomplete** — the check is green with"
+        echo "this note rather than red. Raising the turn budget makes this rare; re-run for a"
+        echo "full pass if the truncated review looks partial."
+      else
+        echo "This check is **advisory** (ADR-030 — AI review never gates merge), but a"
+        echo "red result means no ${vendor} review happened, so the AI-review signal is"
+        echo "absent for this run. It is no longer allowed to report a false green."
+      fi
       if [ "$err" != "" ]; then
         echo ""
         echo "<details><summary>Reviewer step error output</summary>"
@@ -112,5 +149,9 @@ fi
 
 printf '%s\n' "$token"
 
-[ "$token" = "RAN" ] && exit 0
+# RAN and TRUNCATED both mean a review actually ran (TRUNCATED = ran but hit the
+# turn cap, so possibly incomplete) — green. Everything else is red.
+case "$token" in
+  RAN | TRUNCATED) exit 0 ;;
+esac
 exit 1
