@@ -216,7 +216,8 @@ export const features = {
  * agent obeys: the root `AGENTS.md` (with `CLAUDE.md` / `GEMINI.md` shims beside
  * it), the on-demand articles under `constitution/`, and the nested package
  * manuals below. Every layer gets the same two existence checks — slash commands
- * must resolve to `.claude/skills/<name>/SKILL.md`, referenced repo paths must
+ * must resolve to `.agents/skills/<name>/SKILL.md` (or the legacy
+ * `.claude/skills/` address), referenced repo paths must
  * exist — plus the shim-integrity rule on the shims, and, for the shared
  * articles only, the portability guard further down.
  */
@@ -227,6 +228,14 @@ export const claudeMdRefs = {
   // The on-demand articles live at the repo root under constitution/ (moved out
   // of .claude/constitution/ when this repo adopted the v0.10.0 layout).
   constitutionDir: "constitution",
+
+  // Where a `/command` resolves: `<skillsDir>/<name>/SKILL.md`. Since kit
+  // 0.14.0 the canonical home is the vendor-neutral `.agents/skills/`; the
+  // `.claude/skills/` entries beside it are one committed relative symlink per
+  // skill (the bridge the harness that reads only that address follows). The
+  // validators also resolve and scan the legacy address, so nothing goes dark
+  // if a skill is ever left at `.claude/skills/` as a real directory.
+  skillsDir: ".agents/skills",
 
   // The tool entry points beside the root manual. Each must be a bare
   // `@AGENTS.md` shim (plus at most one comment line) — the `shim-invalid` rule
@@ -250,6 +259,7 @@ export const claudeMdRefs = {
     "/merge", // historical reference — the obsolete bot-merge flow, quoted as history
     "/tmp", // a filesystem path that is command-shaped in a code span, never a skill
     "/setup-matt-pocock-skills", // a command from the mattpocock skills bundle, not a repo skill (quoted in /to-prd)
+    "/codebase-design", // upstream skill named in /improve-codebase-architecture's provenance note; deliberately not shipped (folded into that skill)
   ],
 
   /**
@@ -272,6 +282,7 @@ export const claudeMdRefs = {
     "packages",
     "infra",
     "tests",
+    ".agents/skills",
     ".claude/hooks",
     ".claude/skills",
     "constitution",
@@ -364,7 +375,7 @@ export const claudeMdRefs = {
         scope: "spans",
         re: /^[([{"']?\/[a-z][a-z0-9-]*/,
         reason:
-          "A slash command names a skill that exists in THIS repo's .claude/skills. The portable rule is the practice, not the command that runs it.",
+          "A slash command names a skill that exists in THIS repo's .agents/skills. The portable rule is the practice, not the command that runs it.",
       },
       {
         id: "repo-path",
@@ -436,4 +447,77 @@ export const skillPaths = {
   ],
 };
 
-export default { adr, glossary, events, featureTags, features, claudeMdRefs, openapi, skillPaths };
+/**
+ * Policy for the mutation-decision advisory (kit 0.13.0): which file is the
+ * engineering article. The validator warns (never fails) when that article
+ * carries no `**Mutation decision**:` line in either of its two honest forms —
+ * a tool with its on-demand command, or an explicit none-with-reason. The
+ * default follows `claudeMdRefs.constitutionDir`. Ours names Stryker via
+ * `scripts/mutation-delta.sh` (ADR-0081).
+ */
+export const mutationDecision = {
+  // article: "constitution/local-engineering.md",
+};
+
+/**
+ * Policy for the design-brief advisory (kit 0.15.0): the same article, read
+ * for the three architecture anchors — `**Paradigm**:`, `**Architectural
+ * style**:` and `**Context map**:`. The validator warns (never fails) when the
+ * article carries none of them in either honest form — a decision, or an
+ * explicit none-with-reason. One recorded anchor is a brief. The default
+ * follows `claudeMdRefs.constitutionDir`.
+ */
+export const designBrief = {
+  // article: "constitution/local-engineering.md",
+};
+
+/**
+ * Policy for the housekeeping-due advisory (kit 0.15.0): how long this repo
+ * may go between `/housekeeping` passes before the gate says so. The diary's
+ * Current state table carries a `**Last housekeeping**` row holding the ISO
+ * date of the last pass; the validator warns (never fails) once that date is
+ * older than `windowDays`, and warns naming the row when it is absent.
+ *
+ * A month: long enough that a quiet week is not nagged on every push, short
+ * enough that manual drift is caught before a second kit release ships on
+ * top of it.
+ */
+export const housekeepingDue = {
+  windowDays: 30,
+  // diary: "docs/diary.md",
+};
+
+/**
+ * Policy for the banned-words advisory (kit 0.16.0): the glossary whose
+ * "Words this project does not use" section is the list, and the files the
+ * scan leaves alone. The scan covers the root manual, every article under
+ * `constitution/`, every Markdown file of every skill, and the glossary
+ * itself (minus its banned section and its _Avoid_ items); the two shared
+ * articles are excluded by default because they arrive verbatim from the kit
+ * and are not ours to reword. A use is a warning, never a violation. An entry
+ * may carve out a legitimate sense with `Except:` followed by the permitted
+ * phrases as code spans.
+ *
+ * NB this is the kit's scan of the glossary's BANNED-WORDS SECTION; the local
+ * `glossary.bannedAliases` above (ADR-0036, a violation) is a separate,
+ * stricter rule over docs/ and ADRs and stays as it is.
+ */
+export const bannedWords = {
+  // glossary: "docs/domain-glossary.md",
+  // exclude: ["constitution/shared-invariants.md", "constitution/shared-code-craft.md"],
+};
+
+export default {
+  adr,
+  glossary,
+  events,
+  featureTags,
+  features,
+  claudeMdRefs,
+  openapi,
+  skillPaths,
+  mutationDecision,
+  designBrief,
+  housekeepingDue,
+  bannedWords,
+};

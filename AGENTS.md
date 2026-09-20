@@ -21,9 +21,14 @@ materially changes state gets a dated diary entry (protocol: `constitution/local
 1. **Worktree, always** (ADR-025). Never edit the root checkout for in-progress work.
    From the project root: `git worktree add worktree/<slug> -b <type>/<slug>`, where
    `<type>` is one of `feat` `fix` `refactor` `chore` `docs`. Worktrees live under
-   `worktree/` (gitignored).
+   `worktree/` (gitignored). One gotcha it carries: a tool that resolves its settings from
+   the *topmost* file walks up to the project root from inside a worktree too, so a
+   root-level `worktree/**` exclude meant to skip the *other* worktrees can make that tool
+   inspect **zero files** when run *inside* one — and exit green having checked nothing.
+   Biome reads `biome.json` from the invocation directory and is not affected; check any
+   new tool for this shape before trusting its green.
 2. **Test first** for any code change — red, green, refactor, via `/tdd`. The procedure
-   and this stack's conventions live in `.claude/skills/tdd/SKILL.md` (that skill is their
+   and this stack's conventions live in `.agents/skills/tdd/SKILL.md` (that skill is their
    only home). Enforcement: the `.husky/pre-push` TDD pairing guard blocks a push whose
    source changes carry no test changes (`PUSH_WITHOUT_TESTS=1` bypasses once, loudly),
    and CI runs the same rule over the PR (`tdd-pairing.yml`) — so that bypass only defers
@@ -106,11 +111,13 @@ Load the article that covers what you are about to do — do not preload them al
   standards/behavior review split, HITL by label, autonomy stops before merge, executable
   process docs, measuring the ceiling, refactor/behavior commit separation). Project-agnostic:
   copyable verbatim into another repo. **Shared layer** (see `VERSION`) — not edited here.
-- `constitution/shared-code-craft.md` — how the code itself is written: ten portable craft
+- `constitution/shared-code-craft.md` — how the code itself is written: thirteen portable craft
   rules, from the smallest sufficient diff to diagrams drawn as inline SVG in HTML reports,
   never ASCII art. Load it before writing or reviewing code. **Shared layer** too (see `VERSION`).
-- `constitution/local-engineering.md` — this stack: FP/immutable domain (ADR-024), DDD
-  and the glossary (ADR-0036), test tiers, infra-as-code (ADR-017/018/019), hard boundaries.
+- `constitution/local-engineering.md` — this stack: the design brief (paradigm, architectural
+  style, context map — the three anchors `/design-brief` writes), FP/immutable domain (ADR-024),
+  DDD and the glossary (ADR-0036), test tiers and the mutation decision (ADR-0081),
+  infra-as-code (ADR-017/018/019), hard boundaries.
 - `constitution/local-workflow.md` — this repo's process detail: the ADR-0044 merge
   policy in full, commit curation, the ADR-026 docs-trigger matrix, dual AI review (ADR-030),
   ADR mechanics, the capability-tier rubric, the diary update protocol.
@@ -146,8 +153,12 @@ covers what you are about to do rather than all of them.
 
 ## The chain
 
-The skills in `.claude/skills/` are the lifecycle above, made runnable. Each one is a whole
-document; read the one you are about to use, not all of them.
+The skills in `.agents/skills/` — the vendor-neutral home the Agent Skills ecosystem reads,
+bridged into `.claude/skills/` by one committed relative symlink per skill — are the lifecycle
+above, made runnable. Each one is a whole document; read the one you are about to use, not
+all of them. One practical precondition: a harness discovers skills from the directory a
+session starts in, so the commands exist only for sessions started in this directory (or a
+worktree of it) — a session launched above it must be restarted here before the chain appears.
 
 Spec → tickets → implementation → review → landing:
 
@@ -164,7 +175,13 @@ and designs the deepening, then re-enters the line at `/to-tickets`. `/zoom-out`
 in when the area is unfamiliar. `/explain-diff` turns a diff, branch or PR into an
 interactive HTML explainer (teaches, never reviews); `/implement` runs it in its Deliver
 phase and appends the markdown rendition to the PR body below the `<!-- explain-diff-appendix -->`
-marker, so a reviewer meets the change before the diff.
+marker, so a reviewer meets the change before the diff. `/design-brief` sits before the first
+feature diff and again whenever the shape stops fitting: it decides paradigm, style and context
+map twice, compares on complexity, and records the choice in `constitution/local-engineering.md`'s
+anchors, the glossary and an ADR. `/housekeeping` runs on a calendar rather than an event — the
+docs gate's housekeeping-due advisory is what sends you to it — and audits the standing
+instructions, measures the suite, and scans for the red flags that reopen the brief; it never
+fixes, and its findings enter the line at `/to-tickets`.
 
 ## Quick reference
 
@@ -181,6 +198,8 @@ marker, so a reviewer meets the change before the diff.
 | Run end-to-end QA on a branch            | `/ce-dogfood` (browser test all changed flows, auto-fix safe issues, report with auditability) |
 | Force the agent to ask clarifying questions before coding | `/grill-me` (quick) · `/grill-with-docs` (also updates the glossary / ADR drafts) |
 | Diagnose a bug or perf issue methodically | `/diagnose` (reproduce → minimize → hypothesize → instrument → fix → test) |
+| Decide the shape of the system out loud | `/design-brief` — design it twice, compare on complexity, then record paradigm, style and context map as anchors, a glossary section and an ADR; stops for your yes before writing |
+| Run the recurring housekeeping pass | `/housekeeping` — audit the agent files, the glossary, the ADRs, the measurement, the worktrees and the diary, then scan for Ousterhout's red flags; never fixes, files candidate tickets, stamps the diary's `**Last housekeeping**` row |
 | Understand a change before reviewing or merging it | `/explain-diff` — interactive HTML explainer; teaches, never reviews (`/implement` appends its markdown to the PR body) |
 | Turn a conversation into a PRD as a GitHub issue | `/to-prd`                                       |
 | Decompose a PRD into tracer-bullet tickets | `/to-tickets <PRD issue#>` — demoable slices, blocking DAG, HITL/AFK labels |
@@ -193,6 +212,8 @@ marker, so a reviewer meets the change before the diff.
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |
 | Clean up old worktrees + sync main       | `/worktree-cleanup` (runs `scripts/worktree-cleanup.sh`; `--dry-run` to preview) |
 | Find an ADR                              | `docs/adr/INDEX.md`                             |
+| Know where a skill came from             | `.agents/skills/LICENSE-mattpocock-skills.md`  |
+| Hold the code itself to a standard       | `constitution/shared-code-craft.md` — the thirteen portable craft rules; load it before writing or reviewing code |
 
 ## Precedence
 

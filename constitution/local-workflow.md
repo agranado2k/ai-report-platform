@@ -58,16 +58,23 @@ in the loop.
 | A new use case                | `tests/e2e/features/*.feature` + README entry       |
 | A new domain event            | `docs/events.md`                                    |
 | A new ADR                     | `docs/adr/INDEX.md` link                            |
-| `.claude/skills/**` or `.claude/hooks/**` | `AGENTS.md` (or the article that owns the rule) |
+| `.agents/skills/**` (bridged into `.claude/skills/`) or `.husky/**` | `AGENTS.md` (or the article that owns the rule) |
 | `constitution/**` or any `AGENTS.md` | the other layers, so one home per rule survives: a root rule that grew gets its article; an article rule that became binding gets the root; a package rule gets the nested file. Never leave the same rule in two homes (ADR-0082) |
 | `infra/terraform/**`          | `docs/infra.md` + the ops runbook                   |
 
-The docs gate runs the agentic-sdlc v0.10.0 docs-conformance harness, but with a **recorded
-local fork**: `scripts/docs-conformance/index.mjs` and `validators/claude-md-refs.mjs` are
-taken verbatim from the kit, while `runner.mjs` and `context.mjs` are kept forked so the
-eight local validators (ADR index/MADR, glossary, events, features, gherkin, OpenAPI) that
-depend on `ctx.paths` — removed upstream — keep running. The fork is recorded in `VERSION`'s
-deviation note; it can retire when the kit upstreams the docs-skeleton validators.
+The docs gate runs the agentic-sdlc v0.20.0 docs harness, but with a **recorded local
+fork**: `scripts/docs-conformance/index.mjs` and every validator the kit ships
+(`claude-md-refs`, `skill-web`, `skill-paths`, `mutation-decision`, `design-brief`,
+`housekeeping-due`, `skill-bridge`, `banned-words`) are taken verbatim, while `runner.mjs`
+and `context.mjs` are kept forked so the eight local validators (ADR index/MADR, glossary,
+events, features, gherkin, OpenAPI) that depend on `ctx.paths` and `ctx.listRecursive` —
+neither in the kit's context — keep running alongside the kit's eight. The fork is recorded
+in `VERSION`'s deviation note; it can retire when the kit upstreams the docs-skeleton
+validators. Two consequences worth knowing: the kit's "bare fixture → gate exits 0"
+end-to-end tests cannot hold here (a bare fixture correctly trips the local validators) and
+are omitted with a NOTE in each test file; and the kit-verbatim `.mjs` files are exempt from
+the Biome formatter via a `biome.json` override, because reformatting them would break the
+verbatim claim `scripts/check.sh` and `UPDATING.md` step 6 rely on.
 
 ## Automated review (ADR-030)
 

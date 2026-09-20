@@ -4,7 +4,7 @@
 
 ---
 
-## Current state — 2026-09-19
+## Current state — 2026-09-20
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
@@ -13,7 +13,8 @@
 | **Last commit on main**| `38a4455` — Merge PR #389 (`feat/sandbox-fallback`, ticket #385): ADR-0092 — the owner-view "Open in new tab" fallback control + the `sandbox-incompatible` upload warning (`acorn`-AST scan of inline scripts through the `ResourceScanner` port; `GET /<slug>` and `packages/headers` untouched). Closes the PRD #356 owner-view epic. Prior epic PRs on `main`: #381 (#361 owner view), #378/#379/#380 (#363/#364/#365/#376/#377 fidelity surface + upload warnings + owner-open flip + grantee token), #386 (#371 Gemini review honesty), #387 (#372 schema-attr sweep). |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually. The owner-view epic touched no infrastructure** (no Terraform, no `packages/headers` byte change). Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` verified + deployed), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer + the authenticated owner view / editor) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); the dev/preview instance still needs the same OAuth app + DCR (preview OAuth — not blocking prod). |
-| **Active worktrees**   | The owner-view epic worktrees are all **merged and pruned**: `owner-view` (#361), `fidelity-surface` (#364/#377), `owner-open-flip` (#363/#376), `upload-warnings` (#365), `gemini-review-fix` (#371), `sandbox-fallback` (#385). Currently live: **`docs-reconcile`** (`docs/reconcile-adr0092-diary` — this ADR-0092-wording + diary reconciliation) and two **concurrent sibling sessions**, `claude-review-fix` (`ci/claude-review-fix`) and `scanner-rename` (`refactor/scanner-rename` — the recorded `ResourceScanner`-port rename follow-up from ADR-0092). |
+| **Active worktrees**   | The owner-view epic worktrees are all **merged and pruned**: `owner-view` (#361), `fidelity-surface` (#364/#377), `owner-open-flip` (#363/#376), `upload-warnings` (#365), `gemini-review-fix` (#371), `sandbox-fallback` (#385). Currently live: **`docs-reconcile`** (`docs/reconcile-adr0092-diary` — this ADR-0092-wording + diary reconciliation) and two **concurrent sibling sessions**, `claude-review-fix` (`ci/claude-review-fix`) and `scanner-rename` (`refactor/scanner-rename` — the recorded `ResourceScanner`-port rename follow-up from ADR-0092). **`kit-update-0.20.0`** (`chore/kit-update-0.20.0`) — the agentic-sdlc v0.12.0 → v0.20.0 adoption, PR pending. |
+| **Last housekeeping**  | 2026-09-20 — none has run yet; row stamped at the agentic-sdlc v0.20.0 adoption. The docs gate nudges (`housekeeping-due` advisory) once this date is older than `housekeepingDue.windowDays` (30) in `scripts/docs-conformance/config.mjs`; `/housekeeping` stamps it. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile). ADR-0035–**0092** live in `docs/adr/` (INDEX current); the owner-view epic's **ADR-0088–0092 are amendments** to ADR-013/0038/0056/0059/0063/0080/0088/0089 and needed **no spec-rev bump**. **ADR-001–030 remain inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/domain-glossary.md` / `docs/events.md` are canonical for domain language/events; the `docs:check` conformance gate is green. |
 
 ### Open questions / unresolved decisions
@@ -35,7 +36,7 @@
 - **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
 - **TDD enforcement is live**: the `.husky/pre-push` TDD pairing guard blocks source-without-tests pushes; `pnpm docs:check` runs in the same hook. Escape hatches `PUSH_WITHOUT_TESTS=1` / `PUSH_WITHOUT_DOCS=1`, both logged.
-- **The manual is `AGENTS.md`** (agentic-sdlc **v0.12.0**). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/`; the docs-conformance engine is a recorded local fork (see `VERSION`). Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku), resolved by `sh scripts/agents.lib.sh <tier>`.
+- **The manual is `AGENTS.md`** (agentic-sdlc **v0.20.0**). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/`; the skills live at `.agents/skills/` with a `.claude/skills/` symlink bridge (kit 0.14.0 home); the docs harness is a recorded local fork (see `VERSION`: 16 validators, kit 8 + local 8). Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku), resolved by `sh scripts/agents.lib.sh <tier>`.
 
 ### Update protocol
 
@@ -6540,3 +6541,101 @@ truncation is rare. The check stays **advisory** (never required-for-merge). The
 turn-cap decision is recorded in the same ADR-030 amendment.
 
 Tier: implementer. Worktree `drop-gemini`, branch `ci/drop-gemini`.
+
+### 2026-09-20 — Adopted agentic-sdlc v0.20.0 (0.12.0 → 0.20.0, eight releases)
+
+Bumped the kit shared layer **0.12.0 → 0.20.0** via `UPDATING.md` (worktree
+`kit-update-0.20.0`, `chore/kit-update-0.20.0`), following the v0.20.0 recipe end to end —
+Part 1 (steps 0–6) and Part 2 (steps 8–10), one PR. The recipe's zsh
+history-modifier trap (`"$REF:scripts/…"` → `:s` modifier, 0.10.0's own worked
+incident) bit once at step 2; every block was then run through `sh` with braced refs.
+
+**Part 1 — shared layer.** Seven files JOINED the layer and were taken verbatim, bytes and
+mode: `scripts/manifest.lib.sh` (0.16.0 — the one grammar for `VERSION`, which `check.sh`
+now sources), `scripts/agent-dispatch.sh` (0.18.0–0.20.0 — the dispatcher; inert here, it
+exits 3 because no tier names an agent harness), and five advisory validators —
+`mutation-decision` (0.13.0), `skill-bridge` (0.14.0), `design-brief` + `housekeeping-due`
+(0.15.0), `banned-words` (0.16.0). Content changes taken: `agents.lib.sh` (the
+`<harness>:<model>` third axis, `--model`/`--harness`; unprefixed values resolve exactly as
+before — verified `sh scripts/agents.lib.sh reviewer` → `opus`, `--harness` → empty, exit 0),
+`check.sh` (relays advisories to stderr on a green gate — every advisory since 0.11.0 had
+been silent through the wrapper), `shared-code-craft.md` §13 (tactical DDD — the invariant
+lives with the thing it protects), and the three previously-taken validators. Nothing left
+the layer. Step 6: every manifest file `verbatim` except the two recorded fork files.
+
+**The fork survived, re-based on 0.20.0.** `context.mjs` is now the v0.20.0 context
+verbatim (its `read` answers null for missing/dir/dangling, plus `kind` and `readable`)
+**plus** the local `listRecursive` (which 0.16.0 removed upstream — `event-names` walks
+`packages/domain/src` with it) and the `paths` map; `runner.mjs` registers **sixteen**
+validators — the kit's eight plus the local eight. The `VERSION` deviation note is
+re-appended and says so. Two side effects recorded there and in `local-workflow.md`: the
+kit's four "bare fixture → gate exits 0" end-to-end tests are omitted with a NOTE (a bare
+fixture correctly trips the local validators), and the kit-verbatim `.mjs` files are exempt
+from the Biome **formatter** via a `biome.json` override — reformatting `banned-words.mjs`
+and `mutation-decision.mjs` would have broken the verbatim claim; the exception lives in a
+local file, per the recipe's own rule. `context.test.mjs`'s "exactly five keys" test is
+adapted to assert the fork's seven.
+
+**Part 2 — non-shared, by category.**
+
+- **9a-bis, the skills MOVED** to the 0.14.0 canonical home `.agents/skills/`, with one
+  committed relative symlink per skill (and the licence file) at `.claude/skills/`, using
+  the recipe's re-runnable block. Every `/command` resolves through the bridge; the gate's
+  `skillsDir` is `.agents/skills` and `.agents/skills` joined `pathRoots`.
+- **9a, inventory.** Two new skills adopted with their wiring: **`/design-brief`** (design
+  it twice at architecture scale, compare on complexity, write the three anchors + the
+  glossary's context map + an ADR) and **`/housekeeping`** (the calendar-driven audit the
+  housekeeping-due advisory sends you to; never fixes, stamps the diary row). `dogfood`
+  stays a recorded decline (`/ce-dogfood` is ours). Per-skill three-way merges: took the
+  kit's changed-only files (`explain-diff`, `tdd/deep-modules.md` — mermaid, not ASCII);
+  merged 11 skills with local edits, keeping this repo's adaptations (Opus/Haiku agent
+  labels, ADR citations, the wired single-vendor `claude-code-review.yml` path in
+  `/implement`) and taking the kit's new rules: `/to-tickets` rule 10 (`Domain:`) and 11
+  (a new abstraction cites the brief), `/implement`'s domain pass-through and **"the
+  reviewer is never the model that implemented"** (`reviewer self-implemented` domain),
+  `/improve-codebase-architecture`'s style-level re-entry to the brief and its hand-off.
+  **Found and fixed a gap from the 0.12.0 update:** this repo's `/review-pr` Security
+  Sentinel had never received the kit's **OWASP Agentic Skills Top 10 audit** (AST01–AST10)
+  nor the **shell-hazard audit** (§11/§12) — both taken now, with the repo's ADR-013/014/015/016
+  list folded in. Two stale pre-kit sidecars retired for the kit's successors:
+  `grill-with-docs/CONTEXT-FORMAT.md` → `GLOSSARY-FORMAT.md`,
+  `improve-codebase-architecture/HTML-REPORT.md` → `PRESENTING.md` (their `SKILL.md`s were
+  the unedited upstream originals and were taken wholesale); `diagnose`'s HITL script moved
+  up one level (0.16.0). `merge-train`, `pr-iterate`, `worktree-cleanup` and the three
+  `improve-codebase-architecture` sidecars: kit clean, ours stand.
+- **9b, manual and articles.** `AGENTS.md`: hard rule 1's worktree/linter gotcha (checked —
+  Biome reads `biome.json` from the invocation directory, so it does not bite here), the
+  skills' new home + bridge + the session-start precondition, `/design-brief` and
+  `/housekeeping` in the chain and the quick reference, "thirteen" craft rules, the
+  licence row. `constitution/local-engineering.md` gained the **design brief** — the three
+  anchors, each a real decision for this stack: `**Paradigm**` (FP/immutable domain,
+  ADR-024), `**Architectural style**` (hexagonal in a modular monolith, ADR-020),
+  `**Context map**` (four contexts over events, `docs/context-map.md`, ADR-0036/0064) — and
+  the **`**Mutation decision**`** (Stryker on demand via `scripts/mutation-delta.sh`, never
+  a gate, ADR-0081). Its stale `CLAUDE.md` mention → `AGENTS.md`.
+- **9c, templates.** Workflows: `tdd-pairing.yml` UNCHANGED; the four others DECLINED
+  (unchanged decisions). Glossary gained a **Context map** section — every edge declared
+  from both sides in Evans's vocabulary, derived from `docs/context-map.md` — and a
+  **Words this project does not use** section (`strategic design` → context map; the
+  failing `Version` alias rule stays the stricter local `glossary.bannedAliases`, because
+  that word is legitimate everywhere else). Diary gained the `**Last housekeeping**` row
+  (stamped today; no pass has run yet).
+- **9d, policy files.** `config.mjs`: `skillsDir`, the `.agents/skills` root, four new
+  sections (`mutationDecision`, `designBrief`, `housekeepingDue` at 30 days,
+  `bannedWords`), `/codebase-design` on the ignore list. `agents.config.sh`: the kit's
+  nine new keys (`AGENT_HARNESSES`, `AGENT_DISPATCH_MAX_DEPTH`/`_SWEEP_DAYS`, six
+  `AGENT_BUDGET_*`) with their comment blocks, all left at the kit default (empty) under a
+  local stance note — one harness, never dispatched; `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED`
+  deliberately unmapped (an operator decision, flagged in the PR). `guards.config.sh`:
+  `BEHAVIOR_DELTA_SURFACES`' process/agent surface now names `.agents/`, `constitution/`
+  and `AGENTS.md` — it had kept only the pre-ADR-0082 paths, so an edited constitution rule
+  was invisible to `behavior-delta.sh`.
+- **9e, adapters.** Never taken (no `adapters/` tree); the one manual sentence that would
+  cite it was re-pointed at the Claude Code `model` parameter.
+
+Verified: `sh scripts/check.sh` green with **zero advisories** (the three the update first
+raised — brief, mutation decision, housekeeping row — are all answered), `pnpm docs:check:test`
+201/201, `pnpm test:scripts` 64/64, `pnpm lint` (biome ci) green.
+
+Tier: mechanical for Part 1, implementer for Part 2. Worktree `kit-update-0.20.0`, branch
+`chore/kit-update-0.20.0`.
