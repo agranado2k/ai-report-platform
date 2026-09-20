@@ -1335,7 +1335,7 @@ git branch -D feat/&lt;feature-slug&gt;</code></pre>
       <tbody>
         <tr><td>repo-bootstrap</td><td>Create <code>github.com/agranado2k/&lt;repo&gt;</code> public; configure branch protection on <code>main</code></td><td><span class="status-pill not-started">Not started</span></td><td>Blocks everything below</td></tr>
         <tr><td>codeowners</td><td>Add <code>.github/CODEOWNERS</code> with <code>* @agranado2k</code> and sensitive-path overrides</td><td><span class="status-pill not-started">Not started</span></td><td>Required for branch-protection review rule</td></tr>
-        <tr><td>ci-workflows</td><td>Add <code>ci.yml</code>, <code>cd.yml</code>, <code>claude-review.yml</code>, <code>gemini-review.yml</code></td><td><span class="status-pill not-started">Not started</span></td><td>Required status checks wired</td></tr>
+        <tr><td>ci-workflows</td><td>Add <code>ci.yml</code>, <code>cd.yml</code>, <code>claude-review.yml</code>, <code>gemini-review.yml</code> <em>(gemini-review.yml retired #394)</em></td><td><span class="status-pill not-started">Not started</span></td><td>Required status checks wired</td></tr>
         <tr><td>vercel-projects</td><td>Provision two Vercel projects (<code>app</code>, <code>view</code>); link to GitHub repo; preview deploys on every PR</td><td><span class="status-pill not-started">Not started</span></td><td>Preview URLs commented on PRs</td></tr>
         <tr><td>neon-db</td><td>Provision Neon project; create <code>main</code> + per-PR branch automation</td><td><span class="status-pill not-started">Not started</span></td><td>Ephemeral DB per CI run</td></tr>
         <tr><td>r2-buckets</td><td>Cloudflare R2: <code>reports-prod</code>, <code>reports-ci</code> (versioning on) &mdash; no persistent staging (ADR-031); previews namespace within <code>reports-prod</code> via <code>pr-&lt;N&gt;/</code> (ADR-0047)</td><td><span class="status-pill not-started">Not started</span></td><td>Per-env access keys in GitHub secrets</td></tr>
@@ -1461,7 +1461,7 @@ jobs:
           inline_comments: true
           summary_comment: true</code></pre>
 
-    <h4>Workflow: <code>.github/workflows/gemini-review.yml</code></h4>
+    <h4>Workflow: <code>.github/workflows/gemini-review.yml</code> <em>(retired 2026-09-19, #394 &mdash; model deprecated by Google; see ADR-030)</em></h4>
 <pre><code>name: Gemini PR review
 on:
   pull_request:
@@ -2311,7 +2311,7 @@ POST /api/v1/reports
         <li>Edge MW skeletons: viewer's <code>Service-Worker:</code> → 403 (ADR-014); app's signup/login rate-limit + Turnstile.</li>
         <li><strong>CI workflow live</strong> (<code>.github/workflows/ci.yml</code>): biome, typecheck, branch-name, unit, migration-check, e2e, security-headers, Bruno contract, docs-trigger-matrix.</li>
         <li><strong>CD workflow live</strong> (<code>.github/workflows/cd.yml</code>): Vercel prod deploys, GHCR scanner push, <code>terraform apply</code> for any infra diff, Drizzle migrations, smoke tests.</li>
-        <li><strong>AI review workflows live</strong>: <code>claude-review.yml</code> (security/ACL/TDD/FP focus), <code>gemini-review.yml</code> (style/idiom/perf focus). Advisory only.</li>
+        <li><strong>AI review workflows live</strong>: <code>claude-review.yml</code> (security/ACL/TDD/FP focus), <code>gemini-review.yml</code> (style/idiom/perf focus). Advisory only. <em>(Update 2026-09-19, #394: <code>gemini-review.yml</code> is retired &mdash; Google deprecated its model &mdash; so AI review is single-vendor Claude now; see the ADR-030 amendment.)</em></li>
         <li><strong>Branch protection on <code>main</code></strong> applied <em>via Terraform</em> &mdash; the rules themselves are reviewed via PR.</li>
       </ul>
 
@@ -2575,7 +2575,7 @@ POST /api/v1/reports
       <li><code>.github/workflows/ci.yml</code> &mdash; PR quality gate (biome, typecheck, unit, e2e, headers, Bruno, docs)</li>
       <li><code>.github/workflows/cd.yml</code> &mdash; on-merge deploy (Vercel app + view, scanner GHCR, Terraform, migrations, smoke)</li>
       <li><code>.github/workflows/claude-review.yml</code> &mdash; <code>anthropics/claude-code-action</code> (security/ACL/TDD/FP focus)</li>
-      <li><code>.github/workflows/gemini-review.yml</code> &mdash; <code>google-github-actions/gemini-cli</code> (style/idiom/perf focus)</li>
+      <li><code>.github/workflows/gemini-review.yml</code> &mdash; <code>google-github-actions/gemini-cli</code> (style/idiom/perf focus) &mdash; <em>retired 2026-09-19 (#394): model deprecated by Google; AI review is single-vendor Claude, see ADR-030</em></li>
       <li><code>.github/pull_request_template.md</code> &mdash; checklist mirroring the docs-trigger-matrix</li>
       <li><code>.github/dependabot.yml</code> &mdash; deps + GitHub Actions version bumps</li>
       <li><code>infra/terraform/github/</code> &mdash; repo settings + branch protection as Terraform (so the rules themselves are reviewed via PR)</li>

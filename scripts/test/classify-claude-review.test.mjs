@@ -170,12 +170,14 @@ test("the summary names the Claude vendor, not Gemini", () => {
 // Hitting the turn cap is NOT a hard failure like quota/auth. If a review was
 // still posted before the ceiling, the AI-review signal exists (just possibly
 // incomplete), so the check goes GREEN with a note. Only a turn cap that posted
-// NOTHING is a real no-review and stays red. The workflow feeds the reviewer's
-// SDK result subtype (`error_max_turns`) plus, when a review body was produced,
-// evidence of that body; the classifier decides at the (outcome, errorText) seam.
+// NOTHING is a real no-review and stays red. The classifier greens ONLY on the
+// fixed `AI_REVIEW_BODY_POSTED` sentinel the gate appends after confirming a
+// posted body — never on residual model/result text (ADR-0069), so nothing the
+// model or diff writes can turn a no-review green.
+const POSTED = "AI_REVIEW_BODY_POSTED";
 
 test("a max-turns run that still posted a review is TRUNCATED and green-with-note", () => {
-  const err = "error_max_turns review body was posted before the turn cap\n";
+  const err = `error_max_turns ${POSTED}\n`;
   const r = run("failure", err);
   assert.equal(r.token, "TRUNCATED");
   assert.equal(r.code, 0);
@@ -186,23 +188,33 @@ test("a max-turns run that still posted a review is TRUNCATED and green-with-not
 });
 
 test("a max-turns run that posted NOTHING is RED (a real no-review)", () => {
-  // Bare subtype marker, no review body alongside it → not a real review.
+  // Bare subtype marker, no posted-body sentinel → not a real review.
   const r = run("failure", "error_max_turns\n");
   assert.notEqual(r.token, "TRUNCATED");
   assert.equal(r.code, 1);
 });
 
+test("a turn-cap phrasing that matches but carries no sentinel stays RED (no false green)", () => {
+  // Regression for the #395 review finding: the old strip-and-diff body check
+  // greened `reached its turn limit` (matched by the alternation but not fully
+  // stripped) even with nothing posted. Sentinel-only detection closes that gap.
+  const r = run("failure", "reached its turn limit\n");
+  assert.notEqual(r.token, "TRUNCATED");
+  assert.equal(r.code, 1);
+});
+
 test("a truncated review whose posted body mentions 'rate limit' is TRUNCATED, not QUOTA", () => {
-  // TRUNCATED is decided BEFORE the quota/auth/transient markers so the posted
-  // (model-authored, ADR-0069-untrusted) review text cannot flip the class.
-  const err = "error_max_turns The handler should return 429 when the rate limit is hit.\n";
+  // TRUNCATED is decided BEFORE the quota/auth/transient markers, so the posted
+  // (model-authored, ADR-0069-untrusted) review text cannot flip the class even
+  // when it mentions a 429 rate limit.
+  const err = `error_max_turns ${POSTED} The handler should return 429 when the rate limit is hit.\n`;
   const r = run("failure", err);
   assert.equal(r.token, "TRUNCATED");
   assert.equal(r.code, 0);
 });
 
 test("a max-turns truncation that swallowed its error and exited 0 is still TRUNCATED-green", () => {
-  const err = "error_max_turns review body was posted before the turn cap\n";
+  const err = `error_max_turns ${POSTED}\n`;
   const r = run("success", err);
   assert.equal(r.token, "TRUNCATED");
   assert.equal(r.code, 0);
