@@ -1,13 +1,12 @@
 #!/bin/sh
 # classify-ai-review.sh — decide whether an AI PR-review check may go green, and
-# if not, classify WHY and fail visibly (ADR-030; issues #371 Gemini, #388 Claude).
+# if not, classify WHY and fail visibly (ADR-030; #388 Claude, #394 Gemini retired).
 #
 # The bug: the review workflows run their review step under `continue-on-error:
 # true` so a transient outage doesn't fail the PR. But `continue-on-error` masks
 # EVERY failure — a 429 quota/rate-limit exhaustion, a missing/invalid credential,
 # or an absent CLI all left the review check GREEN with no review posted. A green
-# check that does not prove a review ran defeats the reason the second vendor
-# exists.
+# check that does not prove a review ran defeats the reason AI review exists.
 #
 # This is the pure, vendor-neutral decision function, extracted so it can be
 # unit-tested off the workflow. The workflow feeds it the review step's `outcome`
@@ -16,10 +15,12 @@
 # review — so the check turns RED, never a false green.
 #
 # Vendor-specific wrappers are thin shims that set REVIEW_VENDOR and exec this:
-#   - scripts/classify-gemini-review.sh  (REVIEW_VENDOR=Gemini, issue #371)
 #   - scripts/classify-claude-review.sh  (REVIEW_VENDOR=Claude, issue #388)
-# The error-marker set below is a SUPERSET covering both vendors' signatures, so
-# one classifier serves both without regressing either.
+# AI review is single-vendor (Claude) today: the Gemini reviewer was retired in
+# #394 because Google deprecated its model. This classifier stays deliberately
+# VENDOR-NEUTRAL — its error-marker set is a generic superset, not Claude-only —
+# so a different second vendor can be reintroduced later behind this same seam by
+# adding a shim (REVIEW_VENDOR=<Name>) and any markers unique to it. See ADR-030.
 #
 # Usage:  REVIEW_VENDOR=<Name> classify-ai-review.sh <outcome> [<error-file>]
 #   <outcome>     the GitHub Actions step outcome: success|failure|cancelled|...
@@ -49,17 +50,17 @@ match() {
 # Classify. Error-text markers win over the step outcome (belt and suspenders:
 # the action can swallow an error and still exit 0 — the ticket's re-run case),
 # so a known failure signature is always caught even on a "success" outcome.
-# Order is precedence: most specific first. Markers cover BOTH vendors:
-#   Gemini (run-gemini-cli): TerminalQuotaError, "Gemini CLI not found",
-#     "No authentication method", GaxiosError "API key not valid".
-#   Claude (claude-code-action / Anthropic API): rate_limit_error [429],
-#     authentication_error [401] / invalid x-api-key / OAuth token,
-#     overloaded_error [529], "Credit balance is too low".
-if match 'cli not found|command not found|not found in \$?path|could not find.*(gemini|claude|cli)|executable.*not found'; then
+# Order is precedence: most specific first. The active vendor is Claude
+# (claude-code-action / Anthropic API): rate_limit_error [429],
+# authentication_error [401] / invalid x-api-key / OAuth token,
+# overloaded_error [529], "Credit balance is too low". The remaining markers are
+# generic (quota / auth / 5xx phrasings, not tied to any one vendor) and are kept
+# on purpose: they are the vendor-neutral seam a future second reviewer plugs into.
+if match 'cli not found|command not found|not found in \$?path|could not find.*(claude|cli)|executable.*not found'; then
   token=MISSING_CLI
-elif match 'terminalquotaerror|exhausted your daily quota|resource[_ ]exhausted|quota exceeded|exceeded your.*quota|daily quota|rate[_ ]?limit|rate_limit_error|credit balance is too low|usage limit|\b429\b|\[429\]'; then
+elif match 'exhausted your daily quota|resource[_ ]exhausted|quota exceeded|exceeded your.*quota|daily quota|rate[_ ]?limit|rate_limit_error|credit balance is too low|usage limit|\b429\b|\[429\]'; then
   token=QUOTA
-elif match 'no authentication method|authentication_error|api[_ ]?key not valid|api[_ ]?key[_ ]?invalid|invalid api key|invalid x-api-key|claude_code_oauth_token|oauth[_ ]?token.*(required|missing|expired|invalid|revoked|not provided)|(expired|invalid|revoked).*oauth|missing.*(api key|gemini_api_key|credential|oauth)|gemini_api_key.*(unset|empty|not set|required)|unauthorized|permission[_ ]denied|\b40[13]\b|\[40[13]\]|status.*(401|403)'; then
+elif match 'no authentication method|authentication_error|api[_ ]?key not valid|api[_ ]?key[_ ]?invalid|invalid api key|invalid x-api-key|claude_code_oauth_token|oauth[_ ]?token.*(required|missing|expired|invalid|revoked|not provided)|(expired|invalid|revoked).*oauth|missing.*(api key|credential|oauth)|unauthorized|permission[_ ]denied|\b40[13]\b|\[40[13]\]|status.*(401|403)'; then
   token=AUTH
 elif match 'unavailable|overloaded_error|overloaded|\b5[0-9][0-9]\b|\[5[0-9][0-9]\]|status.*(5[0-9][0-9])|service is currently unavailable|econnreset|etimedout|timed out|deadline[_ ]exceeded|temporarily'; then
   token=TRANSIENT

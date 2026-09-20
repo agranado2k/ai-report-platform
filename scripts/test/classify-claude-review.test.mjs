@@ -15,7 +15,7 @@
 // (scripts/classify-ai-review.sh, REVIEW_VENDOR=Claude); these tests exercise it
 // end-to-end so a regression in either the shim or the shared core is caught.
 //
-// Same dependency-free node:test tier as scripts/test/classify-gemini-review.test.mjs.
+// Same dependency-free node:test tier as scripts/test/behavior-delta.test.mjs.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
