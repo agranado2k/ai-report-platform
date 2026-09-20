@@ -41,7 +41,9 @@
 # Set DOCS_CHECK_NO_NODE=1 to force the fallback (the kit's demo does, to prove
 # both engines).
 #
-# Exit: 0 clean, 1 violations found, 2 could not run.
+# Exit: 0 clean, 1 violations found, 2 could not run. A clean run may still
+# write the harness's advisory block to stderr — advisories are relayed on a
+# green gate and never change the exit code.
 
 set -u
 
@@ -52,7 +54,15 @@ cd "$repo_root" || {
 }
 
 HARNESS="scripts/docs-conformance/index.mjs"
+# The header the harness prints above its advisory block. Keep this in step
+# with `scripts/docs-conformance/index.mjs` — two engines, one contract; the
+# advisory suite goes red if the two drift.
+advisory_header="WARN  docs conformance"
 
+# Findings go to a tempfile rather than a variable because every scan below
+# is a `while … done` fed by a pipe, which POSIX sh runs in a subshell: a flag
+# set inside it is lost when the loop ends. The file is the one channel that
+# survives; "any finding at all" is then the file's size (see posix_failed).
 vfile=$(mktemp) || exit 2
 trap 'rm -f "$vfile"' EXIT INT TERM HUP
 
@@ -111,14 +121,24 @@ else
 		"has no 'shared-layer: <version>' line" \
 		"The manifest must state the version it pins, or the update recipe has no anchor to diff from."
 
-	awk '
-		/^files:/           { inlist = 1; next }
-		!inlist             { next }
-		/^[ \t]*#/          { next }
-		/^[ \t]*$/          { next }
-		/^[ \t]+[^ \t]/     { sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; next }
-		                    { inlist = 0 }
-	' VERSION | while IFS= read -r shared; do
+	# One grammar for the manifest, shared with bootstrap and the suites; the
+	# module is itself manifest-listed, so a consumer's gate has it — and the
+	# gate fails CLOSED without it: a missing module is a missing shared file,
+	# and a module that defines nothing is a broken gate, never a silent pass.
+	manifest_lib="$repo_root/scripts/manifest.lib.sh"
+	if [ ! -r "$manifest_lib" ]; then
+		report "shared-layer-missing" "scripts/manifest.lib.sh" \
+			"the manifest parser is missing, so the shared-layer check cannot run" \
+			"Restore scripts/manifest.lib.sh from the kit at the pinned version; scripts/check.sh sources it."
+	else
+		# shellcheck disable=SC1090
+		. "$manifest_lib"
+		command -v manifest_section >/dev/null 2>&1 || {
+			echo "check.sh: scripts/manifest.lib.sh did not define manifest_section — the gate cannot run" >&2
+			exit 2
+		}
+	fi
+	command -v manifest_section >/dev/null 2>&1 && manifest_section files <VERSION | while IFS= read -r shared; do
 		[ -e "$shared" ] && continue
 		report "shared-layer-missing" "$shared" \
 			"is listed in VERSION as shared layer but does not exist" \
@@ -145,20 +165,22 @@ harness_status=0
 engine="fallback"
 
 if [ "${DOCS_CHECK_NO_NODE:-}" != "1" ] && [ -f "$HARNESS" ] && command -v node >/dev/null 2>&1; then
-	engine="harness"
+	engine="docs harness"
 	harness_out=$(node "$HARNESS" "$repo_root" 2>&1)
 	harness_status=$?
 fi
 
 if [ "$engine" = "fallback" ]; then
 	# Reduced form. Path roots: the trees a manual is allowed to point into. A
-	# backticked token whose first segment is one of these, and which contains a
-	# `/`, is a repo path and must resolve. Anything else is left alone.
+	# backticked token that starts with one of these roots followed by `/` is
+	# a repo path and must resolve; anything else is left alone. A root may
+	# itself carry a `/` (`.agents/skills`), exactly as the harness's do.
 	#
-	# Keep this list in step with `claudeMdRefs.pathRoots` in
-	# scripts/docs-conformance/config.mjs — two engines, one policy, and the
-	# duplication is the price of running without a runtime.
-	path_roots='constitution scripts docs tests adapters .githooks .github .claude'
+	# This list IS `claudeMdRefs.pathRoots` in scripts/docs-conformance/
+	# config.mjs, entry for entry — two engines, one policy, and the
+	# duplication is the price of running without a runtime. The harness's
+	# list is the truth; tests/gate-path-roots.test.sh fails when they differ.
+	path_roots='constitution scripts docs tests adapters .githooks .github .agents/skills .claude/hooks .claude/skills .claude/constitution'
 
 	scan_manual() {
 		manual=$1
@@ -180,10 +202,11 @@ if [ "$engine" = "fallback" ]; then
 				case "$token" in
 				*'*'* | *'?'*) continue ;;
 				esac
-				root=${token%%/*}
 				is_root=0
 				for r in $path_roots; do
-					[ "$root" = "$r" ] && is_root=1 && break
+					case "$token" in
+					"$r"/*) is_root=1 && break ;;
+					esac
 				done
 				[ "$is_root" = 1 ] || continue
 				# Trailing punctuation from prose, and trailing slash on dirs.
@@ -214,10 +237,16 @@ if [ "$engine" = "fallback" ]; then
 	echo "NOTICE  docs gate running WITHOUT node — reduced coverage." >&2
 	echo "        Checked: unstamped placeholders, shared-layer manifest, repo paths in the manual layer." >&2
 	echo "        NOT checked: slash-command resolution, article reachability, nested manuals," >&2
-	echo "        package-relative paths, shim integrity (CLAUDE.md / GEMINI.md), the" >&2
-	echo "        portability deny-list on the shared article, cross-skill references" >&2
-	echo "        (the skill-web advisory), and path references inside skill bodies" >&2
-	echo "        (the skill-paths rule)." >&2
+	echo "        package-relative paths, shim integrity (CLAUDE.md / GEMINI.md) and the" >&2
+	echo "        portability deny-list on the shared article — the claude-md-refs rules" >&2
+	echo "        beyond repo paths; cross-skill references (the skill-web advisory)," >&2
+	echo "        path references inside skill bodies" >&2
+	echo "        (the skill-paths rule), the engineering article's mutation" >&2
+	echo "        decision (the mutation-decision advisory) and its design brief" >&2
+	echo "        (the design-brief advisory), the diary's housekeeping date (the" >&2
+	echo "        housekeeping-due advisory), materialized skill-bridge symlinks" >&2
+	echo "        (the skill-bridge advisory), and the glossary's banned words" >&2
+	echo "        (the banned-words advisory)." >&2
 	echo "        Install node and re-run to get the full harness (scripts/docs-conformance)." >&2
 	echo "" >&2
 fi
@@ -226,6 +255,16 @@ posix_failed=0
 [ -s "$vfile" ] && posix_failed=1
 
 if [ "$posix_failed" = 0 ] && [ "$harness_status" = 0 ]; then
+	# A green harness may still carry ADVISORIES — findings on the warning
+	# channel that never fail the gate. Relay them: this wrapper is the entry
+	# point the hook and CI run, and a warning only the harness printed is a
+	# warning nobody saw. Quiet when there is nothing to advise, and trimmed
+	# to the advisory block — the harness's own OK line is not repeated.
+	case "$harness_out" in
+	*"$advisory_header"*)
+		printf '%s\n' "$harness_out" | sed '/^OK  docs conformance/d' >&2
+		;;
+	esac
 	echo "OK  docs gate: all checks passed (shared-layer ${shared_version:-unknown}, engine: $engine)"
 	exit 0
 fi

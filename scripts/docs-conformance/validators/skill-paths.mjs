@@ -33,11 +33,11 @@
 // pathRoots the manual validator reads, and the same code-span/fence rules —
 // one definition of "what is a path reference", now three consumers.
 
-import { pathRefs, pathTokenRe } from "./claude-md-refs.mjs";
+import { LEGACY_SKILLS_DIR, pathRefs, pathTokenRe, skillHomes } from "./claude-md-refs.mjs";
 
 export const id = "skill-paths";
 
-const DEFAULT_SKILLS_DIR = ".claude/skills";
+const DEFAULT_SKILLS_DIR = ".agents/skills";
 
 export function run(ctx) {
   const out = [];
@@ -48,26 +48,37 @@ export function run(ctx) {
   const exempt = new Set(cfg.exemptFiles ?? []);
   const exemptTokens = new Set(cfg.exemptTokens ?? []);
 
-  for (const name of ctx.list(skillsDir)) {
-    if (!ctx.exists(`${skillsDir}/${name}/SKILL.md`)) continue; // not a skill dir
-    for (const md of ctx.list(`${skillsDir}/${name}`, ".md")) {
-      const file = `${skillsDir}/${name}/${md}`;
-      if (exempt.has(file)) continue;
-      const raw = ctx.read(file);
-      if (raw == null) continue;
+  // Both homes are ENUMERATED, not just resolved — same reasoning as
+  // skill-web's: a tree whose skills stayed at the legacy address is
+  // sanctioned, and scanning only the configured home would drop its body
+  // coverage to zero in silence. De-duplicated by skill name; the configured
+  // home wins when a skill sits at both.
+  const seen = new Set();
+  const homes = skillHomes(skillsDir);
+  for (const dir of homes) {
+    for (const name of ctx.list(dir)) {
+      if (seen.has(name)) continue;
+      if (!ctx.exists(`${dir}/${name}/SKILL.md`)) continue; // not a skill dir
+      seen.add(name);
+      for (const md of ctx.list(`${dir}/${name}`, ".md")) {
+        const file = `${dir}/${name}/${md}`;
+        if (exempt.has(file)) continue;
+        const raw = ctx.read(file);
+        if (raw == null) continue;
 
-      for (const token of [...pathRefs(raw, pathRe)].sort()) {
-        if (exemptTokens.has(token)) continue;
-        if (ctx.exists(token)) continue;
-        if (ctx.exists(`${token}.template`)) continue;
-        out.push({
-          validator: id,
-          severity: "warning",
-          file,
-          rule: "skill-path-missing",
-          message: `references \`${token}\` but neither it nor \`${token}.template\` exists`,
-          hint: "Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.",
-        });
+        for (const token of [...pathRefs(raw, pathRe)].sort()) {
+          if (exemptTokens.has(token)) continue;
+          if (ctx.exists(token)) continue;
+          if (ctx.exists(`${token}.template`)) continue;
+          out.push({
+            validator: id,
+            severity: "warning",
+            file,
+            rule: "skill-path-missing",
+            message: `references \`${token}\` but neither it nor \`${token}.template\` exists`,
+            hint: "Fix the reference, restore the file, or finish the update that delivers it — an agent obeying this skill will be pointed at it. An upstream-verbatim file goes in skillPaths.exemptFiles; a path that exists only after something creates it goes in skillPaths.exemptTokens. Reasons on every entry.",
+          });
+        }
       }
     }
   }

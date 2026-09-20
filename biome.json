@@ -53,6 +53,26 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "UPDATING.md",
+        "scripts/docs-conformance/index.mjs",
+        "scripts/docs-conformance/validators/claude-md-refs.mjs",
+        "scripts/docs-conformance/validators/skill-web.mjs",
+        "scripts/docs-conformance/validators/skill-paths.mjs",
+        "scripts/docs-conformance/validators/mutation-decision.mjs",
+        "scripts/docs-conformance/validators/design-brief.mjs",
+        "scripts/docs-conformance/validators/housekeeping-due.mjs",
+        "scripts/docs-conformance/validators/skill-bridge.mjs",
+        "scripts/docs-conformance/validators/banned-words.mjs"
+      ],
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
     }
   ],
   "assist": {
