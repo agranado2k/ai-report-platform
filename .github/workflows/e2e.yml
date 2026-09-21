@@ -212,6 +212,18 @@ jobs:
           # (publishable keys are meant to reach the browser). Absent → @browser
           # is grep-excluded the same way @auth is (playwright.config.ts).
           E2E_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY_STAGING }}
+          # Serialized-CI marker (issue #372). This workflow is ONLY ever invoked
+          # by preview-isolation.yml's `smoke` job, which carries the
+          # `preview-smoke-shared` concurrency group (cancel-in-progress:false) —
+          # so no other smoke can run concurrently on the shared Clerk dev
+          # instance. That guarantee is exactly what makes it safe for the
+          # pre-run sweep (tests/e2e/support/global-setup.ts) to sweep at age 0,
+          # taking an evicted/killed run's younger-than-24h straggler members
+          # that would otherwise stack onto this run's footprint and tip the
+          # anchored org's membership cap → 402 plan_limit_exceeded. Absent on a
+          # local `pnpm e2e`, which keeps the concurrency-safe 24h age gate so it
+          # can never delete a colleague's live run's fixtures.
+          E2E_SERIALIZED_SWEEP: "1"
           # Through `env:`, never inlined into the script body — a branch name
           # is attacker-controllable on a fork PR (same rule the readiness step
           # above follows).

@@ -17,12 +17,16 @@
 // must never match, in any casing.
 import { describe, expect, it } from "vitest";
 import {
+  ANCHORED_TEAM_ORG_ID,
+  assessAnchoredOrgCap,
   isRunScopedDecoyOrgName,
   isRunScopedFixtureEmail,
   NEVER_SWEEP_EMAILS,
+  preRunSweepAgeHours,
   RUN_SCOPED_EMAIL_PATTERN_SOURCE,
   runScopedTeamEmail,
   SECOND_FIXTURE_EMAIL,
+  SMOKE_RUN_SCOPED_FOOTPRINT,
   SWEEP_MIN_AGE_HOURS,
   selectSweepableOrganizations,
   selectSweepableUsers,
@@ -166,6 +170,105 @@ describe("isRunScopedDecoyOrgName", () => {
   });
 });
 
+describe("preRunSweepAgeHours — the serialized-CI age gate (issue #372)", () => {
+  // The 24h age gate on the opportunistic sweep exists ONLY to protect a
+  // CONCURRENT run's live identities on the shared instance. The `smoke` job's
+  // `preview-smoke-shared` concurrency group (cancel-in-progress:false) makes a
+  // concurrent smoke impossible — so in that serialized context the gate is
+  // pure downside: it is exactly what lets an evicted/killed run's straggler
+  // members survive into this run and tip the low cap → 402. There, sweep at
+  // age 0 to take every straggler; everywhere else keep the concurrency-safe
+  // default so a local `pnpm e2e` can never nuke a colleague's live run.
+  it("sweeps at age 0 in the serialized-CI smoke, and at the safe default otherwise", () => {
+    expect(preRunSweepAgeHours(true)).toBe(0);
+    expect(preRunSweepAgeHours(false)).toBe(SWEEP_MIN_AGE_HOURS);
+    expect(SWEEP_MIN_AGE_HOURS).toBe(24);
+  });
+});
+
+describe("ANCHORED_TEAM_ORG_ID", () => {
+  // The canonical `agranado.com` team org (ADR-0074) — the one whose membership
+  // cap the leak fills. Its id is ALSO hard-coded as `ORG_ID` in
+  // .github/workflows/clerk-sweep.yml (bash + curl cannot import this module),
+  // so pinning the literal here makes any change to it a visible failing diff
+  // that prompts the paired workflow edit — the same discipline the
+  // RUN_SCOPED_EMAIL_PATTERN_SOURCE pin uses.
+  it("is byte-identical to ORG_ID in .github/workflows/clerk-sweep.yml", () => {
+    expect(ANCHORED_TEAM_ORG_ID).toBe("org_3HK9gdegaQZ1qdkGPgN3RGOTWVO");
+  });
+});
+
+describe("SMOKE_RUN_SCOPED_FOOTPRINT", () => {
+  // The peak number of NEW run-scoped members one full `pnpm e2e` smoke joins
+  // into the anchored org: silver/gold/bronze (team-org-upload.feature) plus
+  // fsown/fscol (folder-sharing.feature — also @smoke @auth). The preflight
+  // must confirm the org has at least this much headroom AFTER the pre-run
+  // sweep, or fail fast rather than let a mid-suite provisioning call 402.
+  it("is the 5-member peak footprint of a full smoke run", () => {
+    expect(SMOKE_RUN_SCOPED_FOOTPRINT).toBe(5);
+  });
+});
+
+describe("assessAnchoredOrgCap — the fail-fast preflight (issue #372)", () => {
+  const footprint = SMOKE_RUN_SCOPED_FOOTPRINT; // 5
+
+  it("passes when the org has strictly more headroom than the run needs", () => {
+    const verdict = assessAnchoredOrgCap({ membersCount: 3, maxAllowedMemberships: 20 }, footprint);
+    expect(verdict.ok).toBe(true);
+    expect(verdict.reason).toBeNull();
+  });
+
+  it("passes at the exact boundary — headroom equal to the footprint is enough", () => {
+    // 20 - 15 = 5 free, footprint 5 → the run fits exactly.
+    expect(
+      assessAnchoredOrgCap({ membersCount: 15, maxAllowedMemberships: 20 }, footprint).ok,
+    ).toBe(true);
+  });
+
+  it("FAILS with an actionable reason when headroom is below the footprint", () => {
+    // 20 - 18 = 2 free, footprint 5 → cannot provision the run.
+    const verdict = assessAnchoredOrgCap(
+      { membersCount: 18, maxAllowedMemberships: 20 },
+      footprint,
+    );
+    expect(verdict.ok).toBe(false);
+    // The message must name the numbers an operator needs to act, not 402 opaquely.
+    expect(verdict.reason).toContain("18"); // members remaining after the sweep
+    expect(verdict.reason).toContain("20"); // the cap
+    expect(verdict.reason).toContain("5"); // the footprint
+    expect(verdict.reason).toMatch(/cap|headroom/i);
+  });
+
+  it("FAILS when the org is already at the cap", () => {
+    const verdict = assessAnchoredOrgCap(
+      { membersCount: 20, maxAllowedMemberships: 20 },
+      footprint,
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("does NOT block when the cap is unknown/unlimited (non-positive) — fail only on a confirmed shortfall", () => {
+    // Clerk's "0 = unlimited" for max_allowed_memberships is unconfirmed in the
+    // docs, so a non-positive cap is treated as unknown: never fail-fast on it,
+    // because a false setup failure is worse than deferring to the real 402.
+    expect(
+      assessAnchoredOrgCap({ membersCount: 999, maxAllowedMemberships: 0 }, footprint).ok,
+    ).toBe(true);
+    expect(
+      assessAnchoredOrgCap({ membersCount: 999, maxAllowedMemberships: -1 }, footprint).ok,
+    ).toBe(true);
+  });
+
+  it("does NOT block when a count is not a finite number — treat as undeterminable", () => {
+    expect(
+      assessAnchoredOrgCap({ membersCount: Number.NaN, maxAllowedMemberships: 20 }, footprint).ok,
+    ).toBe(true);
+    expect(
+      assessAnchoredOrgCap({ membersCount: 5, maxAllowedMemberships: Number.NaN }, footprint).ok,
+    ).toBe(true);
+  });
+});
+
 describe("selectSweepableUsers", () => {
   const runScoped = runScopedTeamEmail("silver", "mzq3k9x2ab7c");
   const alsoRunScoped = runScopedTeamEmail("bronze", "mzq3k9x2ab7d");
@@ -218,6 +321,47 @@ describe("selectSweepableUsers", () => {
 
   it("returns nothing for an empty instance", () => {
     expect(selectSweepableUsers([], { nowMs: NOW, olderThanHours: 0 })).toEqual([]);
+  });
+});
+
+describe("the serialized age-0 pre-run sweep NEVER takes a protected identity (issue #372)", () => {
+  // The aggressive age-0 sweep is the whole fix, and it is also the whole
+  // danger: it takes EVERY run-scoped identity regardless of age. These pin the
+  // NEVER-SWEEP protections under that exact path — the hand-provisioned
+  // SECOND_FIXTURE, the primary fixture, a real human on the domain, and the
+  // canonical anchored org must all survive it.
+  const age0 = { nowMs: NOW, olderThanHours: preRunSweepAgeHours(true) };
+  const oldRunScoped = runScopedTeamEmail("gold", "mzq3k9x2ab7d");
+
+  it("takes stragglers of ANY age but never the standing/human users", () => {
+    const users = [
+      {
+        id: "straggler_fresh",
+        email: runScopedTeamEmail("silver", "mzq3k9x2ab7c"),
+        createdAtMs: NOW - 1,
+      },
+      { id: "straggler_hours", email: oldRunScoped, createdAtMs: NOW - 3 * HOUR_MS },
+      { id: "second_fixture", email: SECOND_FIXTURE_EMAIL, createdAtMs: NOW - 1 },
+      { id: "human", email: "arthur@agranado.com", createdAtMs: NOW - 1 },
+    ];
+    const primary = "primary+clerk_test@agranado.com"; // stands in for E2E_TEST_USER_EMAIL
+
+    const selected = selectSweepableUsers(users, { ...age0, neverSweep: [primary] });
+
+    expect(preRunSweepAgeHours(true)).toBe(0);
+    expect(selected.map((u) => u.id)).toEqual(["straggler_fresh", "straggler_hours"]);
+  });
+
+  it("takes run-scoped decoys of ANY age but never the canonical anchored org", () => {
+    const localPart = runScopedTeamEmail("silver", "mzq3k9x2ab7c").split("@")[0];
+    const orgs = [
+      { id: "decoy_fresh", name: `arp-e2e-decoy-${localPart}`, createdAtMs: NOW - 1 },
+      { id: "org_canonical", name: "agranado.com", createdAtMs: NOW - 1 },
+    ];
+
+    const selected = selectSweepableOrganizations(orgs, age0);
+
+    expect(selected.map((o) => o.id)).toEqual(["decoy_fresh"]);
   });
 });
 

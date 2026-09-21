@@ -6701,3 +6701,49 @@ independence seam beside the cost seam: it fails if the mapping is emptied or ev
 the implementer's model. Test-first; `pnpm test:scripts` 66/66.
 
 Tier: mechanical. Worktree `reviewer-self-implemented`, branch `chore/reviewer-self-implemented`.
+
+### 2026-09-21 — team-org smoke 402 flake: age-0 serialized pre-run sweep + fail-fast cap preflight (#372)
+
+The merge-required `team-org-upload` preview smoke kept flaking `402
+plan_limit_exceeded` on the shared, domain-anchored Clerk dev-instance org
+(`org_3HK9…`) — it blocked #351/#353/#355, each cleared only by a re-run. Not
+leaks: a `clerk-sweep` dry-run found the org draining to ~1 baseline. The cause
+is **peak run-scoped membership under eviction**. The smoke provisions up to 5
+run-scoped members (silver/gold/bronze + fsown/fscol) into the one anchored org,
+and the `preview-smoke-shared` group (`cancel-in-progress: false`) keeps only one
+pending run — so a third PR **evicts** the second, and an evicted/SIGKILL'd run
+leaves its run-scoped members behind with no teardown. Those stragglers are
+younger than the 24h `SWEEP_MIN_AGE_HOURS` gate, so the age-gated pre-run sweep
+skipped them; they stacked onto the next run's footprint and tipped the cap.
+
+**The fix (operator-chosen — the #372 "grill-me" design pass was done up front, so
+this landed at implementer effort).** Two changes, both in the e2e support layer:
+
+1. **Age-0 serialized pre-run sweep.** The 24h gate exists only to protect a
+   *concurrent* run's live fixtures — and the `preview-smoke-shared` group
+   guarantees no concurrent smoke. So in that serialized context the gate only
+   shields stragglers. `global-setup.ts` now sweeps at age 0 when
+   `E2E_SERIALIZED_SWEEP=1` (set by `e2e.yml`, the sole invoker of the serialized
+   smoke) via the new pure `preRunSweepAgeHours`; unset everywhere else keeps the
+   concurrency-safe 24h default, so a local/dev `pnpm e2e` can never nuke a
+   colleague's run. Every never-sweep predicate is untouched — the `SECOND_FIXTURE`,
+   the primary fixture and the canonical anchored org are protected at age 0
+   exactly as at 24h, now pinned by dedicated tests.
+2. **Fail-fast cap preflight.** After the sweep, `global-setup.ts` reads the
+   anchored org's `total_count` + `max_allowed_memberships` (Clerk BAPI fields
+   verified against the 2026-05-12 spec) and throws in setup — an obvious,
+   actionable failure — when headroom is below the smoke's footprint (5), instead
+   of an opaque mid-suite 402. Only a *confirmed* shortfall blocks; an
+   undeterminable cap state (429/5xx, missing field, non-positive cap whose
+   "unlimited" meaning Clerk does not document) logs and proceeds. The decision is
+   the pure, unit-tested `assessAnchoredOrgCap`.
+
+Test-first in `tests/e2e/support/clerk-fixture-identity.test.ts` (33 tests):
+`preRunSweepAgeHours`, `assessAnchoredOrgCap` (headroom/boundary/at-cap/unknown-cap/
+non-finite), the `ANCHORED_TEAM_ORG_ID` + `SMOKE_RUN_SCOPED_FOOTPRINT` pins, and
+the age-0 protection of the standing fixtures + canonical org. The BAPI shell
+(`fetchAnchoredOrgCapState`, `preflightAnchoredOrgCap`) stays thin, following the
+existing untested-shell pattern (`listAllUsers` et al.), with the decision in the
+pure module. No ADR change — a test-infra fix; the age-gate rationale and the
+serialized-CI exception now live in `tests/e2e/README.md`. Tier: implementer.
+Worktree `clerk-cap-fix`, branch `fix/clerk-cap-flake`.

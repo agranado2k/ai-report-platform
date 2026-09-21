@@ -78,8 +78,45 @@ export const NEVER_SWEEP_EMAILS: readonly string[] = [SECOND_FIXTURE_EMAIL];
  *  A full CI run is minutes; 24h is far past any of them. */
 export const SWEEP_MIN_AGE_HOURS = 24;
 
+/**
+ * The age gate a PRE-RUN sweep should use, given whether it runs in the
+ * serialized-CI smoke (issue #372).
+ *
+ * The 24h default exists ONLY to protect a CONCURRENT run's live identities:
+ * simultaneous PR smokes share this dev instance, so an un-gated opportunistic
+ * sweep would delete another run's fixtures mid-scenario. But the `smoke` job's
+ * `preview-smoke-shared` concurrency group (`cancel-in-progress: false`,
+ * `.github/workflows/preview-isolation.yml`) guarantees no other smoke runs at
+ * the same time — so THERE the age gate protects nothing and instead lets a
+ * straggler survive: GitHub keeps only one pending run per group, so a third PR
+ * EVICTS the second's queued smoke, and an evicted/SIGKILL'd run leaves its
+ * run-scoped members behind with no teardown. Those stragglers are younger than
+ * 24h, stack onto the next run's footprint, and tip the low membership cap →
+ * `402 plan_limit_exceeded`. In the serialized context, sweep at age 0 to take
+ * every straggler; everywhere else (a local/dev `pnpm e2e`) keep the safe
+ * default so a sweep can never nuke a colleague's live run.
+ */
+export function preRunSweepAgeHours(serializedSmoke: boolean): number {
+  return serializedSmoke ? 0 : SWEEP_MIN_AGE_HOURS;
+}
+
 /** The name `ensureTeamFixtureUser` gives the pending-session-heal decoy org. */
 export const DECOY_ORG_NAME_PREFIX = "arp-e2e-decoy-";
+
+/** The canonical `agranado.com` team org (ADR-0074) — the shared, domain-anchored
+ *  org every run-scoped fixture JIT-joins, and the one whose membership cap the
+ *  leak fills. Its id is ALSO hard-coded as `ORG_ID` in
+ *  `.github/workflows/clerk-sweep.yml`; a unit test pins this literal so the two
+ *  cannot drift silently (same discipline as `RUN_SCOPED_EMAIL_PATTERN_SOURCE`).
+ *  This is the one org a sweep must NEVER delete. */
+export const ANCHORED_TEAM_ORG_ID = "org_3HK9gdegaQZ1qdkGPgN3RGOTWVO";
+
+/** The peak number of NEW run-scoped members one full `pnpm e2e` smoke joins
+ *  into the anchored org: silver/gold/bronze (`team-org-upload.feature`, 3) plus
+ *  fsown/fscol (`folder-sharing.feature`, 2) — both `@smoke @auth`, so both run
+ *  in CI. The pre-provision preflight uses this as the headroom the org must
+ *  have after the pre-run sweep. */
+export const SMOKE_RUN_SCOPED_FOOTPRINT = 5;
 
 function normalize(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
@@ -121,6 +158,54 @@ export function isRunScopedDecoyOrgName(
   const localPart = normalized.slice(DECOY_ORG_NAME_PREFIX.length);
   if (localPart.length === 0) return false;
   return isRunScopedFixtureEmail(`${localPart}@${TEAM_ORG_DOMAIN}`, neverSweep);
+}
+
+/** The anchored org's membership state, reduced to what the preflight decides
+ *  on. `maxAllowedMemberships` is Clerk's `max_allowed_memberships`;
+ *  `membersCount` is the memberships list's `total_count` (both verified against
+ *  the Clerk Backend API spec, 2026-05-12). */
+export interface OrgCapState {
+  readonly membersCount: number;
+  readonly maxAllowedMemberships: number;
+}
+
+/** A preflight verdict — `ok` with `reason: null`, or a block with a
+ *  human-actionable `reason`. */
+export interface CapVerdict {
+  readonly ok: boolean;
+  readonly reason: string | null;
+}
+
+const CAP_OK: CapVerdict = { ok: true, reason: null };
+
+/**
+ * Would provisioning `footprint` more members overflow the anchored org's cap?
+ *
+ * Fail-fast, but only on a CONFIRMED shortfall. A non-positive cap is treated
+ * as unknown/unlimited (Clerk's "0 = unlimited" is undocumented for this field,
+ * so we do not rely on it either way), and a non-finite count is undeterminable
+ * — in both cases we pass rather than block, because a false setup failure is
+ * worse than deferring to the real 402 the run would otherwise hit. When the
+ * numbers ARE known and headroom is below the footprint, block with a message
+ * that names the members remaining, the cap and the footprint — turning a
+ * confusing mid-suite 402 into an obvious, actionable setup failure.
+ */
+export function assessAnchoredOrgCap(state: OrgCapState, footprint: number): CapVerdict {
+  const { membersCount, maxAllowedMemberships } = state;
+  if (!Number.isFinite(membersCount) || !Number.isFinite(maxAllowedMemberships)) return CAP_OK;
+  if (maxAllowedMemberships <= 0) return CAP_OK;
+
+  const headroom = maxAllowedMemberships - membersCount;
+  if (headroom >= footprint) return CAP_OK;
+
+  return {
+    ok: false,
+    reason:
+      `anchored org at membership cap after pre-run sweep — ${membersCount} member(s) remain of a ` +
+      `${maxAllowedMemberships} cap (${headroom} free), insufficient headroom for the smoke's ` +
+      `footprint of ${footprint}. Investigate leaked run-scoped identities (Actions → "Clerk ` +
+      `dev-instance sweep") or raise the cap.`,
+  };
 }
 
 export interface SweepWindow {
