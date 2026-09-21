@@ -7,7 +7,8 @@ from this repository — which, because the kit ships `AGENTS.md` and its shims,
 is the constitution.
 
 These are **one file per task kind, never one per provider.** That rule is
-`templates/workflows/ai-review-prompt.md`'s, and its reasoning transfers whole:
+the CI review prompt's (inlined in `.github/workflows/claude-code-review.yml`; the kit's
+`templates/workflows/ai-review-prompt.md`), and its reasoning transfers whole:
 asking two vendors different questions and then comparing their answers
 measures the prompts rather than the models, and two files that must stay
 byte-identical are two files that eventually are not. A file cannot drift from

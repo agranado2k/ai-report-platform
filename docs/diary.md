@@ -6750,7 +6750,7 @@ is read as environment first.
    names are the operator's data, unverified against a vendor reference.
 
 `agents-mapping.test.mjs` runs both halves through the real resolver and dispatcher (dry
-run, no tokens): 20 cases, 78/78 in `test:scripts`. CI caught what the local run could not: the
+run, no tokens): 23 cases, 81/81 in `test:scripts` (the count moved with each review round). CI caught what the local run could not: the
 dispatcher pre-flights that the target CLI is on PATH even for a dry run, and CI has neither
 `codex` nor `claude` — the tests now stub both on a private PATH entry, the way the kit's own
 suite drives a stub agent harness rather than a vendor. The wired review then caught the
@@ -6763,7 +6763,18 @@ a registry round-trip with stdin already redirected to the prompt and stalled un
 900 s timeout with nothing on either stream; the native binary under `~/.npm/_npx/…` answers
 in seconds. `AGENT_CODEX_BIN` (default `codex`) now names the binary the worker runs, tested
 both ways (override becomes the command word; a wrong path is refused, exit 2). The review
-of #401 itself then ran cross-vendor through the wiring — the mechanism's first real use. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
+of #401 itself then ran cross-vendor through the wiring — the mechanism's first real use:
+`gpt-5.6-sol` on Codex, read-only, 174k tokens, 21 minutes, and it honoured the output
+contract. It found what the same-vendor rounds had not: the worker prompts interpolated
+branch NAMES into a `git diff` the reviewer is told to run (a ref can carry shell syntax —
+the documented dispatch now passes SHAs and the prompt refuses anything else), and neither
+worker prompt framed its `%%SPEC%%`/`%%BODY%%` as untrusted data (ADR-0069) — both are now
+delimited and the worker told never to obey them. It also asked for the map to be pinned
+EXACTLY rather than non-empty, for the implicit marker-selection order to be tested, and
+for the `.agents/prompts` path root to have a gate fixture — all three added. Its one
+finding not taken today: an eval tier for the worker prompts themselves (shared invariant
+§3 — a prompt whose two-axis split or no-push boundary could be deleted with every test
+still green); recorded as a follow-up ticket candidate. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
 a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side CI reviewer
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 

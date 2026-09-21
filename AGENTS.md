@@ -225,7 +225,7 @@ fixes, and its findings enter the line at `/to-tickets`.
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |
 | Clean up old worktrees + sync main       | `/worktree-cleanup` (runs `scripts/worktree-cleanup.sh`; `--dry-run` to preview) |
 | Find an ADR                              | `docs/adr/INDEX.md`                             |
-| Get a cross-vendor review of a branch, locally | `sh scripts/agent-dispatch.sh reviewer --prompt-file .agents/prompts/review-worker.md --set BRANCH=<branch> --set BASE=origin/main --set-file SPEC=<file> --timeout 900` — the `reviewer` tier always runs on the other harness (ADR-0084); `--dry-run` shows the command without spending a token |
+| Get a cross-vendor review of a branch, locally | `sh scripts/agent-dispatch.sh reviewer --prompt-file .agents/prompts/review-worker.md --set BRANCH=$(git rev-parse HEAD) --set BASE=$(git rev-parse origin/main) --set-file SPEC=<file> --timeout 900` (SHAs, never ref names) — the `reviewer` tier always runs on the other harness (ADR-0084); `--dry-run` shows the command without spending a token |
 | Know where a skill came from             | `.agents/skills/LICENSE-mattpocock-skills.md`  |
 | Hold the code itself to a standard       | `constitution/shared-code-craft.md` — the thirteen portable craft rules; load it before writing or reviewing code |
 

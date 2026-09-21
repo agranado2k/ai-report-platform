@@ -332,7 +332,8 @@ AGENT_BUDGET_MEMORY_CEILING_MIB=''
 # .agents/prompts/review-worker.md, filled by the dispatcher:
 #
 #   sh scripts/agent-dispatch.sh reviewer --prompt-file .agents/prompts/review-worker.md \
-#     --set BRANCH=<branch> --set BASE=origin/main --set-file SPEC=<ticket.md> --timeout 900
+#     --set BRANCH=$(git rev-parse HEAD) --set BASE=$(git rev-parse origin/main) \
+#     --set-file SPEC=<ticket.md> --timeout 900       # SHAs, never ref names
 #
 # Both CLIs are approval-gated when a command escapes their read-only posture,
 # and headless there is nobody to approve — hence --timeout on every real

@@ -79,14 +79,36 @@ function stubbedHarnessPath() {
 const STUB_PATH = stubbedHarnessPath();
 after(() => rmSync(STUB_PATH.split(delimiter)[0], { recursive: true, force: true }));
 
+/** The map ADR-0084's 2026-09-21 amendment decided, as `<harness>:<model>` or a
+ *  bare in-session model. Exact, on purpose: a policy change has to change this
+ *  table too, so a drifted value cannot hide behind "still non-empty". */
+const DECIDED = {
+  "claude-code": {
+    planner: "fable",
+    implementer: "opus",
+    mechanical: "haiku",
+    reviewer: "codex:gpt-5.6-sol",
+  },
+  codex: {
+    planner: "gpt-6-astra",
+    implementer: "gpt-5.6-luna",
+    mechanical: "gpt-5.6-luna",
+    reviewer: "claude-code:claude-fable-5-1",
+  },
+};
+
 for (const session of SESSIONS) {
   for (const tier of TIERS) {
-    test(`[${session}] tier '${tier}' resolves to a mapped model`, () => {
-      assert.notEqual(
+    test(`[${session}] tier '${tier}' resolves to exactly the decided model`, () => {
+      const [harness, model] = DECIDED[session][tier].includes(":")
+        ? DECIDED[session][tier].split(":", 2)
+        : ["", DECIDED[session][tier]];
+      assert.equal(
         resolveIn(session, tier),
-        "",
-        `tier '${tier}' resolved to nothing in a ${session} session — every tier is mapped in both halves of scripts/agents.config.sh (ADR-0084)`,
+        model,
+        `tier '${tier}' in a ${session} session is not the model ADR-0084 (amended 2026-09-21) decided — change the decision record and this table together`,
       );
+      assert.equal(resolveIn(session, tier, { what: "--harness" }), harness);
     });
   }
 
@@ -301,6 +323,53 @@ test("an unknown session harness falls back to the claude-code half, loudly", ()
   assert.equal(res.status, 0);
   assert.equal(res.stdout.trim(), resolveIn("claude-code", "planner"));
   assert.match(res.stderr, /assuming claude-code/, "the fallback must be audible");
+});
+
+/** Resolve with a hand-built marker environment — the implicit selection
+ *  paths, which every other test bypasses by setting the variable. */
+function resolveWithMarkers(markers, tier = "planner") {
+  const env = {
+    ...process.env,
+    AGENT_SESSION_HARNESS: "",
+    CLAUDECODE: "",
+    CODEX_SANDBOX: "",
+    CODEX_SANDBOX_NETWORK_DISABLED: "",
+    ...markers,
+  };
+  const res = spawnSync("sh", [RESOLVER, tier], { cwd: REPO_ROOT, encoding: "utf8", env });
+  assert.equal(res.status, 0, res.stderr);
+  return { model: res.stdout.trim(), stderr: res.stderr };
+}
+
+test("the session is inferred from the harness markers, in the documented order", () => {
+  // 2. CLAUDECODE alone → the claude-code half, silently (Claude Code exports
+  //    it into every shell it runs, so a Claude Code session needs nothing).
+  const cc = resolveWithMarkers({ CLAUDECODE: "1" });
+  assert.equal(cc.model, DECIDED["claude-code"].planner);
+  assert.doesNotMatch(cc.stderr, /assuming/);
+  // 3. either Codex marker alone → the codex half, silently.
+  assert.equal(resolveWithMarkers({ CODEX_SANDBOX: "seatbelt" }).model, DECIDED.codex.planner);
+  assert.equal(
+    resolveWithMarkers({ CODEX_SANDBOX_NETWORK_DISABLED: "1" }).model,
+    DECIDED.codex.planner,
+  );
+  // 1 beats 2 and 3: the explicit variable wins over any marker — this is what
+  //    the dispatch templates rely on when a worker inherits its parent's markers.
+  assert.equal(
+    resolveWithMarkers({ AGENT_SESSION_HARNESS: "codex", CLAUDECODE: "1" }).model,
+    DECIDED.codex.planner,
+  );
+  assert.equal(
+    resolveWithMarkers({ AGENT_SESSION_HARNESS: "claude-code", CODEX_SANDBOX: "seatbelt" }).model,
+    DECIDED["claude-code"].planner,
+  );
+  // 2 beats 3: a Codex worker's shell inherits CLAUDECODE from a Claude Code
+  //    parent; without the template's explicit assignment this is the wrong
+  //    answer, which is exactly why the template carries one.
+  assert.equal(
+    resolveWithMarkers({ CLAUDECODE: "1", CODEX_SANDBOX: "seatbelt" }).model,
+    DECIDED["claude-code"].planner,
+  );
 });
 
 test("an unrecognised explicit AGENT_SESSION_HARNESS is said out loud, then treated as claude-code", () => {

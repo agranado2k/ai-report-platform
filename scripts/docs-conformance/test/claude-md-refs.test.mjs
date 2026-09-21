@@ -202,6 +202,27 @@ test("checks skill and hook literal path references, at both skill roots", () =>
   cleanup(ctx);
 });
 
+test("resolves .agents/prompts literal paths — the dispatcher's worker prompts are a checked root", () => {
+  // The manual names the worker prompts a dispatch fills (`.agents/prompts/
+  // review-worker.md`). Without `.agents/prompts` among pathRoots the token is
+  // prose to the validator and a renamed prompt goes dark; with it, a dead
+  // path is a violation, as for every other root.
+  const ctx = ctxFor({
+    ...CONFORMANT,
+    ".agents/prompts/review-worker.md": "# review worker\n",
+    "AGENTS.md": [
+      CONFORMANT["AGENTS.md"],
+      "The reviewer prompt is `.agents/prompts/review-worker.md`.",
+      "The planner prompt is `.agents/prompts/plan-worker.md`.",
+    ].join("\n"),
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.ok(hasRule(out, "path-missing"));
+  assert.match(out[0].message, /plan-worker/);
+  cleanup(ctx);
+});
+
 test("stays silent when AGENTS.md does not exist (fixtures that don't model it)", () => {
   const ctx = ctxFor({ "docs/adr/INDEX.md": "# ADRs" });
   const out = run(ctx);
