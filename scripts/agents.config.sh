@@ -306,6 +306,29 @@ AGENT_BUDGET_MEMORY_CEILING_MIB=''
 # `mechanical` ever collapses onto the `reviewer` model.
 
 # ---------------------------------------------------------------------------
+# WHAT THE ALIASES MEAN TODAY (recorded, never stored as the value)
+# ---------------------------------------------------------------------------
+# The values below are Claude Code model ALIASES because that is what the
+# Agent tool's `model` parameter accepts (opus | sonnet | haiku | fable); a
+# full id there is an input-validation error, so pinning one would break every
+# spawn rather than pin anything. The alias tracks its family across a version
+# bump, which is the point. For the reader who needs to know which model that
+# actually is, this table records the resolution at the date it was checked
+# against the Claude API model reference — it is documentation, and it rots on
+# the vendor's schedule, so re-check it at the next housekeeping pass:
+#
+#   alias    model id (2026-09-21)   used by
+#   opus     claude-opus-5           planner, implementer, reviewer
+#   sonnet   claude-sonnet-5         reviewer self-implemented
+#   haiku    claude-haiku-4-5        mechanical
+#
+# The one place in this repo that takes a full id — the wired CI reviewer in
+# .github/workflows/claude-code-review.yml — is pinned to the same generation
+# (claude-opus-5, ADR-030 amendment 2026-09-21) so the wired review and the
+# `reviewer` tier read with the same model. scripts/test/agents-mapping.test.mjs
+# fails if any value here stops being an alias.
+
+# ---------------------------------------------------------------------------
 # 1. PLANNER — decomposition, design, triage
 # ---------------------------------------------------------------------------
 AGENT_TIER_PLANNER='opus'

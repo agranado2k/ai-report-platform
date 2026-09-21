@@ -10,10 +10,10 @@
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; the auth, MCP-server, sharing/ACL, and editing-&-comments epics are all complete + live; the owner-view / artifact-parity epic (PRD #356) is SHIPPED + CLOSED (2026-09-19).** Earlier milestones remain live: real auth (Clerk sign-in, JIT personal-org provisioning, session-gated app — ADR-0048); the remote Streamable-HTTP MCP server at `mcp.centaurspec.com` (ADR-0051, dual auth — `arp_` API keys + Clerk OAuth 2.1); the async scan pipeline (Phase 1.5a, ADR-0045); the viewer-origin split `view.<domain>/<slug>` (ADR-0038); sharing/ACL (password #100, allowlist #109, private-by-default #127, folder-scoped sharing ADR-0078, folder-management relocation ADR-0087; `get_acl`/`set_acl` + write grants live); the **ClickUp-light design system (ADR-0086, supersedes the warm-dark ADR-0058)**; report content-read (`GET /api/v1/reports/{slug}/content` + `reports_get_content`, #312); and the **unified in-viewer editor** at `view.<domain>/<slug>/edit` (ADR-0062–0067) — ProseMirror editor, comments (ADR-0064), version history + visual diff (ADR-0065), author display-names from the Clerk identity mirror — plus the selection/formatting toolbar (PRD #295). **Owner-view epic (PRD #356, ADRs 0088–0092):** the owner finally sees their report as published — an authenticated **owner view** at `view.<domain>/<slug>/view` frames the byte-for-byte canonical `GET /<slug>` under first-party chrome in a sandboxed iframe with **no `allow-same-origin`** (ADR-0089), reached by the owner-open flip (#363). The public viewer CSP gained an **artifact-parity allowlist** (Google Fonts + cdnjs + jsdelivr/npm, each on its own directive; `connect-src 'self'` untouched, so exfiltration stays blocked) and `frame-ancestors` `'none'` → `'self'` (ADR-0088). Write time now records a **Fidelity** verdict (`lossless`/`lossy`, migration 0023, ADR-0090) beside Editability, surfaced on the dashboard row + the Edit confirm dialog (#364) and in the MCP tools. The upload response (HTTP + MCP `reports_upload`) carries **`warnings[]`** — `external-resource-blocked`, `editor-lossy`, `sandbox-incompatible` (ADR-0088/0090/0092, #365/#385). A **grantee read token** (ADR-0091) lets a write-grantee through the framed unlock wall without an `owner:true` escalation. And the owner view **always** offers an "Open in new tab" fallback for a report that blanks in the storage-less frame (ADR-0092). **`GET /<slug>` is byte-for-byte unchanged throughout, and `packages/headers` is untouched by ADR-0089/0091/0092.** Also landed: the Gemini `review` check is now fail-visibly honest (#371, amends ADR-030). **Remaining editor payoff:** the comment-`intent` agent-action pipeline (PRD #198). |
 | **Repo path**          | `~/PetProjects/centaur-spec/` (main; local folder renamed from `ai-report-platform` — the GitHub remote keeps the old name). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `9f3f982` — Merge PR #398 (`chore/kit-update-0.20.0`): agentic-sdlc v0.12.0 → v0.20.0 adoption — skills at `.agents/skills/`, `/design-brief` + `/housekeeping`, the design brief + mutation decision in the engineering article, 16-validator docs harness. |
+| **Last commit on main**| `3635b34` — Merge PR #399 (`chore/reviewer-self-implemented`): `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'` (ADR-0084) — the reviewer is never the model that implemented; before it #398 adopted agentic-sdlc v0.20.0. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually. The owner-view epic touched no infrastructure** (no Terraform, no `packages/headers` byte change). Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` verified + deployed), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer + the authenticated owner view / editor) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); the dev/preview instance still needs the same OAuth app + DCR (preview OAuth — not blocking prod). |
-| **Active worktrees**   | The owner-view epic worktrees are all **merged and pruned**: `owner-view` (#361), `fidelity-surface` (#364/#377), `owner-open-flip` (#363/#376), `upload-warnings` (#365), `gemini-review-fix` (#371), `sandbox-fallback` (#385). Currently live: **`docs-reconcile`** (`docs/reconcile-adr0092-diary` — this ADR-0092-wording + diary reconciliation) and two **concurrent sibling sessions**, `claude-review-fix` (`ci/claude-review-fix`) and `scanner-rename` (`refactor/scanner-rename` — the recorded `ResourceScanner`-port rename follow-up from ADR-0092). `kit-update-0.20.0` (#398) is **merged and pruned** (`/worktree-cleanup` 2026-09-21; root `main` fast-forwarded 21b56ff → 9f3f982). Currently live: **`reviewer-self-implemented`** (`chore/reviewer-self-implemented` — the ADR-0084 mapping follow-up). |
+| **Active worktrees**   | `kit-update-0.20.0` (#398) and `reviewer-self-implemented` (#399) are **merged and pruned** (`/worktree-cleanup` 2026-09-21; root `main` at `3635b34`). Currently live: **`model-ids`** (`chore/model-ids` — the alias→id record + CI reviewer bump, PR pending). |
 | **Last housekeeping**  | 2026-09-20 — none has run yet; row stamped at the agentic-sdlc v0.20.0 adoption. The docs gate nudges (`housekeeping-due` advisory) once this date is older than `housekeepingDue.windowDays` (30) in `scripts/docs-conformance/config.mjs`; `/housekeeping` stamps it. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile). ADR-0035–**0092** live in `docs/adr/` (INDEX current); the owner-view epic's **ADR-0088–0092 are amendments** to ADR-013/0038/0056/0059/0063/0080/0088/0089 and needed **no spec-rev bump**. **ADR-001–030 remain inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/domain-glossary.md` / `docs/events.md` are canonical for domain language/events; the `docs:check` conformance gate is green. |
 
@@ -6701,3 +6701,33 @@ independence seam beside the cost seam: it fails if the mapping is emptied or ev
 the implementer's model. Test-first; `pnpm test:scripts` 66/66.
 
 Tier: mechanical. Worktree `reviewer-self-implemented`, branch `chore/reviewer-self-implemented`.
+
+### 2026-09-21 — Landed #399; models are named in exactly two places, and the aliases stay aliases
+
+**#399 merged** (`3635b34`, signed) after one `/pr-iterate` pass — a Biome format miss on the
+new test (the pre-push hook runs the docs gate, not `biome ci`; CI caught it), the wired
+review LGTM, and a fresh-context **Sonnet** reviewer resolved through the mapping the PR
+itself added (`sh scripts/agents.lib.sh reviewer self-implemented`) — the first real use of
+the independence seam. The required smoke failed once more on the shared-preview flake
+class (`/reports/<slug>/open` returned no redirect after the team-org scenario failed) and
+passed on re-run with zero code delta; recorded so the next red smoke on a docs-only commit
+is read as environment first.
+
+**"Configure the models" — the decision, and the mistake it nearly was.** The operator asked
+to pin real model ids in `scripts/agents.config.sh`. Checked against the harness before
+writing one: Claude Code's Agent tool `model` parameter is an enum of exactly
+`opus | sonnet | haiku | fable`, so `AGENT_TIER_IMPLEMENTER='claude-opus-5'` would not pin
+anything — it would fail input validation on every `/implement` and `/review-pr` spawn.
+ADR-0084's "aliases, not dated ids" was load-bearing, not taste. The shape landed instead:
+
+- `scripts/agents.config.sh` **records** the dated resolution beside the aliases
+  (`opus` → `claude-opus-5`, `sonnet` → `claude-sonnet-5`, `haiku` → `claude-haiku-4-5`,
+  checked 2026-09-21 against the Claude API model reference) as documentation that rots on
+  the vendor's schedule and is re-checked at each `/housekeeping` pass; the values stay
+  aliases. `agents-mapping.test.mjs` gains the **alias guard**: every resolved value must be
+  one of the four, so the literal request cannot be made by accident later.
+- `.github/workflows/claude-code-review.yml` — the **one** place in the repo that takes a
+  full id — moves `claude-opus-4-8` → `claude-opus-5`, so the wired review and the `reviewer`
+  tier read with the same generation. Recorded as an ADR-030 amendment in `docs/spec.html`.
+
+Tier: mechanical. Worktree `model-ids`, branch `chore/model-ids`.

@@ -42,6 +42,24 @@ for (const tier of TIERS) {
   });
 }
 
+// The spawn call this repo's skills make — Claude Code's Agent tool `model`
+// parameter — accepts exactly these aliases and rejects a full model id with
+// an input-validation error. So a value like `claude-opus-5` in the policy file
+// would not "pin" anything; it would break every /implement and /review-pr
+// spawn. The dated id each alias currently denotes is RECORDED beside the
+// mapping in scripts/agents.config.sh, never stored as the value (ADR-0084).
+const HARNESS_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
+
+test("every mapped value is a harness alias, never a dated model id", () => {
+  const mapped = [...TIERS.map((t) => resolveTier(t)), resolveTier("reviewer", "self-implemented")];
+  for (const value of mapped) {
+    assert.ok(
+      HARNESS_ALIASES.has(value),
+      `'${value}' is not a Claude Code model alias (${[...HARNESS_ALIASES].join("/")}) — a dated id here breaks the spawn call; record it in the comment table instead (ADR-0084)`,
+    );
+  }
+});
+
 test("the cost seam holds: mechanical is not the reviewer model", () => {
   // The whole point of the mechanical tier is that it is cheaper than the
   // adversarial one. If these ever collapse to the same model the seam costs
