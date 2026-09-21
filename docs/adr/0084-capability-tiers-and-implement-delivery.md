@@ -48,7 +48,7 @@ The vocabulary is closed — `planner`, `implementer`, `mechanical`, `reviewer`,
 | `mechanical` | `haiku` | `/review-pr` step 1, "Context Discovery (Haiku agent)" |
 | `reviewer` | `opus` | all seven `/review-pr` sub-agents; `.github/workflows/claude-code-review.yml` |
 
-Values are harness **aliases**, not dated identifiers, because the alias is what the spawn call takes (`/report-comments` already writes `model: opus`) and it tracks its family across a version bump. The one dated pin that stays is the CI reviewer's `--model claude-opus-4-8`: a workflow wants a reproducible review, not the newest one.
+Values are harness **aliases**, not dated identifiers, because the alias is what the spawn call takes (`/report-comments` already writes `model: opus`) and it tracks its family across a version bump. The one dated pin that stays is the CI reviewer's `--model claude-opus-4-8`: a workflow wants a reproducible review, not the newest one. *(Superseded by the 2026-09-21 amendment below: the CI pin moved to `claude-opus-5` and is not tied to any tier's model.)*
 
 Three of four resolve to `opus`, and that is the honest reading of today's practice rather than a failure of the rubric. The value delivered on day one is the *seam*: re-pointing is now a one-file diff a reviewer reads, `mechanical` is genuinely cheaper, and `scripts/test/agents-mapping.test.mjs` (the `test:scripts` tier) fails if any tier is emptied or if `mechanical` and `reviewer` ever resolve to the same model — the cost seam made executable.
 

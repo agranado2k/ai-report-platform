@@ -26,10 +26,10 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
@@ -64,16 +64,20 @@ const CLAUDE_CODE_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
  *  (template, model flag, sandbox posture), never about the vendor's binary.
  *  The kit's own dispatcher suite drives a stub agent harness for the same
  *  reason. */
+const STUB_TRIPWIRE = "stub must never run";
 function stubbedHarnessPath() {
   const dir = mkdtempSync(join(tmpdir(), "agents-mapping-stub-"));
   for (const cli of ["codex", "claude"]) {
     const bin = join(dir, cli);
-    writeFileSync(bin, '#!/bin/sh\necho "stub $0 must never run: $*" >&2\nexit 99\n');
+    writeFileSync(bin, `#!/bin/sh\necho "${STUB_TRIPWIRE}: $0 $*" >&2\nexit 99\n`);
     chmodSync(bin, 0o755);
   }
-  return `${dir}${delimiter}${process.env.PATH ?? ""}`;
+  // Never a trailing empty entry: in a POSIX PATH that means "the current
+  // directory", which is the one place a stub must not be looked for.
+  return process.env.PATH ? `${dir}${delimiter}${process.env.PATH}` : dir;
 }
 const STUB_PATH = stubbedHarnessPath();
+after(() => rmSync(STUB_PATH.split(delimiter)[0], { recursive: true, force: true }));
 
 for (const session of SESSIONS) {
   for (const tier of TIERS) {
@@ -86,12 +90,30 @@ for (const session of SESSIONS) {
     });
   }
 
-  test(`[${session}] the cost seam holds: mechanical is not the reviewer model`, () => {
-    assert.notEqual(
-      resolveIn(session, "mechanical"),
-      resolveIn(session, "reviewer"),
-      "mechanical and reviewer resolved to the same model — the cost seam has collapsed (ADR-0084)",
-    );
+  test(`[${session}] the cost seam: mechanical is cheaper than the implementer — or the exemption is on record`, () => {
+    // The mechanical tier exists to be cheaper than the judgement tiers. Since
+    // the reviewer always crosses to the other harness, "mechanical !==
+    // reviewer" can no longer fail and says nothing; the honest seam is
+    // against the IMPLEMENTER, which shares the session. In the codex half
+    // that seam is deliberately collapsed — no cheaper Codex model was named
+    // (ADR-0084 amendment, "Open") — so the equality is asserted on purpose:
+    // re-pointing mechanical at a cheaper model turns this red, and the
+    // operator deletes the exemption rather than the seam.
+    const mechanical = resolveIn(session, "mechanical");
+    const implementer = resolveIn(session, "implementer");
+    if (session === "codex") {
+      assert.equal(
+        mechanical,
+        implementer,
+        "the recorded codex exemption ended — delete this branch and keep the seam",
+      );
+    } else {
+      assert.notEqual(
+        mechanical,
+        implementer,
+        "mechanical and implementer resolved to the same model — the cost seam has collapsed (ADR-0084)",
+      );
+    }
   });
 
   test(`[${session}] the independence seam holds: the reviewer is on the OTHER agent harness`, () => {
@@ -145,6 +167,7 @@ for (const session of SESSIONS) {
 test("[claude-code] every value that runs in-session is a Claude Code model alias, never a dated id", () => {
   for (const tier of ["planner", "implementer", "mechanical"]) {
     const value = resolveIn("claude-code", tier);
+    if (value === "") continue; // "resolves to a mapped model" owns that failure
     assert.ok(
       CLAUDE_CODE_ALIASES.has(value),
       `'${value}' is not a Claude Code model alias (${[...CLAUDE_CODE_ALIASES].join("/")}) — a dated id here breaks the spawn call; record it in the comment table instead (ADR-0084)`,
@@ -168,7 +191,13 @@ test("[claude-code] the reviewer dispatches to codex with the mapped model — d
   });
   assert.equal(res.status, 0, `dry run failed (exit ${res.status}):\n${res.stderr}`);
   const out = res.stdout + res.stderr;
+  assert.doesNotMatch(out, new RegExp(STUB_TRIPWIRE), "a dry run executed the stub");
   assert.match(out, /codex exec/, "the codex invocation template did not reach the dispatcher");
+  assert.match(
+    out,
+    /AGENT_SESSION_HARNESS=codex codex exec/,
+    "the worker must be told which harness it is in — the dispatcher passes this session's markers through, and a Codex worker that inherits CLAUDECODE resolves the claude-code half (its own vendor as reviewer)",
+  );
   assert.match(out, /-m gpt-5\.6-sol/, "the mapped model did not reach the codex command line");
   assert.match(
     out,
@@ -190,10 +219,16 @@ test("[codex] the reviewer dispatches to claude-code with the mapped model — d
   });
   assert.equal(res.status, 0, `dry run failed (exit ${res.status}):\n${res.stderr}`);
   const out = res.stdout + res.stderr;
+  assert.doesNotMatch(out, new RegExp(STUB_TRIPWIRE), "a dry run executed the stub");
   assert.match(
     out,
     /claude -p/,
     "the claude-code invocation template did not reach the dispatcher",
+  );
+  assert.match(
+    out,
+    /AGENT_SESSION_HARNESS=claude-code claude -p/,
+    "the worker must be told which harness it is in — a Claude worker that inherits AGENT_SESSION_HARNESS=codex resolves the codex half",
   );
   assert.match(
     out,
@@ -225,6 +260,19 @@ test("an unknown session harness falls back to the claude-code half, loudly", ()
   assert.equal(res.status, 0);
   assert.equal(res.stdout.trim(), resolveIn("claude-code", "planner"));
   assert.match(res.stderr, /assuming claude-code/, "the fallback must be audible");
+});
+
+test("an unrecognised explicit AGENT_SESSION_HARNESS is said out loud, then treated as claude-code", () => {
+  // `Codex`, `codex-cli`, a stale export: the shared resolver refuses to let a
+  // capitalisation typo pick a harness in silence, and so does this selector.
+  const res = spawnSync("sh", [RESOLVER, "planner"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, AGENT_SESSION_HARNESS: "Codex" },
+  });
+  assert.equal(res.status, 0);
+  assert.equal(res.stdout.trim(), resolveIn("claude-code", "planner"));
+  assert.match(res.stderr, /'Codex' is neither/, "the typo must be audible");
 });
 
 test("an unmapped domain falls back to its tier, silently", () => {

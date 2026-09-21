@@ -322,8 +322,8 @@ AGENT_BUDGET_MEMORY_CEILING_MIB=''
 # the Claude API model reference; documentation that rots on the vendor's
 # schedule, re-checked at each /housekeeping pass:
 #
-#   fable    claude-fable-5-1     sonnet   claude-sonnet-5
-#   opus     claude-opus-5        haiku    claude-haiku-4-5
+#   fable    claude-fable-5-1     sonnet   claude-sonnet-5  (reference only —
+#   opus     claude-opus-5        haiku    claude-haiku-4-5   no tier maps sonnet)
 #
 # WHAT A DISPATCH ACTUALLY RUNS is the two invocation templates below. Only
 # the reviewer ever crosses, so each template is a READ-ONLY worker posture:
@@ -356,13 +356,34 @@ fi
 # reviewer runs in; --ephemeral keeps a worker's session out of the operator's
 # history; -C anchors the worker in this checkout whatever its cwd. The model
 # flag is omitted entirely when the tier maps no model (kit rule).
-AGENT_HARNESS_CODEX_CMD='codex exec -s read-only --ephemeral -C "$PWD" {model_flag} < {prompt_file}'
+#
+# EACH TEMPLATE STARTS WITH AGENT_SESSION_HARNESS=<the target>. The three
+# markers the selector reads are all inherited by child processes and the
+# dispatcher spawns the worker with this session's environment intact — so
+# without it a Codex worker dispatched from Claude Code inherits CLAUDECODE and
+# resolves the claude-code half (its reviewer would be codex: its own vendor),
+# and a Claude worker dispatched from Codex inherits AGENT_SESSION_HARNESS=codex
+# and does the mirror image. The template is eval'd as a command, so the
+# leading assignment is priority 1 inside the worker and neutralises the
+# inherited marker. -C anchors the worker at the checkout ROOT (git's answer,
+# not the dispatcher's cwd) whatever subtree the dispatch ran from.
+AGENT_HARNESS_CODEX_CMD='AGENT_SESSION_HARNESS=codex codex exec -s read-only --ephemeral -C "$(git rev-parse --show-toplevel)" {model_flag} < {prompt_file}'
 AGENT_HARNESS_CODEX_MODEL_FLAG='-m {model}'
 # claude -p reads the prompt on stdin; plan mode is the read-only posture.
-AGENT_HARNESS_CLAUDE_CODE_CMD='claude -p --permission-mode plan {model_flag} < {prompt_file}'
+AGENT_HARNESS_CLAUDE_CODE_CMD='AGENT_SESSION_HARNESS=claude-code claude -p --permission-mode plan {model_flag} < {prompt_file}'
 AGENT_HARNESS_CLAUDE_CODE_MODEL_FLAG='--model {model}'
 
 # --- the map -------------------------------------------------------------
+# An EXPLICIT value that is neither half is said out loud, then treated as
+# claude-code: `Codex`, `codex-cli`, a stale export — the shared resolver
+# refuses to let a capitalisation typo pick a harness in silence (ADR-0005
+# clause 5 in the kit), and this selector holds to the same standard.
+case "$AGENT_SESSION_HARNESS" in
+codex | claude-code) ;;
+*)
+	printf '%s\n' "agents.config: AGENT_SESSION_HARNESS='$AGENT_SESSION_HARNESS' is neither 'claude-code' nor 'codex' — assuming claude-code" >&2
+	;;
+esac
 case "$AGENT_SESSION_HARNESS" in
 codex)
 	# 1. PLANNER — decomposition, design, triage

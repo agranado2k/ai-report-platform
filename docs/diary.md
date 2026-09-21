@@ -13,7 +13,7 @@
 | **Last commit on main**| `3635b34` — Merge PR #399 (`chore/reviewer-self-implemented`): `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'` (ADR-0084) — the reviewer is never the model that implemented; before it #398 adopted agentic-sdlc v0.20.0. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually. The owner-view epic touched no infrastructure** (no Terraform, no `packages/headers` byte change). Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` verified + deployed), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer + the authenticated owner view / editor) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); the dev/preview instance still needs the same OAuth app + DCR (preview OAuth — not blocking prod). |
-| **Active worktrees**   | `kit-update-0.20.0` (#398) and `reviewer-self-implemented` (#399) are **merged and pruned** (`/worktree-cleanup` 2026-09-21; root `main` at `3635b34`). Currently live: **`model-ids`** (`chore/model-ids` — the alias→id record + CI reviewer bump, PR pending). |
+| **Active worktrees**   | `kit-update-0.20.0` (#398) and `reviewer-self-implemented` (#399) are **merged and pruned** (`/worktree-cleanup` 2026-09-21; root `main` at `3635b34`); the earlier `docs-reconcile`, `claude-review-fix` and `scanner-rename` worktrees were pruned before them. Currently live: **`model-ids`** (`chore/model-ids` — the alias→id record + CI reviewer bump, PR pending). |
 | **Last housekeeping**  | 2026-09-20 — none has run yet; row stamped at the agentic-sdlc v0.20.0 adoption. The docs gate nudges (`housekeeping-due` advisory) once this date is older than `housekeepingDue.windowDays` (30) in `scripts/docs-conformance/config.mjs`; `/housekeeping` stamps it. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile). ADR-0035–**0092** live in `docs/adr/` (INDEX current); the owner-view epic's **ADR-0088–0092 are amendments** to ADR-013/0038/0056/0059/0063/0080/0088/0089 and needed **no spec-rev bump**. **ADR-001–030 remain inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/domain-glossary.md` / `docs/events.md` are canonical for domain language/events; the `docs:check` conformance gate is green. |
 
@@ -6750,7 +6750,14 @@ is read as environment first.
    names are the operator's data, unverified against a vendor reference.
 
 `agents-mapping.test.mjs` runs both halves through the real resolver and dispatcher (dry
-run, no tokens): 20/20. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
+run, no tokens): 20 cases, 78/78 in `test:scripts`. CI caught what the local run could not: the
+dispatcher pre-flights that the target CLI is on PATH even for a dry run, and CI has neither
+`codex` nor `claude` — the tests now stub both on a private PATH entry, the way the kit's own
+suite drives a stub agent harness rather than a vendor. The wired review then caught the
+marker LEAK across the dispatch seam (`CLAUDECODE` and `AGENT_SESSION_HARNESS` are inherited
+by the worker, so a Codex worker dispatched from Claude Code resolved the claude-code half —
+its own vendor as reviewer); each invocation template now starts with
+`AGENT_SESSION_HARNESS=<target>`, and the dry-run tests assert it. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
 a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side CI reviewer
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
