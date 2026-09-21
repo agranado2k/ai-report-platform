@@ -26,7 +26,9 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +56,24 @@ function resolveIn(session, tier, { domain, what = "--model" } = {}) {
  *  runs IN a Claude Code session must be one of them. A value dispatched to
  *  another agent harness is whatever that harness's CLI takes. */
 const CLAUDE_CODE_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
+
+/** The dispatcher pre-flights that an agent harness's CLI is on PATH before
+ *  it prints a dry run — so a host without `codex` or `claude` (CI) would
+ *  fail the wiring test for the wrong reason. Stub both on a private PATH
+ *  entry: the dry run never executes them, and the test is about the WIRING
+ *  (template, model flag, sandbox posture), never about the vendor's binary.
+ *  The kit's own dispatcher suite drives a stub agent harness for the same
+ *  reason. */
+function stubbedHarnessPath() {
+  const dir = mkdtempSync(join(tmpdir(), "agents-mapping-stub-"));
+  for (const cli of ["codex", "claude"]) {
+    const bin = join(dir, cli);
+    writeFileSync(bin, '#!/bin/sh\necho "stub $0 must never run: $*" >&2\nexit 99\n');
+    chmodSync(bin, 0o755);
+  }
+  return `${dir}${delimiter}${process.env.PATH ?? ""}`;
+}
+const STUB_PATH = stubbedHarnessPath();
 
 for (const session of SESSIONS) {
   for (const tier of TIERS) {
@@ -139,7 +159,12 @@ test("[claude-code] the reviewer dispatches to codex with the mapped model — d
   const res = spawnSync("sh", [DISPATCHER, "reviewer", "--prompt", "x", "--dry-run"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
-    env: { ...process.env, AGENT_SESSION_HARNESS: "claude-code", AGENTS_TIER_QUIET: "1" },
+    env: {
+      ...process.env,
+      PATH: STUB_PATH,
+      AGENT_SESSION_HARNESS: "claude-code",
+      AGENTS_TIER_QUIET: "1",
+    },
   });
   assert.equal(res.status, 0, `dry run failed (exit ${res.status}):\n${res.stderr}`);
   const out = res.stdout + res.stderr;
@@ -156,7 +181,12 @@ test("[codex] the reviewer dispatches to claude-code with the mapped model — d
   const res = spawnSync("sh", [DISPATCHER, "reviewer", "--prompt", "x", "--dry-run"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
-    env: { ...process.env, AGENT_SESSION_HARNESS: "codex", AGENTS_TIER_QUIET: "1" },
+    env: {
+      ...process.env,
+      PATH: STUB_PATH,
+      AGENT_SESSION_HARNESS: "codex",
+      AGENTS_TIER_QUIET: "1",
+    },
   });
   assert.equal(res.status, 0, `dry run failed (exit ${res.status}):\n${res.stderr}`);
   const out = res.stdout + res.stderr;
