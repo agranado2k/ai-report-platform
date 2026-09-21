@@ -367,7 +367,19 @@ fi
 # leading assignment is priority 1 inside the worker and neutralises the
 # inherited marker. -C anchors the worker at the checkout ROOT (git's answer,
 # not the dispatcher's cwd) whatever subtree the dispatch ran from.
-AGENT_HARNESS_CODEX_CMD='AGENT_SESSION_HARNESS=codex codex exec -s read-only --ephemeral -C "$(git rev-parse --show-toplevel)" {model_flag} < {prompt_file}'
+#
+# WHICH `codex` — found live, the first real dispatch: a `codex` on PATH that is
+# a package-manager WRAPPER (omarchy's ~/.local/bin/codex runs
+# `npx --yes --prefer-online --package @openai/codex -- true` before every
+# invocation) does a registry round-trip with stdin already redirected to the
+# prompt and stalls until --timeout kills it, with nothing on stdout or
+# stderr. The native binary answers in seconds. So the command word is
+# AGENT_CODEX_BIN when set — point it at the real binary, e.g. the one under
+# ~/.npm/_npx/*/node_modules/@openai/codex-linux-x64/vendor/.../bin/codex, or
+# make `codex` on PATH the native one — and `codex` otherwise. The dispatcher
+# pre-flights the word with `command -v`, so a wrong path is exit 2, said.
+AGENT_CODEX_BIN=${AGENT_CODEX_BIN:-codex}
+AGENT_HARNESS_CODEX_CMD="AGENT_SESSION_HARNESS=codex $AGENT_CODEX_BIN exec -s read-only --ephemeral -C \"\$(git rev-parse --show-toplevel)\" {model_flag} < {prompt_file}"
 AGENT_HARNESS_CODEX_MODEL_FLAG='-m {model}'
 # claude -p reads the prompt on stdin; plan mode is the read-only posture.
 AGENT_HARNESS_CLAUDE_CODE_CMD='AGENT_SESSION_HARNESS=claude-code claude -p --permission-mode plan {model_flag} < {prompt_file}'

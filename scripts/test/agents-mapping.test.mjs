@@ -206,6 +206,47 @@ test("[claude-code] the reviewer dispatches to codex with the mapped model — d
   );
 });
 
+test("[claude-code] AGENT_CODEX_BIN names the codex binary the worker runs — the wrapper hazard", () => {
+  // Found live: a `codex` on PATH that is an npx wrapper does a registry
+  // round-trip with stdin already redirected to the prompt and stalls until
+  // --timeout. The policy file lets the operator name the native binary; the
+  // dry run must show that word, and the dispatcher must still pre-flight it.
+  const dir = STUB_PATH.split(delimiter)[0];
+  const native = join(dir, "codex-native");
+  writeFileSync(native, `#!/bin/sh\necho "${STUB_TRIPWIRE}: $0 $*" >&2\nexit 99\n`);
+  chmodSync(native, 0o755);
+  const res = spawnSync("sh", [DISPATCHER, "reviewer", "--prompt", "x", "--dry-run"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: STUB_PATH,
+      AGENT_SESSION_HARNESS: "claude-code",
+      AGENTS_TIER_QUIET: "1",
+      AGENT_CODEX_BIN: native,
+    },
+  });
+  assert.equal(res.status, 0, `dry run failed (exit ${res.status}):\n${res.stderr}`);
+  assert.match(
+    res.stdout + res.stderr,
+    new RegExp(`AGENT_SESSION_HARNESS=codex ${native} exec `),
+    "the override did not become the command word",
+  );
+  const missing = spawnSync("sh", [DISPATCHER, "reviewer", "--prompt", "x", "--dry-run"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: STUB_PATH,
+      AGENT_SESSION_HARNESS: "claude-code",
+      AGENTS_TIER_QUIET: "1",
+      AGENT_CODEX_BIN: join(dir, "no-such-codex"),
+    },
+  });
+  assert.equal(missing.status, 2, "a wrong AGENT_CODEX_BIN must be refused before anything runs");
+  assert.match(missing.stderr, /not on PATH/);
+});
+
 test("[codex] the reviewer dispatches to claude-code with the mapped model — dry run", () => {
   const res = spawnSync("sh", [DISPATCHER, "reviewer", "--prompt", "x", "--dry-run"], {
     cwd: REPO_ROOT,

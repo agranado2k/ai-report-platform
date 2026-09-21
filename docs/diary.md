@@ -6757,7 +6757,13 @@ suite drives a stub agent harness rather than a vendor. The wired review then ca
 marker LEAK across the dispatch seam (`CLAUDECODE` and `AGENT_SESSION_HARNESS` are inherited
 by the worker, so a Codex worker dispatched from Claude Code resolved the claude-code half —
 its own vendor as reviewer); each invocation template now starts with
-`AGENT_SESSION_HARNESS=<target>`, and the dry-run tests assert it. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
+`AGENT_SESSION_HARNESS=<target>`, and the dry-run tests assert it. **The first real dispatch found the last gap:** the `codex` on this machine's PATH is
+omarchy's npx wrapper (`npx --yes --prefer-online … -- true` before every call), which does
+a registry round-trip with stdin already redirected to the prompt and stalled until the
+900 s timeout with nothing on either stream; the native binary under `~/.npm/_npx/…` answers
+in seconds. `AGENT_CODEX_BIN` (default `codex`) now names the binary the worker runs, tested
+both ways (override becomes the command word; a wrong path is refused, exit 2). The review
+of #401 itself then ran cross-vendor through the wiring — the mechanism's first real use. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
 a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side CI reviewer
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
