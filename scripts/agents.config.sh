@@ -327,7 +327,9 @@ AGENT_TIER_REVIEWER='opus'
 
 # The reviewer for a diff THIS SESSION implemented on the reviewer tier's model
 # (`sh scripts/agents.lib.sh reviewer self-implemented`). A different alias on
-# purpose: the independence is the point, and the cheaper model is a bonus.
-# scripts/test/agents-mapping.test.mjs fails if this ever equals the
-# implementer's model or is emptied.
+# purpose: the independence is the point. SCOPE: this guards only the stopgap
+# path — the general `reviewer` tier above still equals `implementer` by
+# design, because the wired `claude-code-review.yml` supplies the fresh-context
+# independence there. scripts/test/agents-mapping.test.mjs fails if this ever
+# equals the implementer's model or is emptied.
 AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'
