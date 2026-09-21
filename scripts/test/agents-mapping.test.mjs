@@ -61,7 +61,11 @@ test("the independence seam holds: a self-implemented review never runs on the i
   // through it. If that mapping is ever dropped, the resolver silently falls
   // back to the reviewer tier and every self-review shares its author's model.
   const independent = resolveTier("reviewer", "self-implemented");
-  assert.notEqual(independent, "", "reviewer self-implemented resolved to nothing — the mapping was dropped");
+  assert.notEqual(
+    independent,
+    "",
+    "reviewer self-implemented resolved to nothing — the mapping was dropped",
+  );
   assert.notEqual(
     independent,
     resolveTier("implementer"),
