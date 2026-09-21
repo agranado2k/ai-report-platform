@@ -6702,32 +6702,56 @@ the implementer's model. Test-first; `pnpm test:scripts` 66/66.
 
 Tier: mechanical. Worktree `reviewer-self-implemented`, branch `chore/reviewer-self-implemented`.
 
-### 2026-09-21 — Landed #399; models are named in exactly two places, and the aliases stay aliases
+### 2026-09-21 — Landed #399; then the model map became two maps, one per agent harness (ADR-0084 amended)
 
 **#399 merged** (`3635b34`, signed) after one `/pr-iterate` pass — a Biome format miss on the
 new test (the pre-push hook runs the docs gate, not `biome ci`; CI caught it), the wired
 review LGTM, and a fresh-context **Sonnet** reviewer resolved through the mapping the PR
-itself added (`sh scripts/agents.lib.sh reviewer self-implemented`) — the first real use of
-the independence seam. The required smoke failed once more on the shared-preview flake
-class (`/reports/<slug>/open` returned no redirect after the team-org scenario failed) and
+itself added. The required smoke failed once more on the shared-preview flake class and
 passed on re-run with zero code delta; recorded so the next red smoke on a docs-only commit
 is read as environment first.
 
-**"Configure the models" — the decision, and the mistake it nearly was.** The operator asked
-to pin real model ids in `scripts/agents.config.sh`. Checked against the harness before
-writing one: Claude Code's Agent tool `model` parameter is an enum of exactly
-`opus | sonnet | haiku | fable`, so `AGENT_TIER_IMPLEMENTER='claude-opus-5'` would not pin
-anything — it would fail input validation on every `/implement` and `/review-pr` spawn.
-ADR-0084's "aliases, not dated ids" was load-bearing, not taste. The shape landed instead:
+**"Configure the models" — three rounds in one day, and what each one taught.**
 
-- `scripts/agents.config.sh` **records** the dated resolution beside the aliases
-  (`opus` → `claude-opus-5`, `sonnet` → `claude-sonnet-5`, `haiku` → `claude-haiku-4-5`,
-  checked 2026-09-21 against the Claude API model reference) as documentation that rots on
-  the vendor's schedule and is re-checked at each `/housekeeping` pass; the values stay
-  aliases. `agents-mapping.test.mjs` gains the **alias guard**: every resolved value must be
-  one of the four, so the literal request cannot be made by accident later.
-- `.github/workflows/claude-code-review.yml` — the **one** place in the repo that takes a
-  full id — moves `claude-opus-4-8` → `claude-opus-5`, so the wired review and the `reviewer`
-  tier read with the same generation. Recorded as an ADR-030 amendment in `docs/spec.html`.
+1. *Pin real ids* (the first ask) was checked against the harness before writing one:
+   Claude Code's Agent tool `model` parameter is an enum of exactly `opus | sonnet | haiku |
+   fable`, so `AGENT_TIER_IMPLEMENTER='claude-opus-5'` would fail input validation on every
+   spawn. ADR-0084's "aliases, not dated ids" was load-bearing. The dated resolution is
+   *recorded* beside the aliases instead (`fable`→`claude-fable-5-1`, `opus`→`claude-opus-5`,
+   `sonnet`→`claude-sonnet-5`, `haiku`→`claude-haiku-4-5`, checked against the Claude API
+   model reference), re-checked at each `/housekeeping` pass; the alias guard test makes the
+   literal mistake impossible later.
+2. *The wired CI reviewer* (`claude-code-review.yml`) — the one place in the repo that takes a
+   full id — moved `claude-opus-4-8` → `claude-opus-5` (ADR-030 amendment in `docs/spec.html`).
+3. *The real requirement*, once the operator said it out loud: this repo is worked from **two
+   agent harnesses**, Claude Code and Codex, each wanting its own mix, with **the reviewer
+   always on the other vendor**. That is the kit's 0.18.0 third axis, adopted for real:
 
-Tier: mechanical. Worktree `model-ids`, branch `chore/model-ids`.
+   | session | planner | implementer | mechanical | reviewer |
+   | --- | --- | --- | --- | --- |
+   | claude-code | `fable` | `opus` | `haiku` | `codex:gpt-5.6-sol` |
+   | codex | `gpt-6-astra` | `gpt-5.6-luna` | `gpt-5.6-luna` | `claude-code:claude-fable-5-1` |
+
+   The kit's model — "an unprefixed value runs on the caller's own harness" — never asks
+   which harness that is, so `scripts/agents.config.sh` (sourced shell, i.e. code) now selects
+   a half on `AGENT_SESSION_HARNESS`: explicit env → `CLAUDECODE` (Claude Code exports it into
+   every shell) → Codex's sandbox markers (`CODEX_SANDBOX*`, present only under seatbelt or
+   network-off — a Linux Codex session with network has **no marker**, so it must set the
+   variable, e.g. `[shell_environment_policy] set` in `~/.codex/config.toml`) → claude-code,
+   said once on stderr. The prefixed reviewer is a **dispatch** (`scripts/agent-dispatch.sh`,
+   inert until today) with the kit's worker prompts now under `.agents/prompts/`; both
+   invocation templates are read-only postures (`codex exec -s read-only --ephemeral`,
+   `claude -p --permission-mode plan`) and every real dispatch carries `--timeout`. The
+   Codex CLI's flags were read from the installed 0.155.1 binary's `exec --help` (the
+   wrapper at `~/.local/bin/codex` needs mise's node on PATH or it hangs — an hour lost).
+   `#399`'s `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'` is **withdrawn** the same day:
+   with the reviewer on the other vendor there is no self-implemented case left. `mechanical`
+   on Codex takes the coder's model (no cheaper Codex model named — open). The Codex model
+   names are the operator's data, unverified against a vendor reference.
+
+`agents-mapping.test.mjs` runs both halves through the real resolver and dispatcher (dry
+run, no tokens): 20/20. ADR-0084 carries the amendment; `AGENTS.md` and `/implement` say when
+a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side CI reviewer
+would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
+
+Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.

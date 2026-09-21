@@ -76,6 +76,21 @@ Two things shape this against a generic "open a PR":
 - **Bad / accepted**: `/implement` sessions now end further out, so a bad ticket produces a PR rather than a branch — mitigated by a PR being *more* visible than a branch, and by the confirm-list staying human-only.
 - **Neutral**: three tiers resolving to the same model means the mechanism saves little today. It is a seam, and its value is realised the first time a wave of `mechanical` tickets runs.
 
+## Amendment (2026-09-21) — two agent harnesses, one map each, and the reviewer always crosses
+
+Decision (1) above filled one map for one harness. The operator now runs this repo from **two** — Claude Code and Codex — and wants a different mix in each, with the reviewer on the other vendor every time. This amendment records the map that replaces (1):
+
+| session | `planner` | `implementer` | `mechanical` | `reviewer` |
+| --- | --- | --- | --- | --- |
+| claude-code | `fable` | `opus` | `haiku` | `codex:gpt-5.6-sol` |
+| codex | `gpt-6-astra` | `gpt-5.6-luna` | `gpt-5.6-luna` | `claude-code:claude-fable-5-1` |
+
+**What is decided.** (a) The kit's 0.18.0 agent-harness axis is adopted: `AGENT_HARNESSES='claude-code codex'`, a reviewer value carries the other harness as its prefix, and a prefixed tier is a **dispatch** through `scripts/agent-dispatch.sh` (never an in-session spawn), with the kit's worker prompts under `.agents/prompts/`. (b) The policy file selects a half on `AGENT_SESSION_HARNESS` — explicit env, else `CLAUDECODE`, else Codex's sandbox markers, else claude-code said once on stderr — because the kit's "unprefixed = the caller's own harness" never asks which harness that is. (c) Only the reviewer crosses; planner/implementer/mechanical stay in-session. (d) The 2026-09-21 morning decision to map `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'` (#399) is **withdrawn**: with the reviewer on the other vendor there is no self-implemented case to special-case, and the domain now falls back to the cross-vendor reviewer. (e) In-session Claude Code values stay **aliases** (`opus | sonnet | haiku | fable`) because that is what the Agent tool's `model` parameter accepts — a full id there is an input-validation error, not a pin; the dated ids the aliases denote are recorded beside them, re-checked at each `/housekeeping` pass. (f) The wired CI reviewer (`claude-code-review.yml`, ADR-030) is the Anthropic action and stays single-vendor on `claude-opus-5`; the cross-vendor reviewer this amendment names is the *dispatched* one. A Codex-side CI reviewer to restore ADR-030's two-vendor intent is a recorded follow-up.
+
+**Open.** `mechanical` on Codex takes the coder's model because no cheaper capable Codex model was named — re-point it when one is. The Codex model names are the operator's policy data, not verified against a vendor reference. The dispatch templates run read-only workers (`codex exec -s read-only`, `claude -p --permission-mode plan`) and every real dispatch carries `--timeout`, because both CLIs are approval-gated when a command escapes that posture and headless there is nobody to approve.
+
+**Tests.** `scripts/test/agents-mapping.test.mjs` now runs both halves through the real resolver (via `AGENT_SESSION_HARNESS`) and holds, per half: every tier mapped; the cost seam; the reviewer on the *other* harness and the other three in-session; the self-implemented fallback; the alias guard for in-session Claude Code values; and a `--dry-run` of the dispatcher in each direction (the command line carries the mapped model and the read-only flag) — the wiring, proven without a token.
+
 ## More information
 
 - Mechanism (shared layer, from the v0.10.0 migration): `scripts/agents.lib.sh`. Mapping (local): `scripts/agents.config.sh`. Test: `scripts/test/agents-mapping.test.mjs` (`node --test`, the `test:scripts` tier).

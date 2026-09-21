@@ -146,7 +146,7 @@
 #   AGENT_HARNESSES='<the agent CLIs you actually have>'
 #   AGENT_TIER_REVIEWER='<an agent harness other than your implementer's>:<model id>'
 #
-AGENT_HARNESSES=''
+AGENT_HARNESSES='claude-code codex'
 
 # EACH DECLARED AGENT HARNESS NEEDS AN INVOCATION before anything can be
 # dispatched to it. This is the fact adapters/claude-code/README.md says cannot
@@ -266,93 +266,122 @@ AGENT_BUDGET_MEMORY_FLOOR_MIB=''
 AGENT_BUDGET_MEMORY_CEILING_MIB=''
 
 # ---------------------------------------------------------------------------
-# THIS REPO'S STANCE ON THE THIRD AXIS AND THE DISPATCHER (kit 0.18.0–0.20.0)
-# ---------------------------------------------------------------------------
-# This repo runs one agent harness (Claude Code) and has never dispatched to
-# another, so AGENT_HARNESSES and every AGENT_DISPATCH_* / AGENT_BUDGET_*
-# variable below is left at the kit default (empty). The dispatcher
-# (`scripts/agent-dispatch.sh`) is therefore inert here — it exits 3 when a
-# tier names no agent harness — and every tier value stays an unprefixed alias.
-# `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED` (kit 0.16.0) IS mapped, below: it is
-# the reviewer for a diff the session itself wrote on the reviewer tier's own
-# model — the one case the plain tier lookup cannot make independent, because
-# implementer and reviewer both resolve to the top model here. The wired review
-# (`claude-code-review.yml`) is still the first mechanism; this mapping is what
-# /implement's stopgap path resolves through so a self-review is never an
-# editorial pass wearing a second hat. Decided 2026-09-21 (PR #398 follow-up).
-
-# ---------------------------------------------------------------------------
-# THIS REPO FILLS IT IN (ADR-0084)
+# THIS REPO FILLS IT IN (ADR-0084, amended 2026-09-21) — TWO HARNESSES, ONE MAP EACH
 # ---------------------------------------------------------------------------
 # The paragraphs above are the KIT's stance: it ships these empty because a
-# framework has no provider. This file is local (see VERSION), so this repo does
-# name its models — one harness (Claude Code), one provider. The values are
-# harness ALIASES, not dated identifiers, because the alias is what a spawn call
-# takes and it tracks its family across a version bump. The mapping is derived
-# from choices this repo already made in skill prose, so adopting the seam
-# changed no behaviour on day one:
+# framework has no provider. This file is local (see VERSION), so this repo
+# names its models — and, since 2026-09-21, its AGENT HARNESSES. The operator
+# runs this repo from two of them, Claude Code and Codex, and wants a
+# different mix in each, with the REVIEWER ALWAYS ON THE OTHER VENDOR:
 #
-#   planner      opus    (no named precedent — planner work runs in the
-#                         operator's own session or spawns with no model named,
-#                         i.e. the session's own, the top of the range)
-#   implementer  opus    (/report-comments Phase 3, "one Opus 5 subagent")
-#   mechanical   haiku   (/review-pr step 1, "Context Discovery (Haiku agent)")
-#   reviewer     opus    (all seven /review-pr sub-agents; claude-code-review.yml)
+#   session       planner        implementer     mechanical      reviewer
+#   claude-code   fable          opus            haiku           codex:gpt-5.6-sol
+#   codex         gpt-6-astra    gpt-5.6-luna    gpt-5.6-luna    claude-code:claude-fable-5-1
 #
-# Three of four are `opus` today, and that is the honest reading of current
-# practice, not a failure of the rubric — the VALUE is the seam: re-pointing is
-# now a one-file diff a reviewer reads, `mechanical` is genuinely cheaper, and
-# scripts/test/agents-mapping.test.mjs fails if any tier is emptied or if
-# `mechanical` ever collapses onto the `reviewer` model.
-
-# ---------------------------------------------------------------------------
-# WHAT THE ALIASES MEAN TODAY (recorded, never stored as the value)
-# ---------------------------------------------------------------------------
-# The values below are Claude Code model ALIASES because that is what the
-# Agent tool's `model` parameter accepts (opus | sonnet | haiku | fable); a
-# full id there is an input-validation error, so pinning one would break every
-# spawn rather than pin anything. The alias tracks its family across a version
-# bump, which is the point. For the reader who needs to know which model that
-# actually is, this table records the resolution at the date it was checked
-# against the Claude API model reference — it is documentation, and it rots on
-# the vendor's schedule, so re-check it at the next housekeeping pass:
+# HOW THE MAP KNOWS WHICH SESSION IT IS IN. The kit's model is "a value with
+# no prefix runs on the caller's own harness" — it never asks which harness
+# that is, because one map served one harness. Two harnesses need the answer,
+# so this file (sourced shell, i.e. CODE — the kit says a policy file may be)
+# selects a half on AGENT_SESSION_HARNESS, resolved in this order:
 #
-#   alias    model id (2026-09-21)   used by
-#   opus     claude-opus-5           planner, implementer, reviewer
-#   sonnet   claude-sonnet-5         reviewer self-implemented
-#   haiku    claude-haiku-4-5        mechanical
+#   1. AGENT_SESSION_HARNESS set in the environment  — the explicit answer;
+#      a Codex session on Linux has no reliable marker of its own, so set it
+#      there: `[shell_environment_policy] set = { AGENT_SESSION_HARNESS = "codex" }`
+#      in ~/.codex/config.toml, or export it in the shell that starts codex.
+#   2. CLAUDECODE set                                  — Claude Code exports it
+#      into every shell it runs, so a Claude Code session needs nothing.
+#   3. CODEX_SANDBOX / CODEX_SANDBOX_NETWORK_DISABLED  — Codex's own markers,
+#      present only under its sandbox (macOS seatbelt, or network-off).
+#   4. otherwise claude-code, said ONCE on stderr      — a plain operator
+#      shell, CI, or an unmarked harness gets the repo's primary map rather
+#      than nothing; scripts/test/agents-mapping.test.mjs holds the message.
 #
-# The one place in this repo that takes a full id — the wired CI reviewer in
-# .github/workflows/claude-code-review.yml — is pinned to the same generation
-# (claude-opus-5, ADR-030 amendment 2026-09-21) so the wired review and the
-# `reviewer` tier read with the same model. scripts/test/agents-mapping.test.mjs
-# fails if any value here stops being an alias.
+# WHY THE VALUES HAVE THE SHAPES THEY HAVE.
+#   - Unprefixed values in the claude-code half are Claude Code ALIASES
+#     (opus | sonnet | haiku | fable), because that is what the Agent tool's
+#     `model` parameter accepts — a full id there is an input-validation
+#     error, not a pin. `fable` is the alias for Claude Fable 5.1.
+#   - Unprefixed values in the codex half are what `codex -m` takes — the
+#     operator's own model names for that harness (gpt-6-astra is also the
+#     default model in ~/.codex/config.toml). Not verified against a vendor
+#     reference here; they are the operator's policy data.
+#   - The reviewer is PREFIXED with the OTHER harness, and its model is what
+#     that harness's CLI takes on its command line: `codex -m gpt-5.6-sol`,
+#     `claude --model claude-fable-5-1` (the CLI accepts full ids; the alias
+#     would also work, the full id is the unambiguous one at a process seam).
+#   - mechanical on codex is NOT an operator decision yet: the map named no
+#     cheap Codex model, so it takes the coder's. Re-point it when there is a
+#     cheaper capable one; the cost seam (mechanical != reviewer) still holds.
+#   - AGENT_TIER_REVIEWER_SELF_IMPLEMENTED (kit 0.16.0) is deliberately GONE:
+#     with the reviewer on the other vendor there is no self-implemented case
+#     left to special-case — the domain falls back to the reviewer tier, and
+#     that IS the independent one. The test pins that fallback.
+#
+# WHAT THE ALIASES MEAN TODAY (recorded, never stored as the value). For the
+# reader who needs the dated id behind an alias, checked 2026-09-21 against
+# the Claude API model reference; documentation that rots on the vendor's
+# schedule, re-checked at each /housekeeping pass:
+#
+#   fable    claude-fable-5-1     sonnet   claude-sonnet-5
+#   opus     claude-opus-5        haiku    claude-haiku-4-5
+#
+# WHAT A DISPATCH ACTUALLY RUNS is the two invocation templates below. Only
+# the reviewer ever crosses, so each template is a READ-ONLY worker posture:
+# codex in its read-only sandbox, claude in plan mode. Neither can write the
+# tree, push, or merge (shared invariant §7). The prompt is
+# .agents/prompts/review-worker.md, filled by the dispatcher:
+#
+#   sh scripts/agent-dispatch.sh reviewer --prompt-file .agents/prompts/review-worker.md \
+#     --set BRANCH=<branch> --set BASE=origin/main --set-file SPEC=<ticket.md> --timeout 900
+#
+# Both CLIs are approval-gated when a command escapes their read-only posture,
+# and headless there is nobody to approve — hence --timeout on every real
+# dispatch (the kit's rule above). Check a wiring without spending a token:
+#   sh scripts/agent-dispatch.sh reviewer --prompt x --dry-run
 
-# ---------------------------------------------------------------------------
-# 1. PLANNER — decomposition, design, triage
-# ---------------------------------------------------------------------------
-AGENT_TIER_PLANNER='opus'
+# --- which half? ---------------------------------------------------------
+if [ -z "${AGENT_SESSION_HARNESS:-}" ]; then
+	if [ -n "${CLAUDECODE:-}" ]; then
+		AGENT_SESSION_HARNESS=claude-code
+	elif [ -n "${CODEX_SANDBOX:-}" ] || [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
+		AGENT_SESSION_HARNESS=codex
+	else
+		AGENT_SESSION_HARNESS=claude-code
+		printf '%s\n' "agents.config: no session-harness marker found — assuming claude-code (set AGENT_SESSION_HARNESS to override)" >&2
+	fi
+fi
 
-# ---------------------------------------------------------------------------
-# 2. IMPLEMENTER — one ticket, test-first, through the seams
-# ---------------------------------------------------------------------------
-AGENT_TIER_IMPLEMENTER='opus'
+# --- the invocation each declared agent harness needs --------------------
+# codex exec reads the prompt on stdin; -s read-only is the sandbox the
+# reviewer runs in; --ephemeral keeps a worker's session out of the operator's
+# history; -C anchors the worker in this checkout whatever its cwd. The model
+# flag is omitted entirely when the tier maps no model (kit rule).
+AGENT_HARNESS_CODEX_CMD='codex exec -s read-only --ephemeral -C "$PWD" {model_flag} < {prompt_file}'
+AGENT_HARNESS_CODEX_MODEL_FLAG='-m {model}'
+# claude -p reads the prompt on stdin; plan mode is the read-only posture.
+AGENT_HARNESS_CLAUDE_CODE_CMD='claude -p --permission-mode plan {model_flag} < {prompt_file}'
+AGENT_HARNESS_CLAUDE_CODE_MODEL_FLAG='--model {model}'
 
-# ---------------------------------------------------------------------------
-# 3. MECHANICAL — checkable definition of done, no judgement required
-# ---------------------------------------------------------------------------
-AGENT_TIER_MECHANICAL='haiku'
-
-# ---------------------------------------------------------------------------
-# 4. REVIEWER — adversarial reading of a finished diff, in fresh context
-# ---------------------------------------------------------------------------
-AGENT_TIER_REVIEWER='opus'
-
-# The reviewer for a diff THIS SESSION implemented on the reviewer tier's model
-# (`sh scripts/agents.lib.sh reviewer self-implemented`). A different alias on
-# purpose: the independence is the point. SCOPE: this guards only the stopgap
-# path — the general `reviewer` tier above still equals `implementer` by
-# design, because the wired `claude-code-review.yml` supplies the fresh-context
-# independence there. scripts/test/agents-mapping.test.mjs fails if this ever
-# equals the implementer's model or is emptied.
-AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'
+# --- the map -------------------------------------------------------------
+case "$AGENT_SESSION_HARNESS" in
+codex)
+	# 1. PLANNER — decomposition, design, triage
+	AGENT_TIER_PLANNER='gpt-6-astra'
+	# 2. IMPLEMENTER — one ticket, test-first, through the seams
+	AGENT_TIER_IMPLEMENTER='gpt-5.6-luna'
+	# 3. MECHANICAL — checkable definition of done (no cheap Codex model named yet; see above)
+	AGENT_TIER_MECHANICAL='gpt-5.6-luna'
+	# 4. REVIEWER — adversarial reading in fresh context, on the OTHER vendor
+	AGENT_TIER_REVIEWER='claude-code:claude-fable-5-1'
+	;;
+*)
+	# 1. PLANNER — decomposition, design, triage
+	AGENT_TIER_PLANNER='fable'
+	# 2. IMPLEMENTER — one ticket, test-first, through the seams
+	AGENT_TIER_IMPLEMENTER='opus'
+	# 3. MECHANICAL — checkable definition of done, no judgement required
+	AGENT_TIER_MECHANICAL='haiku'
+	# 4. REVIEWER — adversarial reading in fresh context, on the OTHER vendor
+	AGENT_TIER_REVIEWER='codex:gpt-5.6-sol'
+	;;
+esac
