@@ -198,7 +198,7 @@ deliberately dodged).
 | Decoy org (`arp-e2e-decoy-<localpart>`) | The dev instance runs `force_organization_selection: true` (same as prod), and Clerk gives a **zero-membership** user a `pending` session (task `choose-organization`) whose JWT carries `sts: "pending"` — @clerk/backend treats that as signed-out, so every request 401s (the PR #222 round-2 failure). In prod the ADR-0074 webhook pre-joins the user; e2e previews get no webhook, so the helper creates what the forced task itself would: an **anchorless decoy org** with the user as creator. Sessions then mint `active` — and since Clerk auto-activates the sole membership, the session actively CARRIES the decoy, faithfully reproducing the production duplicate-org shape: the app must ignore it (no `publicMetadata.domain`, so the anchor scan never adopts it) and land the user in the canonical domain org. |
 | ADR-0078 tail (report sharing reaches a shared folder's contents) | The last six steps prove the reported bug and its repair against real infra. The first identity puts a PRIVATE report into the now-org-shared folder — and the move must NOT publish it (ADR-0078 §7: move is `canWrite`-gated, so auto-applying would let a write grantee publish what they cannot read). The third identity then CANNOT see it, which is the bug: a folder share confers visibility of the FOLDER only, and that assertion must keep passing forever — the repair is an EXPLICIT action, not a change to what a folder share means. `POST /folders/{id}/reports/sharing {sharing:"org_edit"}` then changes BOTH reports: the private one, and the already-`org_view` one, which ESCALATES because the candidate rule composes `reportSharingState(aclMode, hasOrgWrite)` and treats "composed state ≠ target" as a candidate. **A skip there is the pre-fix silent no-op, not the honest-partial contract** — the original assertion asserted exactly that skip and shipped the defect to `main` (PR #241 → #244). The honest-partial contract is instead covered by re-applying `org_edit` a second time: both reports then skip with `already shared with your org to view and edit`, the literal read from `ALREADY_AT` in the domain. Finally the third identity must LIST it, GET it (`sharing` reads back `org_edit` — computed server-side, never a value the test held), and PATCH-rename it — a rename goes through the `canWrite` seam, so a 200 there is the org-write leg working through the real HTTP door, not just in a unit test — while DELETE must still 403 (owner-only in every sharing state). |
 | Assertion mechanics | Two-fold. (1) Clerk-side: after the second identity's first upload, the step asserts it holds a membership in the **anchored** `agranado.com` org (`findAnchoredOrgMembership` — BAPI read; absence fails loud, proving the canonical chain didn't join). (2) App-side: its session is **re-minted with that org active** (`POST /v1/sessions` `active_organization_id`, verified against the live BAPI — the v2 token's `o.id` claim reaches the app's `getAuth` as the session org, exactly like a browser session after the forced task's org selection), then a bare `GET /api/v1/reports` must list BOTH identities' uploads. A session *without* an active org can't be used for the read: the read path resolves an org-less session via the user's *oldest* membership — the unmirrored decoy. NOT `POST /settings/api-keys`: that dashboard action is cookie-session territory — a Bearer-token POST gets redirected to the sign-in HTML (the PR #222 round-2 failure). |
-| Cleanup / accumulation | **Three layers, since issue #266** (the "noted follow-up" below stopped being optional when the leak took the pipeline down — see *Run-scoped identity hygiene*). (1) The prompt one: an `After({ tags: "@run-scoped" })` hook deletes both users (removing their canonical-org memberships — the shared anchored org's member count stays flat; the dev instance cap was raised 5 → 20 to match prod) and their decoy orgs after every attempt, pass or fail, now retrying 429/5xx. (2) The durable one: a Playwright **global teardown** deletes everything the run recorded in an on-disk ledger, including objects created by a provisioning call that threw before returning. (3) The self-healing one: an **age-gated sweep** at global setup *and* teardown. Cleanup failures still log loudly and never fail the scenario. |
+| Cleanup / accumulation | **Three layers, since issue #266** (the "noted follow-up" below stopped being optional when the leak took the pipeline down — see *Run-scoped identity hygiene*). (1) The prompt one: an `After({ tags: "@run-scoped" })` hook deletes both users (removing their canonical-org memberships — the shared anchored org's member count stays flat; the dev instance cap was raised 5 → 20 to match prod) and their decoy orgs after every attempt, pass or fail, now retrying 429/5xx. (2) The durable one: a Playwright **global teardown** deletes everything the run recorded in an on-disk ledger, including objects created by a provisioning call that threw before returning. (3) The self-healing one: an **age-gated sweep** at global setup *and* teardown — at **age 0** in the serialized-CI smoke to reclaim evicted-run stragglers, followed by a **fail-fast cap preflight** (both issue #372, see *Run-scoped identity hygiene*). Cleanup failures still log loudly and never fail the scenario; the preflight is the one deliberate exception — it fails setup on a confirmed cap shortfall. |
 
 ## Run-scoped identity hygiene (issue #266)
 
@@ -242,8 +242,33 @@ an exact-match never-sweep list, as does `E2E_TEST_USER_EMAIL`.
 **The age gate.** The opportunistic sweeps only take identities older than
 `SWEEP_MIN_AGE_HOURS` (24). Simultaneous PR runs share this instance — that
 contention is the issue's second symptom — so an un-gated sweep would delete a
-concurrent run's live fixtures mid-scenario. Only the manual workflow can sweep
-with `older_than_hours: 0`.
+concurrent run's live fixtures mid-scenario.
+
+**The serialized-CI exception (issue #372).** There is exactly one place where
+that age gate protects nothing: the serialized smoke. Because the `smoke` job's
+`preview-smoke-shared` group (`cancel-in-progress: false`) guarantees no other
+smoke runs concurrently, the 24h gate cannot be shielding a live concurrent run
+there — and instead it is exactly what lets an **evicted/killed** run's
+younger-than-24h straggler members survive into the next run, stack onto its
+footprint, and tip the low cap → `402 plan_limit_exceeded` (why a re-run then
+passes). So `global-setup.ts`'s pre-run sweep sweeps at **age 0** when
+`E2E_SERIALIZED_SWEEP=1` (set by `e2e.yml`, the only invoker of the serialized
+smoke) via `preRunSweepAgeHours`, taking every straggler regardless of age. The
+never-sweep predicates are unchanged — the `SECOND_FIXTURE`, the primary
+fixture and the canonical anchored org are protected at age 0 exactly as at 24h
+(pinned in `clerk-fixture-identity.test.ts`). Everywhere else (a local/dev
+`pnpm e2e`), `E2E_SERIALIZED_SWEEP` is unset and the concurrency-safe 24h gate
+stands. The manual workflow can also sweep with `older_than_hours: 0`.
+
+**The fail-fast preflight (issue #372).** After the pre-run sweep, `global-setup.ts`
+reads the anchored org's `total_count` and `max_allowed_memberships` and, if the
+remaining headroom is below the smoke's `SMOKE_RUN_SCOPED_FOOTPRINT` (5:
+silver/gold/bronze + fsown/fscol), **throws in setup** with an actionable
+message — turning a confusing mid-suite 402 into an obvious setup failure. Only
+a *confirmed* shortfall blocks; an undeterminable cap state (a transient
+429/5xx, a missing field, a non-positive cap whose "unlimited" meaning Clerk
+does not document) logs and proceeds. The decision itself is the pure,
+unit-tested `assessAnchoredOrgCap`.
 
 **Running the sweep.** Actions → *Clerk dev-instance sweep* → Run workflow.
 `dry_run` defaults to `true`: it prints the would-delete list and a count and
@@ -257,7 +282,10 @@ parallel PRs queue against the one shared Clerk instance instead of colliding.
 Only the smoke leg is grouped — `isolate` / `security-headers` / `teardown`
 contend for nothing shared. Note GitHub keeps at most **one** pending run per
 group, so a third simultaneous PR evicts the second's queued smoke; that's a
-cancelled check needing a re-run, traded against a mid-suite 429.
+cancelled check needing a re-run, traded against a mid-suite 429. An evicted or
+SIGKILL'd run leaves its run-scoped members behind with no teardown — the
+straggler class the age-0 pre-run sweep (above, issue #372) exists to reclaim on
+the *next* run, before it can tip the cap.
 
 ## Authenticated-browser scenarios (`@browser`)
 

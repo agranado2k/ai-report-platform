@@ -24,6 +24,8 @@
 // (.github/workflows/clerk-sweep.yml) are the escalation path.
 import { clerkFetch, deleteClerkObject } from "./clerk-backend-api";
 import {
+  assessAnchoredOrgCap,
+  type OrgCapState,
   SWEEP_MIN_AGE_HOURS,
   type SweepableOrganization,
   type SweepableUser,
@@ -56,9 +58,10 @@ function pathFor(kind: RegisteredIdentity["kind"], id: string): string {
   return kind === "user" ? `/users/${id}` : `/organizations/${id}`;
 }
 
-/** Clerk returns `created_at` as a ms epoch; anything else becomes NaN, which
- *  the pure age gate reads as "unknown" and refuses to age-gate on. */
-function toMs(value: unknown): number {
+/** A Clerk numeric field (a `created_at` ms epoch, a `total_count`, a
+ *  `max_allowed_memberships`); anything non-numeric becomes NaN, which the pure
+ *  gates read as "unknown" and refuse to decide on. */
+function asNumber(value: unknown): number {
   return typeof value === "number" ? value : Number.NaN;
 }
 
@@ -105,7 +108,7 @@ export async function listAllUsers(secretKey: string): Promise<readonly Sweepabl
       users.push({
         id: user.id,
         email: typeof email === "string" ? email : null,
-        createdAtMs: toMs(user.created_at),
+        createdAtMs: asNumber(user.created_at),
       });
     }
     if (body.length < PAGE_LIMIT) break;
@@ -134,7 +137,7 @@ export async function listAllOrganizations(
       organizations.push({
         id: org.id,
         name: typeof org.name === "string" ? org.name : null,
-        createdAtMs: toMs(org.created_at),
+        createdAtMs: asNumber(org.created_at),
       });
     }
     if (pageItems.length < PAGE_LIMIT) break;
@@ -215,6 +218,62 @@ export async function sweepStaleRunScopedIdentities(
       })),
     ),
   );
+}
+
+/**
+ * Read the anchored org's membership state from the Backend API (issue #372).
+ *
+ * `max_allowed_memberships` is always present on the Organization object;
+ * `total_count` on the memberships listing is the org's total member count,
+ * independent of paging (both verified against the Clerk BAPI spec 2026-05-12).
+ * We ask for a single membership only — we want the count, not the page.
+ */
+export async function fetchAnchoredOrgCapState(
+  secretKey: string,
+  orgId: string,
+): Promise<OrgCapState> {
+  const orgRes = await clerkFetch(`/organizations/${orgId}`, secretKey);
+  if (!orgRes.ok) throw new Error(`clerk organization lookup failed: ${orgRes.status}`);
+  const org = (await orgRes.json()) as { max_allowed_memberships?: unknown };
+
+  const membersRes = await clerkFetch(`/organizations/${orgId}/memberships?limit=1`, secretKey);
+  if (!membersRes.ok) throw new Error(`clerk memberships lookup failed: ${membersRes.status}`);
+  const memberships = (await membersRes.json()) as { total_count?: unknown };
+
+  return {
+    membersCount: asNumber(memberships.total_count),
+    maxAllowedMemberships: asNumber(org.max_allowed_memberships),
+  };
+}
+
+/**
+ * Fail-fast BEFORE provisioning if the anchored org lacks headroom for the
+ * smoke's footprint (issue #372) — turning a confusing mid-suite `402
+ * plan_limit_exceeded` into an obvious, actionable setup failure.
+ *
+ * Only a CONFIRMED shortfall throws. If the cap state cannot be determined (a
+ * transient 429/5xx, a missing field), this logs and RETURNS: a false setup
+ * failure is worse than deferring to the real 402 the run would otherwise hit.
+ * The decision itself lives in the pure, unit-tested `assessAnchoredOrgCap`.
+ */
+export async function preflightAnchoredOrgCap(
+  secretKey: string,
+  orgId: string,
+  footprint: number,
+): Promise<void> {
+  let state: OrgCapState;
+  try {
+    state = await fetchAnchoredOrgCapState(secretKey, orgId);
+  } catch (error) {
+    console.warn(
+      `clerk cap preflight skipped — ${String(error)}. Proceeding; a genuine cap shortfall will ` +
+        "surface as the run's own 402.",
+    );
+    return;
+  }
+
+  const verdict = assessAnchoredOrgCap(state, footprint);
+  if (!verdict.ok) throw new Error(verdict.reason ?? "anchored org membership cap exceeded");
 }
 
 /** The addresses a sweep run from inside the e2e process must never touch. */
