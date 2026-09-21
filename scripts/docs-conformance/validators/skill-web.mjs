@@ -18,11 +18,11 @@
 // built-in (`/loop`) is not a skill for either validator, and one exemption
 // with one recorded reason should serve both.
 
-import { commandRefs } from "./claude-md-refs.mjs";
+import { commandRefs, LEGACY_SKILLS_DIR, skillHomes } from "./claude-md-refs.mjs";
 
 export const id = "skill-web";
 
-const DEFAULT_SKILLS_DIR = ".claude/skills";
+const DEFAULT_SKILLS_DIR = ".agents/skills";
 
 export function run(ctx) {
   const out = [];
@@ -30,22 +30,36 @@ export function run(ctx) {
   const skillsDir = cfg.skillsDir ?? DEFAULT_SKILLS_DIR;
   const ignore = new Set(cfg.ignoreCommands ?? []);
 
-  for (const name of ctx.list(skillsDir)) {
-    const file = `${skillsDir}/${name}/SKILL.md`;
-    const raw = ctx.read(file);
-    if (raw == null) continue; // not a skill directory (a license file, a stray)
+  // Both homes are ENUMERATED, not just resolved: a tree whose skills stayed
+  // at the legacy address is a sanctioned permanent state, and scanning only
+  // the configured home would silently drop its coverage to zero (found by
+  // the independent review of the 0.14.0 gate slice, by building that tree).
+  // De-duplicated by skill name — a skill present at both addresses is one
+  // skill, scanned once, from the configured home.
+  const seen = new Set();
+  for (const dir of skillHomes(skillsDir)) {
+    for (const name of ctx.list(dir)) {
+      if (seen.has(name)) continue;
+      const file = `${dir}/${name}/SKILL.md`;
+      const raw = ctx.read(file);
+      if (raw == null) continue; // not a skill directory (a license file, a stray)
+      seen.add(name);
 
-    for (const ref of [...commandRefs(raw)].sort()) {
-      if (ignore.has(`/${ref}`)) continue;
-      if (ctx.exists(`${skillsDir}/${ref}/SKILL.md`)) continue;
-      out.push({
-        validator: id,
-        severity: "warning",
-        file,
-        rule: "skill-web-dangling",
-        message: `references \`/${ref}\` but ${skillsDir}/${ref}/SKILL.md is not installed`,
-        hint: "Adopt the skill (see the skills inventory in the update recipe), record the decline in a local article, or add it to claudeMdRefs.ignoreCommands with a reason.",
-      });
+      for (const ref of [...commandRefs(raw)].sort()) {
+        if (ignore.has(`/${ref}`)) continue;
+        if (ctx.exists(`${skillsDir}/${ref}/SKILL.md`)) continue;
+        // Same legacy fallback as skill-missing: a sibling still living at
+        // the pre-0.14.0 address is installed, not dangling.
+        if (ctx.exists(`${LEGACY_SKILLS_DIR}/${ref}/SKILL.md`)) continue;
+        out.push({
+          validator: id,
+          severity: "warning",
+          file,
+          rule: "skill-web-dangling",
+          message: `references \`/${ref}\` but ${skillsDir}/${ref}/SKILL.md is not installed`,
+          hint: "Adopt the skill (see the skills inventory in the update recipe), record the decline in a local article, or add it to claudeMdRefs.ignoreCommands with a reason.",
+        });
+      }
     }
   }
   return out;

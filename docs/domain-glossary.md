@@ -126,6 +126,56 @@ Terms for infra that sits alongside the four bounded contexts rather than inside
 - **Audit action** — the closed `AuditAction` vocabulary (`packages/application/src/audit.ts`) an `Audit log` row's `action` column is written from: `report.*`, `folder.*`, `acl.set`, `grant.write.*`, `comment.*`, `api_key.*` — one member per audited user-initiated mutation use case (ADR-0070). `target_type`/`target_id`/`action` are free `text` at the DB layer; the closed union is an application-layer discipline, not a DB enum.
 - **Viewer CSP allowlist** — the named set of external hosts the public viewer's enforcing CSP permits a report to load passive assets from (`VIEW_CSP_ALLOWLIST`, `packages/headers/src/view-headers.ts`, ADR-0088 amending ADR-013): `https://fonts.googleapis.com` (`style-src`), `https://fonts.gstatic.com` (`font-src`), and `https://cdnjs.cloudflare.com` + `https://cdn.jsdelivr.net/npm/` (`script-src`) — the set a self-contained agent-authored artifact needs to render in its designed typeface with its charting library, i.e. **artifact parity**. Deliberately a *loading* allowlist and nothing more: `connect-src 'self'`, `img-src`, `form-action` and `worker-src` stay pinned to the viewer origin, so no host on it becomes an exfiltration channel. One constant, keyed by directive, asserted against by both the unit tests and the live `security-headers` gate — widening it is a visible edit to one object, never a string spliced into a policy. Applies to `viewHeaders()` only: the report-only shadow policy and the ADR-0063 `/edit` profile carry no allowlist. Spec: ADR-0088.
 
+## Context map
+
+The edges between the four contexts above, each declared from **both** sides (the same
+relationship word on both lines, only the role differs). The narrative map with the
+diagram, the aggregates per context and the event catalogue is `docs/context-map.md`
+(ADR-0036); this section is the edge list the design brief in
+`constitution/local-engineering.md` anchors to. An edge declared from one side only is half
+a decision — the other context's block will not mention it.
+
+### Identity & Access
+
+- **Identity & Access → Reports & Folders**: shared kernel — co-owner; `UserId` and `OrgId` are the only jointly-owned types. Also conformist — upstream; publishes `UserCreated`.
+- **Identity & Access → Abuse & Moderation**: shared kernel — co-owner; `UserId` and `OrgId`.
+- **Identity & Access → Authoring & Collaboration**: shared kernel — co-owner; `UserId` and `OrgId` (comment authors are mirrored Clerk identities, ADR-0064).
+- **Identity & Access → Clerk (external)**: anti-corruption layer — downstream; Clerk webhooks are translated into `UserCreated` and the local user/org mirror, and nothing of Clerk's model leaks past the adapter.
+
+### Reports & Folders
+
+- **Reports & Folders → Identity & Access**: shared kernel — co-owner; `UserId` and `OrgId`. Also conformist — downstream; consumes `UserCreated` as an optional write-grant backfill (ADR-0060).
+- **Reports & Folders → Abuse & Moderation**: conformist — upstream; publishes `ReportVersionUploaded` (the scan-job trigger). Also conformist — downstream; consumes `ReportVersionScanned` (sets `ReportVersion.scan_status`, auto-publishes on `clean`) and `ReportTakenDown` (sets `Report.deleted_at`).
+- **Reports & Folders → Authoring & Collaboration**: conformist — upstream; the published `ReportVersion`'s document model (ADR-0062) is what comments anchor to. The three `Comment*` events are reserved for this context as a future consumer; none is subscribed today.
+
+### Abuse & Moderation
+
+- **Abuse & Moderation → Identity & Access**: shared kernel — co-owner; `UserId` and `OrgId`.
+- **Abuse & Moderation → Reports & Folders**: conformist — downstream; consumes `ReportVersionUploaded` to enqueue a `ScanJob` and reads `Report.slug` to attach abuse reports. Also conformist — upstream; publishes `ReportVersionScanned` and `ReportTakenDown`.
+
+### Authoring & Collaboration
+
+- **Authoring & Collaboration → Identity & Access**: shared kernel — co-owner; `UserId` and `OrgId`.
+- **Authoring & Collaboration → Reports & Folders**: conformist — downstream; reads the published document model to resolve comment anchors and keeps no model of the report itself. Publishes `CommentAdded`, `CommentResolved`, `CommentEdited` into the transactional outbox with no subscriber yet (`docs/events.md`; the audit rows are written synchronously by the use case, not via these events — ADR-0070).
+
+---
+
+## Words this project does not use
+
+The docs gate reads this section: every use of a banned word in the manual layer, the
+skills, and this glossary's own entries is a **warning** (the kit's banned-words advisory);
+this section and every `_Avoid_` line are the exceptions, because writing the word is their
+job. A word that is legitimate in one sense keeps that sense with an `Except:` clause naming
+the permitted phrases as code spans. (The stricter, **failing** alias rule over `docs/` and
+the ADRs — the `_Avoid_` alias `Version` → `ReportVersion` — is `glossary.bannedAliases` in
+`scripts/docs-conformance/config.mjs`, ADR-0036; it stays there, because that word is
+legitimate in far too many other senses to warn on across the skills.)
+
+- **strategic design** — ambiguous here: Evans's name for context mapping, and Ousterhout's
+  "strategic" (design as continuous investment) is the sense the engineering article's design
+  brief uses. Use **context map** for the edges and **subdomain classification** for the core /
+  supporting / generic split.
+
 ## Domain events
 
 Event names are the contract; their full catalog (emitter, subscribers, payload, and the Emitted/Proposed split) lives in `docs/events.md`. Events are facts in past tense.
