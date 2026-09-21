@@ -73,7 +73,16 @@ jobs:
             Commits violations, and any drift from docs/db-design.md / the glossary.
           claude_args: |
             --max-turns 45
-            --model claude-opus-4-8
+            --model claude-opus-5
+        # --model: the wired reviewer takes a FULL model id (unlike the tier
+        # mapping in scripts/agents.config.sh, whose in-session values are the
+        # aliases the Agent tool's spawn accepts). claude-opus-4-8 ->
+        # claude-opus-5 on 2026-09-21 (ADR-030 amendment): the current Opus
+        # generation, chosen for the review's quality, not tied to any tier —
+        # this workflow is the Anthropic action and stays single-vendor, while
+        # the `reviewer` TIER (ADR-0084) is the cross-vendor one dispatched
+        # from a session. Re-check against the Claude API model reference at
+        # each housekeeping pass.
         # --max-turns raised 25 -> 45 (issue #394): a review that runs out of turns
         # is now classified TRUNCATED (green with a note) rather than lost, but a
         # higher budget makes truncation rare in the first place. 45 gives a

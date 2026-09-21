@@ -283,6 +283,7 @@ export const claudeMdRefs = {
     "infra",
     "tests",
     ".agents/skills",
+    ".agents/prompts",
     ".claude/hooks",
     ".claude/skills",
     "constitution",

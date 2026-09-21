@@ -48,7 +48,7 @@ The vocabulary is closed — `planner`, `implementer`, `mechanical`, `reviewer`,
 | `mechanical` | `haiku` | `/review-pr` step 1, "Context Discovery (Haiku agent)" |
 | `reviewer` | `opus` | all seven `/review-pr` sub-agents; `.github/workflows/claude-code-review.yml` |
 
-Values are harness **aliases**, not dated identifiers, because the alias is what the spawn call takes (`/report-comments` already writes `model: opus`) and it tracks its family across a version bump. The one dated pin that stays is the CI reviewer's `--model claude-opus-4-8`: a workflow wants a reproducible review, not the newest one.
+Values are harness **aliases**, not dated identifiers, because the alias is what the spawn call takes (`/report-comments` already writes `model: opus`) and it tracks its family across a version bump. The one dated pin that stays is the CI reviewer's `--model claude-opus-4-8`: a workflow wants a reproducible review, not the newest one. *(Superseded by the 2026-09-21 amendment below: the CI pin moved to `claude-opus-5` and is not tied to any tier's model.)*
 
 Three of four resolve to `opus`, and that is the honest reading of today's practice rather than a failure of the rubric. The value delivered on day one is the *seam*: re-pointing is now a one-file diff a reviewer reads, `mechanical` is genuinely cheaper, and `scripts/test/agents-mapping.test.mjs` (the `test:scripts` tier) fails if any tier is emptied or if `mechanical` and `reviewer` ever resolve to the same model — the cost seam made executable.
 
@@ -75,6 +75,21 @@ Two things shape this against a generic "open a PR":
 - **Bad / accepted**: model identifiers stay outside the config in three files — `/review-pr` (two distinct models), `/report-comments`, and the deliberate CI pin. So the manual claims only that the config is where a tier's model is *configured*, never that it is the sole occurrence of a model name in the repo. That is deliberate scope discipline (§10), recorded here as the migration backlog; anyone tempted to "fix" it should do it as its own `refactor` ticket.
 - **Bad / accepted**: `/implement` sessions now end further out, so a bad ticket produces a PR rather than a branch — mitigated by a PR being *more* visible than a branch, and by the confirm-list staying human-only.
 - **Neutral**: three tiers resolving to the same model means the mechanism saves little today. It is a seam, and its value is realised the first time a wave of `mechanical` tickets runs.
+
+## Amendment (2026-09-21) — two agent harnesses, one map each, and the reviewer always crosses
+
+Decision (1) above filled one map for one harness. The operator now runs this repo from **two** — Claude Code and Codex — and wants a different mix in each, with the reviewer on the other vendor every time. This amendment records the map that replaces (1):
+
+| session | `planner` | `implementer` | `mechanical` | `reviewer` |
+| --- | --- | --- | --- | --- |
+| claude-code | `fable` | `opus` | `haiku` | `codex:gpt-5.6-sol` |
+| codex | `gpt-6-astra` | `gpt-5.6-luna` | `gpt-5.6-luna` | `claude-code:claude-fable-5-1` |
+
+**What is decided.** (a) The kit's 0.18.0 agent-harness axis is adopted: `AGENT_HARNESSES='claude-code codex'`, a reviewer value carries the other harness as its prefix, and a prefixed tier is a **dispatch** through `scripts/agent-dispatch.sh` (never an in-session spawn), with the kit's worker prompts under `.agents/prompts/`. (b) The policy file selects a half on `AGENT_SESSION_HARNESS` — explicit env, else `CLAUDECODE`, else Codex's sandbox markers, else claude-code said once on stderr — because the kit's "unprefixed = the caller's own harness" never asks which harness that is. (c) Only the reviewer crosses; planner/implementer/mechanical stay in-session. (d) The 2026-09-21 morning decision to map `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'` (#399) is **withdrawn**: with the reviewer on the other vendor there is no self-implemented case to special-case, and the domain now falls back to the cross-vendor reviewer. (e) In-session Claude Code values stay **aliases** (`opus | sonnet | haiku | fable`) because that is what the Agent tool's `model` parameter accepts — a full id there is an input-validation error, not a pin; the dated ids the aliases denote are recorded beside them, re-checked at each `/housekeeping` pass. (f) The wired CI reviewer (`claude-code-review.yml`, ADR-030) is the Anthropic action and stays single-vendor on `claude-opus-5`; the cross-vendor reviewer this amendment names is the *dispatched* one. A Codex-side CI reviewer to restore ADR-030's two-vendor intent is a recorded follow-up.
+
+**Open.** `mechanical` on Codex takes the coder's model because no cheaper capable Codex model was named — re-point it when one is. The Codex model names are the operator's policy data, not verified against a vendor reference. The dispatch templates run read-only workers (`codex exec -s read-only`, `claude -p --permission-mode plan`) and every real dispatch carries `--timeout`, because both CLIs are approval-gated when a command escapes that posture and headless there is nobody to approve.
+
+**Tests.** `scripts/test/agents-mapping.test.mjs` now runs both halves through the real resolver (via `AGENT_SESSION_HARNESS`) and holds, per half: every tier mapped; the cost seam; the reviewer on the *other* harness and the other three in-session; the self-implemented fallback; the alias guard for in-session Claude Code values; and a `--dry-run` of the dispatcher in each direction (the command line carries the mapped model and the read-only flag) — the wiring, proven without a token.
 
 ## More information
 

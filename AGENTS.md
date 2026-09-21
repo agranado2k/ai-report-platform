@@ -75,15 +75,28 @@ Unlike the four tiers, **the domain vocabulary is open and local**: it is data i
 your config, invented by the repo that finds the distinction useful, and a domain
 you have not mapped is not an error — it resolves to the tier, silently.
 
+A third axis names **which agent harness** runs a tier (kit 0.18.0): a value
+written `<harness>:<model>` is a **dispatch** to that harness's CLI through
+`scripts/agent-dispatch.sh`, never an in-session spawn; `sh scripts/agents.lib.sh
+--harness <tier>` reads the prefix. **This repo runs from two harnesses — Claude
+Code and Codex — and the mapping has one half per session**, selected on
+`AGENT_SESSION_HARNESS` (Claude Code sets `CLAUDECODE` and needs nothing; a Codex
+session sets the variable — the policy file says how). In both halves the
+`reviewer` tier names the *other* harness: **the reviewer is never the implementer's
+vendor.** The worker prompts a dispatch fills are `.agents/prompts/`
+(`review-worker.md`, `implement-worker.md` — one per task kind, never per vendor).
+
 **This manual names no model; the mapping does.** Model identifiers rot on a
 vendor's schedule, so the tier → model mapping is data in `scripts/agents.config.sh`
 and the resolver is `scripts/agents.lib.sh` (`sh scripts/agents.lib.sh implementer`
 prints the mapped id). The kit ships that file empty; **this repo fills it in
-(ADR-0084)** — one harness, one provider — and `scripts/test/agents-mapping.test.mjs`
-fails if a tier is emptied or the cost seam collapses. (An unmapped tier would
-still be a working state: the resolver warns once, prints nothing, and the spawn
-inherits the session's own model.) The cost/benefit rubric for choosing a tier
-lives in `constitution/local-workflow.md`.
+(ADR-0084, amended 2026-09-21)** — two harnesses, one map each, the reviewer always
+crossing — and `scripts/test/agents-mapping.test.mjs` fails if a tier is emptied,
+the cost seam collapses, the reviewer stops crossing, or a dispatch's wiring
+stops resolving (dry-run, no tokens). (An unmapped tier would still be a working
+state: the resolver warns once, prints nothing, and the spawn inherits the
+session's own model.) The cost/benefit rubric for choosing a tier lives in
+`constitution/local-workflow.md`.
 
 ## Agent trust boundary (ADR-0069 is the contract)
 
@@ -212,6 +225,7 @@ fixes, and its findings enter the line at `/to-tickets`.
 | Provision new infrastructure             | `infra/terraform/scripts/tf.sh <env> plan`      |
 | Clean up old worktrees + sync main       | `/worktree-cleanup` (runs `scripts/worktree-cleanup.sh`; `--dry-run` to preview) |
 | Find an ADR                              | `docs/adr/INDEX.md`                             |
+| Get a cross-vendor review of a branch, locally | `sh scripts/agent-dispatch.sh reviewer --prompt-file .agents/prompts/review-worker.md --set BRANCH=$(git rev-parse HEAD) --set BASE=$(git rev-parse origin/main) --set-file SPEC=<file> --timeout 900` (SHAs, never ref names) — the `reviewer` tier always runs on the other harness (ADR-0084); `--dry-run` shows the command without spending a token |
 | Know where a skill came from             | `.agents/skills/LICENSE-mattpocock-skills.md`  |
 | Hold the code itself to a standard       | `constitution/shared-code-craft.md` — the thirteen portable craft rules; load it before writing or reviewing code |
 
