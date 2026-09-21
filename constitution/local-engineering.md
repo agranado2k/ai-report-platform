@@ -1,10 +1,27 @@
 # Local engineering — this stack's style, architecture, and boundaries
 
-Project-specific elaboration of the root `CLAUDE.md`. Read it before writing code in
+Project-specific elaboration of the root `AGENTS.md`. Read it before writing code in
 `packages/`, before touching `infra/`, and before adding any dependency. The portable
 reasoning behind several of these rules lives in `shared-invariants.md`.
 
 ## Style
+
+The three lines below are the **design brief** — the shape of the system, decided out
+loud (kit 0.15.0; `/design-brief` rewrites them when the shape stops fitting). Each has
+exactly two honest forms, a decision or an explicit `none — <reason>`, and each stays a
+bold label at the start of its own line because that shape is what the docs gate reads.
+
+**Paradigm**: functional and immutable in `packages/domain/` and `packages/application/`
+(ADR-024) — pure functions over `readonly` types returning `Result<T, E>`; classes and
+side effects only at the adapters (`packages/adapters/`, `apps/*`).
+
+**Architectural style**: hexagonal / ports-and-adapters (ADR-020) inside a Turborepo
+modular monolith — use cases depend on ports, Drizzle/R2/Clerk implementations live in
+adapters, and the one rule a newcomer breaks is importing an adapter from a use case.
+
+**Context map**: four bounded contexts integrated through domain events, with `UserId`
+and `OrgId` as the only shared kernel — declared in `docs/context-map.md` (ADR-0036,
+ADR-0064) and summarised in the glossary.
 
 - **Functional, immutable** for `packages/domain/` and `packages/application/` (ADR-024).
   No new FP libraries — vanilla TS plus the `Result<T, E>` type with `ok`/`err`. The
@@ -63,7 +80,12 @@ On a **stacked** branch pass the real base explicitly (`scripts/mutation-delta.s
 <base-branch>`): the `origin/main` default scopes the run to everything since main,
 so the mutants of the branch underneath are attributed to this one.
 
-Conventions and the red-green-refactor procedure itself live in `.claude/skills/tdd/SKILL.md` —
+**Mutation decision**: Stryker (`@stryker-mutator/vitest-runner`), on demand — `scripts/mutation-delta.sh [<base-branch>]`
+for the branch-scoped delta, `pnpm test:mutation` for the whole-domain calibration; never
+a gate (ADR-0081). On a PR, the `mutation-check` label makes `.github/workflows/mutation-delta.yml`
+post the same summary as one comment.
+
+Conventions and the red-green-refactor procedure itself live in `.agents/skills/tdd/SKILL.md` —
 that skill is the single home for them, not this file.
 
 ## Boundaries — what this repo is NOT

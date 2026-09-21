@@ -177,7 +177,7 @@
 # and an entire PR-flow capability silently absent. Names, never bytes: a
 # consumer is invited to adapt a skill's prose, so the manifest answers "do I
 # HAVE it?", and only that. The update recipe diffs this list against the
-# consumer's installed set — state, not delta, so skipped windows heal.
+# consumer's present set — state, not delta, so skipped windows heal.
 # UPDATING.md changed content with the bump (the worked-example transcripts
 # and their surrounding prose re-pinned — a content change by this manifest's
 # own precedent).
@@ -187,11 +187,11 @@
 # ≤0.10.0 adopting /explain-diff need the skill directory PLUS its two wiring
 # points — the Deliver-phase appendix bullet in /implement and the
 # explain-diff-appendix marker in the PR template. UPDATING.md moved with the
-# manifest: step 9a now OPENS with the inventory fence (manifest vs installed,
+# manifest: step 9a now OPENS with the inventory fence (manifest vs present,
 # printed before any per-skill diff) and carries that retroactive note under
 # "Arriving from 0.10.0 or older". The half-adopted STATE got its own detector:
 # scripts/docs-conformance/validators/skill-web.mjs joined the layer — it scans
-# installed skill bodies for references to skills that are not installed and
+# present skill bodies for references to skills that are not present and
 # WARNS, never fails (declining a skill is a legal recorded state; the gate's
 # engine now separates advisories from violations, and the reduced POSIX form
 # says it cannot run this scan). It reads claudeMdRefs.ignoreCommands, so one
@@ -208,7 +208,7 @@
 # tickets and was finished at the v0.11.0 tag.)
 # 0.12.0 — skill interiors join the gate (#79, from K2's oldest caveat, #18).
 # One file joined the layer: scripts/docs-conformance/validators/skill-paths.mjs.
-# Every installed skill body — SKILL.md and the sidecar markdown beside it —
+# Every present skill body — SKILL.md and the sidecar markdown beside it —
 # now has its repo-path references resolved, as WARNINGS on the 0.11.0
 # advisory channel. Warnings by discovery, not by softness: the spec ordered
 # violations, and implementation found the legal reading — VERSION SKEW. The
@@ -225,14 +225,517 @@
 # gains a skillPaths section — exemptFiles for upstream-verbatim documents,
 # and exemptTokens for paths that are legitimately absent until created (the
 # shipped entries: the dogfood report directory, made by the skill's first
-# run, and the example review workflow, installed by bootstrap from the
+# run, and the example review workflow, copied by bootstrap from the
 # templates tree). Take that section by hand at step 9d, or the gate warns on
 # the kit's own shipped skills. The validator's fixture tests join the
 # consumer-owned test directory alongside the others. One skill changed with
 # the wave: /merge-train's step-5 release note no longer names the kit's own
 # self-host suite by path — the first thing the new scan caught was the kit
 # pointing every consumer at a file bootstrap deletes (take via 9a).
-shared-layer: 0.12.0
+# 0.13.0 — the mutation decision, made out loud (#85, PRD #89 — and the
+# skill-visibility guidance of #86, PRD #88). One file joins the layer with
+# this wave: scripts/docs-conformance/validators/mutation-decision.mjs — an
+# advisory on the 0.11.0 warning channel: a stamped engineering article that
+# records no mutation decision prints a warning, never a failure, because the
+# article is consumer-owned prose and version skew is a sanctioned state;
+# promotion to a violation is a named future path, alongside skill-web's and
+# skill-paths'. One manifest-listed file changed content with it:
+# validators/claude-md-refs.mjs now EXPORTS its fence-stripper, so the new
+# validator reads quoted material by the gate's one definition of it.
+# UPDATING.md's transcripts moved with the wave (the adapters listing gained
+# a line, the manifest lists gained the validator, and the pinned versions
+# advanced).
+#   NON-MANIFEST HALF, enumerated: the engineering article template replaces
+# its bare mutation-tool blank with a labeled anchor line — "Mutation
+# decision:", filled in one of exactly two honest forms, a tool plus its
+# on-demand command or an explicit none-with-reason (your article is yours:
+# add the line by hand if you filled an older template). bootstrap's Next:
+# list names the decision beside the other day-one choices, and the setup
+# payload's hand-back tells the installing agent to surface it, never to
+# default to silence. adapters/ruby/ arrives as the second worked stack
+# example: mutant-rspec on demand, with the two field notes (value-object
+# block methods and module-function doubles are invisible to the kill loop)
+# that make a catastrophic first score read correctly. From the
+# skill-visibility half: the setup payload gains step 4 (native-read the
+# stamped manual, verify the chain's commands before reporting done),
+# bootstrap's Next: gains the start-your-session-here item, the kit README
+# says the same, and the stamped manual's chain section carries the
+# precondition in one harness-neutral sentence.
+
+# 0.14.0 — the skills' vendor-neutral home (#97, PRD #100). One file joins
+# the layer with the wave's gate slice:
+# scripts/docs-conformance/validators/skill-bridge.mjs — an advisory that
+# names the one failure shape the move added (a core.symlinks=false checkout
+# materializing the bridge as text files, blinding the harness that reads
+# only the old address; never a violation — a broken checkout must still run
+# the gate that diagnoses it). The skill-reading validators' baked default
+# follows the canonical home, and slash-command resolution gains a LEGACY
+# fallback: a skill living only at the pre-move address still resolves, so
+# staying put stays green — and both the slash-command web and the skill-body
+# scan ENUMERATE both homes, so a tree that never moved keeps its full
+# coverage instead of silently dropping to zero. Manifest-listed content
+# changes, beyond the joining file: validators/claude-md-refs.mjs,
+# validators/skill-web.mjs, validators/skill-paths.mjs and
+# docs-conformance/runner.mjs (the flip, the fallback, the dual enumeration
+# and its registration), plus UPDATING.md: the
+# recipe's kit-side skill paths follow the move below (the per-skill three-way
+# gains a yours/kit's split with a rename-aware diff, new-skill detection
+# spans both homes, the adopt fences lay the harness bridge), and the pinned
+# transcripts moved with it. scripts/check.sh: the reduced fallback's path
+# roots gain the new home. The skills themselves are name-manifested, not
+# byte-manifested, so the move itself is the wave's non-manifest half.
+#   NON-MANIFEST HALF, enumerated: every skill's canonical home is now
+# .agents/skills/ — the vendor-neutral address the Agent Skills ecosystem
+# reads — and .claude/skills/ holds one committed relative symlink per skill,
+# the per-skill-entry shape the one harness that reads only that address
+# documents and follows. bootstrap lays both sides in a fresh project, strips
+# both on a dogfood decline, and the adopt arm classifies skill collisions
+# against whichever address the target repo occupies. The gate's path roots
+# (your config.mjs) gain the new home; your skillsDir is yours and keeps
+# working at either address, since the gate reads through the symlinks. The
+# manual templates, README and setup payload name the canonical home. A
+# pre-0.14.0 project's real files at .claude/skills/ stay a legal permanent
+# state: a slash command resolves at your skillsDir OR at the legacy
+# address, forever, and nothing warns about it. UPDATING.md's step 9a-bis
+# carries the optional migration as one re-runnable fenced block (move the
+# real directories, lay the bridge, leave your skillsDir alone) plus the
+# Windows note the tripwire advisory backs; tests/docs-demo.sh C8 executes
+# that block against a genuine pre-move consumer, twice, and holds its end
+# state to what a fresh bootstrap produces.
+# 0.15.0 — the shape of the system, decided out loud (PRD #107). One file joins the layer
+# with the wave's first slice (#108):
+# scripts/docs-conformance/validators/design-brief.mjs — an advisory on the
+# 0.11.0 warning channel: a stamped engineering article that carries none of
+# the three architecture anchors (Paradigm, Architectural style, Context map)
+# in either honest form prints a warning, never a failure, because the article
+# is consumer-owned prose and an article filled from a pre-0.15.0 template is
+# sanctioned version skew; promotion to a violation is a named future path,
+# as mutation-decision's and skill-bridge's are. docs-conformance/runner.mjs
+# changed content (the registration). scripts/check.sh changed content twice:
+# the reduced fallback's notice names the scan it cannot run, and — the fix
+# this slice's demo forced — a GREEN gate now relays the harness's advisories
+# to stderr instead of swallowing them. Every advisory since 0.11.0 had been
+# audible only from the harness run directly, never through the wrapper the
+# hook and CI actually run; tests/docs-gate-advisory.test.sh (kit-only) holds
+# the relay from here on. UPDATING.md moved
+# with the bump (the pinned versions advanced; the transcripts re-captured).
+# A second file joins with #111:
+# scripts/docs-conformance/validators/housekeeping-due.mjs — the wave's
+# nudge. Standing instructions rot on a calendar and the diary's protocol is
+# event-triggered, so nothing ever said "it has been a while"; the diary's
+# Current state table now carries a `**Last housekeeping**` row holding the
+# ISO date of the last pass, and this advisory warns once that date is older
+# than the window the gate config names (housekeepingDue.windowDays, default
+# 30) — or warns naming the row when it is absent. Never a failure: an
+# overdue pass must not block a hotfix. scripts/check.sh's reduced notice
+# names it; runner.mjs registers it. With #110 a manifest-listed ARTICLE
+# changed content: constitution/shared-code-craft.md gains §13, the tactical
+# half of Domain-Driven Design in one portable paragraph — an invariant is
+# enforced inside the object that owns it, a value with meaning is its own
+# type, and every name is the glossary's — credited to Evans in the closing
+# paragraph beside the essay the rest condenses. A consumer takes it as a
+# re-read of one section and changes no command of theirs. That is the
+# manifest half; the tag closes it.
+#   NON-MANIFEST HALF, enumerated, in ticket order. From #108: the
+# engineering article template's Architecture section gains three labeled
+# anchor lines — "Paradigm:", "Architectural style:" and "Context map:" —
+# each filled in one of exactly two honest forms, a decision or an explicit
+# none-with-reason, in the shape the 0.13.0 mutation decision established
+# (your article is yours: add the lines by hand if you filled an older
+# template); your config.mjs (yours, never overwritten) gains a designBrief
+# policy section mirroring mutationDecision's — take it by hand at step 9d or
+# accept the default, which reads the same article; the kit glossary gains
+# **anchor** and **advisory** as terms. From #109: the glossary template
+# gains a Context map section — one line per edge, the same relationship
+# named from both sides, roles opposite — and "strategic design" joins its
+# banned words (say context map); the grilling skill's glossary sidecar
+# teaches the both-sides rule; your glossary is yours: add the section by
+# hand from the template's comment. From #110: the manual template's
+# article-layer line and quick-reference row say THIRTEEN craft rules — the
+# count had read "ten" since 0.10.0 added §11 and §12, and a stamped
+# consumer inherited the wrong number for five releases; the self-host suite
+# now holds both manuals to the article's section count (your stamped manual
+# is yours: correct the word by hand). From #111: the diary template's
+# Current state table gains the `**Last housekeeping**` row, stamped with the
+# bootstrap date (your diary is yours: add the row by hand, dated your last
+# pass or today), and your config.mjs gains the housekeepingDue section with
+# the window as data. From #112: the /design-brief skill joins the roster
+# (design it twice at architecture scale, compare on complexity, stop for a
+# yes, then write the three anchors, the glossary's context map and one
+# decision record) with its BRIEF-FORMAT sidecar and its bridge symlink; the
+# kit's own decision record 0002 pins "strategic" to Ousterhout's sense; take
+# the skill via 9a. From #113: the brief's entry points — bootstrap's Next:
+# list and the setup payload's hand-back name the design brief beside the
+# mutation decision (kit-side; nothing of yours moves), /to-tickets gains
+# rule 11 (a ticket that adds an abstraction or crosses a context edge cites
+# the brief or reopens it) and /improve-codebase-architecture sends a
+# style-level finding back to the brief (both via 9a), and the manual
+# template's chain section and quick-reference rows name both new skills
+# (via 9b). From #114: the /housekeeping skill joins the roster — the
+# recurring pass the housekeeping-due advisory sends an agent to: eight
+# checklist items each with a named source, Ousterhout's red-flag scan routed
+# to the architecture skill or back to the brief, never a fix of its own,
+# one write (the diary stamp) and one delegated action (the cleanup skill's
+# pruning) — with its CHECKLIST sidecar and bridge symlink; the advisory's
+# hint and the brief's entry points name it by command; take it via 9a.
+# From #115: UPDATING.md's step 9 carries an "Arriving from 0.14.0" note per
+# category with the take for each item above. That is the whole non-manifest
+# half.
+# 0.16.0 — the kit keeps its own house (PRD #124, from the first
+# housekeeping pass and the architecture review it routed to). Two files join
+# the layer. With the wave's first slice (#125):
+# scripts/manifest.lib.sh — the one grammar for VERSION's two sections.
+# Eleven hand-copied awk programs in three dialects read the manifest before,
+# and two disagreed on what an annotated entry means: bootstrap took the first
+# word, the gate took the whole line. The module reads the manifest on stdin,
+# prints one name per line (the first word of an entry; annotation is legal
+# in both sections), and is sourced by scripts/check.sh, bootstrap and the
+# suites. UPDATING.md's two fenced copies stay verbatim by contract (the
+# recipe runs in a consumer at an older release) and tests/manifest.test.sh
+# (kit-only) holds them equal to the module. With #128:
+# scripts/docs-conformance/validators/banned-words.mjs — an advisory that
+# reads the glossary's "Words this project does not use" section and warns on
+# each banned word in the manual layer and the skills, naming the word, the
+# line and the replacement, with an `Except:` carve-out per entry for a
+# legitimate sense; fences and code spans are silent, the shared articles are
+# excluded by default.
+# Shared files that changed content, by ticket. scripts/check.sh three times:
+# it sources the manifest module instead of carrying its own copy (#125); its
+# reduced form's path roots are the harness's list entry for entry — four
+# subtrees of .agents and .claude instead of the two whole trees — and match
+# by prefix, so a root may carry a `/` (#127); its no-node NOTICE names every
+# scan the runner registers, by id (#129, #128). scripts/docs-conformance/
+# context.mjs answers "is there a body?" with null (missing, a directory, a
+# dangling link), still throws on a body it cannot read, gains `kind` and
+# `readable`, and loses its recursive lister; validators/skill-bridge.mjs asks
+# those instead of catching errno codes, every verdict unchanged (#126).
+# runner.mjs registers the new advisory (#128) and names its list `findings`
+# (#138). scripts/agents.lib.sh's header is the contract alone — seam,
+# arguments, resolution orders, exit codes — and the incidents it recounted
+# are a dated diary entry; no behaviour moved (#137). UPDATING.md's Part 2
+# transcript is re-captured to its fixpoint for the sidecar move and the
+# joining validator, and its step 9a says a removed file inside a skill is a
+# delete (#138, #128). The kit's own suites hold each of these: manifest,
+# gate-path-roots, self-host's notice probe, the harness fixtures.
+# Finished at the v0.16.0 tag (#136 closes the wave).
+#   NON-MANIFEST HALF, enumerated, in ticket order. From #125: the test
+# harness gains a roster helper both skill suites use; the kit glossary gains
+# **manifest** as a term. From #128: the glossary template documents the
+# `Except:` carve-out shape, the gate policy file gains a `bannedWords` block
+# (glossary path, exclusions), and the grill-with-docs sidecar quotes the
+# banned phrase it mentions as a code span. From #135: the tdd sidecar's two
+# diagrams are mermaid and the grilling skill's file tree is a nested list,
+# never character art; the tdd skill's provenance line and the licence's
+# rows say so, and improve-codebase-architecture's PRESENTING.md names
+# mermaid as the report diagram language. From #138: the
+# diagnose skill's human-in-the-loop script moves one level up, to
+# .agents/skills/diagnose/hitl-loop.template.sh, and the explain-diff skill's
+# filename example carries a date placeholder. From #144: the implement
+# skill's Deliver step names the rule that the reviewer is never the model
+# that implemented, and the `reviewer self-implemented` domain a consumer may
+# map in scripts/agents.config.sh for the session that wrote its own diff.
+# The wave's kit-only half — fixture builders, the mutation wrapper, the
+# path-roots and notice probes, ADR-0003 and ADR-0004, the optional set as
+# data in bootstrap — never ships and is the diary's to tell.
+# 0.17.0 — the kit's prose uses its own words. No file joins or leaves the
+# layer; one shared file changed content: UPDATING.md's prose says *policy
+# files* where it said config files (step 9d renamed), *copied* where it
+# said installed, and quotes the banned phrase in 9c as a code span — the
+# shared-layer half of the kit's own rewording, which the advisory that
+# 0.16.0 shipped never scans (it reads a consumer's manual, articles and
+# skills). The release exists to make the same rewording reachable in the
+# skills and the adapters, which travel only at a tag.
+#   NON-MANIFEST HALF, enumerated, in ticket order. From #161: eight skills
+# lost a banned word to the glossary's term — design-brief, diagnose,
+# dogfood, housekeeping (CHECKLIST.md), improve-codebase-architecture,
+# prototype, review-pr, tdd — none changing what a skill does, and the kit's
+# glossary drops the `tool config` carve-out no prose used. From #164: the
+# adapters' README.md and node-ts/INSTALL.md and VERSION's own header prose
+# reworded the same way. From #167: claude-code/README.md, node-ts/README.md,
+# node-ts/evals/README.md and ruby/README.md reworded; the glossary carves
+# out `config-as-data` as a qualified use. Kit-only, the diary's to tell:
+# the release-delta probe (self-host F6) and the kit's own thirteen
+# rewordings.
+# 0.18.0 — a capability tier may name the AGENT HARNESS it runs in, and the
+# word "harness" stops meaning two things (ADR-0005). ONE FILE JOINS the
+# layer — scripts/agent-dispatch.sh,
+# which turns a resolved (agent harness, model) pair into a running worker and
+# is the kit's first executable spawn path. It exits 3 rather than an error
+# when a tier names no agent harness, which is every tier in every project that
+# does not ask for one, so it is inert until a project declares one. Three
+# shared files changed CONTENT.
+# scripts/agents.lib.sh gains that axis: a tier value may be written
+# `<agent harness>:<model id>`, and `--model` / `--harness` read the two
+# halves. Its old contract is unchanged in every particular — one answer on
+# stdout, diagnostics on stderr, unmapped warns once and exits 0 — and a value
+# with no prefix resolves exactly as it did. scripts/check.sh
+# prints `engine: docs harness` where it printed `engine: harness` — the gate's
+# own success line was using the word the glossary now bans, which is the
+# inconsistency the kit exists to prevent. UPDATING.md's two pinned transcripts
+# are re-captured to match; nothing else in the recipe moved, so a consumer
+# following it reads the same steps.
+#   THE CLAIM A CONSUMER MOST NEEDS: a project that declares no agent harness
+# cannot tell this release from the last. The resolver's third axis is opt-in
+# through a declaration that ships empty, an unprefixed tier value resolves
+# exactly as it did, and unmapped still warns once and exits 0.
+#   NON-MANIFEST HALF, enumerated. docs/domain-glossary.md gains **Docs
+# harness** and **Agent harness** as separate terms and bans the bare word,
+# with an Except clause carving out the four qualified forms and the word's
+# ordinary sense — a rig built to exercise code, which /diagnose uses and which
+# was never ambiguous here. docs/adr/0005-the-agent-harness-axis.md records the
+# axis, the dispatcher's home and the word; docs/adr/INDEX.md lists it;
+# bootstrap.sh's kit-own list keeps it out of consumer trees. AGENTS.md,
+# .agents/skills/implement/SKILL.md and .agents/skills/housekeeping/CHECKLIST.md
+# say which harness they mean at every use the gate flagged.
+# scripts/agents.config.sh — yours, and still shipped empty — documents the
+# third axis and adds AGENT_HARNESSES beside the tier mapping, and the two
+# invocation templates each declared agent harness needs. bootstrap.sh offers
+# to fill it: an agent-roster prompt that ASKS and records the operator's
+# answer and suggests neither a model id nor an agent harness — a hardcoded
+# list of vendor CLIs to probe PATH for would be the kit naming vendors' tools
+# just as a model id would. --with-agents / --no-agents skip the question, and
+# so does having no terminal.
+# tests/agent-harness.test.sh, tests/agent-dispatch.test.sh and
+# tests/agent-roster.test.sh are the axis's suites, named in the README's
+# runnable list and wired into the kit's own guards workflow; the dispatcher's
+# drives a stub agent harness rather than a vendor, so the suite tests the
+# wiring instead of somebody's account.
+# .agents/prompts/ carries what a dispatched worker is actually told: one file
+# per task kind (build a ticket, review a branch), never one per provider, for
+# the reason the CI review prompt already gives — asking two vendors different
+# questions measures the prompts rather than the models. Each ends in an output
+# contract the coordinating session reads, and each forbids push and merge in
+# words, because shared invariant §7 is not the dispatcher's to enforce.
+# .gitignore now excludes worktree/, making hard rule 1's claim about version
+# control true, and tests/self-host.test.sh holds it against git rather than
+# against the file. tests/implement-deliver.test.sh matches the delivery
+# mechanism's bold label instead of the prose after it.
+# 0.19.0 — the dispatcher's edges, found by using it. No file joins or leaves
+# the layer; two shared files changed CONTENT. scripts/agent-dispatch.sh no
+# longer lets a worker inherit the dispatcher's stdin: found live, dispatching
+# to an agent harness whose CLI reads stdin when it is not a tty — the worker
+# blocked forever on the inherited open pipe, and returned in fourteen seconds
+# with the pipe closed. The prompt reaches a worker by {prompt_file}, so a
+# template that redirects from it still gets it and one that does not gets
+# nothing. It also gains --timeout <seconds>: headless agent CLIs gate tool
+# calls on approvals, and headless there is no human, so a worker told to run
+# `git diff` in an approval-gated mode waited forever — found live. The
+# worker's whole process tree is killed and the caller sees 124, timeout(1)'s
+# convention and distinct from anything a worker exits with; the verdict is a
+# flag the watchdog writes, never an inference from the worker's own status.
+# scripts/agents.config.sh — yours — says what an approval-gated CLI needs
+# before it can be dispatched to: its own headless policy, or a timeout, or
+# both. And --set-file NAME=path fills a marker from a file rather than the
+# command line: a --set value is one argv element and a diff handed to a
+# reviewer worker overruns it, so a large value comes from a file that awk
+# reads directly, never crossing an exec.
+# nothing. And the docs harness's banned-words validator now scans the
+# GLOSSARY too — the canonical document for the language was the one file
+# free to contradict the rule it defines, and two of its own entries did until
+# a reviewer read them by hand; the banned section and every _Avoid_ item are
+# exempt, because writing the word is their job. So TWO shared files changed
+# content: scripts/agent-dispatch.sh and
+# scripts/docs-conformance/validators/banned-words.mjs. Two consumer-owned files
+# followed it, named here because the delta probe holds the note to what moved:
+# scripts/docs-conformance/config.mjs's scan-scope comment and
+# templates/docs/domain-glossary.md.template's, both of which described the old
+# scope. UPDATING.md's
+# transcripts are re-captured to the new version and nothing in the recipe
+# moved.
+#   A project that has never dispatched to another agent harness cannot tell
+# this release from the last.
+#   NON-MANIFEST HALF, enumerated. adapters/gemini-cli/README.md is the second
+# agent-harness adapter: the three details a dispatch to Gemini needs and the
+# dispatcher cannot state — the prompt on stdin by redirect, a trusted directory,
+# and an approval policy for headless tool calls — each found live.
+# tests/agent-dispatch.test.sh holds the
+# stdin rule with a FIFO held open by a background writer. The kit's own house
+# gained, since 0.18.0 and without a bump because none of it ships: a pinned
+# collation in tests/lib.sh (#186); one split-stream runner where three suites
+# had copies (#187); a named test reporter in kit-demo (#195); and the pairing
+# guard ON in this repository through a kit-only policy and wrapper (#190),
+# with ADR-0003 amended to say the arrangement is general. One of those did
+# touch a file every consumer has: .githooks/pre-push gained eight lines that
+# run the kit's own guard wrapper when it exists, and it never exists
+# downstream, so the hook behaves exactly as before in every consumer — a
+# consumer's update diff will list it, and this is why.
+# 0.20.0 — a dispatched worker is bounded (#205): in depth now, by a
+# BUDGET that is shown before it is enforced (ADR-0006), and in the scratch
+# it leaves behind. No file joins or leaves the layer; TWO shared files
+# changed CONTENT — scripts/agent-dispatch.sh, and UPDATING.md by re-pin,
+# which this manifest's 0.9.0 note counts as a content change and step 5 of
+# the recipe reports as one. The forcing incident is #205's, found live: the
+# suite's own nested stub — a worker whose tier maps back to its own agent
+# harness, a fork bomb with a model in the loop — filled a 2 vCPU host's
+# user-slice task ceiling (10008, systemd's 33% of threads-max) in under
+# three minutes, and from then on nothing of the operator's could fork.
+# Three answers, one per ticket, all in the dispatcher.
+#   From #206: a dispatch refuses to nest past a policy maximum depth. The
+# depth reaches every dispatch through the worker's environment,
+# AGENT_DISPATCH_DEPTH, the way the other per-dispatch facts do — a top-level
+# dispatch is depth 1 and a worker is spawned one deeper — and a dispatch
+# past AGENT_DISPATCH_MAX_DEPTH is refused before the tier is resolved or the
+# prompt is read: exit 4, distinct from every status the dispatcher itself
+# produces, with the depth, the maximum and the variable named on stderr. A
+# dispatch AT the maximum still runs, and --dry-run prints the depth. The kit
+# default is 3, the deepest legitimate shape today — a planner dispatching
+# implementers dispatching reviewers — and the policy file overrides it.
+#   From #207: the dispatcher derives a task ceiling and a memory ceiling for
+# the worker's whole process tree from THIS host at dispatch time — a
+# percentage of the smallest cgroup pids.max on the session's path (else the
+# per-user process limit) and of MemAvailable now, each clamped to a floor
+# and a ceiling, never a fixed number — and --dry-run prints both with the
+# host fact each came from, the clamp if one applied, the rung of the
+# enforcement ladder this host would offer (a transient scope under the user
+# service manager, else rlimits, else a loud no-op), and that NOTHING IS
+# APPLIED in this release. Three flags join: --budget-tasks <n>,
+# --budget-memory <MiB>, and --no-budget, which is loud. A dispatch inside a
+# budgeted worker reads the outer budget from AGENT_DISPATCH_BUDGET_TASKS and
+# AGENT_DISPATCH_BUDGET_MEMORY_MIB and derives nothing. Exit status 71
+# (EX_OSERR, "can't fork") is reserved for a worker that exceeds its budget;
+# nothing produces it yet. The depth maximum, the six budget values and the
+# sweep age below are read by one policy reader through one validator, so
+# the three cannot disagree about a leading zero. UPDATING.md's transcripts
+# are re-captured to the new version and nothing in the recipe moved — the
+# second content change above, and all of it.
+#   From #210: the dispatcher's scratch names itself — agent-dispatch.XXXXXX
+# under $TMPDIR, where `mktemp -d` alone named it tmp.XXXXXX — so a dispatch
+# that dies before its trap (killed, over a budget, on a host out of tasks)
+# leaves a directory that is dispatch scratch by name alone; 267 anonymous
+# ones on one host is why. On entry, after the depth refusal and before
+# making its own, a dispatch sweeps every sibling carrying the prefix that
+# is at least the SWEEP AGE old and says on stderr how many went; a younger
+# one may be a dispatch still running and is left alone, and nothing without
+# the prefix is ever touched. The age is AGENT_DISPATCH_SWEEP_DAYS in the
+# policy file, whole days, kit default one — POSIX find's `-mtime` is the
+# age test the sweep is written to, so days is the unit — and a --timeout
+# that reaches it is refused, so scratch past the sweep age was never a
+# worker still running UNDER A TIMEOUT. An untimed worker that outlives the
+# age has its scratch removed under it, harmlessly: it took its prompt at
+# exec and never writes there again. A --dry-run sweeps nothing.
+#   From #208: the derived budget of #207 is now APPLIED. The dispatcher runs
+# the worker inside the strongest mechanism the host offers, probed at dispatch
+# time and pre-flighted before the spawn: a named transient scope under the
+# user service manager (systemd-run --user --scope with TasksMax and MemoryMax,
+# plus MemorySwapMax=0 and OOMPolicy=continue so the memory ceiling bites at
+# once and a wrapper inside the scope survives to read the counters — ADR-0006
+# clause 5, amended where building refined its bare command); else rlimits in
+# the worker's own shell (ulimit -u/-p and -d, weaker and best-effort); else a
+# loud no-op. A worker that exceeds its budget makes the dispatcher exit 71
+# (EX_OSERR), the verdict read from the scope's pids.events / memory.events
+# counters and never from the worker's own status, with stderr naming which
+# ceiling was hit; a verdict that cannot be read is said, never a silent
+# pass-through; on the rlimit rung a hit is unobservable and the worker's
+# status passes through. --timeout and the budget compose — whichever fired
+# first, read from the counters before the tree is signalled, and the whole
+# scope is killed so the tree is gone either way. A nested dispatch reads
+# AGENT_DISPATCH_BUDGET_TASKS / _MEMORY_MIB from its environment, opens no
+# second scope (a scope inside a scope is a sibling that escapes), and an
+# inherited budget wins over --no-budget. The floor note, the off switch and
+# the no-mechanism note, dry-run-only until now, are lifted to every dispatch;
+# the enforced: dry-run line now says the budget IS applied.
+#   From #209: the dispatcher's derivation became a SEAM the kit's own
+# test harness takes the budget through, so every suite under tests/ runs inside
+# the budget a worker gets. scripts/agent-dispatch.sh now detects being
+# SOURCED (ZSH_EVAL_CONTEXT, then $0 — scripts/agents.lib.sh's own test) and
+# then defines its budget prefix and returns at a "dispatch proper" line
+# before any argument is parsed, scratch swept, tier resolved or prompt read:
+# _budget_derive (the derivation, the rung and NPROC_FLAG, from the flags,
+# the environment and the host), _budget_scope_props and
+# _budget_counters_text, with _dispatch_here=<its directory> set beforehand
+# the way _agents_here is. Executed, it is the dispatcher it was — the
+# derivation block is a function called where it stood, and the counters
+# heredoc is the same text written to the same file. One more content
+# change to scripts/agent-dispatch.sh — the file every clause above changed —
+# and the whole of #209's shared-layer half; nothing joins or leaves the layer.
+#   A top-level dispatch on a host WITHOUT a user service manager and without
+# rlimits cannot tell this release from the last: its depth is 1, its statuses
+# are untouched, the eight new variables ship empty, and the budget is a loud
+# no-op. On a host that CAN bound one — most — the worker now runs inside a
+# budget it did not before: a within-budget worker behaves as it always did and
+# exits 0, but a runaway is stopped at its ceiling and the dispatch exits 71,
+# and the operator's session survives it. One that has dispatched before also
+# sees a scratch directory with a name, and hears about a sweep only when
+# there was something to sweep. A consumer that sources the dispatcher gets
+# the budget seam; one that only ever runs it sees no difference at all.
+#   NON-MANIFEST HALF, enumerated. docs/adr/0006-the-worker-budget-is-derived-from-the-host.md
+# records the budget decision — what a budget is, the derivation, where
+# policy lives, the ladder, nesting, the status, and the two options rejected
+# (a fixed cap; lowering the slice's own TasksMax); #208 amends it by a dated
+# block under More information — clause 5 (the scope command gains
+# MemorySwapMax=0 and OOMPolicy=continue and a unit name; the rung is decided
+# by a pre-flight, never by a re-run), clause 6 (nothing observed on the
+# rlimit rung; an unreadable verdict is loud; whichever fired first is read
+# from the counters) and clause 8 (the notes lifted, the enforced line now
+# positive); docs/adr/INDEX.md lists it and carries the amendment on its
+# row, and bootstrap.sh's kit-own list keeps it out of consumer trees.
+# docs/domain-glossary.md gains **Budget** under Process, citing it, and no
+# term for the depth: depth is a property of a dispatch, not a concept; for
+# #210 it gains **Dispatch scratch** and **Sweep age** beside it, and for
+# #208 **Sweep age** says what a sweep does to a scope-rung verdict.
+# scripts/agents.config.sh — yours — documents AGENT_DISPATCH_MAX_DEPTH and
+# AGENT_DISPATCH_SWEEP_DAYS beside the timeout note and gains the six
+# AGENT_BUDGET_* variables under a note in the same voice, all eight shipped
+# empty (empty is the kit default); add the blocks by hand from the kit's
+# copy. /housekeeping's CHECKLIST.md item 5 lists the dispatch scratch on
+# the host by name and age, and its SKILL.md's item line says so.
+# tests/agent-dispatch.test.sh holds the ceiling with a stub agent harness
+# that re-dispatches itself and counts its workers, holds the budget's
+# arithmetic against a fake host handed to the dispatcher through the
+# test-only AGENT_DISPATCH_HOST_ROOT, the clamps, the policy read, the
+# fallback to the per-user process limit, the flags, the inherited case and
+# the probed rung, and holds each sweep line through the dispatch seam, with
+# a KILLed dispatch as the fixture that leaves scratch behind; for #208 it
+# drives real runaways under small budgets through the dispatch seam — a
+# self-spawning fork loop stopped at the task ceiling (exit 71, the calling
+# shell still forking after), a self-bounding allocation stopped at the memory
+# ceiling (71), a fork loop under the rlimit rung refused inside the worker's
+# own shell with the dispatcher's limits and cleanup untouched, --no-budget
+# running unbounded and loud, the rlimit rung applying ulimit -u/-p and -d on
+# both spawn paths, --timeout composing with the budget both ways (the
+# ceiling first, and the ceiling before a timeout), a double-forked child
+# gone with the scope, an inherited dispatch opening no scope and passing
+# the exported pair on, a pre-flight refusal falling to rlimits with one
+# run, a missing marker reported and never re-run, and a fake systemd-run
+# driving every verdict branch — task hit, memory hit, the pids-only rung's
+# guard, and a missing, malformed or unreadable verdict said aloud;
+# tests/housekeeping-skill.test.sh holds the checklist line. UPDATING.md's
+# Part 2 gate transcript gains the skill-paths advisory the checklist's new
+# `scripts/agents.config.sh` reference raises in a consumer that has not
+# taken the policy file yet. For #209, kit-only and never shipped:
+# tests/lib.sh — the shared test harness — sources the dispatcher's seam the
+# moment a suite sources it, derives the budget under the kit's own policy
+# file scripts/agents.kit.config.sh (which now says so, and stays at the
+# defaults), and runs the suite again inside it down the same ladder — a
+# named transient scope with a wrapper that reads the counters and turns a
+# hit into a FAIL line naming the ceiling and exit 71, else ulimit -u/-p and
+# -d in the suite's own shell, else a loud no-op — with AGENT_SUITE_BUDGET as
+# the one switch: `off` runs a suite bare and loudly, `applied: …` is the
+# marker the inner run carries and the recursion bound, anything else is
+# refused, and inside a dispatched worker's budget the suite opens none of
+# its own; its header documents all of it. tests/adapters-demo.sh,
+# tests/setup-demo.sh and tests/kit-demo.sh source the test harness for the pin
+# and the budget alone and keep their own assertion helpers.
+# tests/suite-budget.test.sh holds the seam and the test harness: sourcing
+# defines and runs nothing, the derivation answers the dry run's numbers, a
+# green stub suite runs once inside a budget from a fake host and says so, a
+# fork loop and a greedy allocation come back as failures naming the ceiling
+# with exit 71 and the calling shell still forking, the rlimit rung applies
+# and refuses forks inside the suite's own shell, the off switch, the marker,
+# a bad value, a scope that refuses to open and a verdict that cannot be
+# read; .github/workflows/kit-ci.yml gives it a job, bootstrap.sh's KIT_ONLY
+# list names it, README.md describes it. docs/adr/0006 gains a second dated
+# amendment recording what #209 settled, docs/adr/INDEX.md says so on its
+# row, and docs/domain-glossary.md's **Budget** and **Suite** entries now say
+# a suite runs inside one. README.md's shared-layer marker and the pins in
+# tests/docs-demo.sh and tests/kit-demo.sh moved 0.19.0 -> 0.20.0 with the
+# release, as every bump moves them.
+#   From #87 (independent of the budget work, landing in the same untagged
+# interval): constitution/AGENTS.md.template's hard rule 1 gains a gotcha —
+# an in-tree worktree/<slug> and a linter that resolves config from the
+# topmost file inspect zero files inside a worktree. Consumer-facing prose,
+# not manifest content.
+shared-layer: 0.20.0
 
 # NOT shared layer, and deliberately so: scripts/guards.config.sh. It is the
 # only file the guards read policy from, and its whole purpose is to be edited
@@ -253,6 +756,8 @@ files:
   UPDATING.md
   scripts/guards.lib.sh
   scripts/agents.lib.sh
+  scripts/agent-dispatch.sh
+  scripts/manifest.lib.sh
   scripts/tdd-pairing-guard.sh
   scripts/tdd-pairing-guard-ci.sh
   scripts/behavior-delta.sh
@@ -263,6 +768,11 @@ files:
   scripts/docs-conformance/validators/claude-md-refs.mjs
   scripts/docs-conformance/validators/skill-web.mjs
   scripts/docs-conformance/validators/skill-paths.mjs
+  scripts/docs-conformance/validators/mutation-decision.mjs
+  scripts/docs-conformance/validators/design-brief.mjs
+  scripts/docs-conformance/validators/housekeeping-due.mjs
+  scripts/docs-conformance/validators/skill-bridge.mjs
+  scripts/docs-conformance/validators/banned-words.mjs
 
 # The SKILLS the release ships — a NAME-LEVEL manifest, deliberately not part
 # of files: above. A skill's prose is yours to adapt from the moment bootstrap
@@ -275,11 +785,13 @@ files:
 # (bootstrap asks before installing it) — declining it is a clean state, not
 # a gap.
 skills:
+  design-brief
   diagnose
   dogfood            optional — bootstrap asks; declining is a recorded choice
   explain-diff
   grill-me
   grill-with-docs
+  housekeeping
   implement
   improve-codebase-architecture
   merge-train
@@ -296,37 +808,48 @@ skills:
 # ---------------------------------------------------------------------------
 # Two files above are listed as shared layer but are, in THIS repo, a RECORDED
 # LOCAL FORK — they exist at the pinned paths (so `scripts/check.sh` is
-# satisfied), but their CONTENT diverges from v0.12.0 on purpose:
+# satisfied), but their CONTENT diverges from v0.20.0 on purpose:
 #
-#   scripts/docs-conformance/context.mjs   the v0.12.0 context VERBATIM plus a
-#                                          local `paths` map on the returned ctx
-#                                          (the eight local validators read it).
-#                                          list/read/exists/config are unchanged,
-#                                          so the shared validators run against it.
-#   scripts/docs-conformance/runner.mjs    registers ELEVEN validators, not the
-#                                          three v0.12.0 ships: the kit's
-#                                          claude-md-refs + skill-web + skill-paths
-#                                          PLUS eight local docs-skeleton
-#                                          validators (adr-index-sync, adr-madr,
+#   scripts/docs-conformance/context.mjs   the v0.20.0 context VERBATIM plus two
+#                                          local additions on the returned ctx:
+#                                          `listRecursive` (event-names walks
+#                                          packages/domain/src) and the `paths`
+#                                          map (the eight local validators read
+#                                          it). read/kind/readable/list/exists
+#                                          are unchanged, so the shared
+#                                          validators run against it untouched.
+#   scripts/docs-conformance/runner.mjs    registers SIXTEEN validators, not the
+#                                          eight v0.20.0 ships: the kit's eight
+#                                          (banned-words, claude-md-refs,
+#                                          design-brief, housekeeping-due,
+#                                          mutation-decision, skill-bridge,
+#                                          skill-paths, skill-web) PLUS eight
+#                                          local docs-skeleton validators
+#                                          (adr-index-sync, adr-madr,
 #                                          glossary-terms, event-names,
 #                                          feature-presence, feature-executes,
 #                                          gherkin-structure, openapi-structure).
 #
 # Why: centaur-spec adopted the docs-conformance engine before v0.10.0 and grew
 # eight local validators that read `ctx.paths`. v0.10.0 upstreamed only
-# `claude-md-refs` and deleted both the extra validators and `ctx.paths`; 0.11.0
-# and 0.12.0 then ADDED `skill-web` and `skill-paths` to the shared layer. Taking
-# runner.mjs/context.mjs verbatim would silently drop the eight checks this repo
-# depends on, so they stay forked while `index.mjs` and every
-# `validators/*.mjs` the kit ships (claude-md-refs, skill-web, skill-paths) are
-# taken verbatim and registered alongside the local eight. When the kit
-# upstreams the docs-skeleton validators (its runner.mjs comment names this as
-# planned work), this fork can retire. See docs/diary.md and
-# constitution/local-workflow.md for the same note in prose.
+# `claude-md-refs` and deleted both the extra validators and `ctx.paths`; every
+# release since has ADDED kit validators to the shared layer, and each is taken
+# verbatim and registered alongside the local eight. Taking runner.mjs /
+# context.mjs verbatim would silently drop the eight checks this repo depends
+# on, so they stay forked. When the kit upstreams the docs-skeleton validators
+# (its runner.mjs comment names this as planned work), this fork can retire.
+# See docs/diary.md and constitution/local-workflow.md for the same note in
+# prose. Two side effects of the fork are recorded there too: the kit's
+# "bare fixture → exit 0" end-to-end tests are omitted with a NOTE, and the
+# kit-verbatim .mjs files are exempt from the Biome formatter (biome.json).
 #
 # The `skills:` manifest above is the kit's shipped set, taken wholesale. This
-# repo's own installed set deviates by name in two recorded ways: it ships
-# `ce-dogfood` where the kit ships the optional `dogfood`, and (as of this
-# update) it now carries `explain-diff`. The skills' BODIES are adapted to this
-# stack throughout (ADR numbers, this repo's tools) — expected for a non-shared,
-# name-level manifest.
+# repo's own installed set deviates by name in one recorded way: it ships
+# `ce-dogfood` where the kit ships the optional `dogfood` (a recorded decline of
+# the kit's skill, not a gap), and it carries four local skills the kit does not
+# (`report-comments`, `review-and-evaluate`, `zoom-out`, `ce-dogfood`). The
+# skills live at the 0.14.0 canonical home `.agents/skills/` with the
+# `.claude/skills/` symlink bridge. Their BODIES are adapted to this stack
+# throughout (ADR numbers, this repo's tools, Opus/Haiku agent labels) —
+# expected for a non-shared, name-level manifest; `/merge-train`, `/pr-iterate`
+# and `/worktree-cleanup` are deliberate local forks (ADR-025/0044/0077 wiring).

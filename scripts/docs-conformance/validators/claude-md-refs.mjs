@@ -51,7 +51,10 @@ export const id = "claude-md-refs";
 
 const DEFAULT_ROOT_MANUAL = "AGENTS.md";
 const DEFAULT_CONSTITUTION_DIR = ".claude/constitution";
-const DEFAULT_SKILLS_DIR = ".claude/skills";
+export const DEFAULT_SKILLS_DIR = ".agents/skills";
+// The pre-0.14.0 skills address. Deliberately NOT configurable: it names one
+// historical layout, and a knob would invite pointing it somewhere new.
+export const LEGACY_SKILLS_DIR = ".claude/skills";
 
 // A shim's two legal line shapes. The import is the line the tool resolves; the
 // comment is an HTML comment, which renders as nothing and therefore cannot be
@@ -86,6 +89,19 @@ const COMMAND_TOKEN = /(?:^|[\s([{"'|])\/([a-z][a-z0-9-]*)(?=$|[\s)\]}"'|,.;:!?]
 // nested manual went unchecked. A bare package specifier (`@scope/name`) is
 // still not a path — the dotted-final-segment rule below sees to that.
 const PKG_RELATIVE = /^[\w.@-]+(?:\/[\w.@-]+)*\/?$/;
+
+/**
+ * The homes a skill may live in, configured one first, then the two the kit
+ * knows by name — de-duplicated, so a project already on one of them lists it
+ * once. Symmetric on purpose: the earlier form appended the legacy home only
+ * when the configured home was NOT it, which left a project configured ONTO
+ * the legacy address unable to see the canonical one at all. That is the
+ * layout a pre-0.14.0 consumer carries in a config nobody has edited, so it
+ * was the least deserving of a blind spot.
+ */
+export function skillHomes(skillsDir) {
+  return [...new Set([skillsDir, DEFAULT_SKILLS_DIR, LEGACY_SKILLS_DIR])];
+}
 
 export function run(ctx) {
   const cfg = ctx.config.claudeMdRefs ?? {};
@@ -227,8 +243,12 @@ function normalizeSpan(raw) {
  * treatment — a manual reaches for `~~~` precisely to show a ``` fence
  * verbatim, which is the case that leaves stray backticks behind. Fences may be
  * indented (lists), so anchor on optional leading whitespace.
+ *
+ * Exported: every validator that scans document content is expected to strip
+ * fences first (skill-paths does via pathRefs; mutation-decision imports this
+ * directly), so quoted material never counts as the real thing.
  */
-function stripFences(raw) {
+export function stripFences(raw) {
   return raw.replace(/^[ \t]*(```|~~~)[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
 }
 
@@ -285,12 +305,19 @@ function checkOne(ctx, file, base, pathRe) {
 
   for (const name of [...commands].sort()) {
     if (ignore.has(`/${name}`)) continue;
-    if (!ctx.exists(`${skillsDir}/${name}/SKILL.md`)) {
+    // The LEGACY fallback mirrors skill-paths' .template rule: one resolution
+    // covers both sides of the 0.14.0 home move. A project whose skills still
+    // live at the pre-move address — staying put, or the adopt arm's
+    // identical-copy case — is a sanctioned permanent state, so a command
+    // resolves at the configured home OR the legacy one.
+    if (!skillHomes(skillsDir).some((d) => ctx.exists(`${d}/${name}/SKILL.md`))) {
       out.push({
         validator: id,
         file,
         rule: "skill-missing",
-        message: `references \`/${name}\` but ${skillsDir}/${name}/SKILL.md does not exist`,
+        message: `references \`/${name}\` but ${skillsDir}/${name}/SKILL.md does not exist${
+          skillsDir === LEGACY_SKILLS_DIR ? "" : ` (nor at the legacy ${LEGACY_SKILLS_DIR})`
+        }`,
         hint: "Create the skill, remove the reference, or add it to claudeMdRefs.ignoreCommands with a reason.",
       });
     }

@@ -32,8 +32,8 @@ const CONFORMANT = {
     "The `.husky/pre-push` hook runs the docs guard.",
   ].join("\n"),
   ...SHIMS,
-  ".claude/skills/tdd/SKILL.md": "# tdd",
-  ".claude/skills/pr-iterate/SKILL.md": "# pr-iterate",
+  ".agents/skills/tdd/SKILL.md": "# tdd",
+  ".agents/skills/pr-iterate/SKILL.md": "# pr-iterate",
   "scripts/worktree-cleanup.sh": "#!/bin/sh\n",
   ".husky/pre-push": "pnpm docs:check\n",
 };
@@ -182,13 +182,15 @@ test("checks every /-token in a span that opens with a slash command", () => {
   cleanup(ctx);
 });
 
-test("checks .claude/skills and .claude/hooks literal path references", () => {
+test("checks skill and hook literal path references, at both skill roots", () => {
   const ctx = ctxFor({
     ...CONFORMANT,
+    ".claude/skills/legacy-note.md": "a file living at the pre-0.14.0 root\n",
     "AGENTS.md": [
       CONFORMANT["AGENTS.md"],
-      "The procedural skill is at `.claude/skills/tdd/SKILL.md`.",
-      "See also `.claude/skills/ghost/SKILL.md`.",
+      "The procedural skill is at `.agents/skills/tdd/SKILL.md`.",
+      "A note still at the old root: `.claude/skills/legacy-note.md`.",
+      "See also `.agents/skills/ghost/SKILL.md`.",
       "Enforcement lives in `.claude/hooks/tdd-guard.sh`.",
     ].join("\n"),
   });
@@ -671,5 +673,111 @@ test("stays silent about portability when the shared article does not exist", ()
   const ctx = ctxFor(CONFORMANT);
   const out = run(ctx);
   assert.deepEqual(out, []);
+  cleanup(ctx);
+});
+
+test("a slash command resolves at the legacy skills address too — pre-move layouts stay legal", () => {
+  // The 0.14.0 home move: skillsDir points at .agents/skills, but a consumer
+  // whose skills still live at .claude/skills (staying put, or the adopt
+  // arm's identical-copy case) is a sanctioned permanent state, not a
+  // violation.
+  const SHIM =
+    "<!-- Shim: the agent manual is AGENTS.md. Edit that file, not this one. -->\n@AGENTS.md\n";
+  // The skill lives ONLY at the legacy address. Pointing this fixture at the
+  // canonical one (as it first did) made the case indistinguishable from the
+  // ordinary one above it: the legacy probe could be deleted outright and the
+  // whole suite stayed green — the compatibility promise this wave sells,
+  // with no failing check behind it.
+  const ctx = ctxFor({
+    "AGENTS.md": "Write it test-first with `/tdd`.\n",
+    "CLAUDE.md": SHIM,
+    "GEMINI.md": SHIM,
+    ".claude/skills/tdd/SKILL.md": "# tdd\n",
+  });
+  const out = run(ctx).filter((f) => f.rule === "skill-missing");
+  assert.deepEqual(out, []);
+  cleanup(ctx);
+});
+
+test("the baked default is the canonical home — a config naming no skillsDir still resolves", () => {
+  // Every other fixture inherits defaultConfig, which sets skillsDir
+  // explicitly, so DEFAULT_SKILLS_DIR is unreachable under test without this
+  // case: flipping the constant back to .claude/skills left the suite green.
+  const SHIM =
+    "<!-- Shim: the agent manual is AGENTS.md. Edit that file, not this one. -->\n@AGENTS.md\n";
+  const cfg = configWith({ skillsDir: undefined });
+  const ctx = ctxFor(
+    {
+      "AGENTS.md": "Write it test-first with `/tdd`.\n",
+      "CLAUDE.md": SHIM,
+      "GEMINI.md": SHIM,
+      ".agents/skills/tdd/SKILL.md": "# tdd\n",
+    },
+    cfg,
+  );
+  assert.deepEqual(
+    run(ctx).filter((f) => f.rule === "skill-missing"),
+    [],
+  );
+  cleanup(ctx);
+});
+
+test("the skill-missing message names the legacy address only when it is not already the configured one", () => {
+  const SHIM =
+    "<!-- Shim: the agent manual is AGENTS.md. Edit that file, not this one. -->\n@AGENTS.md\n";
+  const files = {
+    "AGENTS.md": "Run `/ghost` for nothing.\n",
+    "CLAUDE.md": SHIM,
+    "GEMINI.md": SHIM,
+  };
+
+  // Canonical default: the reader is told both addresses were checked.
+  const canonical = ctxFor(files);
+  const fromCanonical = run(canonical).filter((f) => f.rule === "skill-missing");
+  assert.equal(fromCanonical.length, 1);
+  assert.match(fromCanonical[0].message, /nor at the legacy \.claude\/skills/);
+  cleanup(canonical);
+
+  // A project configured ONTO the legacy home must not be told the gate also
+  // looked at the legacy home — it is the same directory, named twice.
+  const legacy = ctxFor(files, configWith({ skillsDir: ".claude/skills" }));
+  const fromLegacy = run(legacy).filter((f) => f.rule === "skill-missing");
+  assert.equal(fromLegacy.length, 1);
+  assert.doesNotMatch(fromLegacy[0].message, /nor at the legacy/);
+  cleanup(legacy);
+});
+
+test("a command with a skill at neither address is still skill-missing", () => {
+  const SHIM =
+    "<!-- Shim: the agent manual is AGENTS.md. Edit that file, not this one. -->\n@AGENTS.md\n";
+  const ctx = ctxFor({
+    "AGENTS.md": "Run `/ghost` for nothing.\n",
+    "CLAUDE.md": SHIM,
+    "GEMINI.md": SHIM,
+  });
+  assert.ok(hasRule(run(ctx), "skill-missing"));
+  cleanup(ctx);
+});
+
+test("a command resolves at the canonical home even when the config names the legacy one", () => {
+  // Resolution was asymmetric the same way enumeration was: configured onto
+  // .claude/skills, the canonical home was never probed, so a consumer who
+  // took the kit's skills but never edited their config got skill-missing
+  // for every one of them.
+  const SHIM =
+    "<!-- Shim: the agent manual is AGENTS.md. Edit that file, not this one. -->\n@AGENTS.md\n";
+  const ctx = ctxFor(
+    {
+      "AGENTS.md": "Write it test-first with `/tdd`.\n",
+      "CLAUDE.md": SHIM,
+      "GEMINI.md": SHIM,
+      ".agents/skills/tdd/SKILL.md": "# tdd\n",
+    },
+    configWith({ skillsDir: ".claude/skills" }),
+  );
+  assert.deepEqual(
+    run(ctx).filter((f) => f.rule === "skill-missing"),
+    [],
+  );
   cleanup(ctx);
 });

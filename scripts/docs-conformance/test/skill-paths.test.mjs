@@ -17,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // consumer (bootstrap stamped it) and right in the kit (only the .template
 // exists here).
 const CLEAN = {
-  ".claude/skills/worktree-cleanup/SKILL.md":
+  ".agents/skills/worktree-cleanup/SKILL.md":
     "# worktree-cleanup\nWraps `scripts/worktree-cleanup.sh`; the diary is `docs/diary.md`.\n",
   "scripts/worktree-cleanup.sh": "#!/bin/sh\n",
   "docs/diary.md": "# diary\n",
@@ -36,13 +36,13 @@ test("a dead path in a skill body is reported, as a warning", () => {
   // article a later release delivers.
   const ctx = ctxFor({
     ...CLEAN,
-    ".claude/skills/worktree-cleanup/SKILL.md":
+    ".agents/skills/worktree-cleanup/SKILL.md":
       "# worktree-cleanup\nWraps `scripts/no-such-script.sh`.\n",
   });
   const out = run(ctx);
   assert.equal(out.length, 1);
   assert.ok(hasRule(out, "skill-path-missing"));
-  assert.equal(out[0].file, ".claude/skills/worktree-cleanup/SKILL.md");
+  assert.equal(out[0].file, ".agents/skills/worktree-cleanup/SKILL.md");
   assert.match(out[0].message, /no-such-script\.sh/);
   assert.equal(out[0].severity, "warning");
   cleanup(ctx);
@@ -50,7 +50,7 @@ test("a dead path in a skill body is reported, as a warning", () => {
 
 test("a path that resolves only via its .template source is silent — the same skill is right on both sides of bootstrap", () => {
   const ctx = ctxFor({
-    ".claude/skills/merge-train/SKILL.md":
+    ".agents/skills/merge-train/SKILL.md":
       "# merge-train\nThe merge method lives in `constitution/local-workflow.md`.\n",
     // Content is irrelevant — the fallback is an existence check; a real mark
     // here would (correctly) trip the gate's own placeholder scan on this file.
@@ -63,11 +63,11 @@ test("a path that resolves only via its .template source is silent — the same 
 test("sidecar markdown inside a skill directory is scanned too", () => {
   const ctx = ctxFor({
     ...CLEAN,
-    ".claude/skills/worktree-cleanup/DETAILS.md": "See `scripts/vanished.sh` for the mechanics.\n",
+    ".agents/skills/worktree-cleanup/DETAILS.md": "See `scripts/vanished.sh` for the mechanics.\n",
   });
   const out = run(ctx);
   assert.equal(out.length, 1);
-  assert.equal(out[0].file, ".claude/skills/worktree-cleanup/DETAILS.md");
+  assert.equal(out[0].file, ".agents/skills/worktree-cleanup/DETAILS.md");
   cleanup(ctx);
 });
 
@@ -75,13 +75,13 @@ test("an exempted file's interior is skipped entirely, by reviewable config", ()
   const cfg = {
     ...defaultConfig,
     skillPaths: {
-      exemptFiles: [".claude/skills/worktree-cleanup/DETAILS.md"],
+      exemptFiles: [".agents/skills/worktree-cleanup/DETAILS.md"],
     },
   };
   const ctx = ctxFor(
     {
       ...CLEAN,
-      ".claude/skills/worktree-cleanup/DETAILS.md":
+      ".agents/skills/worktree-cleanup/DETAILS.md":
         "Upstream-verbatim: see `scripts/vanished.sh`.\n",
     },
     cfg,
@@ -98,7 +98,7 @@ test("an exempted token is skipped everywhere — for paths that exist only afte
   const ctx = ctxFor(
     {
       ...CLEAN,
-      ".claude/skills/worktree-cleanup/SKILL.md":
+      ".agents/skills/worktree-cleanup/SKILL.md":
         "# worktree-cleanup\nWrite the run up under `docs/reports/`.\n",
     },
     cfg,
@@ -110,7 +110,7 @@ test("an exempted token is skipped everywhere — for paths that exist only afte
 test("fenced blocks are quoted material, not references", () => {
   const ctx = ctxFor({
     ...CLEAN,
-    ".claude/skills/worktree-cleanup/SKILL.md": [
+    ".agents/skills/worktree-cleanup/SKILL.md": [
       "# worktree-cleanup",
       "```sh",
       "cat scripts/only-in-a-fence.sh",
@@ -125,7 +125,7 @@ test("fenced blocks are quoted material, not references", () => {
 test("a directory that is not a skill (no SKILL.md) is not scanned", () => {
   const ctx = ctxFor({
     ...CLEAN,
-    ".claude/skills/notes/README.md": "See `scripts/gone.sh`.\n",
+    ".agents/skills/notes/README.md": "See `scripts/gone.sh`.\n",
   });
   assert.deepEqual(run(ctx), []);
   cleanup(ctx);
@@ -134,8 +134,8 @@ test("a directory that is not a skill (no SKILL.md) is not scanned", () => {
 // NOTE (centaur-spec local deviation): the kit's "end to end … gate still exits
 // 0" test is intentionally omitted here. It spawns the full index.mjs against a
 // BARE skill fixture and asserts exit 0 — which holds only for the kit's
-// three-validator runner. This repo's runner.mjs is a recorded local fork that
-// registers ELEVEN validators (see VERSION), so a bare fixture correctly trips
+// eight-validator runner. This repo's runner.mjs is a recorded local fork that
+// registers SIXTEEN validators (see VERSION), so a bare fixture correctly trips
 // the eight local docs-skeleton validators (adr-index-sync, event-names, …) and
 // exits 1. The advisory-vs-violation exit behaviour is instead proven by this
 // repo's own green `pnpm docs:check` (skill advisories, gate green); the unit
@@ -147,4 +147,47 @@ test("this repo's own skill interiors pass", () => {
   // with its shipped exemptions, exactly as a consumer runs it.
   const ctx = makeContext({ repoRoot: join(here, "..", "..", ".."), config: defaultConfig });
   assert.deepEqual(run(ctx), []);
+});
+
+test("a skill body at the legacy address is scanned too — staying put keeps its coverage", () => {
+  const ctx = ctxFor({
+    ".claude/skills/a/SKILL.md": "Read `scripts/no-such-thing.sh` before starting.\n",
+  });
+  assert.ok(hasRule(run(ctx), "skill-path-missing"));
+  cleanup(ctx);
+});
+
+test("the baked default is the canonical home — a config naming no skillsDir still scans", () => {
+  const cfg = {
+    ...defaultConfig,
+    claudeMdRefs: { ...defaultConfig.claudeMdRefs, skillsDir: undefined },
+  };
+  const ctx = ctxFor({ ".agents/skills/a/SKILL.md": "Read `scripts/no-such-thing.sh`.\n" }, cfg);
+  assert.ok(hasRule(run(ctx), "skill-path-missing"));
+  cleanup(ctx);
+});
+
+test("a skill at BOTH addresses is scanned once, and it is the CONFIGURED home that wins", () => {
+  // Divergent bodies on purpose — see the twin case in skill-web.test.mjs.
+  // With identical ones, both the de-duplication and the ordering could be
+  // deleted outright and this suite stayed green.
+  const ctx = ctxFor({
+    ".agents/skills/implement/SKILL.md": "Read `scripts/ghost-canonical.sh`.\n",
+    ".claude/skills/implement/SKILL.md": "Read `scripts/ghost-legacy.sh`.\n",
+  });
+  const out = run(ctx);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].file, ".agents/skills/implement/SKILL.md");
+  assert.match(out[0].message, /ghost-canonical\.sh/);
+  cleanup(ctx);
+});
+
+test("a project configured onto the LEGACY home still scans the canonical one", () => {
+  const cfg = {
+    ...defaultConfig,
+    claudeMdRefs: { ...defaultConfig.claudeMdRefs, skillsDir: ".claude/skills" },
+  };
+  const ctx = ctxFor({ ".agents/skills/a/SKILL.md": "Read `scripts/no-such-thing.sh`.\n" }, cfg);
+  assert.ok(hasRule(run(ctx), "skill-path-missing"));
+  cleanup(ctx);
 });

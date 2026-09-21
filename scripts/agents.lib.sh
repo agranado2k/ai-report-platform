@@ -1,142 +1,58 @@
 #!/bin/sh
 # agents.lib.sh — THE capability-tier resolver. One implementation, many callers.
 #
-# Answers exactly one question: "which execution model does this tier run on?"
+# Answers one question: "which execution model does this tier run on?"
 #
-#   sh scripts/agents.lib.sh implementer          -> prints the mapped model id,
-#                                                    or nothing if it is unmapped
-#   sh scripts/agents.lib.sh implementer content  -> the same, for work whose
-#                                                    MEDIUM has its own mapping
-#   . scripts/agents.lib.sh; resolve_tier …       -> either, as a shell function
+#   sh scripts/agents.lib.sh [--model|--harness] <tier> [domain]
+#       --model (the default) -> the mapped model id, or nothing when unmapped
+#       --harness             -> the agent harness that runs it, or nothing,
+#                                which means the caller's own
+#   . scripts/agents.lib.sh; resolve_tier …    -> the same, as a shell function;
+#      set AGENTS_CONFIG=<file> or _agents_here=<dir> BEFORE sourcing, on its
+#      own line (bash and zsh drop a prefix assignment on `.`)
 #
-# Sourcing is side-effect-free in every shell, including zsh (see the bottom of
-# the file). A sourcing caller must say where the config lives, though, because
-# a sourced file cannot portably learn its own path:
+# tier    CLOSED: planner | implementer | mechanical | reviewer. Unknown: exit 2.
+# domain  OPEN local policy, shape `[a-z][a-z0-9-]*`; hyphens fold to `_` in
+#         the variable name. Unmapped: falls back to the tier, silently.
 #
-#   AGENTS_CONFIG=scripts/agents.config.sh; . scripts/agents.lib.sh  # explicit
-#   _agents_here=scripts; . scripts/agents.lib.sh                    # or by dir
+# Config resolution, first hit wins: 1. $AGENTS_CONFIG (set but missing is
+# exit 2) · 2. <this file's repo root>/scripts/agents.config.sh · 3. <this
+# file's dir>/agents.config.sh. Orders 2–3 anchor on THIS file, never on the
+# caller's cwd; a sourcing caller that set neither variable gets nothing.
+# Variable resolution, first NON-EMPTY wins: AGENT_TIER_<TIER>_<DOMAIN> (only
+# with a domain) · AGENT_TIER_<TIER>.
 #
-# Two statements on purpose: a prefix assignment on `.` persists only in plain
-# sh — bash and zsh drop it before the sourced code runs, and the recipe would
-# quietly resolve UNMAPPED.
+# Exit: 0 resolved (a value, or deliberately nothing — an unmapped tier warns
+# once per process, AGENTS_TIER_QUIET=1 silences it, the caller spawns with no
+# model) · 2 usage error, unknown tier, bad domain, or a missing named config.
 #
-# With neither set, orders 2 and 3 below are both skipped and every tier reports
-# UNMAPPED — deliberately, since the only other candidate is whatever repository
-# the process happens to be standing in (see agents_load_config).
-#
-# WHY THE KIT NEVER NAMES A MODEL
-# ---------------------------------------------------------------------------
-# Model identifiers rot faster than any other constant a framework could carry:
-# they are renamed, deprecated and repriced on someone else's schedule, and they
-# differ per provider and per agent harness. A kit that shipped one would be
-# shipping a lie with a timer on it, and the lie would be re-read by every
-# session that loads the manual.
-#
-# So the kit ships the VOCABULARY and the MECHANISM, and your project supplies
-# the mapping:
-#
-#   VOCABULARY   four tier names — planner, implementer, mechanical, reviewer —
-#                defined in the manual layer (the root manual and the local
-#                workflow article), because deciding which tier a piece of work
-#                deserves is a human process rule, not a script's business.
-#                Plus an OPEN second axis, the task DOMAIN, below.
-#   MECHANISM    this file. Shared layer (see VERSION): copied verbatim, so a
-#                fix to the resolution order reaches every project.
-#   MAPPING      scripts/agents.config.sh. Yours, local, never overwritten by a
-#                kit update — the same split, and the same reasoning, as
-#                guards.lib.sh / guards.config.sh.
-#
-# THE UNCONFIGURED DEFAULT IS LOAD-BEARING
-# ---------------------------------------------------------------------------
-# An unmapped tier prints NOTHING and exits 0, after warning once. "Nothing" is
-# a real answer: the caller passes no model parameter and the spawned agent
-# inherits the session's own model, which is precisely the behaviour every
-# project has today. A resolver that hard-failed on an unmapped tier would make
-# a freshly bootstrapped project unable to spawn anything, and would be deleted
-# on day one — and a deleted resolver resolves nothing.
-#
-# An UNKNOWN tier is the opposite case and does fail (exit 2). A typo is not a
-# policy choice: silently running `implementor` on whatever the session happens
-# to be is the exact cost blindness this seam exists to remove.
-#
-# THE SECOND AXIS: TASK DOMAIN
-# ---------------------------------------------------------------------------
-# A tier says how much JUDGEMENT the work is worth. It says nothing about what
-# the work is made of — and "write the launch announcement" and "write the retry
-# logic" are the same cost/benefit shape while being different enough that a
-# project may well want different models on them. One axis cannot express that,
-# so there is an optional second one: the DOMAIN, the medium of the work.
-#
-#   AGENT_TIER_IMPLEMENTER_CONTENT   set  -> `resolve_tier implementer content`
-#   AGENT_TIER_IMPLEMENTER           set  -> everything else at that tier
-#
-# The two vocabularies are deliberately OPPOSITE, and the difference is the
-# whole design:
-#
-#   TIER   CLOSED. Four names, fixed by the manual layer, shared word between a
-#          ticket, a skill and this file. An unknown one is a caller bug.
-#   DOMAIN OPEN. Whatever tokens a project finds worth distinguishing — `code`,
-#          `content`, `sql`, `html-report`. It is pure local policy, invented in
-#          the config and the tickets, so this file cannot hold a list of them
-#          and does not try. An UNMAPPED domain is therefore a working state,
-#          not a typo: it falls back to the plain tier mapping in silence,
-#          because "no special opinion about this medium" is the ordinary case
-#          and a warning for it would train people to ignore the one that
-#          matters.
-#
-# What the domain does NOT get is a free pass on its SHAPE. It is interpolated
-# into a variable name and expanded through `eval`, and unlike the tier it was
-# never whitelisted against a fixed list — so the shape check IS its whitelist:
-# `[a-z][a-z0-9-]*` and nothing else, checked before the token is allowed
-# anywhere near the eval. Hyphens are legal in a token and illegal in a shell
-# variable name, so they fold to underscores: `html-report` reads
-# AGENT_TIER_<TIER>_HTML_REPORT.
-#
-# Omit the argument entirely and this file behaves exactly as it did before the
-# axis existed — which is the point, because every caller that predates it (the
-# skills, the adapter note, a consumer's own script) keeps working untouched.
-#
-# Config resolution order, first hit wins:
-#   1. $AGENTS_CONFIG        — explicit. If it is set and does not exist, that
-#                              is an ERROR (exit 2): the caller named a file, so
-#                              falling back silently would run a mapping nobody
-#                              asked for. Tests rely on this.
-#   2. <root of the repo THIS FILE lives in>/scripts/agents.config.sh
-#   3. <this file's directory>/agents.config.sh
-#
-# Orders 2 and 3 are anchored on this file, never on the caller's working
-# directory: a config is sourced, and sourcing one out of whatever repo an
-# operator happens to be standing in would execute a stranger's code.
-#
-# Variable resolution order, first NON-EMPTY hit wins:
-#   1. AGENT_TIER_<TIER>_<DOMAIN>   only when a domain was given
-#   2. AGENT_TIER_<TIER>
-#
-# Exit codes:  0 resolved (a value, or deliberately nothing) · 2 usage error,
-#              unknown tier, malformed domain, or an explicit config that does
-#              not exist.
+# Shared layer (see VERSION): this file is copied verbatim; the mapping in
+# scripts/agents.config.sh is yours, never overwritten by an update; the kit
+# names no model (the root manual's "Capability tiers" says why). History:
+# the agentic-sdlc repository's diary, 2026-09-03.
 
-# The closed vocabulary — planner, implementer, mechanical, reviewer — is
-# deliberately NOT configurable: the tier names are the shared word between a
-# ticket, a skill and this resolver, and a project that renamed them would
-# break every skill that says "implementer" while the docs gate stayed green.
-# Add a MAPPING in the config; do not add a tier.
-#
-# There is deliberately NO variable holding that list any more. It used to be
-# a module global feeding the usage and error text, and a sourced config could
-# reassign it — leaving diagnostics that named tiers that do not exist while
-# the literal `case` check kept working. The messages now spell the four names
-# where they are printed, under the same keep-in-sync-by-hand contract as
-# AGENT_DOMAIN_SHAPE's case pattern below: three literal sites (the check, the
-# usage text, the unknown-tier error), moved together or not at all.
-
-# The domain has no list here on purpose — see THE SECOND AXIS above. What it
-# has instead is a SHAPE, and this is it, written once so the usage text and
-# the error text below cannot drift apart. It does NOT also drive the case
-# pattern that enforces the shape — that pattern spells out the alphabet
-# instead of quoting this string, for the locale reason documented where it
-# lives. So this string and that pattern CAN drift; keep them in sync by hand.
+# The domain's SHAPE, written once so the usage text and the error text cannot
+# drift apart. It does NOT drive the case pattern that enforces the shape —
+# that pattern spells out the alphabet, for the locale reason documented where
+# it lives — so this string and that pattern are kept in sync by hand. The
+# four tier names are likewise spelled at their three literal sites (the
+# check, the usage text, the unknown-tier error) and move together: a sourced
+# config could reassign a global, so there is no list variable to reassign.
 AGENT_DOMAIN_SHAPE='[a-z][a-z0-9-]*'
+
+# The AGENT HARNESS token's shape. Same alphabet as a task domain, and for the
+# same reason: it is interpolated into the variable name carrying that agent
+# harness's invocation template, so the shape is the whitelist standing in
+# front of an eval. It is spelled out at its `case` site below rather than
+# driven from this string, exactly as the domain's is.
+#
+# The VOCABULARY, unlike the tier's, is OPEN and declared by the project in
+# AGENT_HARNESSES — because naming an agent harness is naming a vendor's tool,
+# and the kit names none. An undeclared prefix is not an error: it means the
+# value was never a prefixed one at all (a local runtime's `<name>:<tag>` is a
+# single model id), so the whole string stays the model. That fallback is why
+# the declaration has to exist.
+AGENT_HARNESS_SHAPE='[a-z][a-z0-9-]*'
 
 # MODULE GLOBALS, and why they diverge from guards.lib.sh's convention.
 #
@@ -151,12 +67,10 @@ AGENT_DOMAIN_SHAPE='[a-z][a-z0-9-]*'
 # the direct-execution branch, and settable by a sourcing caller — which is the
 # only way such a caller gets orders 2 and 3 at all.
 #
-# It defaults to EMPTY, and that is deliberate rather than tidy: it used to
-# default to `.`, which quietly made resolution order 3 mean "a config file in
-# whatever directory the process is standing in" — a different and much wider
-# rule than the one documented above, and the same trust problem order 2 had.
-# Empty means orders 2 and 3 are both skipped, so a sourcing caller that has
-# not said where it is gets $AGENTS_CONFIG or nothing.
+# It defaults to EMPTY on purpose: empty means orders 2 and 3 are both
+# skipped, so a sourcing caller that has not said where it is gets
+# $AGENTS_CONFIG or nothing — never a config from whatever directory the
+# process happens to be standing in.
 #
 # The other two globals are per-process memos: config loading and the unmapped
 # warning both have to happen at most once no matter how many tiers a single
@@ -165,11 +79,18 @@ _agents_here=${_agents_here:-}
 _agents_config_loaded=0
 _agents_config_tried=0
 _agents_warned=0
+_agents_undeclared_warned=0
+_agents_nomodel_warned=0
+_agents_dropped_warned=0
 
 agents_usage() {
-	echo "usage: agents.lib.sh <tier> [domain]" >&2
+	echo "usage: agents.lib.sh [--model|--harness] <tier> [domain]" >&2
 	echo "  tier is one of: planner implementer mechanical reviewer" >&2
 	echo "  domain is an optional $AGENT_DOMAIN_SHAPE token naming the medium of the work." >&2
+	echo "  --model    print the model id. The default, and what every caller got" >&2
+	echo "             before the agent-harness axis existed." >&2
+	echo "  --harness  print the agent harness token instead, or nothing when the" >&2
+	echo "             tier is mapped to a bare model id — which means the caller's own." >&2
 }
 
 # agents_load_config — source the mapping, once per process.
@@ -178,10 +99,8 @@ agents_usage() {
 # error — see the unconfigured default above), 2 when an explicitly named one
 # is missing.
 #
-# The MISS is memoized too, not only the hit. An unconfigured project is the
-# common case, and every resolve_tier call in it would otherwise re-run
-# `git rev-parse` and two stat calls to reach the same "no" — a caller that
-# resolves four tiers pays for that four times, for nothing.
+# The MISS is memoized too, not only the hit: an unconfigured project is the
+# common case, and one process resolves several tiers.
 #
 # Only the genuine "no config anywhere" miss is remembered. An explicitly named
 # AGENTS_CONFIG that does not exist keeps failing on every call, loudly: that is
@@ -215,9 +134,8 @@ agents_load_config() {
 	# when the cwd is in no repository at all.
 	#
 	# When $_agents_here is EMPTY there is nothing to anchor on, so both orders
-	# are skipped and a caller gets $AGENTS_CONFIG or nothing. That is why it no
-	# longer defaults to `.`: `.` silently meant "the process's current
-	# directory", which is the same wider rule in its order-3 clothes.
+	# are skipped and a caller gets $AGENTS_CONFIG or nothing — never the
+	# process's current directory in order-3 clothes.
 	if [ -n "$_agents_here" ]; then
 		_al_root=$(git -C "$_agents_here" rev-parse --show-toplevel 2>/dev/null) || _al_root=
 		if [ -n "$_al_root" ] && [ -f "$_al_root/scripts/agents.config.sh" ]; then
@@ -237,19 +155,137 @@ agents_load_config() {
 	return 1
 }
 
+# agents_split_harness <value> — take a mapped tier value apart into the AGENT
+# HARNESS that runs it and the model it runs. Sets _ah_harness and _ah_model.
+#
+# A value is either `<agent harness>:<model id>` or a bare `<model id>`. The
+# bare form is the ONLY form that existed before this axis, and it still means
+# what it meant: this tier's model, on whatever agent harness the caller is
+# already running. So a bare value leaves _ah_harness empty, and empty keeps
+# meaning "no parameter, inherit" — one more layer of the same
+# unset-is-a-working-state contract the rest of this file is built on.
+#
+# WHY THE PREFIX IS CHECKED AGAINST A DECLARATION rather than just split on the
+# first colon. A colon is legal INSIDE a model identifier — a local runtime's
+# `<name>:<tag>` is one id, not an agent harness and a model — so splitting
+# unconditionally would invent an agent harness and spawn on a fragment. The
+# project's AGENT_HARNESSES declaration is what makes the split decidable: a
+# prefix that was declared is an agent harness, and one that was not is part of
+# the id.
+#
+# A project that declared NOTHING is the pre-axis world exactly: every value is
+# bare, nothing is ever split, and this function costs one `case`.
+agents_split_harness() {
+	_ah_harness=
+	_ah_model=$1
+
+	# No colon, nothing to decide. The common case, and the fast one.
+	case $1 in
+	*:*) ;;
+	*) return 0 ;;
+	esac
+
+	_ah_prefix=${1%%:*}
+
+	# The prefix's SHAPE. The alphabet is spelled out rather than written
+	# `[!a-z]` for the same locale reason the domain check spells its own: under
+	# en_US.UTF-8 a bracket RANGE collates case-insensitively, so `[!a-z]*`
+	# would accept an upper-case prefix, and a check whose meaning moves with
+	# $LANG is not a check.
+	#
+	# A failure here does NOT return early, and that is the whole point. It used
+	# to: `AGENT_TIER_REVIEWER='Alpha:some-model'` with `alpha` declared then
+	# resolved to no agent harness and a model id of `Alpha:some-model`, in
+	# total silence — a capitalisation typo in the policy file spawning on the
+	# caller's own agent harness with nothing said anywhere. That is exactly the
+	# silent wrong-harness spawn ADR-0005 clause 5 forbids. A malformed prefix
+	# falls through to the same warning an undeclared one gets.
+	_ah_shape=ok
+	case $_ah_prefix in
+	'' | [!abcdefghijklmnopqrstuvwxyz]* | *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) _ah_shape=bad ;;
+	esac
+
+	# Declared? The membership test is a `case` against a padded string, NOT
+	# `for h in $AGENT_HARNESSES`. An unquoted expansion is word-split by sh,
+	# bash and ksh and NOT by zsh (SH_WORD_SPLIT is off by default) — the exact
+	# portability bug the tier check one function down documents having been
+	# bitten by. A `case` compares patterns and behaves identically in all four
+	# shells. The declaration is normalised first so a project may write it
+	# across lines and still mean the same set.
+	_ah_list=$(printf '%s' "${AGENT_HARNESSES:-}" | tr '\t\n' '  ')
+	if [ "$_ah_shape" = ok ]; then
+		case " $_ah_list " in
+		*" $_ah_prefix "*)
+			_ah_harness=$_ah_prefix
+			_ah_model=${1#*:}
+			return 0
+			;;
+		esac
+	fi
+
+	# Undeclared prefix. The whole string stays the model, which is right for a
+	# `<name>:<tag>` id and is also what a TYPO'd agent-harness name resolves
+	# to — and a typo then fails at spawn time, loudly, because nothing accepts
+	# a model called `alpah:some-id`. That is late, so say something now; but
+	# only when the project declared any agent harness at all, since one that
+	# declared none has simply written a model id with a colon in it and
+	# deserves silence.
+	if [ -n "$_ah_list" ] && [ "$_agents_undeclared_warned" = 0 ] && [ "${AGENTS_TIER_QUIET:-}" != "1" ]; then
+		_agents_undeclared_warned=1
+		if [ "$_ah_shape" = bad ]; then
+			echo "!  agents: '$_ah_prefix' is not a well-formed agent harness token, so '$1'" >&2
+			echo "   resolves as a MODEL ID. A token is a $AGENT_HARNESS_SHAPE — lower case." >&2
+		else
+			echo "!  agents: '$_ah_prefix' is not a declared agent harness, so '$1' resolves as a MODEL ID." >&2
+		fi
+		echo "   Declared: $_ah_list" >&2
+		echo "   If that prefix was meant as an agent harness, fix it and add it to AGENT_HARNESSES." >&2
+	fi
+	return 0
+}
+
 # resolve_tier <tier> [domain] — print the mapped model id on stdout,
 # diagnostics on stderr. Stdout carries the ANSWER and nothing else, so a caller
 # can use it directly: `model=$(sh scripts/agents.lib.sh implementer content)`.
 resolve_tier() {
+	# The optional leading MODE flag, shifted off before the signature below is
+	# checked — so that signature stays "one tier, one optional domain" and the
+	# arity errors keep counting the arguments a caller actually thinks about.
+	#
+	# `default` and `model` both print the model, and they are still two modes:
+	# `default` is a caller written before this axis existed, which does not know
+	# an agent harness may be configured, so it is told when it drops one.
+	# `--model` is a caller that asked for the model specifically, so it is not.
+	#
+	# The `--*` arm refuses an unknown flag rather than letting it fall through to
+	# the tier check, where `--harnes` would be reported as an unknown capability
+	# tier — an error message pointing at the wrong thing.
+	_rt_mode=default
+	case "${1:-}" in
+	--model)
+		_rt_mode=model
+		shift
+		;;
+	--harness)
+		_rt_mode=harness
+		shift
+		;;
+	--*)
+		echo "x agents: unknown option '$1'." >&2
+		agents_usage
+		return 2
+		;;
+	esac
+
 	if [ $# -lt 1 ] || [ $# -gt 2 ] || [ -z "${1:-}" ]; then
 		agents_usage
 		return 2
 	fi
 
-	# The accept-check is a LITERAL `case`, not a loop over $AGENT_TIERS, for two
-	# independent reasons.
+	# The accept-check is a LITERAL `case`, not a loop over a variable holding
+	# the list, for two independent reasons.
 	#
-	# PORTABILITY, the one that was actually broken: `for t in $AGENT_TIERS`
+	# PORTABILITY, the one that was actually broken: `for t in $list`
 	# relies on the shell word-splitting an unquoted expansion, and zsh does not
 	# (SH_WORD_SPLIT is off by default). Under `zsh scripts/agents.lib.sh
 	# implementer` the loop saw ONE word — the whole string — so every real tier
@@ -262,7 +298,7 @@ resolve_tier() {
 	# can no longer drift via a reassigned global or a shell's splitting
 	# rules. The MESSAGES spell the same four names as literals too (no
 	# global survives for a config to reassign), so check and diagnostics
-	# cannot disagree — see the vocabulary comment at the top of the file.
+	# cannot disagree — the four names are spelled at their three literal sites (see AGENT_DOMAIN_SHAPE's comment).
 	_rt_tier=$1
 	_rt_domain=${2:-}
 	case "$_rt_tier" in
@@ -344,7 +380,43 @@ resolve_tier() {
 		return 0
 	fi
 
-	printf '%s\n' "$_rt_value"
+	agents_split_harness "$_rt_value"
+
+	if [ "$_rt_mode" = harness ]; then
+		# Empty is a real answer and prints as one: a tier mapped to a bare model
+		# id runs on the caller's own agent harness, which is what every tier did
+		# before this axis existed. The caller branches on emptiness exactly as it
+		# already branches on an unmapped model.
+		[ -n "$_ah_harness" ] && printf '%s\n' "$_ah_harness"
+		return 0
+	fi
+
+	# An agent harness named with NO model. Refusing here would make an error of
+	# the one case the rest of this file treats as normal, so it resolves: that
+	# agent harness, on its own default model. Said once, because the tier's
+	# cost/benefit decision then has no effect on what the work actually costs —
+	# which is the same blindness an unmapped tier has, at somebody else's prices.
+	if [ -n "$_ah_harness" ] && [ -z "$_ah_model" ] &&
+		[ "$_agents_nomodel_warned" = 0 ] && [ "${AGENTS_TIER_QUIET:-}" != "1" ]; then
+		_agents_nomodel_warned=1
+		echo "!  agents: agent harness '$_ah_harness' is named with no model, so this tier runs" >&2
+		echo "   on that agent harness's OWN DEFAULT. The tier is still a decision about" >&2
+		echo "   the work; it is no longer a decision about the cost." >&2
+	fi
+
+	# A caller written before this axis is about to spawn this model on its OWN
+	# agent harness while the config says otherwise. It still gets the model —
+	# breaking the old contract would break every consumer on the shared layer —
+	# but the operator hears about it, once, on stderr where the value is not.
+	if [ "$_rt_mode" = default ] && [ -n "$_ah_harness" ] &&
+		[ "$_agents_dropped_warned" = 0 ] && [ "${AGENTS_TIER_QUIET:-}" != "1" ]; then
+		_agents_dropped_warned=1
+		echo "!  agents: this tier names agent harness '$_ah_harness', and the caller asked only" >&2
+		echo "   for a model, so the agent harness is being DROPPED — the spawn will run wherever" >&2
+		echo "   the caller already is. Ask for it with --harness." >&2
+	fi
+
+	[ -n "$_ah_model" ] && printf '%s\n' "$_ah_model"
 	return 0
 }
 

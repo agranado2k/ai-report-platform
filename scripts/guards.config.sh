@@ -49,10 +49,13 @@ GUARD_TEST_RE='\.(test|spec)\.(ts|tsx|mjs)$|\.feature$'
 # behavior-delta.sh splits each record on the FIRST pipe, so a label carries no
 # pipe of its own while a regex may. These reproduce, verbatim, the eight
 # surfaces the forked behavior-delta.sh hard-coded (re_api … re_process) and
-# their section titles, so scripts/test/behavior-delta.test.mjs and the two open
-# PRs' verdicts are preserved. The process/agent surface deliberately keeps its
-# OLD paths (`.claude/constitution/`, `CLAUDE.md`) even though this migration
-# moves them, so the verdict on a PR forked before the move does not shift.
+# their section titles, so scripts/test/behavior-delta.test.mjs is preserved.
+# The process/agent surface names BOTH the current homes (`.agents/skills/`
+# since kit 0.14.0, `constitution/`, `AGENTS.md`) and the pre-move ones
+# (`.claude/`, `CLAUDE.md`) — the old patterns cost nothing and keep the verdict
+# stable on any branch that still touches the legacy address. `scripts/` is
+# scoped to the top-level guards/gates/tooling and the docs harness: a change
+# under `scripts/test/` is a test, and the edited-tests surface already owns it.
 BEHAVIOR_DELTA_SURFACES='API surface (docs/api/openapi.yaml)|^docs/api/openapi\.yaml$
 Error semantics (packages/http, RFC 9457 model — ADR-0040)|^packages/http/
 Domain events (docs/events.md)|^docs/events\.md$
@@ -60,7 +63,7 @@ Persistence (packages/db, docs/db-design.md)|^packages/db/|^docs/db-design\.md$
 Configuration (packages/env — ADR-0043)|^packages/env/
 Security posture (packages/headers — CSP / Trusted Types)|^packages/headers/
 Agent-facing prompt surfaces (apps/mcp — ADR-0072)|^apps/mcp/(src/(instructions|prompts|tools)|skill/|packaging/)
-Process & agent surfaces (.claude/skills, the constitution, .husky, docs gate — ADR-026/0082)|^\.claude/skills/|^\.claude/constitution/|^CLAUDE\.md$|/CLAUDE\.md$|^\.husky/|^scripts/docs-conformance/'
+Process & agent surfaces (.agents/skills, the constitution, AGENTS.md, .husky, docs gate — ADR-026/0082)|^\.agents/|^\.claude/|^constitution/|^AGENTS\.md$|/AGENTS\.md$|^CLAUDE\.md$|/CLAUDE\.md$|^GEMINI\.md$|^\.husky/|^scripts/[^/]*\.(sh|mjs)$|^scripts/docs-conformance/'
 
 # Executable specification files. behavior-delta flags these when EDITED inside a
 # structure-only commit.

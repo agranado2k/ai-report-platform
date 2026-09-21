@@ -117,6 +117,21 @@ text follows it: `${REF}` ends the parse where `$REF` invites
 reinterpretation. The gap between the shell that ran the tests and the shell
 that runs the operator is a bug's favorite hiding place.
 
+## 13. The invariant lives with the thing it protects
+
+A rule about a domain object — a total that must balance, a state that may
+only move forward, a field that is never empty once set — is enforced inside
+the object that owns it, once, and not re-checked at every call site that
+touches it. A value with meaning — money, an identifier, a span of time — is
+its own type, not a bare primitive the reader must interpret and the next
+caller can pass in the wrong unit. And the names on all of it are the
+project's own: the glossary is the single vocabulary, so a concept has one
+name in code, in tests and in conversation, and a new concept enters the
+glossary in the same change that first names it. A check scattered across
+callers drifts the first time one of them is skipped; a primitive with a
+meaning drifts the first time two of them are swapped; a second name for one
+concept is a distinction the next reader will invent a reason for.
+
 ---
 
 Most of these rules condense long-standing advice for human engineers, restated
@@ -126,4 +141,7 @@ where that essay asks for drawings in ASCII, §10 inverts the medium — this
 framework's reports render as HTML, and a medium that can carry a real vector
 drawing makes character art a downgrade, not a convenience. §11 and §12 are
 this project's own: each condenses a reproduced data-loss incident from its
-history, not a line from the essay.
+history, not a line from the essay. §13 condenses the tactical half of Eric
+Evans's *Domain-Driven Design* — aggregates that own their invariants, value
+objects over primitives, and the ubiquitous language — the half that shows
+up in a diff rather than in a context map.
