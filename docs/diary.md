@@ -4,16 +4,16 @@
 
 ---
 
-## Current state — 2026-09-20
+## Current state — 2026-09-21
 
 | Field                  | Value                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | **Phase**              | **Phase 1 shipped + hardened; the auth, MCP-server, sharing/ACL, and editing-&-comments epics are all complete + live; the owner-view / artifact-parity epic (PRD #356) is SHIPPED + CLOSED (2026-09-19).** Earlier milestones remain live: real auth (Clerk sign-in, JIT personal-org provisioning, session-gated app — ADR-0048); the remote Streamable-HTTP MCP server at `mcp.centaurspec.com` (ADR-0051, dual auth — `arp_` API keys + Clerk OAuth 2.1); the async scan pipeline (Phase 1.5a, ADR-0045); the viewer-origin split `view.<domain>/<slug>` (ADR-0038); sharing/ACL (password #100, allowlist #109, private-by-default #127, folder-scoped sharing ADR-0078, folder-management relocation ADR-0087; `get_acl`/`set_acl` + write grants live); the **ClickUp-light design system (ADR-0086, supersedes the warm-dark ADR-0058)**; report content-read (`GET /api/v1/reports/{slug}/content` + `reports_get_content`, #312); and the **unified in-viewer editor** at `view.<domain>/<slug>/edit` (ADR-0062–0067) — ProseMirror editor, comments (ADR-0064), version history + visual diff (ADR-0065), author display-names from the Clerk identity mirror — plus the selection/formatting toolbar (PRD #295). **Owner-view epic (PRD #356, ADRs 0088–0092):** the owner finally sees their report as published — an authenticated **owner view** at `view.<domain>/<slug>/view` frames the byte-for-byte canonical `GET /<slug>` under first-party chrome in a sandboxed iframe with **no `allow-same-origin`** (ADR-0089), reached by the owner-open flip (#363). The public viewer CSP gained an **artifact-parity allowlist** (Google Fonts + cdnjs + jsdelivr/npm, each on its own directive; `connect-src 'self'` untouched, so exfiltration stays blocked) and `frame-ancestors` `'none'` → `'self'` (ADR-0088). Write time now records a **Fidelity** verdict (`lossless`/`lossy`, migration 0023, ADR-0090) beside Editability, surfaced on the dashboard row + the Edit confirm dialog (#364) and in the MCP tools. The upload response (HTTP + MCP `reports_upload`) carries **`warnings[]`** — `external-resource-blocked`, `editor-lossy`, `sandbox-incompatible` (ADR-0088/0090/0092, #365/#385). A **grantee read token** (ADR-0091) lets a write-grantee through the framed unlock wall without an `owner:true` escalation. And the owner view **always** offers an "Open in new tab" fallback for a report that blanks in the storage-less frame (ADR-0092). **`GET /<slug>` is byte-for-byte unchanged throughout, and `packages/headers` is untouched by ADR-0089/0091/0092.** Also landed: the Gemini `review` check is now fail-visibly honest (#371, amends ADR-030). **Remaining editor payoff:** the comment-`intent` agent-action pipeline (PRD #198). |
 | **Repo path**          | `~/PetProjects/centaur-spec/` (main; local folder renamed from `ai-report-platform` — the GitHub remote keeps the old name). Feature work happens in `worktree/<slug>` (ADR-025), cleaned up on merge. |
-| **Last commit on main**| `4c71bb8` — Merge PR #397 (`ci/turn-cap-sentinel`): the `claude-review` gate keys TRUNCATED on a fixed sentinel (ADR-030 amendment); before it #395 retired the Gemini reviewer and #392 renamed `ResourceScanner` → `UploadScanner`. |
+| **Last commit on main**| `9f3f982` — Merge PR #398 (`chore/kit-update-0.20.0`): agentic-sdlc v0.12.0 → v0.20.0 adoption — skills at `.agents/skills/`, `/design-brief` + `/housekeeping`, the design brief + mutation decision in the engineering article, 16-validator docs harness. |
 | **Remote**             | `git@github.com:agranado2k/ai-report-platform.git` (public). |
 | **Live infrastructure**| **shared + prod applied — all via the Terraform pipeline on merge (ADR-018), never manually. The owner-view epic touched no infrastructure** (no Terraform, no `packages/headers` byte change). Cloudflare zone (DNS-as-code; Clerk custom domain `clerk.centaurspec.com` + `accounts.centaurspec.com` verified + deployed), R2 (`tf-state`, `arp-reports-prod`, `arp-reports-ci`; previews namespace within prod via `pr-<N>/`, ADR-0047), Neon **single `main` branch** + per-PR ephemeral branches (ADR-031), Upstash Redis, Vercel `arp-app-prod` (**app.centaurspec.com**, session-gated) + `arp-view-prod` (**view.centaurspec.com**, public viewer + the authenticated owner view / editor) + `arp-mcp-prod` (**mcp.centaurspec.com**, the MCP server — ADR-0051), GitHub repo with ADR-032/0044 protection (**0 required approvals, signed merge commits**). **Clerk:** prod instance (`pk_live`, app.centaurspec.com) **+** staging dev instance (`pk_test`, used by previews — ADR-0048); the `email` session-token claim is set on both. **OAuth app + DCR enabled on the LIVE instance** (for the MCP); the dev/preview instance still needs the same OAuth app + DCR (preview OAuth — not blocking prod). |
-| **Active worktrees**   | The owner-view epic worktrees are all **merged and pruned**: `owner-view` (#361), `fidelity-surface` (#364/#377), `owner-open-flip` (#363/#376), `upload-warnings` (#365), `gemini-review-fix` (#371), `sandbox-fallback` (#385). Currently live: **`docs-reconcile`** (`docs/reconcile-adr0092-diary` — this ADR-0092-wording + diary reconciliation) and two **concurrent sibling sessions**, `claude-review-fix` (`ci/claude-review-fix`) and `scanner-rename` (`refactor/scanner-rename` — the recorded `ResourceScanner`-port rename follow-up from ADR-0092). **`kit-update-0.20.0`** (`chore/kit-update-0.20.0`) — the agentic-sdlc v0.12.0 → v0.20.0 adoption, PR pending. |
+| **Active worktrees**   | The owner-view epic worktrees are all **merged and pruned**: `owner-view` (#361), `fidelity-surface` (#364/#377), `owner-open-flip` (#363/#376), `upload-warnings` (#365), `gemini-review-fix` (#371), `sandbox-fallback` (#385). Currently live: **`docs-reconcile`** (`docs/reconcile-adr0092-diary` — this ADR-0092-wording + diary reconciliation) and two **concurrent sibling sessions**, `claude-review-fix` (`ci/claude-review-fix`) and `scanner-rename` (`refactor/scanner-rename` — the recorded `ResourceScanner`-port rename follow-up from ADR-0092). `kit-update-0.20.0` (#398) is **merged**, prunable. Currently live: **`reviewer-self-implemented`** (`chore/reviewer-self-implemented` — the ADR-0084 mapping follow-up). |
 | **Last housekeeping**  | 2026-09-20 — none has run yet; row stamped at the agentic-sdlc v0.20.0 adoption. The docs gate nudges (`housekeeping-due` advisory) once this date is older than `housekeepingDue.windowDays` (30) in `scripts/docs-conformance/config.mjs`; `/housekeeping` stamps it. |
 | **Spec status**        | **rev 9** (2026-06-17 decision reconcile). ADR-0035–**0092** live in `docs/adr/` (INDEX current); the owner-view epic's **ADR-0088–0092 are amendments** to ADR-013/0038/0056/0059/0063/0080/0088/0089 and needed **no spec-rev bump**. **ADR-001–030 remain inline in `docs/spec.html`** (extraction deferred — INDEX backlog). `docs/domain-glossary.md` / `docs/events.md` are canonical for domain language/events; the `docs:check` conformance gate is green. |
 
@@ -36,7 +36,7 @@
 - **All work in worktrees** per ADR-025: `git worktree add worktree/<slug> -b <type>/<slug>` from the project root. Worktrees live under `worktree/` (gitignored). Branch types: `feat` `fix` `refactor` `chore` `docs`.
 - **Terraform via `infra/terraform/scripts/tf.sh` only.** The wrapper acquires a Postgres advisory lock on Neon to prevent parallel-apply state corruption.
 - **TDD enforcement is live**: the `.husky/pre-push` TDD pairing guard blocks source-without-tests pushes; `pnpm docs:check` runs in the same hook. Escape hatches `PUSH_WITHOUT_TESTS=1` / `PUSH_WITHOUT_DOCS=1`, both logged.
-- **The manual is `AGENTS.md`** (agentic-sdlc **v0.20.0**). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/`; the skills live at `.agents/skills/` with a `.claude/skills/` symlink bridge (kit 0.14.0 home); the docs harness is a recorded local fork (see `VERSION`: 16 validators, kit 8 + local 8). Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku), resolved by `sh scripts/agents.lib.sh <tier>`.
+- **The manual is `AGENTS.md`** (agentic-sdlc **v0.20.0**). `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` shims; the constitution lives at `constitution/`; the skills live at `.agents/skills/` with a `.claude/skills/` symlink bridge (kit 0.14.0 home); the docs harness is a recorded local fork (see `VERSION`: 16 validators, kit 8 + local 8). Capability tiers are mapped in `scripts/agents.config.sh` (ADR-0084: planner/implementer/reviewer→opus, mechanical→haiku, **reviewer self-implemented→sonnet**), resolved by `sh scripts/agents.lib.sh <tier> [domain]`.
 
 ### Update protocol
 
@@ -6673,3 +6673,31 @@ raised — brief, mutation decision, housekeeping row — are all answered), `pn
 
 Tier: mechanical for Part 1, implementer for Part 2. Worktree `kit-update-0.20.0`, branch
 `chore/kit-update-0.20.0`.
+
+### 2026-09-21 — Landed #398; the self-implemented reviewer gets its own model (ADR-0084 mapping)
+
+**#398 merged** (`9f3f982`, signed merge commit) after one `/pr-iterate` pass: the branch had
+gone CONFLICTING against `main` (#397's diary entry; merged, never rebased), the local
+`/review-and-evaluate` found and fixed the dropped shell-hazard bullets in `/review-pr`, and
+the wired `claude-review` was LGTM with notes. Two environmental stops worth recording:
+the required preview smoke failed once on the issue-#266 Clerk membership-cap class and
+passed on re-run (the scheduled sweep had caught up — no code changed); and **this
+machine's commits were `unknown_key` on GitHub** — `~/.gitconfig.local` signs with SSH
+(`~/.ssh/id_ed25519`) while the notebook signs with GPG, and the SSH key was registered
+only for authentication. Registering it as a *signing* key (`gh auth refresh -s
+admin:ssh_signing_key`, then Settings → SSH and GPG keys → Signing) verified the four
+commits retroactively; `required_signatures` had blocked the merge until then.
+
+**Operator decision, from the question #398 left open:** the kit's 0.16.0 rule — *the
+reviewer is never the model that implemented* — was documented but not enforced, because
+implementer and reviewer both map to `opus`. `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'`
+now names a different alias for the one case the plain lookup cannot make independent (a
+diff the session wrote itself, resolved by `/implement`'s stopgap path as
+`sh scripts/agents.lib.sh reviewer self-implemented`); the wired `claude-code-review.yml`
+stays the first mechanism. Declined for now: a `content` domain split (prose has been fine
+on opus; a second vocabulary to maintain) and any `AGENT_HARNESSES` declaration (one
+harness; the dispatcher stays inert). `scripts/test/agents-mapping.test.mjs` gains the
+independence seam beside the cost seam: it fails if the mapping is emptied or ever equals
+the implementer's model. Test-first; `pnpm test:scripts` 66/66.
+
+Tier: mechanical. Worktree `reviewer-self-implemented`, branch `chore/reviewer-self-implemented`.

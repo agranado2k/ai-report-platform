@@ -273,12 +273,13 @@ AGENT_BUDGET_MEMORY_CEILING_MIB=''
 # variable below is left at the kit default (empty). The dispatcher
 # (`scripts/agent-dispatch.sh`) is therefore inert here — it exits 3 when a
 # tier names no agent harness — and every tier value stays an unprefixed alias.
-# `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED` (kit 0.16.0; the reviewer for a diff
-# the session itself wrote on the reviewer tier's model) is deliberately NOT
-# mapped yet: this repo's wired review is `claude-code-review.yml`, and
-# /implement's stopgap path reports "shares the author's model" when it falls
-# back — mapping it to a different alias is an operator decision, not a kit
-# default.
+# `AGENT_TIER_REVIEWER_SELF_IMPLEMENTED` (kit 0.16.0) IS mapped, below: it is
+# the reviewer for a diff the session itself wrote on the reviewer tier's own
+# model — the one case the plain tier lookup cannot make independent, because
+# implementer and reviewer both resolve to the top model here. The wired review
+# (`claude-code-review.yml`) is still the first mechanism; this mapping is what
+# /implement's stopgap path resolves through so a self-review is never an
+# editorial pass wearing a second hat. Decided 2026-09-21 (PR #398 follow-up).
 
 # ---------------------------------------------------------------------------
 # THIS REPO FILLS IT IN (ADR-0084)
@@ -323,3 +324,10 @@ AGENT_TIER_MECHANICAL='haiku'
 # 4. REVIEWER — adversarial reading of a finished diff, in fresh context
 # ---------------------------------------------------------------------------
 AGENT_TIER_REVIEWER='opus'
+
+# The reviewer for a diff THIS SESSION implemented on the reviewer tier's model
+# (`sh scripts/agents.lib.sh reviewer self-implemented`). A different alias on
+# purpose: the independence is the point, and the cheaper model is a bonus.
+# scripts/test/agents-mapping.test.mjs fails if this ever equals the
+# implementer's model or is emptied.
+AGENT_TIER_REVIEWER_SELF_IMPLEMENTED='sonnet'

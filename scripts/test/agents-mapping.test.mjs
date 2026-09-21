@@ -53,6 +53,22 @@ test("the cost seam holds: mechanical is not the reviewer model", () => {
   );
 });
 
+test("the independence seam holds: a self-implemented review never runs on the implementer model", () => {
+  // Kit 0.16.0's rule, adopted at v0.20.0: the reviewer is never the model that
+  // implemented. With implementer and reviewer both on the top model, the case
+  // the plain lookup cannot answer is a diff this session wrote itself — the
+  // `self-implemented` domain names it, and /implement resolves the reviewer
+  // through it. If that mapping is ever dropped, the resolver silently falls
+  // back to the reviewer tier and every self-review shares its author's model.
+  const independent = resolveTier("reviewer", "self-implemented");
+  assert.notEqual(independent, "", "reviewer self-implemented resolved to nothing — the mapping was dropped");
+  assert.notEqual(
+    independent,
+    resolveTier("implementer"),
+    "reviewer self-implemented resolved to the implementer model — the independence seam has collapsed",
+  );
+});
+
 test("an unmapped domain falls back to its tier, silently", () => {
   // The domain axis is optional and open (ADR-0084): a domain this repo has no
   // opinion about must resolve to the plain tier, not error.
