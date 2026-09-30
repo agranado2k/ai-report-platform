@@ -126,10 +126,17 @@ describe("ReportRow", () => {
     expect(wrapper).toContain("relative z-10");
   });
 
-  it("actions menu is keyboard-reachable (focus-within reveal, not hover-only) and holds the actions", () => {
+  it("actions menu names its trigger and holds Delete", () => {
     const html = render({ isPublished: true });
-    expect(html).toContain("focus-within:opacity-100");
+    expect(html).toContain("Actions for Q3 roadmap");
     expect(html).toContain("Delete report");
+  });
+
+  it("keeps row actions visible and touch-sized for phone users", () => {
+    const html = render({ isPublished: true });
+    expect(html).toContain("min-h-11");
+    expect(html).toContain("size-11");
+    expect(html).not.toContain("opacity-0");
   });
 
   // ── Fidelity, ADR-0090 / #364 ──────────────────────────────────────────

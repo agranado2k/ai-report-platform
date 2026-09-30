@@ -1,5 +1,5 @@
 import { Form } from "@remix-run/react";
-import { Badge, Button, cx, FolderIcon, MoreIcon, Select } from "arp-ui";
+import { Badge, Button, FolderIcon, MoreIcon, Select } from "arp-ui";
 import type { ComponentProps } from "react";
 import { RenameReportForm } from "../RenameReportForm";
 import { ReportSharingMenu } from "../ReportSharingMenu";
@@ -48,7 +48,7 @@ export function ReportRow({
   pendingSharing: ComponentProps<typeof ReportSharingMenu>["pendingState"];
 }) {
   return (
-    <li className="group relative grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-0 hover:bg-hover">
+    <li className="group relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-hover has-[details[open]]:z-20 lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem] lg:py-3">
       {/* Stretched-link open overlay (CSP-safe, ADR-0056 owner-open). z-0 paints
           above plain in-flow cells so clicking the name / status opens the
           report; interactive cells lift to z-10. A PROCESSING report (not yet
@@ -64,12 +64,12 @@ export function ReportRow({
       ) : null}
 
       {/* Name: title + slug + folder tag + (ADR-0080) editability note */}
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-fg">{r.title}</p>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
+      <div className="col-span-2 min-w-0 lg:col-span-1">
+        <p className="break-words text-sm font-semibold text-fg lg:truncate">{r.title}</p>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-subtle">
           <code className="font-mono">{r.slug}</code>
-          <span className="inline-flex items-center gap-1">
-            <FolderIcon className="size-3.5" />
+          <span className="inline-flex min-w-0 items-center gap-1 break-all">
+            <FolderIcon className="size-3.5 shrink-0" />
             {folderLabel}
           </span>
           {r.editabilityNotice ? (
@@ -91,12 +91,12 @@ export function ReportRow({
       </div>
 
       {/* Status */}
-      <div>
+      <div className="col-start-1 row-start-2 lg:col-auto lg:row-auto">
         <StatusBadge isPublished={r.isPublished} />
       </div>
 
       {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay */}
-      <div className="relative z-10 justify-self-start">
+      <div className="relative z-10 col-start-2 row-start-2 justify-self-end has-[details[open]]:z-20 lg:col-auto lg:row-auto lg:justify-self-start">
         <ReportSharingMenu
           node={r.sharing}
           choices={sharingChoices}
@@ -104,9 +104,9 @@ export function ReportRow({
         />
       </div>
 
-      {/* Row actions — hover-revealed (also on keyboard focus / while open), a
+      {/* Row actions — always visible for touch and pointer users, a
           native <details> menu (no JS, CSP-safe). The full menu/keyboard model
-          is #347; this just adds the reveal + keeps the existing actions.
+          is #347; the existing actions remain available.
 
           #363 adds Edit here as its own control. The row used to have ONE
           destination and it was the editor, which is why an owner clicked Edit
@@ -120,23 +120,18 @@ export function ReportRow({
           place that mints one (ADR-0059 §4) after re-checking `canWrite` live.
           `z-10` lifts it above the `absolute inset-0` overlay — without that
           the overlay swallows the click and Edit silently means Open. */}
-      <div
-        className={cx(
-          "relative z-10 flex items-center gap-1 justify-self-end opacity-0 transition-opacity",
-          "group-hover:opacity-100 focus-within:opacity-100",
-        )}
-      >
+      <div className="relative z-10 col-span-2 flex items-center justify-end gap-1 border-t border-border pt-2 lg:col-span-1 lg:border-0 lg:pt-0">
         {r.isPublished ? (
           <a
             href={`/reports/${r.slug}/open?to=edit`}
-            className="rounded-control px-2 py-1 text-xs font-medium text-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            className="inline-flex min-h-11 items-center rounded-control px-3 text-sm font-medium text-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
           >
             Edit
             <span className="sr-only"> {r.title}</span>
           </a>
         ) : null}
         <details className="shrink-0">
-          <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
+          <summary className="flex size-11 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
             <MoreIcon className="size-4" />
             <span className="sr-only">Actions for {r.title}</span>
           </summary>

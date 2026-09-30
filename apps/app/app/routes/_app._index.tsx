@@ -22,6 +22,7 @@ import { AppHeader, buttonClass, cx, EmptyState, PageShell } from "../components
 import { type FolderManageNode, FolderManagePanel } from "../components/folders/FolderManagePanel";
 import { NewFolderDialog } from "../components/folders/NewFolderDialog";
 import { ReportFilter } from "../components/reports/ReportFilter";
+import { ReportPagination } from "../components/reports/ReportPagination";
 import { ReportRow } from "../components/reports/ReportRow";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
@@ -656,14 +657,14 @@ export default function Index() {
               }
             />
           ) : (
-            <div className="overflow-hidden rounded-card border border-border">
+            <div className="rounded-card border border-border bg-surface shadow-xs">
               {/* Visual column header; the rows below are a real <ul>/<li> so
                   list semantics (lost when T4a replaced the <ul> with a div
                   grid — #346) are restored. A full ARIA table with column
                   association is the interaction ticket's call (#347). */}
               <div
                 aria-hidden="true"
-                className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted"
+                className="hidden items-center gap-3 border-b border-border bg-bg px-4 py-2 text-xs font-medium text-muted lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem]"
               >
                 <span>Name</span>
                 <span>Status</span>
@@ -689,32 +690,18 @@ export default function Index() {
             </div>
           )}
 
-          {hasPrev || hasNext ? (
-            <div className="mt-4 flex items-center gap-3 text-sm">
-              {hasPrev ? (
-                <Link
-                  to={cursorHref(items[0] ? { ending_before: items[0].id } : undefined)}
-                  className="text-brand hover:text-brand-hover"
-                >
-                  ← Prev
-                </Link>
-              ) : (
-                <span className="text-subtle">← Prev</span>
-              )}
-              {hasNext ? (
-                <Link
-                  to={cursorHref(
+          <ReportPagination
+            previousHref={
+              hasPrev ? cursorHref(items[0] ? { ending_before: items[0].id } : undefined) : null
+            }
+            nextHref={
+              hasNext
+                ? cursorHref(
                     items.length ? { starting_after: items[items.length - 1]?.id } : undefined,
-                  )}
-                  className="text-brand hover:text-brand-hover"
-                >
-                  Next →
-                </Link>
-              ) : (
-                <span className="text-subtle">Next →</span>
-              )}
-            </div>
-          ) : null}
+                  )
+                : null
+            }
+          />
 
           {createParent ? (
             // Creating a folder gets a deliberate dialog step (#336, report §02)

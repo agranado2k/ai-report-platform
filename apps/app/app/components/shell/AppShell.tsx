@@ -14,6 +14,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { Logo } from "../Logo";
@@ -71,7 +72,7 @@ interface NavItemProps {
 
 function NavItem({ icon, label, href, active, collapsed, soon }: NavItemProps) {
   const cls = cx(
-    "flex h-8 items-center gap-2 rounded-control px-2 text-sm transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
+    "flex h-11 md:h-8 items-center gap-2 rounded-control px-2 text-sm transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
     active
       ? "bg-brand-soft font-medium text-brand-hover [&_svg]:text-brand-hover"
       : "text-fg hover:bg-hover [&_svg]:text-muted",
@@ -125,7 +126,35 @@ export function AppShell({
   account,
   children,
 }: AppShellProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [desktopCollapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  // Phone navigation visibility is independent from the desktop rail
+  // preference. While it is open, show the full folder tree even when the
+  // desktop rail is persisted collapsed; the desktop button still reflects
+  // the persisted preference after a resize.
+  const mobileRailCollapsed = desktopCollapsed && !mobileOpen;
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || document.querySelector("dialog[open]")) return;
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+        menuButton.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMobileOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      desktop.removeEventListener("change", closeOnDesktop);
+    };
+  }, [mobileOpen]);
 
   // One persist-and-flip, shared by the ⌘B chord and the header button so the
   // two entry points can't drift. localStorage is guarded: it throws in
@@ -160,13 +189,60 @@ export function AppShell({
   const crumbs = crumbsFor(activePath, navFolders, selectedFolderId);
 
   return (
-    <div className="grid h-dvh grid-rows-1 bg-surface" style={{ gridTemplateColumns: "auto 1fr" }}>
+    <div className="grid h-dvh grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)] bg-surface md:grid-cols-[auto_minmax(0,1fr)] md:grid-rows-[auto_minmax(0,1fr)]">
+      <header className="row-start-1 flex min-w-0 min-h-14 items-center gap-2 border-b border-border px-3 md:col-start-2 md:px-4">
+        <button
+          ref={menuButton}
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileOpen}
+          aria-controls="app-navigation"
+          className={cx(
+            buttonClass("ghost", "sm", { iconOnly: true }),
+            "min-h-11 min-w-11 shrink-0 md:hidden",
+          )}
+        >
+          <PanelLeftIcon className="size-5" />
+        </button>
+        <div className="hidden md:block">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-pressed={desktopCollapsed}
+            title="Toggle sidebar (⌘B)"
+            className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1")}
+          >
+            <PanelLeftIcon className="size-4" />
+          </button>
+        </div>
+        <Breadcrumbs crumbs={crumbs} />
+        <Link
+          to="/upload"
+          onClick={() => setMobileOpen(false)}
+          className={cx(buttonClass("primary", "sm"), "min-h-11 shrink-0 md:min-h-8")}
+        >
+          <UploadIcon className="size-4" />
+          <span className="sm:hidden">
+            Upload<span className="sr-only"> report</span>
+          </span>
+          <span className="hidden sm:inline">Upload report</span>
+        </Link>
+      </header>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: Native links emit click for keyboard activation too. */}
       <aside
+        id="app-navigation"
+        aria-label="Workspace navigation"
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
+        }}
         className={cx(
-          "flex h-dvh flex-col gap-1 border-r border-border bg-bg p-2 transition-[width] duration-150",
-          collapsed ? "w-14" : "w-64",
+          "row-start-2 max-h-[50dvh] min-h-0 flex-col gap-1 overflow-y-auto border-b border-border bg-bg p-2 md:col-start-1 md:row-start-1 md:row-span-2 md:h-dvh md:max-h-none md:border-r md:border-b-0",
+          mobileOpen ? "flex" : "hidden md:flex",
+          mobileRailCollapsed ? "md:w-14" : "md:w-64",
         )}
-        data-collapsed={collapsed}
+        data-collapsed={mobileRailCollapsed}
       >
         {/* Workspace / brand — also the way home. */}
         <Link
@@ -174,11 +250,11 @@ export function AppShell({
           aria-label="Centaur — your reports"
           className={cx(
             "flex h-11 items-center gap-2.5 rounded-control px-2 no-underline hover:bg-hover",
-            collapsed && "justify-center px-0",
+            mobileRailCollapsed && "justify-center px-0",
           )}
         >
           <Logo className="size-7 shrink-0" />
-          {collapsed ? null : (
+          {mobileRailCollapsed ? null : (
             <span className="font-serif text-lg font-semibold tracking-tight text-fg">Centaur</span>
           )}
         </Link>
@@ -189,21 +265,26 @@ export function AppShell({
             label="Reports"
             href="/"
             active={isNavActive(activePath, "/")}
-            collapsed={collapsed}
+            collapsed={mobileRailCollapsed}
           />
-          <NavItem icon={<UsersIcon />} label="Shared with me" collapsed={collapsed} soon />
-          <NavItem icon={<ClockIcon />} label="Recent" collapsed={collapsed} soon />
+          <NavItem
+            icon={<UsersIcon />}
+            label="Shared with me"
+            collapsed={mobileRailCollapsed}
+            soon
+          />
+          <NavItem icon={<ClockIcon />} label="Recent" collapsed={mobileRailCollapsed} soon />
         </nav>
 
-        {collapsed ? null : (
+        {mobileRailCollapsed ? null : (
           <>
             <div className="mt-3 px-2 text-xs font-medium text-muted">Folders</div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="shrink-0 md:min-h-0 md:flex-1 md:overflow-y-auto">
               <FolderNavTree folders={navFolders} selectedId={selectedFolderId} />
             </div>
           </>
         )}
-        {collapsed ? <div className="flex-1" /> : null}
+        {mobileRailCollapsed ? <div className="flex-1" /> : null}
 
         <nav className="grid gap-px border-t border-border pt-2">
           <NavItem
@@ -211,7 +292,7 @@ export function AppShell({
             label="API keys & MCP"
             href="/settings/api-keys"
             active={isNavActive(activePath, "/settings")}
-            collapsed={collapsed}
+            collapsed={mobileRailCollapsed}
           />
         </nav>
 
@@ -219,37 +300,19 @@ export function AppShell({
         <div
           className={cx(
             "flex items-center gap-2 rounded-control p-1",
-            collapsed ? "justify-center" : "hover:bg-hover",
+            mobileRailCollapsed ? "justify-center" : "hover:bg-hover",
           )}
         >
           {account}
-          {collapsed ? null : (
+          {mobileRailCollapsed ? null : (
             <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-placeholder" />
           )}
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-col">
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-pressed={collapsed}
-            title="Toggle sidebar (⌘B)"
-            className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1")}
-          >
-            <PanelLeftIcon className="size-4" />
-          </button>
-          <Breadcrumbs crumbs={crumbs} />
-          <div className="flex-1" />
-          <Link to="/upload" className={buttonClass("primary", "sm")}>
-            <UploadIcon className="size-4" />
-            Upload report
-          </Link>
-        </header>
-        <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
-      </div>
+      <main className="row-start-3 min-h-0 min-w-0 overflow-y-auto md:col-start-2 md:row-start-2">
+        {children}
+      </main>
     </div>
   );
 }

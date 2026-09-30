@@ -46,6 +46,11 @@ export default defineConfig({
   // one, so it has to be repeated rather than inherited.
   projects: [
     {
+      name: "dashboard-mobile",
+      grep: /@dashboard-mobile/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 375, height: 812 } },
+    },
+    {
       name: "chromium",
       grep: /@synthetic-fixture/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },

@@ -6780,3 +6780,67 @@ a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side C
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
 Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.
+
+### 2026-09-30 — Ticket #403: responsive dashboard navigation and report list
+
+Branch `feat/mobile-navigation` (`ae645dc`) adds the first party dashboard's phone
+navigation and responsive report rows. Navigation opens from the compact header,
+closes when a destination is selected or Escape is pressed, restores focus to the
+menu button, and keeps the desktop rail collapse preference independent across a
+phone resize. Report rows keep Open, Edit, sharing, publication, access, and
+fidelity conclusions intact while making row actions visible and touch-sized.
+
+The mounted browser tier was amended under ADR-0079 for the app shell/list and
+passes eight cases at 320/375/390/768/1024/1280 widths. An authenticated BDD browser
+scenario was added to exercise the deployed dashboard seam when Clerk browser
+credentials are present. The broader MCP app test initially failed under the
+sandbox with `listen EPERM`; the same unmodified MCP test passed 13/13 with host
+network permissions, so it is environmental rather than a ticket regression.
+
+### 2026-09-30 — PR #409 independent iteration
+
+Independent browser probing reproduced overlapping folder/settings controls at
+375×400. A red layout assertion (folder bottom 358px, settings top 283px) now
+passes with the folder region kept at its intrinsic height on phones. Header
+precedes navigation in DOM order, with a red-to-green keyboard regression.
+Production pagination is shared with the mounted fixture and has 44px targets
+(the new assertion initially measured 20px). The resize test now checks actual
+rail state; destination closing and action opacity also have assertions.
+
+The earlier eight-case diary count is superseded: twelve mounted Chromium cases
+and seventeen shell/row smoke tests pass, alongside app typecheck. CI on
+`b9f3383` ran the authenticated phone scenario successfully: preview run
+36704523376 artifact reported 20 expected, zero skipped. This evidence predates
+the iteration fixes and must be refreshed on their pushed commit. ADR-0079
+records the remaining browser/input and route-fixture evidence limitations.
+
+### 2026-09-30 — PR #409 menu and dialog regressions
+
+A two-row browser fixture reproduced the review's menu layering concern via
+`elementFromPoint`: later row controls covered the open menu. The original
+z-index structure predates this slice, but always-visible actions exposed it;
+an open row now lifts above its siblings. A native delete-dialog check also
+reproduced Escape closing both the dialog and phone navigation; the navigation
+listener now yields to open native dialogs and already-handled keys. Both
+regressions went red then green. Removing an unused header spacer restores the
+breadcrumb's available width (the 320px check initially measured only 68px).
+
+Fourteen mounted browser tests and seventeen shell/row unit tests pass. Local
+Chromium and WebKit touch-emulated probes also passed at 320/375/390 widths,
+812×375 landscape, and 1280 desktop. These are hermetic production-component
+checks, not physical-device or 200% browser-zoom evidence. The independent
+remote artifact for `5b15b79` confirms the authenticated phone scenario passed
+with 20 total, 20 expected and zero skipped tests; subsequent commits need
+the same exact-head CI verification.
+
+### 2026-09-30 — PR #409 sharing overlap and repeatable touch matrix
+
+A final focused review identified the same stacking issue within a phone row:
+its sharing menu could paint behind its own Edit/actions strip. The 375px
+hit-test failed before lifting the open sharing cell and passes afterward.
+The optional `playwright.dashboard-touch.config.ts` makes the earlier local
+Chromium/WebKit evidence repeatable from the checkout, running sixteen
+scenarios in each engine with touch enabled and explicit navigation tapping.
+The width matrix now includes 812×375 landscape. On this macOS host, WebKit
+uses Option+Tab to include links in keyboard traversal; the tab-order assertion
+checks the same destination rather than skipping it.
