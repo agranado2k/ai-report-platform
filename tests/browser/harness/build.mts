@@ -77,7 +77,11 @@ function pageFor(fixture: string, entry: string): string {
   return join(here, `index.${e}.${f}.generated.html`);
 }
 
-export async function buildHarness(fixture = "report.html", entry = "entry.tsx"): Promise<string> {
+export async function buildHarness(
+  fixture = "report.html",
+  entry = "entry.tsx",
+  stylesheet: "production" | "mirrored" = "mirrored",
+): Promise<string> {
   const bundle = await esbuild.build({
     stdin: {
       contents: readFileSync(join(here, entry), "utf8"),
@@ -95,7 +99,7 @@ export async function buildHarness(fixture = "report.html", entry = "entry.tsx")
   });
 
   const js = bundle.outputFiles[0]?.text ?? "";
-  const styles = entry.endsWith("entry-owner-view.tsx") ? await productionViewStyles() : "";
+  const styles = stylesheet === "production" ? await productionViewStyles() : "";
   const report = readFileSync(join(here, fixture), "utf8");
   const inlineSafe = (s: string) => s.replace(/<\/script>/g, "<\\/script>");
 

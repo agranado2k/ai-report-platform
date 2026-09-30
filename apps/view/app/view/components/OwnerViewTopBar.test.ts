@@ -66,16 +66,6 @@ describe("OwnerViewTopBar", () => {
     expect(anchor).toContain('rel="noopener"');
   });
 
-  it("keeps every owner action touch-sized on narrow screens", () => {
-    const html = render();
-    const actions = ["Open in new tab", "Versions", "Edit"];
-    for (const label of actions) {
-      const anchor = html.match(new RegExp(`<a[^>]*>${label}</a>`))?.[0] ?? "";
-      expect(anchor).toContain("min-h-11");
-      expect(anchor).toContain("sm:min-h-8");
-    }
-  });
-
   it("keeps the 'Open in new tab' escape on the owner-read degrade (#385)", () => {
     // The escape matters most here: a read-capable owner still needs to reach a
     // report that blanks in the frame, even though Versions and Edit are gone.
@@ -137,13 +127,6 @@ describe("OwnerViewTopBar", () => {
       expect(html).toMatch(/until you save|until Save/i);
       expect(html).toContain("Cancel");
       expect(html).toMatch(/href="\/abcde12345\/edit"[^>]*>Edit anyway</);
-    });
-
-    it("keeps the confirmation readable in a short viewport", () => {
-      const html = render({ lossyWarning: warning });
-      expect(html).toContain("max-h-[calc(100dvh-2rem)]");
-      expect(html).toContain("overflow-y-auto");
-      expect(html).toContain("flex-wrap");
     });
 
     it("describes the dialog by its consequence, not just its title", () => {

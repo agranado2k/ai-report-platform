@@ -91,3 +91,11 @@ Feature: Owner-view deck smoke — a private script-driven report actually runs 
     When I press the right arrow key
     Then the deck advances to slide two inside the frame
     And the deck's Google Fonts stylesheet was fetched rather than refused by the CSP
+
+  Scenario: A phone owner can read a private Report, use the fallback and cancel lossy editing
+    Given a private script-driven deck I own is published
+    When I use a phone viewport for the owner view
+    And I open that deck from the dashboard
+    Then the owner view chrome is present
+    And the framed report carries the owner-view iframe contract
+    And the phone owner actions and lossy confirmation remain reachable

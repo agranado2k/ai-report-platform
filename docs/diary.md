@@ -49,15 +49,6 @@
 
 ## Entries
 
-### 2026-09-30 — Mobile Owner view chrome (#406)
-
-Ticket #406 is delivered in PR #408. The Owner view now uses responsive production
-chrome spacing, 44px phone action targets, and a viewport-bounded lossy-edit dialog
-with internal scrolling. The hermetic Owner view browser harness compiles the same
-`apps/view/app/tailwind.css` entry as production and covers 320/375/390/768/1024/1280
-widths plus a 320×240 dialog viewport. Canonical report bytes, iframe sandbox,
-fallback href, permission-derived actions, headers, routes, and APIs are unchanged.
-
 ### 2026-05-18 — Spec drafting begins (rev 1)
 
 Initial spec landed with the first 9 ADRs covering the bones of the platform:
@@ -6788,3 +6779,22 @@ a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side C
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
 Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.
+
+### 2026-09-30 — Mobile Owner view chrome (#406)
+
+Ticket #406 is proposed in PR #408. The Owner view now uses responsive production
+chrome spacing, 44px phone action targets, and a viewport-bounded lossy-edit dialog
+with internal scrolling. The hermetic Owner view browser harness compiles the same
+`apps/view/app/tailwind.css` entry as production and covers 320/375/390/768/1024/1280
+widths plus a 320×240 dialog viewport. Canonical report bytes, iframe sandbox,
+fallback href, permission-derived actions, headers, routes, and APIs are unchanged.
+
+Independent review exposed a 32px lossy Edit trigger and weak body-only overflow
+assertions. A failing geometry test preceded the 44px trigger fix. The expanded
+matrix passed 36 Chromium checks across lossless, lossy and read-only states and
+21 supplementary desktop WebKit checks; an additional touch/focus test passed.
+Deliberately oversized actions and an unbounded dialog both fail the new geometry
+checks. The authenticated mobile deck scenario is added but still awaits preview
+execution. Physical-device and actual browser-zoom acceptance remain unverified.
+Generated Husky wrappers were restored and docs, TDD pairing and commitlint guards
+were explicitly replayed after discovering the cached dependency setup omitted them.

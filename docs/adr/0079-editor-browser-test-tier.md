@@ -81,6 +81,21 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 
 ## More information
 
+### 2026-09-30 amendment: Owner view layout coverage
+
+The hermetic tier also covers first-party Owner view chrome and its lossy-edit
+confirmation. These layout and input checks need a browser, but no deployment.
+The harness explicitly opts into the production `apps/view/app/tailwind.css`
+stylesheet, compiled through the app's Vite/Tailwind pipeline; missing stylesheet
+output fails the build. Existing editor fixtures retain their mirrored stylesheet.
+Assertions measure action bounds, nested overflow, short-viewport dialog reachability,
+touch input and focus behavior rather than checking utility-class strings.
+
+This harness does not prove authenticated access or canonical report rendering.
+The mobile scenario in `tests/e2e/smoke/owner-view-deck.feature` exercises those
+contracts against a deployed preview with the existing private report fixture.
+Chromium and supplementary desktop WebKit runs are not physical-device testing.
+
 - `docs/adr/0046-adapter-sql-test-tier.md` — the precedent: a testing-taxonomy decision is repo-wide, so it is a standalone ADR rather than a bullet inside a feature ADR.
 - `docs/adr/0062-editing-model-report-html-schema.md` — Amendment 3, Decision 7: the behaviour this tier first guards, and the record of what is and is not established about the ProseMirror mechanism.
 - `docs/adr/0019` (in `docs/spec.html`) — infrastructure-first delivery; unchanged by this ADR.

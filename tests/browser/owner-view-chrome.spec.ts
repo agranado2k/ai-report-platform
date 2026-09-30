@@ -31,7 +31,7 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     // The fixture arg is unused by this entry (the chrome injects no report —
     // it frames one by URL); pass the existing one so the shared page-shell
     // writer has something to inline.
-    harnessPage = await buildHarness("report.html", "entry-owner-view.tsx");
+    harnessPage = await buildHarness("report.html", "entry-owner-view.tsx", "production");
     editorPage = await buildHarness("report.html", "entry-edit-panel.tsx");
 
     // ONE ephemeral loopback server, for the funnel case below only (the hash
@@ -243,25 +243,45 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     await expect(page.locator(FRAME)).toHaveCount(1);
   });
 
-  test("fits the title, fallback, and permitted actions across the owner-view width matrix", async ({
-    page,
-  }) => {
-    // These are the supported review widths from the mobile-first design
-    // brief. The 320px case is the useful boundary: it catches a title or
-    // action row that creates horizontal page overflow. The short viewport
-    // catches a chrome row that consumes the whole report surface.
-    for (const width of [320, 375, 390, 768, 1024, 1280]) {
-      await page.setViewportSize({ width, height: width <= 390 ? 568 : 720 });
-      await page.goto(
-        `file://${harnessPage}?title=${encodeURIComponent("A report title long enough to truncate")}`,
-      );
-      await expect(page.getByTestId("owner-view")).toBeVisible();
-      await expect(page.getByRole("link", { name: "Open in new tab" })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Versions" })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Edit", exact: true })).toBeVisible();
-      expect(await page.locator("body").evaluate((body) => body.scrollWidth)).toBeLessThanOrEqual(
-        width,
-      );
+  for (const width of [320, 375, 390, 768, 1024, 1280]) {
+    for (const state of ["lossless", "lossy", "read-only"]) {
+      test(`keeps ${state} owner actions within ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 568 });
+        const params = new URLSearchParams({ title: "UnbrokenReportTitle".repeat(12) });
+        if (state === "lossy") params.set("lossy", "1");
+        if (state === "read-only") params.set("canEdit", "0");
+        await page.goto(`file://${harnessPage}?${params}`);
+        const header = page.locator("header");
+        // Page-level overflow cannot detect a control clipped inside this header.
+        expect(await header.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await expect(page.getByRole("heading", { level: 1 })).toBeInViewport({ ratio: 1 });
+        const names =
+          state === "read-only" ? ["Open in new tab"] : ["Open in new tab", "Versions", "Edit"];
+        for (const name of names) {
+          const action = page.getByRole("link", { name, exact: true });
+          await expect(action).toBeInViewport({ ratio: 1 });
+          const box = await action.boundingBox();
+          expect(box?.x).toBeGreaterThanOrEqual(0);
+          expect((box?.x ?? width) + (box?.width ?? width)).toBeLessThanOrEqual(width);
+          if (width <= 390) {
+            expect(box?.height).toBeGreaterThanOrEqual(44);
+            expect(box?.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        if (state === "read-only") {
+          await expect(page.getByRole("link", { name: "Edit", exact: true })).toHaveCount(0);
+          await expect(page.getByRole("link", { name: "Versions", exact: true })).toHaveCount(0);
+        }
+      });
     }
+  }
+
+  test("leaves most of a short landscape viewport available to the Report", async ({ page }) => {
+    const viewport = { width: 568, height: 320 };
+    await page.setViewportSize(viewport);
+    await page.goto(`file://${harnessPage}`);
+    const frame = await page.locator(FRAME).boundingBox();
+    expect(frame?.height).toBeGreaterThanOrEqual(viewport.height / 2);
+    await expect(page.getByRole("link", { name: "Open in new tab" })).toBeInViewport({ ratio: 1 });
   });
 });

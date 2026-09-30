@@ -225,6 +225,57 @@ Then("the owner view chrome is present", async ({ page }) => {
   ).toBeVisible();
 });
 
+When("I use a phone viewport for the owner view", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+});
+
+Then("the phone owner actions and lossy confirmation remain reachable", async ({ page }) => {
+  for (const width of [320, 375, 390]) {
+    await test.step(`Owner actions at ${width}px`, async () => {
+      await page.setViewportSize({ width, height: 568 });
+      const header = page.locator("header");
+      expect(await header.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      for (const name of ["Open in new tab", "Versions", "Edit"]) {
+        const action = page.getByRole("link", { name, exact: true });
+        await expect(action).toBeInViewport({ ratio: 1 });
+        const box = await action.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
+      await expect(deckSlide(page, "slide-1")).toBeVisible();
+    });
+  }
+
+  const [fallback] = await Promise.all([
+    page.context().waitForEvent("page"),
+    page.getByRole("link", { name: "Open in new tab", exact: true }).click(),
+  ]);
+  await expect(fallback.getByTestId("slide-1")).toBeVisible();
+  expect(new URL(fallback.url()).pathname).toBe(`/${slug}`);
+  await fallback.close();
+
+  await page.setViewportSize({ width: 568, height: 320 });
+  await page.getByRole("link", { name: "Edit", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box?.y).toBeGreaterThanOrEqual(0);
+  expect((box?.y ?? 320) + (box?.height ?? 320)).toBeLessThanOrEqual(320);
+  const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+  await cancel.scrollIntoViewIfNeeded();
+  await expect(cancel).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("link", { name: "Edit anyway", exact: true })).toBeInViewport({
+    ratio: 1,
+  });
+  await test.info().attach("phone-owner-lossy-confirmation", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+  await cancel.click();
+  await expect(dialog).toBeHidden();
+  await expect(deckSlide(page, "slide-1")).toBeVisible();
+});
+
 /** The one iframe on the chrome page: the framed report (ADR-0089 §2). */
 function reportFrameElement(page: Page): Locator {
   return page.locator("iframe");

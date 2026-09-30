@@ -70,7 +70,7 @@ export function LossyEditDialog({
     <>
       <a
         href={editHref}
-        className={buttonClass("primary", "sm")}
+        className={`${buttonClass("primary", "sm")} min-h-11 sm:min-h-8`}
         onClick={(e) => {
           const dialog = dialogRef.current;
           // Let the plain navigation happen if <dialog> is unavailable, and

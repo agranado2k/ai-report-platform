@@ -6,7 +6,7 @@ import { cx } from "./cx";
  * bar carrying the brand mark, the document's title over a small product
  * label, an optional status/state pill, and a right-hand action group. The
  * document below it dominates — that is the whole design intent, so this stays
- * a strip and never grows a second row.
+ * a strip on desktop; phone actions wrap below the title to stay reachable.
  *
  * Extracted from the editor's `TopBar` when the owner view (ADR-0089) needed
  * the same bar with different actions. Two bars that are *supposed* to look
