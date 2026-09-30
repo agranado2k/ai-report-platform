@@ -6812,3 +6812,10 @@ desktop action-row checks, plus a committed supplementary WebKit configuration.
 The ADR now records the isolated CSS build and fallback-font limitation; preview
 execution remains the authority for actual-font fit and authenticated behavior.
 Tier: implementer. Worktree `mobile-owner-view`, branch `feat/mobile-owner-view`.
+
+The updated-main preview run 36708554702 passed the phone Owner view journey but
+failed the existing toolbar round-trip. Artifact inspection showed all six plain
+fixture words already bold from earlier runs: implicit content-hash idempotency
+replayed the same mutable Report across uploads. The toolbar fixture now supplies
+a fresh explicit Idempotency-Key per upload. Product idempotency is unchanged;
+the failing deployed scenario is the regression signal and CI must rerun it.
