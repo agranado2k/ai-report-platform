@@ -133,6 +133,10 @@ test.describe("@synthetic-fixture mobile Editing session", () => {
     const composer = page.getByRole("dialog", { name: "New comment" });
     await expect(composer).toBeVisible();
     await page.getByLabel("Comment body").fill("Phone comment");
+    // The bounded composer intentionally scrolls on a short screen. Reach
+    // its footer before requiring the whole activation area to be visible.
+    await composer.hover();
+    await page.mouse.wheel(0, 300);
     await expect(page.getByRole("button", { name: "Post comment" })).toBeInViewport({ ratio: 1 });
     const cbox = await composer.boundingBox();
     if (!cbox) {

@@ -6854,3 +6854,14 @@ BDD generation, and docs conformance passed. The mutable authenticated editor
 fixture now sends a unique Idempotency-Key per upload: sibling preview failures
 showed content-derived replay can reuse a previously edited Report across runs.
 This changes only disposable test-fixture isolation, not product idempotency.
+
+### 2026-09-30 — PR #410 short-screen composer CI follow-up
+
+CI at `8a5fcb3` passed 150 browser tests but failed the short-screen composer
+case twice: Post comment had intersection ratio 0.35227 before any scroll.
+The composer is intentionally bounded and scrollable under A12. The test now
+uses a pointer wheel gesture over that region before requiring the entire
+button to be visible, then posts and verifies the resulting comment. The
+ratio-1 assertion and all viewport-bound assertions remain intact. This is a
+user-journey correction, not a relaxed visibility threshold or product change.
+Local platform geometry passed before; no particular font cause is established.
