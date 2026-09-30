@@ -50,8 +50,9 @@ export default defineConfig({
       // App-shell chrome (#333): pure-logic modules (folder-tree build,
       // breadcrumbs, active-nav, rail-collapse reducer) and node-render smoke
       // tests of the presentational shell. No DOM/browser — the shell is a
-      // pure prop-driven component, so it lives in the fast node tier (the
-      // ADR-0079 browser harness is editor-only). KEEP IN SYNC with
+      // pure prop-driven component, so its markup lives in the fast node tier;
+      // its width-dependent behaviour is the ADR-0079 browser tier's
+      // `app-components` project (amended 2026-09-30). KEEP IN SYNC with
       // GUARD_SOURCE_RE in scripts/guards.config.sh.
       "apps/app/app/components/**/*.test.ts",
       "apps/view/app/server/**/*.test.ts",

@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Component-level BROWSER tests for packages/editor — the tier itself is
-// ADR-0079; the behavior it currently guards is ADR-0062 Amendment 3.
+// ADR-0079; the behavior it first guarded is ADR-0062 Amendment 3. Since the
+// ADR-0079 amendment of 2026-09-30 it also mounts production apps/app
+// components (the `app-components` project, harness/build-app.mts).
 //
 // Deliberately SEPARATE from the root playwright.config.ts. That one is the
 // BDD/e2e harness (ADR-019/ADR-023): it runs Gherkin features against a live

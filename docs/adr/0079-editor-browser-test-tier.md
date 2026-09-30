@@ -1,6 +1,6 @@
 # ADR-0079: A hermetic browser test tier for `packages/editor`
 
-- **Status**: Accepted
+- **Status**: Accepted — **amended 2026-09-30** (app components, #403; see the Amendment section)
 - **Date**: 2026-08-05
 - **Deciders**: agranado2k
 - **Supersedes / amends**: extends the two-tier reasoning of ADR-0046 (in-process pglite below the Neon e2e tier) to the editing surface; clarifies ADR-0019 (infrastructure-first delivery) the same way ADR-0046 does; builds on ADR-0042 (Vitest as the unit tier) and ADR-0071 (`packages/editor` as its own package). The behaviour it currently guards is ADR-0062 Amendment 3, Decision 7.
@@ -78,6 +78,20 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 - **This tier is a fast signal, not a merge gate.** `infra/terraform/envs/shared/main.tf` does not set `required_status_checks`, so the module default `[]` applies and **no** check currently gates merge. This job is advisory exactly like the manual pass it replaces — the improvement is that it runs automatically and leaves a record, not that it blocks anything. Making checks required is a separate operator decision about merge gating.
 - **Trade-offs**: a Playwright browser install in the `unit` workflow (~30s, no caching wired yet); generated `index.*.generated.html` files in the working tree (gitignored); a suite that now runs every contract over three documents in two projects (two synthetic fixtures + the real 86KB generated report, ~16s total); and a harness that still hand-copies the `/edit` route's pane geometry (53px topbar, 320px panel), which can drift from the route silently — a pointer comment in `apps/view/app/routes/$slug_.edit.tsx` names the harness so the two are edited together. The geometry is *not* covered by the mechanical fidelity guard, which only compares stylesheets; that copy has already drifted once.
 - **Neutral**: `tests/browser/**` is not covered by `pnpm typecheck`, identical to the pre-existing situation for `tests/e2e/**`. Worth closing for both at once, not for one of them here.
+
+## Amendment (2026-09-30) — a narrow extension to mounted `apps/app` components (#403)
+
+**Context.** The mobile-first PRD (Centaur Spec report `VPJw8Fr-MO`, Implementation Decision 12) needs evidence that the signed-in app's navigation and Report list work at phone widths: navigation closed by default, Escape restoring focus, a resize keeping the desktop collapse preference, rows without sideways scrolling, 44px touch targets. Those are statements about media queries, focus, effects and layout. The node tier renders one markup for every width; the e2e tier can reach them only through a deployment and credentials. ADR-0087 recorded that this tier was "editor-only" and could not mount `apps/app`; this amendment changes that, narrowly.
+
+**Decision.**
+
+1. **Scope.** The tier may mount **production `apps/app` components** — today `AppShell` and `DashboardPage` (the dashboard body, extracted from the `_app._index` route so it is prop-driven) — under a react-router **memory** data router, the same `react-router-dom` instance `@remix-run/react` wraps. That is all Remix's `Link`, `Form` and `useFetcher` need on the client. Nothing else about the tier changes: Chromium only (§7), `workers: 1` (§5), hermetic (§4 as narrowed by ADR-0089).
+2. **Fidelity rule — the app's own stylesheet, never a copy.** `tests/browser/harness/build-app.mts` bundles the entry against `apps/app` (as `build.mts` does against `apps/view`) and inlines `apps/app/app/tailwind.css` compiled by the **same `@tailwindcss/vite` plugin** the app's Vite build runs, scanning the same sources, with the app's self-hosted fonts. There is **no hand-copied layout** in this harness, unlike the editor harness's pane geometry (§6's known drift risk). A spec here measures the classes the app ships.
+3. **What is not production, named.** The *data*: route loaders (Clerk, Neon, the use cases) are replaced by a fixture reduced the way the loaders reduce it (`?folder=` honoured only for an existing Folder, `?q=` filtering by title). The account slot is a stub button, because Clerk's `<UserButton>` needs a live frontend API. Destination routes other than the dashboard render placeholder bodies. So a green run proves layout and interaction over fixture data, **not** loader behaviour, authentication or the account menu.
+4. **Its own project.** Specs are tagged `@app-components` and run in the `app-components` project with **no pinned viewport**: the width is the thing under test, and each spec sets it from `harness/viewport.ts` (320/375/390/768/1024/1280). Phone specs use `hasTouch`.
+5. **The deployed half stays in e2e.** The authenticated journey at phone width — real session, real loaders, the Clerk control inside the phone navigation, a `?q=` round-trip — is `tests/e2e/smoke/mobile-navigation.feature` (`@smoke @auth @browser`). This tier does not replace it.
+
+**Limits, recorded.** Chromium emulation is not a phone: no software keyboard, no iOS Safari/WebKit, no real touch selection. `hover: hover` is not emulated away by `hasTouch`, so the "actions hidden until hover on a wide hover-capable screen" rule is checked only in its desktop form. The extension covers the shell and the dashboard body only; any further `apps/app` surface added here is a new line in this section, not an assumption.
 
 ## More information
 
