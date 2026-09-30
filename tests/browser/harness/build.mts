@@ -109,7 +109,9 @@ export async function buildHarness(
     `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>editor harness</title>
 <style>${styles}</style>
-<style>
+${
+  stylesheet === "mirrored"
+    ? `<style>
 html,body{margin:0;height:100%;overflow:hidden}
 #root{height:100vh}
 .root-layout{display:flex;flex-direction:column;height:100%}
@@ -125,7 +127,9 @@ html,body{margin:0;height:100%;overflow:hidden}
 .editor-slot{height:100%;max-width:820px;margin:0 auto;background:#fff}
 .side-panel{flex:0 0 320px;border-left:1px solid #ccc;font:14px system-ui}
 .editor-iframe{width:100%;height:100%;border:0}
-</style></head><body>
+</style>`
+    : ""
+}</head><body>
 <div id="root"></div>
 <script type="text/plain" id="report-src">${inlineSafe(report)}</script>
 <script>${inlineSafe(js)}</script>

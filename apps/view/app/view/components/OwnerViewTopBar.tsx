@@ -12,9 +12,9 @@ import { LossyEditDialog } from "./LossyEditDialog";
 
 // The owner view keeps all three actions reachable on a phone. The compact
 // desktop button height is still useful at larger widths, while the mobile
-// hit area follows the touch target used by the rest of the application.
+// hit area meets the mobile-first PRD's 44px target for this surface.
 const actionClass = (variant: "primary" | "secondary") =>
-  `${buttonClass(variant, "sm")} min-h-11 sm:min-h-8`;
+  `${buttonClass(variant, "sm")} min-h-11 sm:min-h-8 sm:pointer-coarse:min-h-11`;
 
 export interface OwnerViewTopBarProps {
   /** The report's title. Author-controlled, so it is rendered as a text node

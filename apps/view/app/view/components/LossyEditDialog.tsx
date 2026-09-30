@@ -70,7 +70,7 @@ export function LossyEditDialog({
     <>
       <a
         href={editHref}
-        className={`${buttonClass("primary", "sm")} min-h-11 sm:min-h-8`}
+        className={`${buttonClass("primary", "sm")} min-h-11 sm:min-h-8 sm:pointer-coarse:min-h-11`}
         onClick={(e) => {
           const dialog = dialogRef.current;
           // Let the plain navigation happen if <dialog> is unavailable, and
@@ -124,12 +124,15 @@ export function LossyEditDialog({
           <Button
             type="button"
             variant="outline"
-            className="min-h-11 sm:min-h-9"
+            className="min-h-11 sm:min-h-9 sm:pointer-coarse:min-h-11"
             onClick={() => dialogRef.current?.close()}
           >
             Cancel
           </Button>
-          <a href={editHref} className={`${buttonClass("primary", "md")} min-h-11 sm:min-h-9`}>
+          <a
+            href={editHref}
+            className={`${buttonClass("primary", "md")} min-h-11 sm:min-h-9 sm:pointer-coarse:min-h-11`}
+          >
             Edit anyway
           </a>
         </DialogFooter>

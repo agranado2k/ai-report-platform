@@ -6798,3 +6798,10 @@ checks. The authenticated mobile deck scenario is added but still awaits preview
 execution. Physical-device and actual browser-zoom acceptance remain unverified.
 Generated Husky wrappers were restored and docs, TDD pairing and commitlint guards
 were explicitly replayed after discovering the cached dependency setup omitted them.
+
+A further rotation test reproduced 32px actions at 844×390 with touch input.
+Coarse-pointer layouts now retain 44px controls above the compact breakpoint.
+The final Owner view matrix passes 38 Chromium tests; 22 supplementary WebKit
+layout/touch tests pass, and its remaining focus test passes using macOS's
+documented Option-Tab link traversal. The production-style harness no longer
+receives the mirrored editor shell's overflow or geometry overrides.

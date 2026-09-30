@@ -160,8 +160,30 @@ test.describe("the owner view's Edit confirm on a lossy version", {
   test.describe("phone touch input", () => {
     test.use({ hasTouch: true });
 
+    test("keeps actions touch-sized after rotating to a wide phone viewport", async ({ page }) => {
+      await page.setViewportSize({ width: 844, height: 390 });
+      await page.goto(`file://${harnessPage}?lossy=1`);
+      for (const name of ["Open in new tab", "Versions", "Edit"]) {
+        const action = page.getByRole("link", { name, exact: true });
+        const box = await action.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
+      await page.getByRole("link", { name: "Edit", exact: true }).tap();
+      for (const action of [
+        page.getByRole("button", { name: "Cancel", exact: true }),
+        page.getByRole("link", { name: "Edit anyway", exact: true }),
+      ]) {
+        await expect(action).toBeInViewport({ ratio: 1 });
+        const box = await action.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
+    });
+
     test("opens and cancels the warning with touch and restores keyboard focus", async ({
       page,
+      browserName,
     }) => {
       await page.setViewportSize({ width: 375, height: 812 });
       await page.goto(`file://${harnessPage}?lossy=1`);
@@ -171,9 +193,13 @@ test.describe("the owner view's Edit confirm on a lossy version", {
       await page.getByRole("button", { name: "Cancel", exact: true }).tap();
       await expect(page.getByRole("dialog")).toBeHidden();
       await page.getByRole("link", { name: "Open in new tab" }).focus();
-      await page.keyboard.press("Tab");
+      // macOS WebKit uses Option-Tab to include links in keyboard traversal.
+      // https://support.apple.com/guide/safari/cpsh003/mac
+      const nextLink =
+        browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab";
+      await page.keyboard.press(nextLink);
       await expect(page.getByRole("link", { name: "Versions", exact: true })).toBeFocused();
-      await page.keyboard.press("Tab");
+      await page.keyboard.press(nextLink);
       await expect(edit).toBeFocused();
       await page.keyboard.press("Enter");
       await expect(page.getByRole("dialog")).toBeVisible();
