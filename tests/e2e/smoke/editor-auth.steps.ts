@@ -59,7 +59,8 @@ Given("a report I own exists", async ({ request }) => {
   session = await mintTestSession();
 
   const uploadResponse = await request.post("/api/v1/reports", {
-    headers: { Authorization: `Bearer ${session.jwt}` },
+    // Each run edits its own disposable Report, never a prior idempotency replay.
+    headers: { Authorization: `Bearer ${session.jwt}`, "Idempotency-Key": randomUUID() },
     multipart: {
       file: {
         name: "ai-readiness-report.html",
@@ -434,9 +435,15 @@ Then("I can edit and save on a phone after switching panels and rotating", async
   await page.getByRole("button", { name: /Open comments and versions panel/ }).click();
   expect((await editor.boundingBox())?.width).toBeGreaterThan(350);
   await page.getByRole("button", { name: "Versions", exact: true }).click();
-  await page.setViewportSize({ width: 844, height: 390 });
+  await page.setViewportSize({ width: 700, height: 390 });
   await page.getByRole("button", { name: "Hide panel" }).click();
   await expect(frame.locator("body")).toContainText("mobile persistence check");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Saved", { timeout: 30_000 });
+  await drainUntilClean(page.request, slug, { drainSecret: SCAN_DRAIN_SECRET, jwt: session.jwt });
+  const persisted = await page.request.get(`/api/v1/reports/${slug}/content`, {
+    headers: { Authorization: `Bearer ${session.jwt}` },
+  });
+  expect(persisted.status()).toBe(200);
+  expect(await persisted.text()).toContain("mobile persistence check");
 });

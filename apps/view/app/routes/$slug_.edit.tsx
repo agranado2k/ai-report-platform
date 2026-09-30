@@ -586,7 +586,7 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
     // the document pane isn't clipped to one screenful — with the chrome
     // (TopBar/panel/toggle) print:hidden, only the document prints.
     <div
-      className="flex h-dvh flex-col overflow-hidden max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 print:h-auto print:overflow-visible"
+      className="flex h-dvh flex-col overflow-hidden max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11 print:h-auto print:overflow-visible"
       data-testid="unified-editor"
     >
       <TopBar

@@ -3,7 +3,7 @@
 // responses are controlled at the Playwright boundary, never inside the editor.
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { build } from "esbuild";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -53,7 +53,7 @@ export async function buildMobileEditor(fixture = "tests/browser/harness/plain-r
               throw new Error("Edit route loader boundary changed");
             }
             let client = (source.slice(0, start) + source.slice(end)).replace(
-              /^import(?:(?!\nimport)[\s\S])*?from "[^"\n]*server[^"\n]*";\n/gm,
+              /^import(?:(?!\nimport)[\s\S])*?from "\.\.\/server\/[^"\n]*";\n/gm,
               "",
             );
             client = client.replace(
@@ -73,7 +73,7 @@ export async function buildMobileEditor(fixture = "tests/browser/harness/plain-r
   });
   const page = resolve(
     root,
-    `tests/browser/harness/index.mobile-editor.${fixture.includes("ai-readiness") ? "real" : "plain"}.generated.html`,
+    `tests/browser/harness/index.mobile-editor.${basename(fixture, ".html")}.generated.html`,
   );
   const report = readFileSync(resolve(root, fixture), "utf8");
   const safe = (s: string) => s.replace(/<\/script>/g, "<\\/script>");

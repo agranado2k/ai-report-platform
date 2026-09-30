@@ -54,6 +54,9 @@ test.describe("@synthetic-fixture mobile Editing session", () => {
       const documentBounds = await editor.boundingBox();
       const panelBounds = await page.locator("aside").boundingBox();
       expect(documentBounds?.width).toBeGreaterThanOrEqual(300);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      );
       if (width >= 768) {
         expect(panelBounds?.width).toBe(320);
       }
@@ -76,7 +79,9 @@ test.describe("@synthetic-fixture mobile Editing session", () => {
     await expect(page.getByRole("status")).toContainText("Saved as v3");
     expect(saved).toContain("unsaved mobile change");
   });
-  test("selection formatting and comment actions fit a short phone screen", async ({ page }) => {
+  test("selection formatting and comment actions fit a short phone screen", async ({
+    page,
+  }, testInfo) => {
     await page.route("https://app.example.test/**/comments", async (route) => {
       const input = route.request().postDataJSON();
       await route.fulfill({
@@ -103,10 +108,8 @@ test.describe("@synthetic-fixture mobile Editing session", () => {
       .contentFrame()
       .locator("p")
       .filter({ hasText: "commentable filler" });
-    await paragraph.click();
-    for (let i = 0; i < 5; i++) {
-      await page.keyboard.press("Shift+ArrowRight");
-    }
+    await expect(paragraph).toBeVisible();
+    await paragraph.dblclick({ position: { x: 60, y: 10 } });
     const toolbar = page.getByTestId("selection-toolbar");
     await expect(toolbar).toBeVisible();
     const boldBounds = await toolbar
@@ -130,13 +133,19 @@ test.describe("@synthetic-fixture mobile Editing session", () => {
     const composer = page.getByRole("dialog", { name: "New comment" });
     await expect(composer).toBeVisible();
     await page.getByLabel("Comment body").fill("Phone comment");
-    await expect(page.getByRole("button", { name: "Post comment" })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Post comment" })).toBeInViewport({ ratio: 1 });
     const cbox = await composer.boundingBox();
     if (!cbox) {
       throw new Error("Composer has no bounds");
     }
     expect(cbox.x + cbox.width).toBeLessThanOrEqual(320);
-    await page.screenshot({ path: "/tmp/centaur-mobile-editor-short.png" });
+    expect(cbox.x).toBeGreaterThanOrEqual(0);
+    expect(cbox.y).toBeGreaterThanOrEqual(0);
+    expect(cbox.y + cbox.height).toBeLessThanOrEqual(260);
+    await testInfo.attach("short-screen-composer", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
     await page.getByRole("button", { name: "Post comment" }).click();
     await expect(composer).toHaveCount(0);
     await page.getByRole("button", { name: /Open comments and versions panel/ }).click();
@@ -152,24 +161,36 @@ test("@real-report mobile panel preserves a representative Report", async ({ pag
   await page.goto(real);
   const editor = page.locator("main iframe").first();
   await expect(editor).toBeVisible();
+  const mounted = await editor.elementHandle();
+  const paragraph = editor.contentFrame().locator("p").first();
+  await paragraph.click();
+  await page.keyboard.type("Persistent representative edit ");
   const before = await editor.contentFrame().locator("body").textContent();
   await page.getByRole("button", { name: /Open comments and versions panel/ }).click();
   expect((await editor.boundingBox())?.width).toBeGreaterThan(350);
   await page.setViewportSize({ width: 844, height: 390 });
   await page.getByRole("button", { name: "Hide panel" }).click();
   expect(await editor.contentFrame().locator("body").textContent()).toBe(before);
+  expect(await mounted?.evaluate((el) => el.isConnected)).toBe(true);
+  await expect(editor.contentFrame().locator("body")).toContainText(
+    "Persistent representative edit",
+  );
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(844);
 });
 
 test("@synthetic-fixture mobile save failure preserves the draft for retry", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 500 });
   let fail = true;
-  await page.route("https://app.example.test/**", (route) =>
-    route.fulfill({
+  let retried = "";
+  await page.route("https://app.example.test/**", (route) => {
+    if (!fail && route.request().method() === "POST") {
+      retried = route.request().postData() ?? "";
+    }
+    return route.fulfill({
       status: fail ? 500 : 200,
       json: fail ? {} : { version: 3, scan_status: "pending", data: [], has_more: false },
-    }),
-  );
+    });
+  });
   await page.goto(url);
   const frame = page.locator("main iframe").first().contentFrame();
   await frame.locator("p").filter({ hasText: "commentable filler" }).click();
@@ -180,6 +201,7 @@ test("@synthetic-fixture mobile save failure preserves the draft for retry", asy
   fail = false;
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Saved as v3");
+  expect(retried).toContain("Retained draft");
 });
 
 test("@synthetic-fixture short screen version controls remain reachable", async ({ page }) => {
@@ -190,4 +212,36 @@ test("@synthetic-fixture short screen version controls remain reachable", async 
   const compare = page.getByRole("button", { name: "Compare", exact: true });
   await compare.scrollIntoViewIfNeeded();
   await expect(compare).toBeInViewport({ ratio: 1 });
+});
+
+test("@synthetic-fixture touch landscape keeps primary editor controls usable", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 844, height: 390 },
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(url);
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    const toggle = page.getByRole("button", { name: /Open comments and versions panel/ });
+    for (const control of [save, toggle]) {
+      const box = await control.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      await expect(control).toBeInViewport({ ratio: 1 });
+    }
+    await toggle.tap();
+    await page.getByRole("button", { name: "Versions", exact: true }).tap();
+    for (const name of ["Comments", "Versions", "Compare", "Hide panel"]) {
+      const control = page.getByRole("button", { name, exact: true });
+      const box = await control.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      await expect(control).toBeInViewport({ ratio: 1 });
+    }
+  } finally {
+    await context.close();
+  }
 });

@@ -6811,3 +6811,46 @@ The implementation reused a prior research agent because concurrency slots were
 full; this deviates from /implement's fresh-context/model dispatch requirement.
 The provisional `mobile-first-design` worktree remains intact; no wholesale
 candidate patch was recovered.
+
+
+### 2026-09-30 — PR #410 independent iteration and WebKit acceptance gap
+
+The configured cross-vendor reviewer ran read-only against `18bce338`, using
+#407 and the full approved mobile PRD. Native agent slots were full, so review
+and remote snapshots used bounded read-only CLI workers; alignment triage was
+performed by the fresh PR iteration session. ADR-0079 now records the actual
+route/compiled-style harness and its boundaries, rather than treating that
+decision as a diary-only note.
+
+Review fixes strengthen real-Report unsaved/mounted persistence, full composer
+visibility, every target-width overflow, save retry payload, and touch landscape
+controls. The A4 regression failed at 32px Save height at 844×390 with coarse
+pointer, then passed at 44px after the existing narrow-screen floor was extended
+to coarse pointers. Generated harness pages now use the fixture basename and
+server import stripping is restricted to the server directory. Screenshots use
+Playwright attachments. The authenticated mobile step rotates 390×700 to
+700×390 and reads saved content back after the scan completes.
+
+The previous head's isolated preview smoke reported 19 passed with no skips;
+its reporter does not print individual successful step names. Its Claude review
+check failed honestly because a successful result used 46 turns against the
+45-turn cap; the posted review body is not a passing check.
+
+WebKit 2287 locally passed four mobile cases but failed selection-toolbar
+display for both keyboard selection and double-click. The same selection test
+fails in all three unchanged original-harness fixtures. Native selected text
+exists in a mounted, contenteditable ProseMirror body; parent-realm listeners
+on the iframe document observed no mouse or selectionchange events. The cause
+and secure cross-browser remedy are not established. No sandbox/CSP change was
+attempted. This is an open acceptance blocker for the required WebKit formatting
+journey, not a passing mobile-browser claim. Physical software keyboard and
+real-touch selection remain unavailable. Native Chrome zoom verification was
+interrupted by user activity; 200% zoom remains unverified. The approximately
+45px document while the short-screen panel is open remains a design concern;
+no arbitrary new height floor was introduced without a failed user action.
+
+Validation: all 151 Chromium browser regressions passed, arp-view typecheck,
+BDD generation, and docs conformance passed. The mutable authenticated editor
+fixture now sends a unique Idempotency-Key per upload: sibling preview failures
+showed content-derived replay can reuse a previously edited Report across runs.
+This changes only disposable test-fixture isolation, not product idempotency.
