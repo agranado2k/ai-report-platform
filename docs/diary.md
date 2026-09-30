@@ -6831,3 +6831,15 @@ checks, not physical-device or 200% browser-zoom evidence. The independent
 remote artifact for `5b15b79` confirms the authenticated phone scenario passed
 with 20 total, 20 expected and zero skipped tests; subsequent commits need
 the same exact-head CI verification.
+
+### 2026-09-30 — PR #409 sharing overlap and repeatable touch matrix
+
+A final focused review identified the same stacking issue within a phone row:
+its sharing menu could paint behind its own Edit/actions strip. The 375px
+hit-test failed before lifting the open sharing cell and passes afterward.
+The optional `playwright.dashboard-touch.config.ts` makes the earlier local
+Chromium/WebKit evidence repeatable from the checkout, running sixteen
+scenarios in each engine with touch enabled and explicit navigation tapping.
+The width matrix now includes 812×375 landscape. On this macOS host, WebKit
+uses Option+Tab to include links in keyboard traversal; the tab-order assertion
+checks the same destination rather than skipping it.

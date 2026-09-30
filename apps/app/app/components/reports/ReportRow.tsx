@@ -96,7 +96,7 @@ export function ReportRow({
       </div>
 
       {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay */}
-      <div className="relative z-10 col-start-2 row-start-2 justify-self-end lg:col-auto lg:row-auto lg:justify-self-start">
+      <div className="relative z-10 col-start-2 row-start-2 justify-self-end has-[details[open]]:z-20 lg:col-auto lg:row-auto lg:justify-self-start">
         <ReportSharingMenu
           node={r.sharing}
           choices={sharingChoices}

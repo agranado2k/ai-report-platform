@@ -7,6 +7,25 @@ test.beforeAll(async () => {
 });
 
 test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mobile", () => {
+  test("keeps a phone sharing menu above its row actions", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`file://${harness}`);
+    const row = page.getByRole("listitem").filter({ hasText: "Quarterly research" });
+    await row.getByLabel("Sharing options for Quarterly research").click();
+    const menu = row.locator("details > div").first();
+    expect(
+      await menu.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        for (let y = box.top + 10; y < box.bottom - 10; y += 12) {
+          for (let x = box.left + 10; x < box.right - 10; x += 12) {
+            if (!element.contains(document.elementFromPoint(x, y))) return false;
+          }
+        }
+        return true;
+      }),
+    ).toBe(true);
+  });
+
   test("leaves phone navigation open when Escape dismisses a report dialog", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`file://${harness}`);
@@ -56,13 +75,19 @@ test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mo
     await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
   });
 
-  test("opens and dismisses phone navigation with focus restoration", async ({ page }) => {
+  test("opens and dismisses phone navigation with focus restoration", async ({
+    page,
+  }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`file://${harness}`);
     const menu = page.getByRole("button", { name: "Open navigation" });
     await expect(menu).toBeVisible();
     await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeHidden();
-    await menu.click();
+    if (testInfo.project.use.hasTouch) {
+      await menu.tap();
+    } else {
+      await menu.click();
+    }
     await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeVisible();
     expect(
       (await page.locator('a[href="/?folder=research"]').boundingBox())?.height,
@@ -72,18 +97,21 @@ test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mo
     await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeHidden();
   });
 
-  test("tabs from the phone header into the opened navigation", async ({ page }) => {
+  test("tabs from the phone header into the opened navigation", async ({ page, browserName }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`file://${harness}`);
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("link", { name: "Upload report", exact: true }).focus();
-    await page.keyboard.press("Tab");
+    // macOS WebKit's default keyboard preference includes links with Option+Tab.
+    await page.keyboard.press(
+      browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab",
+    );
     await expect(page.getByRole("link", { name: "Centaur — your reports" })).toBeFocused();
   });
 
-  for (const width of [320, 375, 390, 768, 1024, 1280]) {
+  for (const width of [320, 375, 390, 768, 812, 1024, 1280]) {
     test(`keeps report content and touch actions within ${width}px`, async ({ page }, testInfo) => {
-      await page.setViewportSize({ width, height: 812 });
+      await page.setViewportSize({ width, height: width === 812 ? 375 : 812 });
       await page.goto(`file://${harness}`);
       const row = page.getByRole("listitem").filter({ hasText: "Quarterly research" });
       await expect(row).toBeVisible();
