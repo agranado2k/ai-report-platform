@@ -49,6 +49,15 @@
 
 ## Entries
 
+### 2026-09-30 — Mobile Owner view chrome (#406)
+
+Ticket #406 is delivered in PR #408. The Owner view now uses responsive production
+chrome spacing, 44px phone action targets, and a viewport-bounded lossy-edit dialog
+with internal scrolling. The hermetic Owner view browser harness compiles the same
+`apps/view/app/tailwind.css` entry as production and covers 320/375/390/768/1024/1280
+widths plus a 320×240 dialog viewport. Canonical report bytes, iframe sandbox,
+fallback href, permission-derived actions, headers, routes, and APIs are unchanged.
+
 ### 2026-05-18 — Spec drafting begins (rev 1)
 
 Initial spec landed with the first 9 ADRs covering the bones of the platform:
