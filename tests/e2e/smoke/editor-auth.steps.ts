@@ -59,7 +59,8 @@ Given("a report I own exists", async ({ request }) => {
   session = await mintTestSession();
 
   const uploadResponse = await request.post("/api/v1/reports", {
-    headers: { Authorization: `Bearer ${session.jwt}` },
+    // Each run edits its own disposable Report, never a prior idempotency replay.
+    headers: { Authorization: `Bearer ${session.jwt}`, "Idempotency-Key": randomUUID() },
     multipart: {
       file: {
         name: "ai-readiness-report.html",
@@ -412,4 +413,37 @@ Then("the view edit route degrades to a read-only view instead of failing", asyn
     body,
     "the read-only link must carry the verified owner fallback — a bare owner-view link leaves a private report's owner depending on the funnel to reach their own report",
   ).toContain(`/${slug}/view?oa=`);
+});
+
+// #407: use the existing authenticated upload + scan + capability handoff.
+// This is the deployed round-trip; the hermetic tier covers controlled API
+// failures and precise short-screen geometry independently.
+Then("I can edit and save on a phone after switching panels and rotating", async ({ page }) => {
+  test.skip(!VIEW_BASE_URL, "PLAYWRIGHT_VIEW_BASE_URL not set");
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto(`${VIEW_BASE_URL}/${slug}/edit`);
+  await expect(page.getByTestId("unified-editor")).toBeVisible();
+  const editor = page.locator("main iframe").first();
+  const frame = editor.contentFrame();
+  const paragraph = frame
+    .locator("p")
+    .filter({ hasNot: frame.locator("a") })
+    .first();
+  await paragraph.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" mobile persistence check");
+  await page.getByRole("button", { name: /Open comments and versions panel/ }).click();
+  expect((await editor.boundingBox())?.width).toBeGreaterThan(350);
+  await page.getByRole("button", { name: "Versions", exact: true }).click();
+  await page.setViewportSize({ width: 700, height: 390 });
+  await page.getByRole("button", { name: "Hide panel" }).click();
+  await expect(frame.locator("body")).toContainText("mobile persistence check");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 30_000 });
+  await drainUntilClean(page.request, slug, { drainSecret: SCAN_DRAIN_SECRET, jwt: session.jwt });
+  const persisted = await page.request.get(`/api/v1/reports/${slug}/content`, {
+    headers: { Authorization: `Bearer ${session.jwt}` },
+  });
+  expect(persisted.status()).toBe(200);
+  expect(await persisted.text()).toContain("mobile persistence check");
 });

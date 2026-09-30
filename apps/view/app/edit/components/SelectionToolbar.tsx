@@ -160,7 +160,7 @@ const PILL_SURFACE = {
 // stylesheet loads (the browser-test harness has no Tailwind), so the bar's
 // measured size — which drives placement — is never a zero-width degenerate.
 const inputClass =
-  "h-7 rounded-control border border-border bg-surface px-2 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 aria-[invalid=true]:border-danger";
+  "h-7 min-w-0 max-w-full rounded-control border border-border bg-surface px-2 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 aria-[invalid=true]:border-danger";
 
 /** The heading levels the bar exposes, in button order — arp-editor's
  *  `HeadingLevel` (1–3) spelled out so the render below can map over it. */
@@ -259,13 +259,17 @@ export function SelectionToolbar({
       data-testid="selection-toolbar"
       data-placement={placed.placement}
       style={PILL_SURFACE}
-      className={linkOpen ? "flex flex-col gap-1 p-1" : "flex items-center gap-0.5 p-1"}
+      className={
+        linkOpen
+          ? "flex max-w-[calc(100vw-1rem)] flex-col gap-1 p-1"
+          : "flex max-w-[calc(100vw-1rem)] flex-wrap items-center gap-0.5 p-1"
+      }
       onMouseDown={(event) => event.preventDefault()}
     >
       {linkOpen ? (
         <>
           <form
-            className="flex items-center gap-1"
+            className="flex flex-wrap items-center gap-1"
             onSubmit={(event) => {
               event.preventDefault();
               submitLink();

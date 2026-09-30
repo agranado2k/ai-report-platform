@@ -6780,3 +6780,89 @@ a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side C
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
 Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.
+
+
+### 2026-09-30 — Mobile Editing session layout (#407)
+
+In `worktree/mobile-editor`, the editor's Comments/Versions panel now stacks
+below the document below the `md` breakpoint, reserving 40% of the remaining
+height for the independently scrolling panel, with a 160px minimum capped at
+80% on very short screens so the version actions can scroll fully into view.
+The short-screen RED showed only 36% of Compare visible before that minimum.
+The document keeps its mounted
+ReportEditor and Editing session through panel switches, resize, and Compare.
+The desktop side panel remains 320px wide. Phone buttons have 44px minimum
+activation areas, the toolbar wraps, and the composer can scroll on short screens.
+The touch-target RED measured a 28px Bold control before this change.
+No auth, CSP, API or report bytes changed.
+
+The RED browser assertion reproduced a zero-width document at a 320px viewport
+with comments open. A new hermetic harness mounts the actual edit-route client
+with compiled production Tailwind CSS; only server loader execution is replaced
+by fixture loader data. Tests cover widths 320/375/390/768/1024/1280, unsaved text,
+formatting, comment creation, Save request content, Compare return, a short
+320×260 viewport and the representative AI-readiness Report. Network responses
+are controlled only in this tier; the existing authenticated deployed editor
+scenario now also exercises phone editing, rotation and save.
+
+Physical mobile touch selection and software-keyboard behavior were unavailable
+locally; viewport simulation is not hardware evidence. The deployed scenario
+requires the existing preview CI credential seam, without local credential reads.
+The implementation reused a prior research agent because concurrency slots were
+full; this deviates from /implement's fresh-context/model dispatch requirement.
+The provisional `mobile-first-design` worktree remains intact; no wholesale
+candidate patch was recovered.
+
+
+### 2026-09-30 — PR #410 independent iteration and WebKit acceptance gap
+
+The configured cross-vendor reviewer ran read-only against `18bce338`, using
+#407 and the full approved mobile PRD. Native agent slots were full, so review
+and remote snapshots used bounded read-only CLI workers; alignment triage was
+performed by the fresh PR iteration session. ADR-0079 now records the actual
+route/compiled-style harness and its boundaries, rather than treating that
+decision as a diary-only note.
+
+Review fixes strengthen real-Report unsaved/mounted persistence, full composer
+visibility, every target-width overflow, save retry payload, and touch landscape
+controls. The A4 regression failed at 32px Save height at 844×390 with coarse
+pointer, then passed at 44px after the existing narrow-screen floor was extended
+to coarse pointers. Generated harness pages now use the fixture basename and
+server import stripping is restricted to the server directory. Screenshots use
+Playwright attachments. The authenticated mobile step rotates 390×700 to
+700×390 and reads saved content back after the scan completes.
+
+The previous head's isolated preview smoke reported 19 passed with no skips;
+its reporter does not print individual successful step names. Its Claude review
+check failed honestly because a successful result used 46 turns against the
+45-turn cap; the posted review body is not a passing check.
+
+WebKit 2287 locally passed four mobile cases but failed selection-toolbar
+display for both keyboard selection and double-click. The same selection test
+fails in all three unchanged original-harness fixtures. Native selected text
+exists in a mounted, contenteditable ProseMirror body; parent-realm listeners
+on the iframe document observed no mouse or selectionchange events. The cause
+and secure cross-browser remedy are not established. No sandbox/CSP change was
+attempted. This is an open acceptance blocker for the required WebKit formatting
+journey, not a passing mobile-browser claim. Physical software keyboard and
+real-touch selection remain unavailable. Native Chrome zoom verification was
+interrupted by user activity; 200% zoom remains unverified. The approximately
+45px document while the short-screen panel is open remains a design concern;
+no arbitrary new height floor was introduced without a failed user action.
+
+Validation: all 151 Chromium browser regressions passed, arp-view typecheck,
+BDD generation, and docs conformance passed. The mutable authenticated editor
+fixture now sends a unique Idempotency-Key per upload: sibling preview failures
+showed content-derived replay can reuse a previously edited Report across runs.
+This changes only disposable test-fixture isolation, not product idempotency.
+
+### 2026-09-30 — PR #410 short-screen composer CI follow-up
+
+CI at `8a5fcb3` passed 150 browser tests but failed the short-screen composer
+case twice: Post comment had intersection ratio 0.35227 before any scroll.
+The composer is intentionally bounded and scrollable under A12. The test now
+uses a pointer wheel gesture over that region before requiring the entire
+button to be visible, then posts and verifies the resulting comment. The
+ratio-1 assertion and all viewport-bound assertions remain intact. This is a
+user-journey correction, not a relaxed visibility threshold or product change.
+Local platform geometry passed before; no particular font cause is established.

@@ -87,3 +87,20 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 - `.github/workflows/unit.yml` — the `browser` job.
 - `tests/browser/playwright.config.ts`, `tests/browser/harness/build.mts` — the config and the harness.
 - `tests/browser/harness/fixture-fidelity.test.ts` — the mechanical fidelity guard for decision 6.
+
+
+## Amendment — 2026-09-30: mounted mobile editor chrome (#407)
+
+The hermetic tier may mount the actual edit-route client with fixture loader
+data and compiled production Tailwind styles. The mobile harness removes the
+server loader for its browser bundle and uses esbuild for the client and the
+existing Vite/Tailwind integration for CSS. This avoids hand-copying responsive
+layout rules while retaining the older focused editor harness.
+
+Network responses are controlled at the browser boundary to exercise layout,
+input reachability, mounted Editing session persistence, and draft preservation
+on save errors. These checks do not certify authentication, permissions,
+server persistence, or the save/API round-trip: those remain deployed e2e
+responsibilities. Chromium remains the CI default; local WebKit/touch emulation
+can supplement it but does not establish physical keyboard/touch-selection
+acceptance. Every fixture has its own generated page path.
