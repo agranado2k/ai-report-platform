@@ -10,6 +10,12 @@ import { buttonClass, ChromeBar, chromeBarPillClass } from "arp-ui";
 import type { LossyWarning } from "../lossy-warning";
 import { LossyEditDialog } from "./LossyEditDialog";
 
+// The owner view keeps all three actions reachable on a phone. The compact
+// desktop button height is still useful at larger widths, while the mobile
+// hit area meets the mobile-first PRD's 44px target for this surface.
+const actionClass = (variant: "primary" | "secondary") =>
+  `${buttonClass(variant, "sm")} min-h-11 sm:min-h-8 sm:pointer-coarse:min-h-11`;
+
 export interface OwnerViewTopBarProps {
   /** The report's title. Author-controlled, so it is rendered as a text node
    *  by `ChromeBar` and never interpolated into markup or an attribute. */
@@ -75,7 +81,7 @@ export function OwnerViewTopBar({
           `rel="noopener"` denies the opened top-level page a handle back to the
           chrome; it is unobtrusive (secondary), sitting left of the
           capability-gated actions. */}
-      <a href={openHref} target="_blank" rel="noopener" className={buttonClass("secondary", "sm")}>
+      <a href={openHref} target="_blank" rel="noopener" className={actionClass("secondary")}>
         Open in new tab
       </a>
 
@@ -94,7 +100,7 @@ export function OwnerViewTopBar({
           state. */}
       {canEdit ? (
         <>
-          <a href={versionsHref} className={buttonClass("secondary", "sm")}>
+          <a href={versionsHref} className={actionClass("secondary")}>
             Versions
           </a>
           {/* ADR-0090 / #364. On a LOSSY live version Edit gains a confirm
@@ -106,7 +112,7 @@ export function OwnerViewTopBar({
           {lossyWarning ? (
             <LossyEditDialog editHref={editHref} warning={lossyWarning} />
           ) : (
-            <a href={editHref} className={buttonClass("primary", "sm")}>
+            <a href={editHref} className={actionClass("primary")}>
               Edit
             </a>
           )}

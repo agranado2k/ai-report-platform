@@ -21,7 +21,7 @@ test.describe("the owner view's Edit confirm on a lossy version", {
     // The fixture arg is unused by this entry (the chrome frames a report by
     // URL rather than injecting one); pass the existing one so the shared
     // page-shell writer has something to inline.
-    harnessPage = await buildHarness("report.html", "entry-owner-view.tsx");
+    harnessPage = await buildHarness("report.html", "entry-owner-view.tsx", "production");
   });
 
   test("Edit opens the confirm instead of navigating, and names what a save would drop", async ({
@@ -106,6 +106,48 @@ test.describe("the owner view's Edit confirm on a lossy version", {
     await expect(dialog).toContainText(/until you save/i);
   });
 
+  test("keeps the lossy Edit action touch-sized before opening its confirmation", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`file://${harnessPage}?lossy=1`);
+    const edit = page.getByRole("link", { name: "Edit", exact: true });
+    const box = await edit.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+    await edit.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("keeps the lossy confirmation usable in a short phone viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 240 });
+    await page.goto(`file://${harnessPage}?lossy=1`);
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+
+    const dialog = page.locator("dialog");
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    // The harness mounts the real OwnerViewChrome with the production Tailwind
+    // entry. The browser assertion proves the native dialog stays within the
+    // phone viewport and that both actions remain reachable.
+    expect(box?.width ?? 0).toBeLessThanOrEqual(320);
+    expect(box?.y).toBeGreaterThanOrEqual(0);
+    expect((box?.y ?? 240) + (box?.height ?? 240)).toBeLessThanOrEqual(240);
+    const cancel = page.getByRole("button", { name: "Cancel" });
+    await cancel.scrollIntoViewIfNeeded();
+    await expect(cancel).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole("link", { name: "Edit anyway" })).toBeInViewport({ ratio: 1 });
+    for (const action of [cancel, page.getByRole("link", { name: "Edit anyway" })]) {
+      const target = await action.boundingBox();
+      expect(target?.height).toBeGreaterThanOrEqual(44);
+      expect(target?.width).toBeGreaterThanOrEqual(44);
+    }
+    await cancel.click();
+    await expect(dialog).toBeHidden();
+  });
+
   test("a LOSSLESS version keeps Edit a plain navigation — no dialog at all", async ({ page }) => {
     // The common path. `lossless` and UNKNOWN both arrive here as a null
     // warning, so this one case covers both, and it must be exactly the
@@ -118,5 +160,56 @@ test.describe("the owner view's Edit confirm on a lossy version", {
       "href",
       "/abcde12345/edit",
     );
+  });
+
+  test.describe("phone touch input", () => {
+    test.use({ hasTouch: true });
+
+    test("keeps actions touch-sized after rotating to a wide phone viewport", async ({ page }) => {
+      await page.setViewportSize({ width: 844, height: 390 });
+      await page.goto(`file://${harnessPage}?lossy=1`);
+      for (const name of ["Open in new tab", "Versions", "Edit"]) {
+        const action = page.getByRole("link", { name, exact: true });
+        const box = await action.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
+      await page.getByRole("link", { name: "Edit", exact: true }).tap();
+      for (const action of [
+        page.getByRole("button", { name: "Cancel", exact: true }),
+        page.getByRole("link", { name: "Edit anyway", exact: true }),
+      ]) {
+        await expect(action).toBeInViewport({ ratio: 1 });
+        const box = await action.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
+    });
+
+    test("opens and cancels the warning with touch and restores keyboard focus", async ({
+      page,
+      browserName,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`file://${harnessPage}?lossy=1`);
+      const edit = page.getByRole("link", { name: "Edit", exact: true });
+      await edit.tap();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await page.getByRole("button", { name: "Cancel", exact: true }).tap();
+      await expect(page.getByRole("dialog")).toBeHidden();
+      await page.getByRole("link", { name: "Open in new tab" }).focus();
+      // macOS WebKit uses Option-Tab to include links in keyboard traversal.
+      // https://support.apple.com/guide/safari/cpsh003/mac
+      const nextLink =
+        browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab";
+      await page.keyboard.press(nextLink);
+      await expect(page.getByRole("link", { name: "Versions", exact: true })).toBeFocused();
+      await page.keyboard.press(nextLink);
+      await expect(edit).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(edit).toBeFocused();
+    });
   });
 });

@@ -8,6 +8,7 @@
 // terminal-state assertions) with DISTINCT step phrasing — playwright-bdd's
 // step registry is global, and reusing another file's step text would bind to
 // that file's module state, not this one's.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,7 +95,9 @@ Given("a bolded-word report I own has been uploaded and scanned clean", async ({
   session = await mintTestSession();
 
   const uploadResponse = await request.post("/api/v1/reports", {
-    headers: { Authorization: `Bearer ${session.jwt}` },
+    // This scenario mutates its Report. Identical bytes otherwise replay the
+    // previous run's upload, eventually leaving no unformatted word to select.
+    headers: { Authorization: `Bearer ${session.jwt}`, "Idempotency-Key": randomUUID() },
     multipart: {
       file: {
         name: "ai-readiness-report.html",

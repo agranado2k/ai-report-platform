@@ -31,6 +31,7 @@ const params = new URLSearchParams(window.location.search);
 // degenerate one `loadLossyWarning` returns when the recorded verdict stands
 // but the bytes could not be re-read, which has its own copy.
 const lossy = params.get("lossy");
+const docTitle = params.get("title") ?? "Q3 roadmap review";
 const lossyWarning =
   lossy === "1"
     ? { lostElements: ["script", "svg"], lostAttributes: ["onclick"] }
@@ -41,7 +42,7 @@ const lossyWarning =
 createRoot(document.getElementById("root") as HTMLElement).render(
   <OwnerViewChrome
     slug="abcde12345"
-    docTitle="Q3 roadmap review"
+    docTitle={docTitle}
     shareState="Private"
     canEdit={params.get("canEdit") !== "0"}
     lossyWarning={lossyWarning}
