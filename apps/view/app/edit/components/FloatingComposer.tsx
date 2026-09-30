@@ -142,7 +142,7 @@ export function FloatingComposer({ geometry, quote, onSubmit, onCancel }: Floati
       aria-label="New comment"
       data-testid="floating-composer"
       data-placement={placed.placement}
-      className="flex w-72 flex-col gap-2 p-3"
+      className="flex max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-1rem)] flex-col gap-2 overflow-y-auto p-3"
       onMouseDown={(event) => event.preventDefault()}
     >
       <p className="text-xs text-subtle" data-testid="floating-composer-quote">
@@ -186,7 +186,7 @@ export function FloatingComposer({ geometry, quote, onSubmit, onCancel }: Floati
           ✗ {error}
         </p>
       ) : null}
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs text-subtle">
           <span id="floating-composer-intent-label">Intent</span>
           <Select

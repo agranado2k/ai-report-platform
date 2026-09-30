@@ -586,7 +586,7 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
     // the document pane isn't clipped to one screenful — with the chrome
     // (TopBar/panel/toggle) print:hidden, only the document prints.
     <div
-      className="flex h-dvh flex-col overflow-hidden print:h-auto print:overflow-visible"
+      className="flex h-dvh flex-col overflow-hidden max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 print:h-auto print:overflow-visible"
       data-testid="unified-editor"
     >
       <TopBar
@@ -598,7 +598,8 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
         onSave={onSave}
       />
 
-      {/* THE PANE GEOMETRY BELOW IS DUPLICATED, BY HAND, IN THE BROWSER TEST
+      {/* Mobile geometry is exercised by mobile-editor.spec.ts using this route
+          and production CSS. THE DESKTOP GEOMETRY IS DUPLICATED IN THE BROWSER TEST
           HARNESS. `tests/browser/harness/build.mts` reproduces this layout in
           plain CSS (a 53px topbar, a flexed document pane, a 320px = `w-80`
           side panel) so the mounted editor is tested at the size it actually
@@ -607,11 +608,11 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
           (ADR-0079). Nothing links the two automatically: change the topbar
           height, the panel width or the pane structure here and the harness
           keeps testing the old layout silently. Update it in the same PR. */}
-      <div className="flex min-h-0 flex-1 print:block">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row print:block">
         {/* The document pane fills the viewport height and scrolls on its OWN
             (the report iframe carries the scroll), edge-to-edge with no chrome
             padding — it should read like a real web page, not a card in a form. */}
-        <main className="min-w-0 flex-1 overflow-hidden bg-bg print:overflow-visible print:bg-transparent">
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-bg print:overflow-visible print:bg-transparent">
           {/* ReportEditor stays mounted at ALL times (even when hidden) so
               in-progress edits are never lost by switching to Compare — the mode
               switch only toggles visibility via CSS. `h-full` makes the iframe
@@ -746,10 +747,11 @@ function UnifiedEditor({ data }: { readonly data: EditorData }) {
         </main>
 
         {panel.open ? (
-          // Full-height panel: the tab header stays put, and ONLY the
+          // Stacked on phones, full-height beside the document on desktop.
+          // The tab header stays put, and ONLY the
           // comments/versions list below it scrolls — its own independent
           // scrollbar, separate from the document pane's.
-          <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-surface print:hidden">
+          <aside className="flex h-[40%] max-h-[80%] min-h-40 w-full shrink-0 flex-col overflow-hidden border-t border-border bg-surface md:h-auto md:max-h-none md:min-h-0 md:w-80 md:border-t-0 md:border-l print:hidden">
             <div className="shrink-0 px-4 pt-4">
               <PanelHeader
                 tab={panel.tab}

@@ -98,6 +98,7 @@ Feature: Authenticated owner-open hand-off smoke (real browser)
     And I am redirected to an edit-shaped location for that report
     And the view edit route accepts the edit token instead of falling back to the public viewer
     And the cookie-carrying request opens the editor instead of redirecting
+    And I can edit and save on a phone after switching panels and rotating
 
   Scenario: A report the editor cannot open is accepted, legible, and degrades cleanly
     Given a report I own that the editor cannot open exists

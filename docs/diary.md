@@ -6779,3 +6779,35 @@ a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side C
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
 Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.
+
+
+### 2026-09-30 — Mobile Editing session layout (#407)
+
+In `worktree/mobile-editor`, the editor's Comments/Versions panel now stacks
+below the document below the `md` breakpoint, reserving 40% of the remaining
+height for the independently scrolling panel, with a 160px minimum capped at
+80% on very short screens so the version actions can scroll fully into view.
+The short-screen RED showed only 36% of Compare visible before that minimum.
+The document keeps its mounted
+ReportEditor and Editing session through panel switches, resize, and Compare.
+The desktop side panel remains 320px wide. Phone buttons have 44px minimum
+activation areas, the toolbar wraps, and the composer can scroll on short screens.
+The touch-target RED measured a 28px Bold control before this change.
+No auth, CSP, API or report bytes changed.
+
+The RED browser assertion reproduced a zero-width document at a 320px viewport
+with comments open. A new hermetic harness mounts the actual edit-route client
+with compiled production Tailwind CSS; only server loader execution is replaced
+by fixture loader data. Tests cover widths 320/375/390/768/1024/1280, unsaved text,
+formatting, comment creation, Save request content, Compare return, a short
+320×260 viewport and the representative AI-readiness Report. Network responses
+are controlled only in this tier; the existing authenticated deployed editor
+scenario now also exercises phone editing, rotation and save.
+
+Physical mobile touch selection and software-keyboard behavior were unavailable
+locally; viewport simulation is not hardware evidence. The deployed scenario
+requires the existing preview CI credential seam, without local credential reads.
+The implementation reused a prior research agent because concurrency slots were
+full; this deviates from /implement's fresh-context/model dispatch requirement.
+The provisional `mobile-first-design` worktree remains intact; no wholesale
+candidate patch was recovered.
