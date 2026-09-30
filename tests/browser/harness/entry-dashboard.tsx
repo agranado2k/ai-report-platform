@@ -56,6 +56,18 @@ function Dashboard() {
             sharingChoices={[]}
             pendingSharing={null}
           />
+          <ReportRow
+            report={{
+              ...report,
+              slug: "def456",
+              title: "Subsequent report",
+              sharing: { ...report.sharing, slug: "def456", title: "Subsequent report" },
+            }}
+            folders={folders}
+            folderLabel="Root"
+            sharingChoices={[]}
+            pendingSharing={null}
+          />
         </ul>
         <ReportPagination previousHref={null} nextHref="/?starting_after=abc123" />
       </PageShell>

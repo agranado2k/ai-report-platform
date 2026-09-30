@@ -48,7 +48,7 @@ export function ReportRow({
   pendingSharing: ComponentProps<typeof ReportSharingMenu>["pendingState"];
 }) {
   return (
-    <li className="group relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-hover lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem] lg:py-3">
+    <li className="group relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-hover has-[details[open]]:z-20 lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem] lg:py-3">
       {/* Stretched-link open overlay (CSP-safe, ADR-0056 owner-open). z-0 paints
           above plain in-flow cells so clicking the name / status opens the
           report; interactive cells lift to z-10. A PROCESSING report (not yet

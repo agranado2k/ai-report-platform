@@ -95,8 +95,11 @@ The harness mounts production navigation, report rows, and pagination. Its list
 container is a fixture, not the complete route; it does not certify production
 filter/cursor composition, empty states, or the desktop column header. Current
 automated evidence is Chromium layout and keyboard input, including a short
-phone viewport. WebKit, touch emulation, 200% browser zoom, and a physical-device
-pass remain explicit acceptance gaps, not implied by the width matrix.
+phone viewport. Supplemental local Chromium and WebKit touch-emulated probes on
+2026-09-30 covered 320/375/390 widths, 812×375 landscape, and 1280 desktop; these
+probes do not turn the Chromium-only CI project into a cross-browser gate.
+200% browser zoom and a physical-device pass remain explicit acceptance gaps,
+not implied by the width matrix.
 
 ## More information
 

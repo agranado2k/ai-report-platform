@@ -7,6 +7,41 @@ test.beforeAll(async () => {
 });
 
 test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mobile", () => {
+  test("leaves phone navigation open when Escape dismisses a report dialog", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`file://${harness}`);
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    const row = page.getByRole("listitem").filter({ hasText: "Quarterly research" });
+    await row.locator("summary").filter({ hasText: "Actions for" }).click();
+    await row.getByRole("button", { name: "Delete report", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Close navigation" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  test("keeps an open row menu above subsequent row controls", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 812 });
+    await page.goto(`file://${harness}`);
+    const row = page.getByRole("listitem").filter({ hasText: "Quarterly research" });
+    await row.locator("summary").filter({ hasText: "Actions for" }).click();
+    const menu = row.locator("details > div").last();
+    expect(
+      await menu.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        for (let y = box.top + 10; y < box.bottom - 10; y += 12) {
+          for (let x = box.left + 10; x < box.right - 10; x += 12) {
+            if (!element.contains(document.elementFromPoint(x, y))) return false;
+          }
+        }
+        return true;
+      }),
+    ).toBe(true);
+  });
+
   test("keeps folders above settings in short phone navigation", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 400 });
     await page.goto(`file://${harness}`);
@@ -120,5 +155,8 @@ test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mo
       320,
     );
     await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toBeVisible();
+    expect(
+      (await page.getByRole("navigation", { name: "Breadcrumb" }).boundingBox())?.width,
+    ).toBeGreaterThanOrEqual(100);
   });
 });

@@ -138,6 +138,7 @@ export function AppShell({
   useEffect(() => {
     if (!mobileOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") {
         setMobileOpen(false);
         menuButton.current?.focus();
@@ -217,7 +218,6 @@ export function AppShell({
           </button>
         </div>
         <Breadcrumbs crumbs={crumbs} />
-        <div className="flex-1" />
         <Link
           to="/upload"
           onClick={() => setMobileOpen(false)}
