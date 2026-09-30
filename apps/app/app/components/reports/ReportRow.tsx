@@ -13,6 +13,22 @@ import { DeleteReportDialog } from "./DeleteReportDialog";
 // sharing kebab and the rename/move/delete <details> menu are the same controls;
 // the interaction layer (keyboard model, multi-select/bulk, a unified menu, and
 // a full ARIA table with column association) is #347.
+//
+// Mobile first (#403): below `md` a row is two lines — the Report (title
+// wrapping in full, slug, Folder, notices) above its status, sharing and
+// actions — and every control is a 44px target. From `md` it is the four
+// scannable columns, with the actions revealed on hover where the device can
+// hover. Hover never gates an action on a touch screen.
+
+/** Where the row actions hide until hover: a wide screen whose pointer can
+ *  hover. Everywhere else they are simply visible. */
+const HOVER_REVEAL =
+  "[@media(hover:hover)_and_(min-width:48rem)]:opacity-0 " +
+  "[@media(hover:hover)_and_(min-width:48rem)]:group-hover:opacity-100 " +
+  "[@media(hover:hover)_and_(min-width:48rem)]:focus-within:opacity-100";
+
+/** An open menu's cell rises above the rows after it (they paint later). */
+const OPEN_MENU_ON_TOP = "has-[details[open]]:z-30";
 
 /** The client-safe row shape the loader ships (a subset of the dashboard item). */
 export interface ReportRowItem {
@@ -48,7 +64,7 @@ export function ReportRow({
   pendingSharing: ComponentProps<typeof ReportSharingMenu>["pendingState"];
 }) {
   return (
-    <li className="group relative grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-0 hover:bg-hover">
+    <li className="group relative grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-2 border-b border-border px-3 py-3 transition-colors last:border-0 hover:bg-hover md:grid-cols-[minmax(0,1fr)_7rem_auto_2.5rem] md:gap-3 md:py-2.5">
       {/* Stretched-link open overlay (CSP-safe, ADR-0056 owner-open). z-0 paints
           above plain in-flow cells so clicking the name / status opens the
           report; interactive cells lift to z-10. A PROCESSING report (not yet
@@ -64,13 +80,15 @@ export function ReportRow({
       ) : null}
 
       {/* Name: title + slug + folder tag + (ADR-0080) editability note */}
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-fg">{r.title}</p>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
+      <div className="col-span-full min-w-0 md:col-span-1">
+        <p title={r.title} className="text-sm font-medium break-words text-fg md:truncate">
+          {r.title}
+        </p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
           <code className="font-mono">{r.slug}</code>
-          <span className="inline-flex items-center gap-1">
-            <FolderIcon className="size-3.5" />
-            {folderLabel}
+          <span title={folderLabel} className="inline-flex max-w-full min-w-0 items-center gap-1">
+            <FolderIcon className="size-3.5 shrink-0" />
+            <span className="truncate">{folderLabel}</span>
           </span>
           {r.editabilityNotice ? (
             <Badge tone="neutral" className="relative z-10" title={r.editabilityNotice.title}>
@@ -95,8 +113,9 @@ export function ReportRow({
         <StatusBadge isPublished={r.isPublished} />
       </div>
 
-      {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay */}
-      <div className="relative z-10 justify-self-start">
+      {/* Sharing (ADR-0078 §12) — its own kebab, lifted above the overlay. Not
+          positioned below `md`, so its menu anchors to the row's full width. */}
+      <div className={cx("justify-self-start md:relative md:z-10", OPEN_MENU_ON_TOP)}>
         <ReportSharingMenu
           node={r.sharing}
           choices={sharingChoices}
@@ -122,25 +141,26 @@ export function ReportRow({
           the overlay swallows the click and Edit silently means Open. */}
       <div
         className={cx(
-          "relative z-10 flex items-center gap-1 justify-self-end opacity-0 transition-opacity",
-          "group-hover:opacity-100 focus-within:opacity-100",
+          "relative z-10 flex items-center gap-1 justify-self-end transition-opacity",
+          HOVER_REVEAL,
+          OPEN_MENU_ON_TOP,
         )}
       >
         {r.isPublished ? (
           <a
             href={`/reports/${r.slug}/open?to=edit`}
-            className="rounded-control px-2 py-1 text-xs font-medium text-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            className="inline-flex h-11 min-w-11 items-center justify-center rounded-control px-3 text-xs font-medium text-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring md:h-auto md:min-w-0 md:px-2 md:py-1"
           >
             Edit
             <span className="sr-only"> {r.title}</span>
           </a>
         ) : null}
         <details className="shrink-0">
-          <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg [&::-webkit-details-marker]:hidden">
+          <summary className="flex size-11 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-hover hover:text-fg md:size-8 [&::-webkit-details-marker]:hidden">
             <MoreIcon className="size-4" />
             <span className="sr-only">Actions for {r.title}</span>
           </summary>
-          <div className="absolute right-0 z-10 mt-1 w-60 rounded-card border border-border bg-surface p-2 shadow-md">
+          <div className="absolute right-0 z-10 mt-1 w-60 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-surface p-2 shadow-md">
             <RenameReportForm slug={r.slug} title={r.title} />
             <Form method="post" className="flex items-center gap-1.5 p-1">
               <input type="hidden" name="intent" value="move" />

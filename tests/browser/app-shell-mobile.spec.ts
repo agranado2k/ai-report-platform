@@ -36,6 +36,8 @@ test.describe("phone navigation", { tag: "@app-components" }, () => {
       await expect(menuButton(page)).toBeVisible();
       await expect(menuButton(page)).toHaveAttribute("aria-expanded", "false");
       await expect(page.getByRole("link", { name: "API keys & MCP" })).toBeHidden();
+      // The rail's collapse control is a desktop preference with no rail to act on here.
+      await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeHidden();
 
       // The list starts at the left gutter, not beside a 256px rail.
       const list = await page.getByRole("list").first().boundingBox();
@@ -144,9 +146,13 @@ test.describe("phone navigation", { tag: "@app-components" }, () => {
     const box = await upload.boundingBox();
     expect((box?.x ?? 0) + (box?.width ?? 999)).toBeLessThanOrEqual(320);
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await expect(
-      page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Design reviews"),
-    ).toBeVisible();
+    const current = page
+      .getByRole("navigation", { name: "Breadcrumb" })
+      .getByText("Design reviews");
+    await expect(current).toBeVisible();
+    // Where you are wins the space: the current Folder reads in full, the
+    // parent is what truncates.
+    expect(await current.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(await horizontalOverflow(page)).toBe(0);
   });
 });

@@ -140,21 +140,23 @@ export function DashboardPage({
               }
               action={
                 q ? undefined : (
-                  <Link to="/upload" className={buttonClass("primary")}>
+                  <Link to="/upload" className={cx(buttonClass("primary"), "max-md:h-11")}>
                     Upload a report
                   </Link>
                 )
               }
             />
           ) : (
-            <div className="overflow-hidden rounded-card border border-border">
+            // Not `overflow-hidden`: an open row menu must extend past the list
+            // rather than be clipped by it (#403).
+            <div className="rounded-card border border-border">
               {/* Visual column header; the rows below are a real <ul>/<li> so
                   list semantics (lost when T4a replaced the <ul> with a div
                   grid — #346) are restored. A full ARIA table with column
                   association is the interaction ticket's call (#347). */}
               <div
                 aria-hidden="true"
-                className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted"
+                className="hidden grid-cols-[minmax(0,1fr)_7rem_auto_2.5rem] items-center gap-3 rounded-t-card border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted md:grid"
               >
                 <span>Name</span>
                 <span>Status</span>
@@ -181,7 +183,7 @@ export function DashboardPage({
           )}
 
           {hasPrev || hasNext ? (
-            <div className="mt-4 flex items-center gap-3 text-sm">
+            <div className="mt-4 flex items-center gap-3 text-sm [&>*]:inline-flex [&>*]:min-h-11 [&>*]:items-center md:[&>*]:min-h-0">
               {hasPrev ? (
                 <Link
                   to={cursorHref(items[0] ? { ending_before: items[0].id } : undefined)}

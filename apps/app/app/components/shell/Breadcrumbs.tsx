@@ -25,7 +25,10 @@ export function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
             className={cx(
               "flex min-w-0 items-center gap-1",
               i < parentIndex && "max-md:hidden",
-              last ? "shrink" : "shrink-[2]",
+              // Ancestors give up their width first, the current crumb last. Flex
+              // shrink is proportional (factor × width), so "first" takes a factor
+              // large enough that the current crumb's share is under a pixel.
+              last ? "shrink" : "shrink-[10000]",
             )}
           >
             {i > 0 ? (

@@ -385,10 +385,7 @@ export function AppShell({
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-pressed={collapsed}
             title="Toggle sidebar (⌘B)"
-            className={cx(
-              buttonClass("ghost", "sm", { iconOnly: true }),
-              "-ml-1 hidden md:inline-flex",
-            )}
+            className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1 max-md:hidden")}
           >
             <PanelLeftIcon className="size-4" />
           </button>

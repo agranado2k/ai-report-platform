@@ -55,14 +55,16 @@ export function ReportSharingMenu({
   pendingState: string | null;
 }) {
   return (
-    <details className="relative z-10 shrink-0">
+    // Positioned only from `md`: below it the menu anchors to the ROW (the
+    // nearest positioned ancestor), which is the width a phone has to give.
+    <details className="shrink-0 md:relative md:z-10">
       {/* An `aria-label` rather than an `sr-only` span: React SSR splits
           `text {expression}` with a comment node, which would make the name
           unmatchable for anything reading the markup (the e2e suite included)
           while reading identically to AT. */}
       <summary
         aria-label={`Sharing options for ${node.title}`}
-        className="flex size-8 cursor-pointer list-none items-center justify-center rounded-control text-subtle transition-colors hover:bg-surface-raised hover:text-fg [&::-webkit-details-marker]:hidden"
+        className="relative z-10 flex h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-control px-1 text-subtle transition-colors hover:bg-surface-raised hover:text-fg md:h-8 md:min-w-8 [&::-webkit-details-marker]:hidden"
       >
         <Badge
           tone={node.badge.tone as never}
@@ -73,7 +75,7 @@ export function ReportSharingMenu({
         </Badge>
         <MoreIcon className="ml-1 h-3.5 w-3.5" />
       </summary>
-      <div className="absolute right-0 z-20 mt-1 w-72 rounded-card border border-border bg-surface p-2 text-left shadow-lg">
+      <div className="absolute right-0 z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-surface p-2 text-left shadow-lg max-md:inset-x-3 max-md:w-auto max-md:max-w-none">
         <p className="px-1 pb-1 text-xs font-semibold text-fg">{`Sharing — ${node.title}`}</p>
 
         {node.manageable ? (
