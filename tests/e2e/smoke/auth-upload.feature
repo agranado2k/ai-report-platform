@@ -17,3 +17,8 @@ Feature: Authenticated upload API smoke
     When I upload an HTML report file with my session to "/api/v1/reports"
     Then the authenticated upload response status is 201
     And the authenticated upload returns a slug and a canonical view_url
+
+  @browser
+  Scenario: An authenticated phone dashboard can open navigation and read reports
+    When I open the dashboard at a phone width
+    Then the phone navigation opens and the report list fits

@@ -656,14 +656,14 @@ export default function Index() {
               }
             />
           ) : (
-            <div className="overflow-hidden rounded-card border border-border">
+            <div className="rounded-card border border-border bg-surface shadow-xs">
               {/* Visual column header; the rows below are a real <ul>/<li> so
                   list semantics (lost when T4a replaced the <ul> with a div
                   grid — #346) are restored. A full ARIA table with column
                   association is the interaction ticket's call (#347). */}
               <div
                 aria-hidden="true"
-                className="grid grid-cols-[1fr_7rem_auto_2.5rem] items-center gap-3 border-b border-border bg-bg px-3 py-2 text-xs font-medium text-muted"
+                className="hidden items-center gap-3 border-b border-border bg-bg px-4 py-2 text-xs font-medium text-muted lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_6rem]"
               >
                 <span>Name</span>
                 <span>Status</span>

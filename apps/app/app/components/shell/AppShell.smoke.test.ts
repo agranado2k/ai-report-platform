@@ -51,6 +51,8 @@ describe("AppShell", () => {
     const html = render("/");
     expect(html).toContain('aria-label="Breadcrumb"');
     expect(html).toContain("Collapse sidebar");
+    expect(html).toContain("Open navigation");
+    expect(html).toContain('aria-controls="app-navigation"');
   });
   it("Shared with me / Recent are shown but not linked (unbuilt)", () => {
     const html = render("/");

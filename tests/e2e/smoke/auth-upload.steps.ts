@@ -36,6 +36,24 @@ When("I GET the dashboard with my session", async ({ request }) => {
   dashboardHtml = await res.text();
 });
 
+When("I open the dashboard at a phone width", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const res = await page.goto("/");
+  expect(res?.status(), "authenticated dashboard GET").toBe(200);
+});
+
+Then("the phone navigation opens and the report list fits", async ({ page }) => {
+  const menu = page.getByRole("button", { name: "Open navigation" });
+  await expect(menu).toBeVisible();
+  await menu.click();
+  await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect(page.getByRole("heading", { name: "Your reports" })).toBeVisible();
+  await expect(page.getByRole("main")).toBeVisible();
+});
+
 Then("the server resolved my Clerk user id", async () => {
   // The root loader embeds getAuth's userId in the SSR payload. Its presence
   // proves the minted session was honored server-side — i.e. NOT the signed-out /

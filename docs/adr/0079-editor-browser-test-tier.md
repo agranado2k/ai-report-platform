@@ -81,6 +81,18 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 
 ## More information
 
+## Amendment — authenticated dashboard navigation and list
+
+The mounted browser tier also covers the app's first party dashboard shell and
+report list at phone and desktop widths. This remains hermetic: it mounts the
+real `apps/app` components with the production app stylesheet and uses no auth,
+database, or deployment. The deployed authenticated seam remains in the BDD
+e2e tier, where the dashboard is exercised with Clerk storage state; a browser
+test here must not imply deployed or authenticated coverage.
+
+The dashboard project is intentionally scoped to navigation and report rows.
+Upload and editor surfaces belong to their own tickets and browser contracts.
+
 - `docs/adr/0046-adapter-sql-test-tier.md` — the precedent: a testing-taxonomy decision is repo-wide, so it is a standalone ADR rather than a bullet inside a feature ADR.
 - `docs/adr/0062-editing-model-report-html-schema.md` — Amendment 3, Decision 7: the behaviour this tier first guards, and the record of what is and is not established about the ProseMirror mechanism.
 - `docs/adr/0019` (in `docs/spec.html`) — infrastructure-first delivery; unchanged by this ADR.
