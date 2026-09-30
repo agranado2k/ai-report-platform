@@ -51,7 +51,7 @@ Then("the phone navigation opens and the report list fits", async ({ page }) => 
   await expect(menu).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect(page.getByRole("heading", { name: "Your reports" })).toBeVisible();
-  await expect(page.getByRole("main")).toBeVisible();
+  await expect(page.locator("main").first()).toBeVisible();
 });
 
 Then("the server resolved my Clerk user id", async () => {

@@ -79,8 +79,6 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 - **Trade-offs**: a Playwright browser install in the `unit` workflow (~30s, no caching wired yet); generated `index.*.generated.html` files in the working tree (gitignored); a suite that now runs every contract over three documents in two projects (two synthetic fixtures + the real 86KB generated report, ~16s total); and a harness that still hand-copies the `/edit` route's pane geometry (53px topbar, 320px panel), which can drift from the route silently — a pointer comment in `apps/view/app/routes/$slug_.edit.tsx` names the harness so the two are edited together. The geometry is *not* covered by the mechanical fidelity guard, which only compares stylesheets; that copy has already drifted once.
 - **Neutral**: `tests/browser/**` is not covered by `pnpm typecheck`, identical to the pre-existing situation for `tests/e2e/**`. Worth closing for both at once, not for one of them here.
 
-## More information
-
 ## Amendment — authenticated dashboard navigation and list
 
 The mounted browser tier also covers the app's first party dashboard shell and
@@ -92,6 +90,8 @@ test here must not imply deployed or authenticated coverage.
 
 The dashboard project is intentionally scoped to navigation and report rows.
 Upload and editor surfaces belong to their own tickets and browser contracts.
+
+## More information
 
 - `docs/adr/0046-adapter-sql-test-tier.md` — the precedent: a testing-taxonomy decision is repo-wide, so it is a standalone ADR rather than a bullet inside a feature ADR.
 - `docs/adr/0062-editing-model-report-html-schema.md` — Amendment 3, Decision 7: the behaviour this tier first guards, and the record of what is and is not established about the ProseMirror mechanism.

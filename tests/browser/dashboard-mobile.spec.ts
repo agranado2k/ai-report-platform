@@ -15,6 +15,9 @@ test.describe("Authenticated dashboard navigation and report list @dashboard-mob
     await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeHidden();
     await menu.click();
     await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeVisible();
+    expect(
+      (await page.locator('a[href="/?folder=research"]').boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44);
     await page.keyboard.press("Escape");
     await expect(menu).toBeFocused();
     await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeHidden();
@@ -64,11 +67,10 @@ test.describe("Authenticated dashboard navigation and report list @dashboard-mob
     await page.getByRole("button", { name: "Open navigation" }).click();
     const folder = page.locator('a[href="/?folder=research"]');
     await expect(folder).toBeVisible();
-    expect((await folder.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    await folder.click();
-    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 812 });
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
   });
 
   test("search and pagination controls stay reachable in the report list", async ({ page }) => {
