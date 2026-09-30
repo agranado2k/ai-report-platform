@@ -6779,3 +6779,19 @@ a tier is a dispatch rather than a spawn. **Follow-up recorded:** a Codex-side C
 would restore ADR-030's two-vendor intent in CI, where today only the Anthropic action runs.
 
 Tier: implementer. Worktree `model-ids`, branch `chore/model-ids`.
+
+### 2026-09-30 — Ticket #403: responsive dashboard navigation and report list
+
+Branch `feat/mobile-navigation` (`ae645dc`) adds the first party dashboard's phone
+navigation and responsive report rows. Navigation opens from the compact header,
+closes when a destination is selected or Escape is pressed, restores focus to the
+menu button, and keeps the desktop rail collapse preference independent across a
+phone resize. Report rows keep Open, Edit, sharing, publication, access, and
+fidelity conclusions intact while making row actions visible and touch-sized.
+
+The mounted browser tier was amended under ADR-0079 for the app shell/list and
+passes eight cases at 320/375/390/768/1024/1280 widths. An authenticated BDD browser
+scenario was added to exercise the deployed dashboard seam when Clerk browser
+credentials are present. The broader MCP app test initially failed under the
+sandbox with `listen EPERM`; the same unmodified MCP test passed 13/13 with host
+network permissions, so it is environmental rather than a ticket regression.

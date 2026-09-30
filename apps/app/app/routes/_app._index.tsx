@@ -663,7 +663,7 @@ export default function Index() {
                   association is the interaction ticket's call (#347). */}
               <div
                 aria-hidden="true"
-                className="hidden items-center gap-3 border-b border-border bg-bg px-4 py-2 text-xs font-medium text-muted lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_6rem]"
+                className="hidden items-center gap-3 border-b border-border bg-bg px-4 py-2 text-xs font-medium text-muted lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem]"
               >
                 <span>Name</span>
                 <span>Status</span>

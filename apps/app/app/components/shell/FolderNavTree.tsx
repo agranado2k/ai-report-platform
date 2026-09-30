@@ -28,7 +28,7 @@ function FolderRow({
       title={node.name}
       aria-current={selected ? "page" : undefined}
       className={cx(
-        "flex min-w-0 flex-1 items-center gap-1.5 rounded-control py-1 pr-2 text-sm no-underline transition-colors",
+        "flex min-w-0 flex-1 items-center gap-1.5 rounded-control py-3 pr-2 text-sm no-underline transition-colors md:py-1",
         selected ? "bg-brand-soft font-medium text-brand-hover" : "text-fg hover:bg-hover",
       )}
       style={node.children.length === 0 ? pad : undefined}

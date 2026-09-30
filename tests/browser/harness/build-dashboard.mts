@@ -22,6 +22,7 @@ export async function buildDashboard() {
   const css = cssOutputs
     .flatMap((output) => output.output)
     .find((output) => output.type === "asset" && output.fileName.endsWith(".css"));
+  if (!css) throw new Error("dashboard harness CSS build produced no stylesheet");
   const js = await build({
     stdin: {
       contents: readFileSync(resolve(root, "tests/browser/harness/entry-dashboard.tsx"), "utf8"),
@@ -42,6 +43,7 @@ export async function buildDashboard() {
     define: { "process.env.NODE_ENV": '"development"' },
   });
   const page = resolve(root, "tests/browser/harness/index.dashboard.generated.html");
+  if (!js.outputFiles[0]?.text) throw new Error("dashboard harness JS build produced no bundle");
   writeFileSync(
     page,
     `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${String(css?.source ?? "")}</style></head><body><div id="root"></div><script>${js.outputFiles[0]?.text.replace(/<\/script>/g, "<\\/script>") ?? ""}</script></body></html>`,

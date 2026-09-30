@@ -126,7 +126,7 @@ describe("ReportRow", () => {
     expect(wrapper).toContain("relative z-10");
   });
 
-  it("actions menu is keyboard-reachable and holds the actions", () => {
+  it("actions menu carries keyboard-reachable controls", () => {
     const html = render({ isPublished: true });
     expect(html).toContain("Actions for Q3 roadmap");
     expect(html).toContain("Delete report");

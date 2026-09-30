@@ -129,7 +129,11 @@ export function AppShell({
   const [desktopCollapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const collapsed = desktopCollapsed && !mobileOpen;
+  // Phone navigation visibility is independent from the desktop rail
+  // preference. While it is open, show the full folder tree even when the
+  // desktop rail is persisted collapsed; the desktop button still reflects
+  // the persisted preference after a resize.
+  const mobileRailCollapsed = desktopCollapsed && !mobileOpen;
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -185,11 +189,11 @@ export function AppShell({
           if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
         }}
         className={cx(
-          "row-start-2 max-h-[50dvh] min-h-0 flex-col gap-1 overflow-y-auto border-b border-border bg-bg p-2 md:col-start-1 md:row-start-1 md:row-span-2 md:h-dvh md:max-h-none md:border-r md:border-b-0",
+          "row-start-2 flex max-h-[50dvh] min-h-0 flex-col gap-1 overflow-y-auto border-b border-border bg-bg p-2 md:col-start-1 md:row-start-1 md:row-span-2 md:h-dvh md:max-h-none md:border-r md:border-b-0",
           mobileOpen ? "flex" : "hidden md:flex",
-          collapsed ? "md:w-14" : "md:w-64",
+          mobileRailCollapsed ? "md:w-14" : "md:w-64",
         )}
-        data-collapsed={collapsed}
+        data-collapsed={mobileRailCollapsed}
       >
         {/* Workspace / brand — also the way home. */}
         <Link
@@ -197,11 +201,11 @@ export function AppShell({
           aria-label="Centaur — your reports"
           className={cx(
             "flex h-11 items-center gap-2.5 rounded-control px-2 no-underline hover:bg-hover",
-            collapsed && "justify-center px-0",
+            mobileRailCollapsed && "justify-center px-0",
           )}
         >
           <Logo className="size-7 shrink-0" />
-          {collapsed ? null : (
+          {mobileRailCollapsed ? null : (
             <span className="font-serif text-lg font-semibold tracking-tight text-fg">Centaur</span>
           )}
         </Link>
@@ -212,21 +216,26 @@ export function AppShell({
             label="Reports"
             href="/"
             active={isNavActive(activePath, "/")}
-            collapsed={collapsed}
+            collapsed={mobileRailCollapsed}
           />
-          <NavItem icon={<UsersIcon />} label="Shared with me" collapsed={collapsed} soon />
-          <NavItem icon={<ClockIcon />} label="Recent" collapsed={collapsed} soon />
+          <NavItem
+            icon={<UsersIcon />}
+            label="Shared with me"
+            collapsed={mobileRailCollapsed}
+            soon
+          />
+          <NavItem icon={<ClockIcon />} label="Recent" collapsed={mobileRailCollapsed} soon />
         </nav>
 
-        {collapsed ? null : (
+        {mobileRailCollapsed ? null : (
           <>
             <div className="mt-3 px-2 text-xs font-medium text-muted">Folders</div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 md:overflow-y-auto">
               <FolderNavTree folders={navFolders} selectedId={selectedFolderId} />
             </div>
           </>
         )}
-        {collapsed ? <div className="flex-1" /> : null}
+        {mobileRailCollapsed ? <div className="flex-1" /> : null}
 
         <nav className="grid gap-px border-t border-border pt-2">
           <NavItem
@@ -234,7 +243,7 @@ export function AppShell({
             label="API keys & MCP"
             href="/settings/api-keys"
             active={isNavActive(activePath, "/settings")}
-            collapsed={collapsed}
+            collapsed={mobileRailCollapsed}
           />
         </nav>
 
@@ -242,11 +251,11 @@ export function AppShell({
         <div
           className={cx(
             "flex items-center gap-2 rounded-control p-1",
-            collapsed ? "justify-center" : "hover:bg-hover",
+            mobileRailCollapsed ? "justify-center" : "hover:bg-hover",
           )}
         >
           {account}
-          {collapsed ? null : (
+          {mobileRailCollapsed ? null : (
             <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-placeholder" />
           )}
         </div>
@@ -272,8 +281,8 @@ export function AppShell({
             <button
               type="button"
               onClick={toggleCollapsed}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-pressed={collapsed}
+              aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-pressed={desktopCollapsed}
               title="Toggle sidebar (⌘B)"
               className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1")}
             >
