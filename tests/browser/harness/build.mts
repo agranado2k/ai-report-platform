@@ -26,12 +26,42 @@
 // package of its own, so it can never drift from what the app actually
 // resolves.
 import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..", "..", "..", "apps", "view");
+
+let productionViewStylesPromise: Promise<string> | undefined;
+
+/** Compile the same Tailwind entry used by the deployed viewer. Owner-view
+ * geometry tests must exercise the real utility CSS, not only the class names
+ * emitted by SSR. Keep this opt-in because the editor harness has its own
+ * deliberately mirrored pane stylesheet. */
+async function productionViewStyles(): Promise<string> {
+  productionViewStylesPromise ??= (async () => {
+    const require = createRequire(join(appDir, "package.json"));
+    const { build: viteBuild } = await import(
+      join(require.resolve("vite/package.json"), "../dist/node/index.js")
+    );
+    const { default: tailwind } = await import(require.resolve("@tailwindcss/vite"));
+    const result = await viteBuild({
+      configFile: false,
+      root: appDir,
+      plugins: [tailwind()],
+      build: { write: false, rollupOptions: { input: join(appDir, "app/tailwind.css") } },
+    });
+    const outputs = Array.isArray(result) ? result : [result];
+    return outputs
+      .flatMap((output) => output.output)
+      .filter((output) => output.type === "asset" && output.fileName.endsWith(".css"))
+      .map((output) => String(output.source))
+      .join("\n");
+  })();
+  return productionViewStylesPromise;
+}
 
 /** One generated page PER (ENTRY, FIXTURE) pair. A single shared output path
  *  would mean two spec files that build different fixtures — or the same fixture
@@ -63,6 +93,7 @@ export async function buildHarness(fixture = "report.html", entry = "entry.tsx")
   });
 
   const js = bundle.outputFiles[0]?.text ?? "";
+  const styles = entry.endsWith("entry-owner-view.tsx") ? await productionViewStyles() : "";
   const report = readFileSync(join(here, fixture), "utf8");
   const inlineSafe = (s: string) => s.replace(/<\/script>/g, "<\\/script>");
 
@@ -70,7 +101,8 @@ export async function buildHarness(fixture = "report.html", entry = "entry.tsx")
   writeFileSync(
     page,
     `<!doctype html>
-<html><head><meta charset="utf-8"><title>editor harness</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>editor harness</title>
+<style>${styles}</style>
 <style>
 html,body{margin:0;height:100%;overflow:hidden}
 #root{height:100vh}
