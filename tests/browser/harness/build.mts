@@ -54,11 +54,13 @@ async function productionViewStyles(): Promise<string> {
       build: { write: false, rollupOptions: { input: join(appDir, "app/tailwind.css") } },
     });
     const outputs = Array.isArray(result) ? result : [result];
-    return outputs
+    const css = outputs
       .flatMap((output) => output.output)
       .filter((output) => output.type === "asset" && output.fileName.endsWith(".css"))
       .map((output) => String(output.source))
       .join("\n");
+    if (!css.trim()) throw new Error("Owner view browser harness produced no production CSS");
+    return css;
   })();
   return productionViewStylesPromise;
 }
