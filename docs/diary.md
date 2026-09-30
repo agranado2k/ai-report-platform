@@ -6805,3 +6805,9 @@ The final Owner view matrix passes 38 Chromium tests; 22 supplementary WebKit
 layout/touch tests pass, and its remaining focus test passes using macOS's
 documented Option-Tab link traversal. The production-style harness no longer
 receives the mirrored editor shell's overflow or geometry overrides.
+
+The final review adds explicit short-phone dialog button geometry and compact
+desktop action-row checks, plus a committed supplementary WebKit configuration.
+The ADR now records the isolated CSS build and fallback-font limitation; preview
+execution remains the authority for actual-font fit and authenticated behavior.
+Tier: implementer. Worktree `mobile-owner-view`, branch `feat/mobile-owner-view`.

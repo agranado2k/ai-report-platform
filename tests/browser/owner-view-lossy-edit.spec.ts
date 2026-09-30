@@ -139,6 +139,11 @@ test.describe("the owner view's Edit confirm on a lossy version", {
     await cancel.scrollIntoViewIfNeeded();
     await expect(cancel).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole("link", { name: "Edit anyway" })).toBeInViewport({ ratio: 1 });
+    for (const action of [cancel, page.getByRole("link", { name: "Edit anyway" })]) {
+      const target = await action.boundingBox();
+      expect(target?.height).toBeGreaterThanOrEqual(44);
+      expect(target?.width).toBeGreaterThanOrEqual(44);
+    }
     await cancel.click();
     await expect(dialog).toBeHidden();
   });

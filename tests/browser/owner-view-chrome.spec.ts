@@ -284,4 +284,17 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     expect(frame?.height).toBeGreaterThanOrEqual(viewport.height / 2);
     await expect(page.getByRole("link", { name: "Open in new tab" })).toBeInViewport({ ratio: 1 });
   });
+
+  test("keeps desktop actions compact beside a fitting title", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`file://${harnessPage}`);
+    const title = await page.getByRole("heading", { level: 1 }).boundingBox();
+    expect(title).not.toBeNull();
+    for (const name of ["Open in new tab", "Versions", "Edit"]) {
+      const box = await page.getByRole("link", { name, exact: true }).boundingBox();
+      expect(box?.height).toBe(32);
+      expect(box?.y).toBeLessThan((title?.y ?? 0) + (title?.height ?? 0));
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThan(title?.y ?? 0);
+    }
+  });
 });

@@ -79,22 +79,28 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 - **Trade-offs**: a Playwright browser install in the `unit` workflow (~30s, no caching wired yet); generated `index.*.generated.html` files in the working tree (gitignored); a suite that now runs every contract over three documents in two projects (two synthetic fixtures + the real 86KB generated report, ~16s total); and a harness that still hand-copies the `/edit` route's pane geometry (53px topbar, 320px panel), which can drift from the route silently — a pointer comment in `apps/view/app/routes/$slug_.edit.tsx` names the harness so the two are edited together. The geometry is *not* covered by the mechanical fidelity guard, which only compares stylesheets; that copy has already drifted once.
 - **Neutral**: `tests/browser/**` is not covered by `pnpm typecheck`, identical to the pre-existing situation for `tests/e2e/**`. Worth closing for both at once, not for one of them here.
 
-## More information
-
-### 2026-09-30 amendment: Owner view layout coverage
+## 2026-09-30 amendment: Owner view layout coverage
 
 The hermetic tier also covers first-party Owner view chrome and its lossy-edit
 confirmation. These layout and input checks need a browser, but no deployment.
 The harness explicitly opts into the production `apps/view/app/tailwind.css`
-stylesheet, compiled through the app's Vite/Tailwind pipeline; missing stylesheet
+stylesheet, compiled using an isolated Vite configuration with the app's Tailwind plugin; missing stylesheet
 output fails the build. Existing editor fixtures retain their mirrored stylesheet.
 Assertions measure action bounds, nested overflow, short-viewport dialog reachability,
 touch input and focus behavior rather than checking utility-class strings.
+The isolated configuration does not load the complete app build configuration.
+Self-hosted font URLs cannot load from `file://`; the deployed preview checks
+remain necessary to validate text fit with the actual fonts.
 
 This harness does not prove authenticated access or canonical report rendering.
 The mobile scenario in `tests/e2e/smoke/owner-view-deck.feature` exercises those
 contracts against a deployed preview with the existing private report fixture.
 Chromium and supplementary desktop WebKit runs are not physical-device testing.
+Reproduce the supplementary checks with
+`pnpm exec playwright test --config tests/browser/playwright.owner-webkit.config.ts`.
+The default CI tier remains Chromium; WebKit must be installed separately.
+
+## More information
 
 - `docs/adr/0046-adapter-sql-test-tier.md` — the precedent: a testing-taxonomy decision is repo-wide, so it is a standalone ADR rather than a bullet inside a feature ADR.
 - `docs/adr/0062-editing-model-report-html-schema.md` — Amendment 3, Decision 7: the behaviour this tier first guards, and the record of what is and is not established about the ProseMirror mechanism.
