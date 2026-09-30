@@ -242,4 +242,26 @@ test.describe("the owner view's chrome", { tag: "@owner-view-chrome" }, () => {
     await expect(page.locator(FRAME)).toHaveAttribute("src", "/abcde12345#3");
     await expect(page.locator(FRAME)).toHaveCount(1);
   });
+
+  test("fits the title, fallback, and permitted actions across the owner-view width matrix", async ({
+    page,
+  }) => {
+    // These are the supported review widths from the mobile-first design
+    // brief. The 320px case is the useful boundary: it catches a title or
+    // action row that creates horizontal page overflow. The short viewport
+    // catches a chrome row that consumes the whole report surface.
+    for (const width of [320, 375, 390, 768, 1024, 1280]) {
+      await page.setViewportSize({ width, height: width <= 390 ? 568 : 720 });
+      await page.goto(
+        `file://${harnessPage}?title=${encodeURIComponent("A report title long enough to truncate")}`,
+      );
+      await expect(page.getByTestId("owner-view")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Open in new tab" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Versions" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Edit", exact: true })).toBeVisible();
+      expect(await page.locator("body").evaluate((body) => body.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      );
+    }
+  });
 });

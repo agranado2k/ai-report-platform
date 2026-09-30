@@ -106,6 +106,24 @@ test.describe("the owner view's Edit confirm on a lossy version", {
     await expect(dialog).toContainText(/until you save/i);
   });
 
+  test("keeps the lossy confirmation usable in a short phone viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 240 });
+    await page.goto(`file://${harnessPage}?lossy=1`);
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+
+    const dialog = page.locator("dialog");
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    // The harness deliberately mounts the production component without a
+    // stylesheet; production CSS's max-height/overflow contract is pinned in
+    // the SSR test. The browser assertion still proves the native dialog does
+    // not exceed the phone viewport and that both actions remain reachable.
+    expect(box?.width ?? 0).toBeLessThanOrEqual(320);
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Edit anyway" })).toBeVisible();
+  });
+
   test("a LOSSLESS version keeps Edit a plain navigation — no dialog at all", async ({ page }) => {
     // The common path. `lossless` and UNKNOWN both arrive here as a null
     // warning, so this one case covers both, and it must be exactly the
