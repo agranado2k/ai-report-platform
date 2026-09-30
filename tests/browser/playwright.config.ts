@@ -100,5 +100,14 @@ export default defineConfig({
       grep: /@owner-view-lossy/,
       use: { ...devices["Desktop Chrome"], viewport: VIEWPORT },
     },
+    {
+      // ADR-0079 app-component amendment (#403): the PRODUCTION apps/app shell
+      // and dashboard, mounted with the app's compiled stylesheet
+      // (harness/build-app.mts). No pinned viewport — the width IS the thing
+      // under test, so every spec sets its own from harness/viewport.ts.
+      name: "app-components",
+      grep: /@app-components/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
 });

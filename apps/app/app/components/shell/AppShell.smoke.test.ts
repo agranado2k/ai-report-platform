@@ -42,7 +42,9 @@ describe("AppShell", () => {
     expect(html).toContain("API keys &amp; MCP");
     expect(html).toContain("ACCOUNT"); // injected account slot (no Clerk needed)
     expect(html).toContain("PAGE BODY"); // outlet children
-    expect(html).toContain("Upload report");
+    // "Upload" visibly on a phone; "report" is sr-only there, so the link's
+    // name is "Upload report" at every width.
+    expect(html).toMatch(/href="\/upload"[^>]*>.*Upload<span[^>]*> report<\/span>/);
   });
   it("marks Reports active on the dashboard via aria-current", () => {
     expect(render("/")).toContain('aria-current="page"');
@@ -51,6 +53,14 @@ describe("AppShell", () => {
     const html = render("/");
     expect(html).toContain('aria-label="Breadcrumb"');
     expect(html).toContain("Collapse sidebar");
+  });
+  it("SSRs the phone navigation closed: a labelled Menu button, an empty drawer", () => {
+    const html = render("/");
+    expect(html).toMatch(/aria-label="Open navigation"[^>]*aria-expanded="false"/);
+    // The drawer's content is rendered only while open, so the navigation is
+    // in the markup once (the rail), never twice.
+    expect(html).toMatch(/<dialog[^>]*aria-label="Navigation"[^>]*><\/dialog>/);
+    expect(html.match(/API keys &amp; MCP/g)).toHaveLength(1);
   });
   it("Shared with me / Recent are shown but not linked (unbuilt)", () => {
     const html = render("/");

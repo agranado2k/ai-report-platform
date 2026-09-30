@@ -28,7 +28,7 @@ function FolderRow({
       title={node.name}
       aria-current={selected ? "page" : undefined}
       className={cx(
-        "flex min-w-0 flex-1 items-center gap-1.5 rounded-control py-1 pr-2 text-sm no-underline transition-colors",
+        "flex min-w-0 flex-1 items-center gap-1.5 rounded-control py-2.5 pr-2 text-sm no-underline transition-colors md:py-1",
         selected ? "bg-brand-soft font-medium text-brand-hover" : "text-fg hover:bg-hover",
       )}
       style={node.children.length === 0 ? pad : undefined}
@@ -67,8 +67,10 @@ export function FolderNavTree({
   if (tree.length === 0) {
     return <p className="px-2 py-1 text-xs text-placeholder">No folders yet</p>;
   }
+  // `minmax(0,1fr)`, not the implicit `auto` track: a long Folder name must
+  // truncate inside the rail, not widen the tree into a sideways scroller.
   return (
-    <div className="grid gap-px">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-px">
       {tree.map((node) => (
         <FolderRow key={node.id} node={node} selectedId={selectedId} depth={0} />
       ))}
