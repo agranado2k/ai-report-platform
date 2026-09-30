@@ -25,7 +25,7 @@ import { useRef } from "react";
 import type { LossyWarning } from "../lossy-warning";
 
 const DIALOG_CLASS =
-  "m-auto w-[480px] max-w-[calc(100vw-2rem)] rounded-card border border-border bg-surface p-6 text-fg shadow-lg backdrop:bg-[rgb(20_24_40/0.45)]";
+  "m-auto max-h-[calc(100dvh-2rem)] w-[480px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-card border border-border bg-surface p-4 text-fg shadow-lg backdrop:bg-[rgb(20_24_40/0.45)] sm:p-6";
 
 /** Render a name list as prose: `script`, `svg` and `onclick`.
  *
@@ -120,11 +120,16 @@ export function LossyEditDialog({
           leave the editor without touching it. To change this report without losing anything,
           re-upload the full HTML instead.
         </p>
-        <DialogFooter className="mt-5">
-          <Button type="button" variant="outline" onClick={() => dialogRef.current?.close()}>
+        <DialogFooter className="mt-5 flex-wrap">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 sm:min-h-9"
+            onClick={() => dialogRef.current?.close()}
+          >
             Cancel
           </Button>
-          <a href={editHref} className={buttonClass("primary", "md")}>
+          <a href={editHref} className={`${buttonClass("primary", "md")} min-h-11 sm:min-h-9`}>
             Edit anyway
           </a>
         </DialogFooter>

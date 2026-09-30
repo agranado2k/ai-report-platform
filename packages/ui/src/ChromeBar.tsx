@@ -30,8 +30,8 @@ export interface ChromeBarProps {
 export function ChromeBar({ docTitle, pill, children }: ChromeBarProps) {
   return (
     // `print:hidden` — printing a report keeps the document, never the chrome.
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3 print:hidden">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 print:hidden sm:gap-3 sm:px-6 sm:py-3">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         {/* The brand mark — a rounded brand-fill square with the Centaur
             monogram. Decorative (the product name sits beside it as text), so
             aria-hidden; a plain letterform keeps it CSP-safe with no icon dep. */}
@@ -50,7 +50,7 @@ export function ChromeBar({ docTitle, pill, children }: ChromeBarProps) {
         {pill}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">{children}</div>
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">{children}</div>
     </header>
   );
 }

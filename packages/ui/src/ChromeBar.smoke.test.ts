@@ -28,6 +28,12 @@ describe("ChromeBar", () => {
   it("hides itself in print — a printed report keeps the document, never the chrome", () => {
     expect(r(h(ChromeBar, { docTitle: "x" }))).toContain("print:hidden");
   });
+  it("stacks the action row with phone-safe spacing", () => {
+    const html = r(h(ChromeBar, { docTitle: "x" }, h("a", {}, "Edit")));
+    expect(html).toContain("px-3 py-2");
+    expect(html).toContain("sm:px-6 sm:py-3");
+    expect(html).toContain("w-full flex-wrap");
+  });
   it("is one strip: the brand mark is decorative, so the title is the only h1", () => {
     // The monogram sits beside the product name as text, so announcing it would
     // be a duplicate — the reason it carries aria-hidden rather than a label.
