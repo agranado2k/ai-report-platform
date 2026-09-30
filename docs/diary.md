@@ -6795,3 +6795,20 @@ scenario was added to exercise the deployed dashboard seam when Clerk browser
 credentials are present. The broader MCP app test initially failed under the
 sandbox with `listen EPERM`; the same unmodified MCP test passed 13/13 with host
 network permissions, so it is environmental rather than a ticket regression.
+
+### 2026-09-30 — PR #409 independent iteration
+
+Independent browser probing reproduced overlapping folder/settings controls at
+375×400. A red layout assertion (folder bottom 358px, settings top 283px) now
+passes with the folder region kept at its intrinsic height on phones. Header
+precedes navigation in DOM order, with a red-to-green keyboard regression.
+Production pagination is shared with the mounted fixture and has 44px targets
+(the new assertion initially measured 20px). The resize test now checks actual
+rail state; destination closing and action opacity also have assertions.
+
+The earlier eight-case diary count is superseded: twelve mounted Chromium cases
+and seventeen shell/row smoke tests pass, alongside app typecheck. CI on
+`b9f3383` ran the authenticated phone scenario successfully: preview run
+36704523376 artifact reported 20 expected, zero skipped. This evidence predates
+the iteration fixes and must be refreshed on their pushed commit. ADR-0079
+records the remaining browser/input and route-fixture evidence limitations.

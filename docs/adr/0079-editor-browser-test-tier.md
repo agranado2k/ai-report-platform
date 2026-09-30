@@ -79,7 +79,7 @@ Chosen: **option 1**. `tests/browser/` is a third test tier with an explicit bou
 - **Trade-offs**: a Playwright browser install in the `unit` workflow (~30s, no caching wired yet); generated `index.*.generated.html` files in the working tree (gitignored); a suite that now runs every contract over three documents in two projects (two synthetic fixtures + the real 86KB generated report, ~16s total); and a harness that still hand-copies the `/edit` route's pane geometry (53px topbar, 320px panel), which can drift from the route silently — a pointer comment in `apps/view/app/routes/$slug_.edit.tsx` names the harness so the two are edited together. The geometry is *not* covered by the mechanical fidelity guard, which only compares stylesheets; that copy has already drifted once.
 - **Neutral**: `tests/browser/**` is not covered by `pnpm typecheck`, identical to the pre-existing situation for `tests/e2e/**`. Worth closing for both at once, not for one of them here.
 
-## Amendment — authenticated dashboard navigation and list
+## Amendment (2026-09-30) — dashboard shell and report list (hermetic, no auth)
 
 The mounted browser tier also covers the app's first party dashboard shell and
 report list at phone and desktop widths. This remains hermetic: it mounts the
@@ -90,6 +90,13 @@ test here must not imply deployed or authenticated coverage.
 
 The dashboard project is intentionally scoped to navigation and report rows.
 Upload and editor surfaces belong to their own tickets and browser contracts.
+
+The harness mounts production navigation, report rows, and pagination. Its list
+container is a fixture, not the complete route; it does not certify production
+filter/cursor composition, empty states, or the desktop column header. Current
+automated evidence is Chromium layout and keyboard input, including a short
+phone viewport. WebKit, touch emulation, 200% browser zoom, and a physical-device
+pass remain explicit acceptance gaps, not implied by the width matrix.
 
 ## More information
 

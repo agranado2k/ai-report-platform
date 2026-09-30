@@ -6,7 +6,21 @@ test.beforeAll(async () => {
   harness = await buildDashboard();
 });
 
-test.describe("Authenticated dashboard navigation and report list @dashboard-mobile", () => {
+test.describe("Dashboard shell and report list (hermetic, no auth) @dashboard-mobile", () => {
+  test("keeps folders above settings in short phone navigation", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 400 });
+    await page.goto(`file://${harness}`);
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    const folder = page.locator('a[href="/?folder=research"]');
+    const settings = page.getByRole("link", { name: "API keys & MCP", exact: true });
+    const folderBox = await folder.boundingBox();
+    const settingsBox = await settings.boundingBox();
+    if (!folderBox || !settingsBox) throw new Error("Navigation links must have layout boxes");
+    expect(folderBox.y + folderBox.height).toBeLessThanOrEqual(settingsBox.y);
+    await settings.click();
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
+  });
+
   test("opens and dismisses phone navigation with focus restoration", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`file://${harness}`);
@@ -23,8 +37,17 @@ test.describe("Authenticated dashboard navigation and report list @dashboard-mob
     await expect(page.getByRole("link", { name: "API keys & MCP", exact: true })).toBeHidden();
   });
 
+  test("tabs from the phone header into the opened navigation", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`file://${harness}`);
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("link", { name: "Upload report", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("link", { name: "Centaur — your reports" })).toBeFocused();
+  });
+
   for (const width of [320, 375, 390, 768, 1024, 1280]) {
-    test(`keeps report content and touch actions within ${width}px`, async ({ page }) => {
+    test(`keeps report content and touch actions within ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 812 });
       await page.goto(`file://${harness}`);
       const row = page.getByRole("listitem").filter({ hasText: "Quarterly research" });
@@ -42,16 +65,20 @@ test.describe("Authenticated dashboard navigation and report list @dashboard-mob
         name: "Edit Quarterly research and product strategy report",
       });
       await expect(edit).toBeVisible();
+      await expect(edit.locator("..")).toHaveCSS("opacity", "1");
       await expect(
         page.getByRole("searchbox", { name: "Filter reports by title or slug" }),
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "Next →" })).toBeVisible();
+      expect(
+        (await page.getByRole("link", { name: "Next →" }).boundingBox())?.height,
+      ).toBeGreaterThanOrEqual(44);
       const action = page.getByText("Actions for Quarterly research and product strategy report");
       expect((await action.locator("..").boundingBox())?.height).toBeGreaterThanOrEqual(44);
       if (width === 375 || width === 1280) {
-        await page.screenshot({
-          path: `/tmp/centaur-dashboard-mobile-${width}.png`,
-          fullPage: true,
+        await testInfo.attach(`dashboard-${width}`, {
+          body: await page.screenshot({ fullPage: true }),
+          contentType: "image/png",
         });
       }
     });
@@ -69,6 +96,7 @@ test.describe("Authenticated dashboard navigation and report list @dashboard-mob
     await expect(folder).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 812 });
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await expect(page.locator("#app-navigation")).toHaveAttribute("data-collapsed", "true");
     await page.getByRole("button", { name: "Expand sidebar" }).click();
     await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
   });

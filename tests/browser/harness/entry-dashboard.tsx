@@ -3,6 +3,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { AppHeader } from "../../../apps/app/app/components/AppHeader";
 import { PageShell } from "../../../apps/app/app/components/PageShell";
 import { ReportFilter } from "../../../apps/app/app/components/reports/ReportFilter";
+import { ReportPagination } from "../../../apps/app/app/components/reports/ReportPagination";
 import { ReportRow } from "../../../apps/app/app/components/reports/ReportRow";
 import { AppShell } from "../../../apps/app/app/components/shell/AppShell";
 
@@ -56,10 +57,7 @@ function Dashboard() {
             pendingSharing={null}
           />
         </ul>
-        <nav aria-label="Report pages" className="mt-4 flex gap-3 text-sm">
-          <span className="text-subtle">← Prev</span>
-          <a href="/?starting_after=abc123">Next →</a>
-        </nav>
+        <ReportPagination previousHref={null} nextHref="/?starting_after=abc123" />
       </PageShell>
     </AppShell>
   );

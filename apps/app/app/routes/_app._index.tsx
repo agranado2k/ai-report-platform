@@ -22,6 +22,7 @@ import { AppHeader, buttonClass, cx, EmptyState, PageShell } from "../components
 import { type FolderManageNode, FolderManagePanel } from "../components/folders/FolderManagePanel";
 import { NewFolderDialog } from "../components/folders/NewFolderDialog";
 import { ReportFilter } from "../components/reports/ReportFilter";
+import { ReportPagination } from "../components/reports/ReportPagination";
 import { ReportRow } from "../components/reports/ReportRow";
 import { resolveActorForRead, resolveUploadActor } from "../server/auth.server";
 import { ops } from "../server/container.server";
@@ -689,32 +690,18 @@ export default function Index() {
             </div>
           )}
 
-          {hasPrev || hasNext ? (
-            <div className="mt-4 flex items-center gap-3 text-sm">
-              {hasPrev ? (
-                <Link
-                  to={cursorHref(items[0] ? { ending_before: items[0].id } : undefined)}
-                  className="text-brand hover:text-brand-hover"
-                >
-                  ← Prev
-                </Link>
-              ) : (
-                <span className="text-subtle">← Prev</span>
-              )}
-              {hasNext ? (
-                <Link
-                  to={cursorHref(
+          <ReportPagination
+            previousHref={
+              hasPrev ? cursorHref(items[0] ? { ending_before: items[0].id } : undefined) : null
+            }
+            nextHref={
+              hasNext
+                ? cursorHref(
                     items.length ? { starting_after: items[items.length - 1]?.id } : undefined,
-                  )}
-                  className="text-brand hover:text-brand-hover"
-                >
-                  Next →
-                </Link>
-              ) : (
-                <span className="text-subtle">Next →</span>
-              )}
-            </div>
-          ) : null}
+                  )
+                : null
+            }
+          />
 
           {createParent ? (
             // Creating a folder gets a deliberate dialog step (#336, report §02)

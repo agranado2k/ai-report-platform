@@ -189,6 +189,47 @@ export function AppShell({
 
   return (
     <div className="grid h-dvh grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)] bg-surface md:grid-cols-[auto_minmax(0,1fr)] md:grid-rows-[auto_minmax(0,1fr)]">
+      <header className="row-start-1 flex min-w-0 min-h-14 items-center gap-2 border-b border-border px-3 md:col-start-2 md:px-4">
+        <button
+          ref={menuButton}
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileOpen}
+          aria-controls="app-navigation"
+          className={cx(
+            buttonClass("ghost", "sm", { iconOnly: true }),
+            "min-h-11 min-w-11 shrink-0 md:hidden",
+          )}
+        >
+          <PanelLeftIcon className="size-5" />
+        </button>
+        <div className="hidden md:block">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-pressed={desktopCollapsed}
+            title="Toggle sidebar (⌘B)"
+            className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1")}
+          >
+            <PanelLeftIcon className="size-4" />
+          </button>
+        </div>
+        <Breadcrumbs crumbs={crumbs} />
+        <div className="flex-1" />
+        <Link
+          to="/upload"
+          onClick={() => setMobileOpen(false)}
+          className={cx(buttonClass("primary", "sm"), "min-h-11 shrink-0 md:min-h-8")}
+        >
+          <UploadIcon className="size-4" />
+          <span className="sm:hidden">
+            Upload<span className="sr-only"> report</span>
+          </span>
+          <span className="hidden sm:inline">Upload report</span>
+        </Link>
+      </header>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Native links emit click for keyboard activation too. */}
       <aside
         id="app-navigation"
@@ -197,7 +238,7 @@ export function AppShell({
           if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
         }}
         className={cx(
-          "row-start-2 flex max-h-[50dvh] min-h-0 flex-col gap-1 overflow-y-auto border-b border-border bg-bg p-2 md:col-start-1 md:row-start-1 md:row-span-2 md:h-dvh md:max-h-none md:border-r md:border-b-0",
+          "row-start-2 max-h-[50dvh] min-h-0 flex-col gap-1 overflow-y-auto border-b border-border bg-bg p-2 md:col-start-1 md:row-start-1 md:row-span-2 md:h-dvh md:max-h-none md:border-r md:border-b-0",
           mobileOpen ? "flex" : "hidden md:flex",
           mobileRailCollapsed ? "md:w-14" : "md:w-64",
         )}
@@ -238,7 +279,7 @@ export function AppShell({
         {mobileRailCollapsed ? null : (
           <>
             <div className="mt-3 px-2 text-xs font-medium text-muted">Folders</div>
-            <div className="min-h-0 flex-1 md:overflow-y-auto">
+            <div className="shrink-0 md:min-h-0 md:flex-1 md:overflow-y-auto">
               <FolderNavTree folders={navFolders} selectedId={selectedFolderId} />
             </div>
           </>
@@ -269,52 +310,9 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="contents">
-        <header className="row-start-1 flex min-w-0 min-h-14 items-center gap-2 border-b border-border px-3 md:col-start-2 md:px-4">
-          <button
-            ref={menuButton}
-            type="button"
-            onClick={() => setMobileOpen((open) => !open)}
-            aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
-            aria-expanded={mobileOpen}
-            aria-controls="app-navigation"
-            className={cx(
-              buttonClass("ghost", "sm", { iconOnly: true }),
-              "min-h-11 min-w-11 shrink-0 md:hidden",
-            )}
-          >
-            <PanelLeftIcon className="size-5" />
-          </button>
-          <div className="hidden md:block">
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-pressed={desktopCollapsed}
-              title="Toggle sidebar (⌘B)"
-              className={cx(buttonClass("ghost", "sm", { iconOnly: true }), "-ml-1")}
-            >
-              <PanelLeftIcon className="size-4" />
-            </button>
-          </div>
-          <Breadcrumbs crumbs={crumbs} />
-          <div className="flex-1" />
-          <Link
-            to="/upload"
-            onClick={() => setMobileOpen(false)}
-            className={cx(buttonClass("primary", "sm"), "min-h-11 shrink-0 md:min-h-8")}
-          >
-            <UploadIcon className="size-4" />
-            <span className="sm:hidden">
-              Upload<span className="sr-only"> report</span>
-            </span>
-            <span className="hidden sm:inline">Upload report</span>
-          </Link>
-        </header>
-        <main className="row-start-3 min-h-0 min-w-0 overflow-y-auto md:col-start-2 md:row-start-2">
-          {children}
-        </main>
-      </div>
+      <main className="row-start-3 min-h-0 min-w-0 overflow-y-auto md:col-start-2 md:row-start-2">
+        {children}
+      </main>
     </div>
   );
 }
